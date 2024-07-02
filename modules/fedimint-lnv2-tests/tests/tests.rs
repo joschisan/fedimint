@@ -99,7 +99,7 @@ async fn can_pay_external_invoice_exactly_once() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn refund_unpayable_invoice() -> anyhow::Result<()> {
+async fn refund_failed_payment() -> anyhow::Result<()> {
     let fixtures = fixtures();
     let fed = fixtures.new_default_fed().await;
     let gateway_test = gateway(&fixtures, &fed).await;
@@ -122,6 +122,47 @@ async fn refund_unpayable_invoice() -> anyhow::Result<()> {
         .get_first_module::<LightningClientModule>()
         .send(gateway_api, invoice)
         .await?;
+
+    let mut sub = client
+        .get_first_module::<LightningClientModule>()
+        .subscribe_send(op)
+        .await?
+        .into_stream();
+
+    assert_eq!(sub.ok().await?, SendState::Funding);
+    assert_eq!(sub.ok().await?, SendState::Funded);
+    assert_eq!(sub.ok().await?, SendState::Refunding);
+    assert_eq!(sub.ok().await?, SendState::Refunded);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refund_stuck_payment() -> anyhow::Result<()> {
+    let fixtures = fixtures();
+    let fed = fixtures.new_default_fed().await;
+    let gateway_test = gateway(&fixtures, &fed).await;
+    let gateway_api = gateway_test.gateway.versioned_api().clone();
+
+    let other_ln = FakeLightningTest::new();
+    let invoice = other_ln.stuck_payment_invoice(Amount::from_sats(100), None);
+
+    let client = fed.new_client().await;
+
+    // Print money for client
+    let (op, outpoint) = client
+        .get_first_module::<DummyClientModule>()
+        .print_money(sats(1000))
+        .await?;
+
+    client.await_primary_module_output(op, outpoint).await?;
+
+    let op = client
+        .get_first_module::<LightningClientModule>()
+        .send(gateway_api, invoice)
+        .await?;
+
+    fixtures.bitcoin().mine_blocks(500).await;
 
     let mut sub = client
         .get_first_module::<LightningClientModule>()

@@ -26,7 +26,9 @@ use rand::rngs::OsRng;
 use tokio::sync::mpsc;
 use tracing::info;
 
-const INVALID_INVOICE_PAYMENT_SECRET: [u8; 32] = [212; 32];
+const UNPAYABLE_INVOICE_PAYMENT_SECRET: [u8; 32] = [212; 32];
+
+const STUCK_PAYMENT_INVOICE_PAYMENT_SECRET: [u8; 32] = [213; 32];
 
 #[derive(Debug)]
 pub struct FakeLightningTest {
@@ -83,7 +85,7 @@ impl FakeLightningTest {
 
     /// Creates an invoice that is not payable
     ///
-    /// * Mocks use hard-coded invoice description to fail the payment
+    /// * Mocks use hard-coded payment secret to fail the payment
     /// * Real fixtures won't be able to route to randomly generated node pubkey
     pub fn unpayable_invoice(&self, amount: Amount, expiry_time: Option<u64>) -> Bolt11Invoice {
         let ctx = bitcoin::secp256k1::Secp256k1::new();
@@ -98,7 +100,33 @@ impl FakeLightningTest {
             .payment_hash(sha256::Hash::hash(&[0; 32]))
             .current_timestamp()
             .min_final_cltv_expiry_delta(0)
-            .payment_secret(PaymentSecret(INVALID_INVOICE_PAYMENT_SECRET))
+            .payment_secret(PaymentSecret(UNPAYABLE_INVOICE_PAYMENT_SECRET))
+            .amount_milli_satoshis(amount.msats)
+            .expiry_time(Duration::from_secs(
+                expiry_time.unwrap_or(DEFAULT_EXPIRY_TIME),
+            ))
+            .build_signed(|m| ctx.sign_ecdsa_recoverable(m, &SecretKey::from_keypair(&kp)))
+            .expect("Invoice creation failed")
+    }
+
+    /// Creates an invoice that causes the payment to get stuck indefinitely
+    ///
+    /// * Mocks use hard-coded payment secret to fail the payment
+    /// * Real fixtures won't be able to route to randomly generated node pubkey
+    pub fn stuck_payment_invoice(&self, amount: Amount, expiry_time: Option<u64>) -> Bolt11Invoice {
+        let ctx = bitcoin::secp256k1::Secp256k1::new();
+        // Generate fake node keypair
+        let kp = KeyPair::new(&ctx, &mut OsRng);
+
+        // `FakeLightningTest` will fail to pay any invoice with
+        // `INVALID_INVOICE_DESCRIPTION` in the description of the invoice.
+        InvoiceBuilder::new(Currency::Regtest)
+            .payee_pub_key(kp.public_key())
+            .description("INVALID INVOICE DESCRIPTION".to_string())
+            .payment_hash(sha256::Hash::hash(&[0; 32]))
+            .current_timestamp()
+            .min_final_cltv_expiry_delta(0)
+            .payment_secret(PaymentSecret(STUCK_PAYMENT_INVOICE_PAYMENT_SECRET))
             .amount_milli_satoshis(amount.msats)
             .expiry_time(Duration::from_secs(
                 expiry_time.unwrap_or(DEFAULT_EXPIRY_TIME),
@@ -141,10 +169,14 @@ impl ILnRpcClient for FakeLightningTest {
         let invoice = Bolt11Invoice::from_signed(signed).unwrap();
         *self.amount_sent.lock().unwrap() += invoice.amount_milli_satoshis().unwrap();
 
-        if *invoice.payment_secret() == PaymentSecret(INVALID_INVOICE_PAYMENT_SECRET) {
+        if *invoice.payment_secret() == PaymentSecret(UNPAYABLE_INVOICE_PAYMENT_SECRET) {
             return Err(LightningRpcError::FailedPayment {
                 failure_reason: "Invoice was invalid".to_string(),
             });
+        }
+
+        if *invoice.payment_secret() == PaymentSecret(STUCK_PAYMENT_INVOICE_PAYMENT_SECRET) {
+            futures::future::pending::<()>().await;
         }
 
         Ok(PayInvoiceResponse {
@@ -164,10 +196,14 @@ impl ILnRpcClient for FakeLightningTest {
     ) -> Result<PayInvoiceResponse, LightningRpcError> {
         *self.amount_sent.lock().unwrap() += invoice.amount.msats;
 
-        if invoice.payment_secret == INVALID_INVOICE_PAYMENT_SECRET {
+        if invoice.payment_secret == UNPAYABLE_INVOICE_PAYMENT_SECRET {
             return Err(LightningRpcError::FailedPayment {
                 failure_reason: "Invoice was invalid".to_string(),
             });
+        }
+
+        if invoice.payment_secret == STUCK_PAYMENT_INVOICE_PAYMENT_SECRET {
+            futures::future::pending::<()>().await;
         }
 
         Ok(PayInvoiceResponse {
