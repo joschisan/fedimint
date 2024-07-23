@@ -1005,7 +1005,7 @@ mod fedimint_migration_tests {
         Database, DatabaseVersion, DatabaseVersionKey, DatabaseVersionKeyV0,
         IDatabaseTransactionOpsCoreTyped,
     };
-    use fedimint_core::module::DynServerModuleInit;
+    use fedimint_core::module::{DynServerModuleInit, ModuleConsensusVersion};
     use fedimint_core::{Feerate, OutPoint, PeerId, TransactionId};
     use fedimint_logging::TracingSetup;
     use fedimint_testing::db::{
@@ -1017,11 +1017,18 @@ mod fedimint_migration_tests {
     use fedimint_wallet_common::{
         PegOutFees, Rbf, SpendableUTXO, WalletCommonInit, WalletOutputOutcome,
     };
+    use fedimint_wallet_server::db::ConsensusVersionVoteKey;
     use fedimint_wallet_server::db::{
         BlockCountVoteKey, BlockCountVotePrefix, BlockHashKey, BlockHashKeyPrefix,
+<<<<<<< HEAD
         ClaimedPegInOutpointKey, ClaimedPegInOutpointPrefixKey, DbKeyPrefix, FeeRateVoteKey,
         FeeRateVotePrefix, PegOutBitcoinTransaction, PegOutBitcoinTransactionPrefix,
         PegOutNonceKey, PegOutTxSignatureCI, PegOutTxSignatureCIPrefix, PendingTransactionKey,
+=======
+        ConsensusVersionVotePrefix, DbKeyPrefix, FeeRateVoteKey, FeeRateVotePrefix,
+        PegOutBitcoinTransaction, PegOutBitcoinTransactionPrefix, PegOutNonceKey,
+        PegOutTxSignatureCI, PegOutTxSignatureCIPrefix, PendingTransactionKey,
+>>>>>>> e15578d52 (feat: enable wallet to vote on consensus version)
         PendingTransactionPrefixKey, UTXOKey, UTXOPrefixKey, UnsignedTransactionKey,
         UnsignedTransactionPrefixKey,
     };
@@ -1065,6 +1072,12 @@ mod fedimint_migration_tests {
 
         dbtx.insert_new_entry(&BlockCountVoteKey(PeerId::from(0)), &1)
             .await;
+
+        dbtx.insert_new_entry(
+            &ConsensusVersionVoteKey(PeerId::from(0)),
+            &ModuleConsensusVersion::new(2, 0),
+        )
+        .await;
 
         dbtx.insert_new_entry(
             &FeeRateVoteKey(PeerId::from(0)),
@@ -1358,6 +1371,7 @@ mod fedimint_migration_tests {
                             );
                             info!("Validated FeeRateVote");
                         }
+<<<<<<< HEAD
                         DbKeyPrefix::ClaimedPegInOutpoint => {
                             let claimed_peg_ins = dbtx
                                 .find_by_prefix(&ClaimedPegInOutpointPrefixKey)
@@ -1370,6 +1384,20 @@ mod fedimint_migration_tests {
                                 "validate_migrations was not able to read any claimed peg-in outpoints"
                             );
                             info!("Validated PeggedInOutpoint");
+=======
+                        DbKeyPrefix::ConsensusVersionVote => {
+                            let votes = dbtx
+                                .find_by_prefix(&ConsensusVersionVotePrefix)
+                                .await
+                                .collect::<Vec<_>>()
+                                .await;
+                            let num_votes = votes.len();
+                            ensure!(
+                                num_votes > 0,
+                                "validate_migrations was not able to read any consensus version votes"
+                            );
+                            info!("Validated ConsensusVersionVote");
+>>>>>>> e15578d52 (feat: enable wallet to vote on consensus version)
                         }
                     }
                 }
