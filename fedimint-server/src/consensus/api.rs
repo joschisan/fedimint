@@ -27,7 +27,7 @@ use fedimint_core::endpoint_constants::{
     INVITE_CODE_ENDPOINT, RECOVER_ENDPOINT, SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT,
     SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT, SHUTDOWN_ENDPOINT,
     SIGN_API_ANNOUNCEMENT_ENDPOINT, STATUS_ENDPOINT, SUBMIT_API_ANNOUNCEMENT_ENDPOINT,
-    SUBMIT_TRANSACTION_ENDPOINT, VERSION_ENDPOINT,
+    SUBMIT_TRANSACTION_ENDPOINT, SUBMIT_TX_ENDPOINT, VERSION_ENDPOINT,
 };
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::{Audit, AuditSummary};
@@ -514,6 +514,21 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
                 Ok(fedimint.api_versions_summary().to_owned())
             }
         },
+        api_endpoint! {
+            SUBMIT_TX_ENDPOINT,
+            ApiVersion::new(0, 0),
+            async |fedimint: &ConsensusApi, _context, transaction: SerdeTransaction| -> Result<TransactionId, String> {
+                let transaction = transaction
+                    .try_into_inner(&fedimint.modules.decoder_registry())
+                    .map_err(|e| ApiError::bad_request(e.to_string()))?;
+
+                // we return an inner error if and only if the submitted transaction is
+                // invalid and will be rejected if we were to submit it to consensus
+
+                Ok(fedimint.submit_transaction(transaction).await.map_err(|e| e.to_string()))
+            }
+        },
+        // deprecated; use endpoint SUBMIT_TX_ENDPOINT with string error instead
         api_endpoint! {
             SUBMIT_TRANSACTION_ENDPOINT,
             ApiVersion::new(0, 0),
