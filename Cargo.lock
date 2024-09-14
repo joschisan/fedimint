@@ -3258,6 +3258,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "fedimint-walletv2-common"
+version = "0.5.0-alpha"
+dependencies = [
+ "anyhow",
+ "bitcoin 0.30.2",
+ "fedimint-core",
+ "miniscript",
+ "secp256k1 0.27.0",
+ "serde",
+ "test-log",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "fedimint-walletv2-server"
+version = "0.5.0-alpha"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitcoin 0.30.2",
+ "erased-serde",
+ "fedimint-bitcoind",
+ "fedimint-core",
+ "fedimint-logging",
+ "fedimint-metrics",
+ "fedimint-server",
+ "fedimint-walletv2-common",
+ "futures",
+ "hex",
+ "miniscript",
+ "rand",
+ "secp256k1 0.27.0",
+ "serde",
+ "strum 0.26.3",
+ "strum_macros 0.26.4",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "fedimint-wasm-tests"
 version = "0.5.0-alpha"
 dependencies = [
