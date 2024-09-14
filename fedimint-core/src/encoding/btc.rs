@@ -237,6 +237,23 @@ impl Decodable for bitcoin::hashes::sha256::Hash {
     }
 }
 
+impl Encodable for bitcoin::hashes::sha256d::Hash {
+    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<usize, Error> {
+        self.to_byte_array().consensus_encode(writer)
+    }
+}
+
+impl Decodable for bitcoin::hashes::sha256d::Hash {
+    fn consensus_decode<D: std::io::Read>(
+        d: &mut D,
+        modules: &ModuleDecoderRegistry,
+    ) -> Result<Self, DecodeError> {
+        Ok(Self::from_byte_array(Decodable::consensus_decode(
+            d, modules,
+        )?))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
