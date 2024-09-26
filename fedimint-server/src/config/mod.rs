@@ -109,6 +109,7 @@ pub struct ServerConfigPrivate {
     pub tls_key: rustls::PrivateKey,
     /// Secret key for the atomic broadcast to sign messages
     pub broadcast_secret_key: SecretKey,
+    pub iroh_secret_key: iroh_net::key::SecretKey,
     /// Secret material from modules
     pub modules: BTreeMap<ModuleInstanceId, JsonWithKind>,
 }
@@ -121,6 +122,7 @@ pub struct ServerConfigConsensus {
     pub version: CoreConsensusVersion,
     /// Public keys for the atomic broadcast to authenticate messages
     pub broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
+    pub iroh_public_keys: BTreeMap<PeerId, iroh_net::key::PublicKey>,
     /// Number of rounds per session.
     #[serde(default = "default_broadcast_rounds_per_session")]
     pub broadcast_rounds_per_session: u16,
@@ -179,6 +181,7 @@ impl ServerConfigConsensus {
             global: GlobalClientConfig {
                 api_endpoints: self.api_endpoints.clone(),
                 broadcast_public_keys: Some(self.broadcast_public_keys.clone()),
+                iroh_public_keys: self.iroh_public_keys.clone(),
                 consensus_version: self.version,
                 meta: self.meta.clone(),
             },
@@ -213,6 +216,8 @@ impl ServerConfig {
         identity: PeerId,
         broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
         broadcast_secret_key: SecretKey,
+        iroh_public_keys: BTreeMap<PeerId, iroh_net::key::PublicKey>,
+        iroh_secret_key: iroh_net::key::SecretKey,
         modules: BTreeMap<ModuleInstanceId, ServerModuleConfig>,
         code_version_str: String,
     ) -> Self {
@@ -220,6 +225,7 @@ impl ServerConfig {
             api_auth: params.local.api_auth.clone(),
             tls_key: params.local.our_private_key.clone(),
             broadcast_secret_key,
+            iroh_secret_key,
             modules: BTreeMap::new(),
         };
         let local = ServerConfigLocal {
@@ -237,6 +243,7 @@ impl ServerConfig {
             code_version: code_version_str,
             version: CORE_CONSENSUS_VERSION,
             broadcast_public_keys,
+            iroh_public_keys,
             broadcast_rounds_per_session: if is_running_in_test_env() {
                 DEFAULT_TEST_BROADCAST_ROUNDS_PER_SESSION
             } else {
@@ -392,6 +399,14 @@ impl ServerConfig {
             broadcast_sks.insert(peer_id, broadcast_sk);
         }
 
+        let mut iroh_pks = BTreeMap::new();
+        let mut iroh_sks = BTreeMap::new();
+        for peer_id in peer0.peer_ids() {
+            let iroh_sk = iroh_net::key::SecretKey::generate();
+            iroh_pks.insert(peer_id, iroh_sk.public());
+            iroh_sks.insert(peer_id, iroh_sk);
+        }
+
         let modules = peer0.consensus.modules.iter_modules();
         let module_configs: BTreeMap<_, _> = modules
             .map(|(module_id, kind, module_params)| {
@@ -414,6 +429,8 @@ impl ServerConfig {
                     id,
                     broadcast_pks.clone(),
                     *broadcast_sks.get(&id).expect("We created this entry"),
+                    iroh_pks.clone(),
+                    iroh_sks.get(&id).expect("We created this entry").clone(),
                     module_configs
                         .iter()
                         .map(|(module_id, cfgs)| (*module_id, cfgs[&id].clone()))
@@ -460,6 +477,13 @@ impl ServerConfig {
 
         let broadcast_public_keys = broadcast_keys_exchange
             .exchange_pubkeys("broadcast".to_string(), broadcast_pk)
+            .await?;
+
+        let iroh_sk = iroh_net::key::SecretKey::generate();
+        let iroh_pk = iroh_sk.public();
+
+        let iroh_public_keys = broadcast_keys_exchange
+            .exchange_iroh_pubkeys("iroh".to_string(), iroh_pk)
             .await?;
 
         // in case we are running by ourselves, avoid DKG
@@ -558,6 +582,8 @@ impl ServerConfig {
             *our_id,
             broadcast_public_keys,
             broadcast_sk,
+            iroh_public_keys,
+            iroh_sk,
             module_cfgs,
             code_version_str,
         );
