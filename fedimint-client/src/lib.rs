@@ -2413,6 +2413,7 @@ impl ClientBuilder {
         let db = self.db_no_decoders.with_decoders(decoders.clone());
         let connector = self.connector;
         let peer_urls = get_api_urls(&db, &config).await;
+        let task_group = TaskGroup::new();
         let api = if let Some(admin_creds) = self.admin_creds.as_ref() {
             DynGlobalApi::new_admin(
                 admin_creds.peer_id,
@@ -2424,9 +2425,12 @@ impl ClientBuilder {
                 &connector,
             )
         } else {
-            DynGlobalApi::from_endpoints(peer_urls, &api_secret, &connector)
+            DynGlobalApi::from_iroh_endpoints(
+                config.global.iroh_public_keys.clone(),
+                task_group.make_subgroup(),
+            )
+            .await?
         };
-        let task_group = TaskGroup::new();
 
         // Migrate the database before interacting with it in case any on-disk data
         // structures have changed.
