@@ -1,14 +1,5 @@
-//! Implements a connection manager for communication with other federation
-//! members
-//!
-//! The main interface is [`fedimint_core::net::peers::IPeerConnections`] and
-//! its main implementation is [`ReconnectPeerConnections`], see these for
-//! details.
-
-use std::cmp::{max, min};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,37 +9,21 @@ use fedimint_core::task::{TaskGroup, TaskHandle};
 use fedimint_core::PeerId;
 use fedimint_logging::LOG_NET_PEER;
 use futures::future::select_all;
-use iroh_net::defaults::DEFAULT_STUN_PORT;
-use iroh_net::endpoint::{Connecting, Connection, Endpoint};
+use iroh_net::discovery::pkarr::PkarrPublisher;
+use iroh_net::discovery::pkarr::PkarrResolver;
+use iroh_net::discovery::ConcurrentDiscovery;
+use iroh_net::endpoint::{Connection, Endpoint, Incoming};
 use iroh_net::key::SecretKey;
-use iroh_net::relay::{RelayMap, RelayMode, RelayNode, RelayUrl};
-use iroh_net::{NodeAddr, NodeId};
-use rand::{thread_rng, Rng};
+use iroh_net::NodeId;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::time::Instant;
 use tracing::{info, instrument, trace, warn};
 
 use crate::consensus::aleph_bft::Recipient;
-use crate::metrics::{PEER_CONNECT_COUNT, PEER_DISCONNECT_COUNT, PEER_MESSAGES_COUNT};
 
-const FEDIMINT_P2P_ALPN: &[u8] = "FEDIMINT_P2P".as_bytes();
-
-/// Hostname of the default NA relay.
-const NA_RELAY_HOSTNAME: &str = "https://use1-1.relay.iroh.network.";
-/// Hostname of the default EU relay.
-const EU_RELAY_HOSTNAME: &str = "https://euw1-1.relay.iroh.network.";
-/// Hostname of the default Asia-Pacific relay.
-const AP_RELAY_HOSTNAME: &str = "https://aps1-1.relay.iroh.network.";
-
-const RELAY_URLS: [&str; 3] = [NA_RELAY_HOSTNAME, EU_RELAY_HOSTNAME, AP_RELAY_HOSTNAME];
-
-#[derive(Clone)]
-struct PeerConnection {
-    outgoing: async_channel::Sender<Vec<u8>>,
-    incoming: async_channel::Receiver<Vec<u8>>,
-}
+const FEDIMINT_ALPN: &[u8] = "FEDIMINT_P2P".as_bytes();
 
 /// Specifies the network configuration for federation-internal communication
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,89 +57,32 @@ impl NetworkConfig {
     }
 }
 
-/// Calculates delays for reconnecting to peers
-#[derive(Debug, Clone, Copy)]
-pub struct DelayCalculator {
-    min_retry_duration_ms: u64,
-    max_retry_duration_ms: u64,
-}
-
-impl DelayCalculator {
-    /// Production defaults will try to reconnect fast but then fallback to
-    /// larger values if the error persists
-    const PROD_MAX_RETRY_DURATION_MS: u64 = 10_000;
-    const PROD_MIN_RETRY_DURATION_MS: u64 = 10;
-
-    /// For tests we don't want low min/floor delays because they can generate
-    /// too much logging/warnings and make debugging harder
-    const TEST_MAX_RETRY_DURATION_MS: u64 = 10_000;
-    const TEST_MIN_RETRY_DURATION_MS: u64 = 2_000;
-
-    pub const PROD_DEFAULT: Self = Self {
-        min_retry_duration_ms: Self::PROD_MIN_RETRY_DURATION_MS,
-        max_retry_duration_ms: Self::PROD_MAX_RETRY_DURATION_MS,
-    };
-
-    pub const TEST_DEFAULT: Self = Self {
-        min_retry_duration_ms: Self::TEST_MIN_RETRY_DURATION_MS,
-        max_retry_duration_ms: Self::TEST_MAX_RETRY_DURATION_MS,
-    };
-
-    const BASE_MS: u64 = 4;
-
-    // exponential back-off with jitter
-    pub fn reconnection_delay(&self, disconnect_count: u64) -> Duration {
-        let exponent = disconnect_count.try_into().unwrap_or(u32::MAX);
-        // initial value
-        let delay_ms = Self::BASE_MS.saturating_pow(exponent);
-        // sets a floor using the min_retry_duration_ms
-        let delay_ms = max(delay_ms, self.min_retry_duration_ms);
-        // sets a ceiling using the max_retry_duration_ms
-        let delay_ms = min(delay_ms, self.max_retry_duration_ms);
-        // add a small jitter of up to 10% to smooth out the load on the target peer if
-        // many peers are reconnecting at the same time
-        let jitter_max = delay_ms / 10;
-        let jitter_ms = thread_rng().gen_range(0..max(jitter_max, 1));
-        let delay_secs = delay_ms.saturating_add(jitter_ms) as f64 / 1000.0;
-        Duration::from_secs_f64(delay_secs)
-    }
-}
-
 /// Connection manager that automatically reconnects to peers
 #[derive(Clone)]
 pub struct IrohPeerConnections {
-    connections: HashMap<PeerId, PeerConnection>,
+    connections: BTreeMap<PeerId, PeerConnection>,
 }
 
 impl IrohPeerConnections {
-    /// Creates a new `ReconnectPeerConnections` connection manager from a
-    /// network config and a [`Connector`](crate::net::connect::Connector).
-    /// See [`ReconnectPeerConnections`] for requirements on the
-    /// `Connector`.
-    #[instrument(skip_all)]
-    pub(crate) async fn new(
+    pub async fn new(
         cfg: NetworkConfig,
-        delay_calculator: DelayCalculator,
         task_group: &TaskGroup,
         status_channels: Arc<RwLock<BTreeMap<PeerId, PeerConnectionStatus>>>,
     ) -> anyhow::Result<Self> {
-        let relay_nodes = RELAY_URLS.iter().map(|relay_url| RelayNode {
-            url: RelayUrl::from_str(&relay_url).expect("Relay url is invalid"),
-            stun_only: false,
-            stun_port: DEFAULT_STUN_PORT,
-        });
+        let discovery = ConcurrentDiscovery::from_services(vec![
+            Box::new(PkarrPublisher::n0_dns(cfg.secret_key.clone())),
+            Box::new(PkarrResolver::n0_dns()),
+        ]);
 
         let endpoint = Endpoint::builder()
             .secret_key(cfg.secret_key.clone())
-            .alpns(vec![FEDIMINT_P2P_ALPN.to_vec()])
-            .relay_mode(RelayMode::Custom(
-                RelayMap::from_nodes(relay_nodes).expect("Failed to create relay map"),
-            ))
-            .bind(0)
+            .discovery(Box::new(discovery))
+            .alpns(vec![FEDIMINT_ALPN.to_vec()])
+            .bind()
             .await?;
 
-        let mut connection_senders = HashMap::new();
-        let mut connections = HashMap::new();
+        let mut connection_senders = BTreeMap::new();
+        let mut connections = BTreeMap::new();
 
         for (peer_id, peer_node_id) in cfg.peers.iter() {
             assert_ne!(peer_id, &cfg.identity);
@@ -176,7 +94,6 @@ impl IrohPeerConnections {
                 cfg.identity,
                 *peer_id,
                 *peer_node_id,
-                delay_calculator,
                 connection_receiver,
                 status_channels.clone(),
                 task_group,
@@ -201,18 +118,18 @@ impl IrohPeerConnections {
     async fn run_listen_task(
         cfg: NetworkConfig,
         endpoint: Endpoint,
-        mut senders: HashMap<PeerId, Sender<Connection>>,
+        mut senders: BTreeMap<PeerId, Sender<Connection>>,
         task_handle: TaskHandle,
     ) {
         let mut shutdown_rx = task_handle.make_shutdown_rx();
 
         while !task_handle.is_shutting_down() {
             tokio::select! {
-                connecting =  endpoint.accept() => {
-                    match connecting {
-                        Some(connecting) => {
-                            if let Err(e) = Self::handle_connection(&cfg, connecting, &mut senders).await {
-                                warn!("Failed to handle incoming connection {e}");
+                incoming =  endpoint.accept() => {
+                    match incoming {
+                        Some(incoming) => {
+                            if let Err(e) = Self::handle_connection(&cfg, incoming, &mut senders).await {
+                                warn!(target:LOG_NET_PEER, "Failed to handle incoming connection {e}");
                             }
                         }
                         None => return,
@@ -226,10 +143,10 @@ impl IrohPeerConnections {
 
     async fn handle_connection(
         cfg: &NetworkConfig,
-        connecting: Connecting,
-        senders: &mut HashMap<PeerId, Sender<Connection>>,
+        incoming: Incoming,
+        senders: &mut BTreeMap<PeerId, Sender<Connection>>,
     ) -> anyhow::Result<()> {
-        let connection = connecting.await?;
+        let connection = incoming.accept()?.await?;
 
         let node_id = iroh_net::endpoint::get_remote_node_id(&connection)?;
 
@@ -287,6 +204,12 @@ impl IrohPeerConnections {
     }
 }
 
+#[derive(Clone)]
+struct PeerConnection {
+    outgoing: async_channel::Sender<Vec<u8>>,
+    incoming: async_channel::Receiver<Vec<u8>>,
+}
+
 impl PeerConnection {
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -294,7 +217,6 @@ impl PeerConnection {
         our_id: PeerId,
         peer_id: PeerId,
         peer_node_id: NodeId,
-        delay_calculator: DelayCalculator,
         incoming_connections: Receiver<Connection>,
         status_channels: Arc<RwLock<BTreeMap<PeerId, PeerConnectionStatus>>>,
         task_group: &TaskGroup,
@@ -312,7 +234,6 @@ impl PeerConnection {
                     our_id,
                     peer_id,
                     peer_node_id,
-                    delay_calculator,
                     incoming_connections,
                     status_channels,
                     &handle,
@@ -337,57 +258,49 @@ impl PeerConnection {
         self.incoming.recv().await.ok()
     }
 
-    #[allow(clippy::too_many_arguments)] // TODO: consider refactoring
-    #[instrument(
-        name = "peer_io_thread",
-        target = "net::peer",
-        skip_all,
-        // `id` so it doesn't conflict with argument names otherwise will not be shown
-        fields(id = %peer_id)
-    )]
     async fn run_connection_state_machine(
         endpoint: Endpoint,
         incoming: async_channel::Sender<Vec<u8>>,
         outgoing: async_channel::Receiver<Vec<u8>>,
         our_id: PeerId,
-        peer_id: PeerId,
-        peer_node_id: NodeId,
-        delay_calculator: DelayCalculator,
+        peer: PeerId,
+        node_id: NodeId,
         incoming_connections: Receiver<Connection>,
         status_channels: Arc<RwLock<BTreeMap<PeerId, PeerConnectionStatus>>>,
         task_handle: &TaskHandle,
     ) {
-        info!(target: LOG_NET_PEER, "Starting connection state machine for peer {peer_id}");
+        info!(target: LOG_NET_PEER, "Starting connection state machine for peer {peer}");
 
         let mut state_machine = ConnectionSM {
             common: ConnectionSMCommon {
                 endpoint,
                 incoming,
                 outgoing,
-                our_id_str: our_id.to_string(),
                 our_id,
-                peer_id_str: peer_id.to_string(),
-                peer_id,
-                peer_node_id,
-                delay_calculator,
+                peer,
+                node_id,
                 incoming_connections,
                 status_channels,
             },
-            state: ConnectionSMState::Disconnected(ConnectionSMStateDisconnected {
-                reconnect_at: Instant::now(),
-                reconnect_counter: 0,
-            }),
+            state: ConnectionSMState::Disconnected(Instant::now()),
         };
 
         while !task_handle.is_shutting_down() {
-            if let Some(new_state) = state_machine.state_transition(task_handle).await {
-                state_machine = new_state;
-            } else {
-                break;
+            tokio::select! {
+                new_state =  state_machine.state_transition() => {
+                    if let Some(new_state) = new_state {
+                        state_machine = new_state;
+                    } else {
+                        break;
+                    }
+                },
+                () = task_handle.make_shutdown_rx() => {
+                    break;
+                },
             }
         }
 
-        info!(target: LOG_NET_PEER, "Shutting down connection state machine for peer {peer_id}");
+        info!(target: LOG_NET_PEER, "Shutting down connection state machine for peer {peer}");
     }
 }
 
@@ -401,36 +314,24 @@ struct ConnectionSMCommon {
     incoming: async_channel::Sender<Vec<u8>>,
     outgoing: async_channel::Receiver<Vec<u8>>,
     our_id: PeerId,
-    our_id_str: String,
-    peer_id: PeerId,
-    peer_id_str: String,
-    peer_node_id: NodeId,
-    delay_calculator: DelayCalculator,
+    peer: PeerId,
+    node_id: NodeId,
     incoming_connections: Receiver<Connection>,
     status_channels: Arc<RwLock<BTreeMap<PeerId, PeerConnectionStatus>>>,
 }
 
-struct ConnectionSMStateDisconnected {
-    reconnect_at: Instant,
-    reconnect_counter: u64,
-}
-
-struct ConnectionSMStateConnected {
-    connection: Connection,
-}
-
 enum ConnectionSMState {
-    Disconnected(ConnectionSMStateDisconnected),
-    Connected(ConnectionSMStateConnected),
+    Disconnected(Instant),
+    Connected(Connection),
 }
 
 impl ConnectionSM {
-    async fn state_transition(mut self, task_handle: &TaskHandle) -> Option<Self> {
+    async fn state_transition(mut self) -> Option<Self> {
         match self.state {
-            ConnectionSMState::Disconnected(disconnected) => {
+            ConnectionSMState::Disconnected(reconnect_at) => {
                 let state = self
                     .common
-                    .state_transition_disconnected(disconnected, task_handle)
+                    .state_transition_disconnected(reconnect_at)
                     .await?;
 
                 if let ConnectionSMState::Connected(..) = state {
@@ -438,7 +339,7 @@ impl ConnectionSM {
                         .status_channels
                         .write()
                         .await
-                        .insert(self.common.peer_id, PeerConnectionStatus::Connected);
+                        .insert(self.common.peer, PeerConnectionStatus::Connected);
                 }
 
                 Some(ConnectionSM {
@@ -446,18 +347,15 @@ impl ConnectionSM {
                     state,
                 })
             }
-            ConnectionSMState::Connected(connected) => {
-                let state = self
-                    .common
-                    .state_transition_connected(connected, task_handle)
-                    .await?;
+            ConnectionSMState::Connected(connection) => {
+                let state = self.common.state_transition_connected(connection).await?;
 
                 if let ConnectionSMState::Disconnected(..) = state {
                     self.common
                         .status_channels
                         .write()
                         .await
-                        .insert(self.common.peer_id, PeerConnectionStatus::Disconnected);
+                        .insert(self.common.peer, PeerConnectionStatus::Disconnected);
                 };
 
                 Some(ConnectionSM {
@@ -472,20 +370,19 @@ impl ConnectionSM {
 impl ConnectionSMCommon {
     async fn state_transition_connected(
         &mut self,
-        connected: ConnectionSMStateConnected,
-        task_handle: &TaskHandle,
+        connection: Connection,
     ) -> Option<ConnectionSMState> {
         tokio::select! {
             message = self.outgoing.recv() => {
-                match self.send_message(connected, message.ok()?).await {
-                    Ok(connected) => Some(ConnectionSMState::Connected(connected)),
+                match self.send_message(&connection, message.ok()?).await {
+                    Ok(()) => Some(ConnectionSMState::Connected(connection)),
                     Err(e) => Some(self.disconnected(e)),
                 }
             },
             connection = self.incoming_connections.recv() => {
                 Some(self.connected(connection?))
             },
-            stream = connected.connection.accept_uni() => {
+            stream = connection.accept_uni() => {
                 let mut stream = match stream {
                     Ok(stream) => stream,
                     Err(e) => return Some(self.disconnected(e.into())),
@@ -496,105 +393,68 @@ impl ConnectionSMCommon {
                     Err(e) => return Some(self.disconnected(e.into())),
                 };
 
-                PEER_MESSAGES_COUNT.with_label_values(&[&self.our_id_str, &self.peer_id_str, "incoming"]).inc();
 
                 if self.incoming.try_send(message).is_err(){
                     warn!(target: LOG_NET_PEER, "Could not relay incoming message");
                 }
 
-                Some(ConnectionSMState::Connected(connected))
-            },
-            () = task_handle.make_shutdown_rx() => {
-                None
+                Some(ConnectionSMState::Connected(connection))
             },
         }
     }
 
     fn connected(&mut self, connection: Connection) -> ConnectionSMState {
-        info!("Peer {} is connected", self.peer_id);
+        info!(target:LOG_NET_PEER, "Peer {} is connected", self.peer);
 
-        ConnectionSMState::Connected(ConnectionSMStateConnected { connection })
+        ConnectionSMState::Connected(connection)
     }
 
     fn disconnected(&self, error: anyhow::Error) -> ConnectionSMState {
-        info!(target: LOG_NET_PEER, "Peer {} is disconnected: {}", self.peer_id, error);
+        info!(target: LOG_NET_PEER, "Peer {} is disconnected: {}", self.peer, error);
 
-        PEER_DISCONNECT_COUNT
-            .with_label_values(&[&self.our_id_str, &self.peer_id_str])
-            .inc();
-
-        ConnectionSMState::Disconnected(ConnectionSMStateDisconnected {
-            reconnect_at: Instant::now() + self.delay_calculator.reconnection_delay(0),
-            reconnect_counter: 0,
-        })
+        ConnectionSMState::Disconnected(Instant::now())
     }
 
-    async fn send_message(
-        &self,
-        connected: ConnectionSMStateConnected,
-        message: Vec<u8>,
-    ) -> anyhow::Result<ConnectionSMStateConnected> {
-        PEER_MESSAGES_COUNT
-            .with_label_values(&[&self.our_id_str, &self.peer_id_str, "outgoing"])
-            .inc();
-
-        let mut sink = connected.connection.open_uni().await?;
+    async fn send_message(&self, connection: &Connection, message: Vec<u8>) -> anyhow::Result<()> {
+        let mut sink = connection.open_uni().await?;
 
         sink.write_all(&message).await?;
 
-        sink.finish().await?;
+        sink.finish()?;
 
-        Ok(connected)
+        Ok(())
     }
 
     async fn state_transition_disconnected(
         &mut self,
-        disconnected: ConnectionSMStateDisconnected,
-        task_handle: &TaskHandle,
+        reconnect_at: Instant,
     ) -> Option<ConnectionSMState> {
         tokio::select! {
             connection = self.incoming_connections.recv() => {
-                let connection = connection?;
-
-                PEER_CONNECT_COUNT.with_label_values(&[&self.our_id_str, &self.peer_id_str, "incoming"]).inc();
-
-                Some(self.connected(connection))
+                Some(self.connected(connection?))
             },
             // to prevent "reconnection ping-pongs", only the side with lower PeerId is responsible for reconnecting
-            () = tokio::time::sleep_until(disconnected.reconnect_at), if self.our_id < self.peer_id => {
-                Some(self.reconnect(disconnected).await)
-            },
-            () = task_handle.make_shutdown_rx() => {
-                None
+            () = tokio::time::sleep_until(reconnect_at), if self.our_id < self.peer => {
+                Some(self.reconnect().await)
             },
         }
     }
 
-    async fn reconnect(
-        &mut self,
-        disconnected: ConnectionSMStateDisconnected,
-    ) -> ConnectionSMState {
-        for relay in RELAY_URLS {
-            let addr = NodeAddr::from_parts(
-                self.peer_node_id,
-                Some(RelayUrl::from_str(relay).expect("Relay url is invalid")),
-                Vec::new(),
-            );
-
-            if let Ok(connection) = self.endpoint.connect(addr, FEDIMINT_P2P_ALPN).await {
-                return self.connected(connection);
-            };
+    async fn reconnect(&mut self) -> ConnectionSMState {
+        match self
+            .endpoint
+            .connect_by_node_id(self.node_id, FEDIMINT_ALPN)
+            .await
+        {
+            Ok(connection) => return self.connected(connection),
+            Err(e) => warn!(
+                target: LOG_NET_PEER,
+                "Failed to connect to peer {} : {}",
+                self.peer, e
+            ),
         }
 
-        let failed_reconnect_counter = disconnected.reconnect_counter + 1;
-
-        ConnectionSMState::Disconnected(ConnectionSMStateDisconnected {
-            reconnect_at: Instant::now()
-                + self
-                    .delay_calculator
-                    .reconnection_delay(failed_reconnect_counter),
-            reconnect_counter: failed_reconnect_counter,
-        })
+        ConnectionSMState::Disconnected(Instant::now() + Duration::from_secs(10))
     }
 }
 
@@ -602,16 +462,19 @@ impl ConnectionSMCommon {
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
+    use std::time::Duration;
 
-    use fedimint_core::task::TaskGroup;
+    use fedimint_core::task::{sleep, TaskGroup};
     use fedimint_core::PeerId;
+    use iroh_net::discovery::pkarr::PkarrPublisher;
     use iroh_net::key::SecretKey;
-    use iroh_net::NodeId;
+    use iroh_net::{Endpoint, NodeId};
     use tokio::sync::RwLock;
 
-    use super::{DelayCalculator, IrohPeerConnections, NetworkConfig};
+    use super::{IrohApiConnections, IrohPeerConnections, NetworkConfig, FEDIMINT_ALPN};
     use crate::consensus::aleph_bft::Recipient;
 
+    #[tracing_test::traced_test]
     #[tokio::test]
     async fn test_iroh_peer_connections() -> anyhow::Result<()> {
         let secret_keys = (0_u16..7)
@@ -629,7 +492,6 @@ mod tests {
         for (peer_id, sk) in secret_keys {
             let connection = IrohPeerConnections::new(
                 NetworkConfig::new(sk, public_keys.clone()),
-                DelayCalculator::TEST_DEFAULT,
                 &task_group,
                 Arc::new(RwLock::new(BTreeMap::new())),
             )
@@ -648,19 +510,337 @@ mod tests {
 
             for (receiver_id, connection) in &mut connections {
                 if receiver_id != &PeerId::from(i) {
-                    let (origin_id, msg) = connection.receive().await;
-
-                    println!(
-                        "Peer {:?} received {:?} from {:?}",
-                        receiver_id, msg, origin_id
+                    assert_eq!(
+                        (PeerId::from(i), message.clone()),
+                        connection.receive().await
                     );
-
-                    assert_eq!(origin_id, PeerId::from(i));
-                    assert_eq!(msg, message)
                 }
             }
         }
 
         Ok(())
+    }
+
+    #[tracing_test::traced_test]
+    #[tokio::test]
+    async fn test_iroh_api_connections() -> anyhow::Result<()> {
+        let secret_key = SecretKey::generate();
+        let public_key = secret_key.public();
+
+        tokio::spawn(async { echo(secret_key).await });
+
+        let connections = IrohApiConnections::new(
+            [(PeerId::from(0), public_key)].into_iter().collect(),
+            TaskGroup::new(),
+        )
+        .await
+        .expect("Failed to build connections");
+
+        for i in 0_u64.. {
+            let request = i.to_be_bytes().to_vec();
+
+            if let Some(response) = connections.request(PeerId::from(0), request.clone()).await {
+                assert_eq!(request, response);
+                break;
+            }
+
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        Ok(())
+    }
+
+    async fn echo(secret_key: SecretKey) {
+        let endpoint = Endpoint::builder()
+            .secret_key(secret_key.clone())
+            .discovery(Box::new(PkarrPublisher::n0_dns(secret_key)))
+            .alpns(vec![FEDIMINT_ALPN.to_vec()])
+            .bind()
+            .await
+            .expect("Failed to bind to echo endpoint");
+
+        loop {
+            let connection = endpoint
+                .accept()
+                .await
+                .expect("Failed to accept incoming connections")
+                .await
+                .expect("Fail to connect");
+
+            while let Ok((mut send_stream, mut receive_stream)) = connection.accept_bi().await {
+                let echo = receive_stream
+                    .read_to_end(100_000)
+                    .await
+                    .expect("Failed to read echo from stream");
+
+                send_stream
+                    .write_all(&echo)
+                    .await
+                    .expect("Failed to write echo to stream");
+
+                send_stream.finish().expect("Failed to finish send stream");
+            }
+        }
+    }
+}
+
+/// Connection manager that automatically reconnects to peers
+#[derive(Clone)]
+pub struct IrohApiConnections {
+    connections: BTreeMap<PeerId, IrohApiConnection>,
+}
+
+impl IrohApiConnections {
+    #[instrument(skip_all)]
+    pub(crate) async fn new(
+        peers: BTreeMap<PeerId, NodeId>,
+        task_group: TaskGroup,
+    ) -> anyhow::Result<Self> {
+        let endpoint = Endpoint::builder()
+            .discovery(Box::new(PkarrResolver::n0_dns()))
+            .alpns(vec![FEDIMINT_ALPN.to_vec()])
+            .bind()
+            .await?;
+
+        let connections = peers
+            .iter()
+            .map(|(peer, node_id)| {
+                (
+                    *peer,
+                    IrohApiConnection::new(endpoint.clone(), *peer, *node_id, &task_group),
+                )
+            })
+            .collect();
+
+        Ok(IrohApiConnections { connections })
+    }
+
+    async fn request(&self, peer_id: PeerId, message: Vec<u8>) -> Option<Vec<u8>> {
+        self.connections
+            .get(&peer_id)
+            .expect("Cannot find peer api connection for peer id")
+            .request(message)
+            .await
+    }
+}
+
+#[derive(Clone)]
+struct IrohApiConnection {
+    request_sender: async_channel::Sender<(Vec<u8>, oneshot::Sender<Vec<u8>>)>,
+}
+
+impl IrohApiConnection {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        endpoint: Endpoint,
+        peer_id: PeerId,
+        peer_node_id: NodeId,
+        task_group: &TaskGroup,
+    ) -> IrohApiConnection {
+        let (request_sender, request_receiver) = async_channel::bounded(1024);
+
+        let tg = task_group.clone();
+
+        task_group.spawn(
+            format!("io-thread-peer-{peer_id}"),
+            move |handle| async move {
+                Self::run_connection_state_machine(
+                    endpoint,
+                    request_receiver,
+                    peer_id,
+                    peer_node_id,
+                    tg,
+                    &handle,
+                )
+                .await;
+            },
+        );
+
+        IrohApiConnection { request_sender }
+    }
+
+    async fn request(&self, request: Vec<u8>) -> Option<Vec<u8>> {
+        let (response_sender, response_receiver) = oneshot::channel();
+
+        if self
+            .request_sender
+            .send((request, response_sender))
+            .await
+            .is_err()
+        {
+            warn!(target: LOG_NET_PEER, "Could not send outgoing message");
+        }
+
+        response_receiver.await.ok()
+    }
+
+    async fn run_connection_state_machine(
+        endpoint: Endpoint,
+        request_receiver: async_channel::Receiver<(Vec<u8>, oneshot::Sender<Vec<u8>>)>,
+        peer: PeerId,
+        node_id: NodeId,
+        task_group: TaskGroup,
+        task_handle: &TaskHandle,
+    ) {
+        info!(target: LOG_NET_PEER, "Starting connection state machine for peer {peer}");
+
+        let mut state_machine = IrohApiConnectionSM {
+            common: IrohApiConnectionSMCommon {
+                endpoint,
+                request_receiver,
+                node_id,
+                peer,
+                task_group,
+            },
+            state: IrohApiConnectionSMState::Disconnected(Instant::now()),
+        };
+
+        loop {
+            tokio::select! {
+                new_state =  state_machine.state_transition() => {
+                    if let Some(new_state) = new_state {
+                        state_machine = new_state;
+                    } else {
+                        break;
+                    }
+                },
+                () = task_handle.make_shutdown_rx() => {
+                    break;
+                },
+            }
+        }
+
+        info!(target: LOG_NET_PEER, "Shutting down connection state machine for peer {peer}");
+    }
+}
+
+struct IrohApiConnectionSM {
+    common: IrohApiConnectionSMCommon,
+    state: IrohApiConnectionSMState,
+}
+
+struct IrohApiConnectionSMCommon {
+    endpoint: Endpoint,
+    request_receiver: async_channel::Receiver<(Vec<u8>, oneshot::Sender<Vec<u8>>)>,
+    peer: PeerId,
+    node_id: NodeId,
+    task_group: TaskGroup,
+}
+
+enum IrohApiConnectionSMState {
+    Disconnected(Instant),
+    Connected(Connection),
+}
+
+impl IrohApiConnectionSM {
+    async fn state_transition(mut self) -> Option<Self> {
+        match self.state {
+            IrohApiConnectionSMState::Disconnected(disconnected) => {
+                let state = self
+                    .common
+                    .state_transition_disconnected(disconnected)
+                    .await?;
+
+                Some(IrohApiConnectionSM {
+                    common: self.common,
+                    state,
+                })
+            }
+            IrohApiConnectionSMState::Connected(connected) => {
+                let state = self.common.state_transition_connected(connected).await?;
+
+                Some(IrohApiConnectionSM {
+                    common: self.common,
+                    state,
+                })
+            }
+        }
+    }
+}
+
+impl IrohApiConnectionSMCommon {
+    async fn state_transition_connected(
+        &mut self,
+        connection: Connection,
+    ) -> Option<IrohApiConnectionSMState> {
+        tokio::select! {
+            message = self.request_receiver.recv() => {
+                match self.handle_request(&connection, message.ok()?).await {
+                    Ok(()) => Some(IrohApiConnectionSMState::Connected(connection)),
+                    Err(e) => Some(self.disconnected(e)),
+                }
+            },
+            error = connection.closed() => {
+                Some(self.disconnected(error.into()))
+            }
+        }
+    }
+
+    fn connected(&mut self, connection: Connection) -> IrohApiConnectionSMState {
+        info!(target: LOG_NET_PEER,"Peer {} is connected", self.peer);
+
+        IrohApiConnectionSMState::Connected(connection)
+    }
+
+    fn disconnected(&self, error: anyhow::Error) -> IrohApiConnectionSMState {
+        info!(target: LOG_NET_PEER, "Peer {} is disconnected: {}", self.peer, error);
+
+        IrohApiConnectionSMState::Disconnected(Instant::now())
+    }
+
+    async fn handle_request(
+        &self,
+        connection: &Connection,
+        request: (Vec<u8>, oneshot::Sender<Vec<u8>>),
+    ) -> anyhow::Result<()> {
+        let (mut send_stream, mut receive_stream) = connection.open_bi().await?;
+
+        send_stream.write_all(&request.0).await?;
+
+        send_stream.finish()?;
+
+        self.task_group.spawn("request task", |handle| async move {
+            tokio::select! {
+                response = receive_stream.read_to_end(100_000) => {
+                    if let Ok(response) = response {
+                        request.1.send(response).ok();
+                    }
+                },
+                () = handle.make_shutdown_rx() => {},
+            }
+        });
+
+        Ok(())
+    }
+
+    async fn state_transition_disconnected(
+        &mut self,
+        reconnect_at: Instant,
+    ) -> Option<IrohApiConnectionSMState> {
+        tokio::select! {
+            _ = self.request_receiver.recv() => {
+                Some(IrohApiConnectionSMState::Disconnected(reconnect_at))
+            },
+            () = tokio::time::sleep_until(reconnect_at) => {
+                Some(self.reconnect().await)
+            },
+        }
+    }
+
+    async fn reconnect(&mut self) -> IrohApiConnectionSMState {
+        match self
+            .endpoint
+            .connect_by_node_id(self.node_id, FEDIMINT_ALPN)
+            .await
+        {
+            Ok(connection) => return self.connected(connection),
+            Err(e) => warn!(
+                target: LOG_NET_PEER,
+                "Failed to connect to peer {} : {}",
+                self.peer, e
+            ),
+        }
+
+        IrohApiConnectionSMState::Disconnected(Instant::now() + Duration::from_secs(10))
     }
 }
