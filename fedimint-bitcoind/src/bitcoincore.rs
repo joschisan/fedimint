@@ -68,7 +68,7 @@ impl IBitcoindRpc for BitcoinClient {
     }
 
     async fn get_block(&self, hash: &BlockHash) -> anyhow::Result<bitcoin::Block> {
-        block_in_place(|| self.client.get_block(&hash)).map_err(anyhow::Error::from)
+        block_in_place(|| self.client.get_block(hash)).map_err(anyhow::Error::from)
     }
 
     async fn get_fee_rate(&self, confirmation_target: u16) -> anyhow::Result<Option<Feerate>> {

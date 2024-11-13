@@ -1019,21 +1019,10 @@ mod fedimint_migration_tests {
     };
     use fedimint_wallet_server::db::{
         BlockCountVoteKey, BlockCountVotePrefix, BlockHashKey, BlockHashKeyPrefix,
-<<<<<<< HEAD
-<<<<<<< HEAD
-        ClaimedPegInOutpointKey, ClaimedPegInOutpointPrefixKey, DbKeyPrefix, FeeRateVoteKey,
-        FeeRateVotePrefix, PegOutBitcoinTransaction, PegOutBitcoinTransactionPrefix,
-        PegOutNonceKey, PegOutTxSignatureCI, PegOutTxSignatureCIPrefix, PendingTransactionKey,
-=======
+        ClaimedPegInOutpointKey, ClaimedPegInOutpointPrefixKey, ConsensusVersionVoteKey,
         ConsensusVersionVotePrefix, DbKeyPrefix, FeeRateVoteKey, FeeRateVotePrefix,
         PegOutBitcoinTransaction, PegOutBitcoinTransactionPrefix, PegOutNonceKey,
         PegOutTxSignatureCI, PegOutTxSignatureCIPrefix, PendingTransactionKey,
->>>>>>> e15578d52 (feat: enable wallet to vote on consensus version)
-=======
-        ConsensusVersionVoteKey, ConsensusVersionVotePrefix, DbKeyPrefix, FeeRateVoteKey,
-        FeeRateVotePrefix, PegOutBitcoinTransaction, PegOutBitcoinTransactionPrefix,
-        PegOutNonceKey, PegOutTxSignatureCI, PegOutTxSignatureCIPrefix, PendingTransactionKey,
->>>>>>> aebd34e53 (feat: track utxos in consensus)
         PendingTransactionPrefixKey, UTXOKey, UTXOPrefixKey, UnsignedTransactionKey,
         UnsignedTransactionPrefixKey,
     };
@@ -1376,7 +1365,6 @@ mod fedimint_migration_tests {
                             );
                             info!("Validated FeeRateVote");
                         }
-<<<<<<< HEAD
                         DbKeyPrefix::ClaimedPegInOutpoint => {
                             let claimed_peg_ins = dbtx
                                 .find_by_prefix(&ClaimedPegInOutpointPrefixKey)
@@ -1389,7 +1377,7 @@ mod fedimint_migration_tests {
                                 "validate_migrations was not able to read any claimed peg-in outpoints"
                             );
                             info!("Validated PeggedInOutpoint");
-=======
+                        }
                         DbKeyPrefix::ConsensusVersionVote => {
                             let votes = dbtx
                                 .find_by_prefix(&ConsensusVersionVotePrefix)
@@ -1402,7 +1390,6 @@ mod fedimint_migration_tests {
                                 "validate_migrations was not able to read any consensus version votes"
                             );
                             info!("Validated ConsensusVersionVote");
->>>>>>> e15578d52 (feat: enable wallet to vote on consensus version)
                         }
                         DbKeyPrefix::UnspentTxOut => {
                             let utxos = dbtx

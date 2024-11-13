@@ -1,6 +1,5 @@
 use bitcoin::secp256k1::ecdsa::Signature;
-use bitcoin::TxOut;
-use bitcoin::{BlockHash, OutPoint, Txid};
+use bitcoin::{BlockHash, OutPoint, TxOut, Txid};
 use fedimint_core::db::{IDatabaseTransactionOpsCoreTyped, MigrationContext};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::ModuleConsensusVersion;
@@ -206,7 +205,7 @@ pub async fn migrate_to_v1(mut ctx: MigrationContext<'_>) -> Result<(), anyhow::
                 match item {
                     TypedModuleHistoryItem::Input(input) => {
                         let outpoint = input
-                            .ensure_v0_ref()
+                            .maybe_v0_ref()
                             .expect("can only support V0 wallet inputs")
                             .0
                             .outpoint();
