@@ -32,7 +32,6 @@ use common::{
     WalletModuleTypes, WalletOutput, WalletOutputOutcome, WalletSummary, CONFIRMATION_TARGET,
     DEPRECATED_RBF_ERROR, FEERATE_MULTIPLIER,
 };
-use db::ConsensusVersionVoteKey;
 use fedimint_bitcoind::{create_bitcoind, DynBitcoindRpc};
 use fedimint_core::config::{
     ConfigGenModuleParams, DkgResult, ServerModuleConfig, ServerModuleConsensusConfig,
@@ -89,13 +88,14 @@ use strum::IntoEnumIterator;
 use tokio::sync::watch;
 use tracing::{debug, info, instrument, trace, warn};
 
+use crate::db::UnspentTxOutKey;
 use crate::db::{
     migrate_to_v1, BlockCountVoteKey, BlockCountVotePrefix, BlockHashKey, BlockHashKeyPrefix,
-    ClaimedPegInOutpointKey, ClaimedPegInOutpointPrefixKey, ConsensusVersionVotePrefix,
-    DbKeyPrefix, FeeRateVoteKey, FeeRateVotePrefix, PegOutBitcoinTransaction,
-    PegOutBitcoinTransactionPrefix, PegOutNonceKey, PegOutTxSignatureCI, PegOutTxSignatureCIPrefix,
-    PendingTransactionKey, PendingTransactionPrefixKey, UTXOKey, UTXOPrefixKey,
-    UnsignedTransactionKey, UnsignedTransactionPrefixKey,
+    ClaimedPegInOutpointKey, ClaimedPegInOutpointPrefixKey, ConsensusVersionVoteKey,
+    ConsensusVersionVotePrefix, DbKeyPrefix, FeeRateVoteKey, FeeRateVotePrefix,
+    PegOutBitcoinTransaction, PegOutBitcoinTransactionPrefix, PegOutNonceKey, PegOutTxSignatureCI,
+    PegOutTxSignatureCIPrefix, PendingTransactionKey, PendingTransactionPrefixKey, UTXOKey,
+    UTXOPrefixKey, UnsignedTransactionKey, UnsignedTransactionPrefixKey, UnspentTxOutPrefix,
 };
 use crate::metrics::WALLET_BLOCK_COUNT;
 
@@ -206,7 +206,27 @@ impl ModuleInit for WalletInit {
                         "Claimed Peg-in Outpoint"
                     );
                 }
-                DbKeyPrefix::ConsensusVersionVote => {}
+                DbKeyPrefix::ConsensusVersionVote => {
+                    push_db_pair_items!(
+                        dbtx,
+                        ConsensusVersionVotePrefix,
+                        ConsensusVersionVoteKey,
+                        ModuleConsensusVersion,
+                        wallet,
+                        "Consensus Version Votes"
+                    );
+                }
+
+                DbKeyPrefix::UnspentTxOut => {
+                    push_db_pair_items!(
+                        dbtx,
+                        UnspentTxOutPrefix,
+                        UnspentTxOutKey,
+                        TxOut,
+                        wallet,
+                        "Consensus Version Votes"
+                    );
+                }
             }
         }
 
@@ -1114,6 +1134,46 @@ impl Wallet {
             })
             .await
             .expect("bitcoind rpc to get block hash");
+
+            if self.consensus_module_consensus_version(dbtx).await
+                > ModuleConsensusVersion::new(2, 0)
+            {
+                let block = retry("get_block", backoff_util::background_backoff(), || {
+                    self.btc_rpc.get_block(&block_hash)
+                })
+                .await
+                .expect("bitcoind rpc to get block");
+
+                for transaction in block.txdata {
+                    dbtx.remove_entry(&PendingTransactionKey(transaction.compute_txid()))
+                        .await;
+
+                    // We maintain the set of unspent P2WSH transaction outputs created
+                    // since the federation was established.
+
+                    for tx_in in &transaction.input {
+                        dbtx.remove_entry(&UnspentTxOutKey(tx_in.previous_output))
+                            .await;
+                    }
+
+                    for (vout, tx_out) in transaction.output.iter().enumerate() {
+                        if tx_out.script_pubkey.is_p2wsh() {
+                            if let Some(utxo) = dbtx
+                                .insert_entry(
+                                    &UnspentTxOutKey(bitcoin::OutPoint {
+                                        txid: transaction.compute_txid(),
+                                        vout: vout as u32,
+                                    }),
+                                    &tx_out,
+                                )
+                                .await
+                            {
+                                panic!("Attempted to overwrite utxo {utxo:?}")
+                            }
+                        }
+                    }
+                }
+            }
 
             let pending_transactions = dbtx
                 .find_by_prefix(&PendingTransactionPrefixKey)

@@ -1,4 +1,5 @@
 use bitcoin::secp256k1::ecdsa::Signature;
+use bitcoin::TxOut;
 use bitcoin::{BlockHash, OutPoint, Txid};
 use fedimint_core::db::{IDatabaseTransactionOpsCoreTyped, MigrationContext};
 use fedimint_core::encoding::{Decodable, Encodable};
@@ -26,6 +27,7 @@ pub enum DbKeyPrefix {
     PegOutNonce = 0x38,
     ClaimedPegInOutpoint = 0x39,
     ConsensusVersionVote = 0x40,
+    UnspentTxOut = 0x41,
 }
 
 impl std::fmt::Display for DbKeyPrefix {
@@ -226,3 +228,16 @@ pub async fn migrate_to_v1(mut ctx: MigrationContext<'_>) -> Result<(), anyhow::
 
     Ok(())
 }
+
+#[derive(Clone, Debug, Encodable, Decodable, Serialize)]
+pub struct UnspentTxOutKey(pub bitcoin::OutPoint);
+
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct UnspentTxOutPrefix;
+
+impl_db_record!(
+    key = UnspentTxOutKey,
+    value = TxOut,
+    db_prefix = DbKeyPrefix::UnspentTxOut,
+);
+impl_db_lookup!(key = UnspentTxOutKey, query_prefix = UnspentTxOutPrefix);

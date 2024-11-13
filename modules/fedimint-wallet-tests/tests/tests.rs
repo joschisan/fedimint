@@ -1017,9 +1017,9 @@ mod fedimint_migration_tests {
     use fedimint_wallet_common::{
         PegOutFees, Rbf, SpendableUTXO, WalletCommonInit, WalletOutputOutcome,
     };
-    use fedimint_wallet_server::db::ConsensusVersionVoteKey;
     use fedimint_wallet_server::db::{
         BlockCountVoteKey, BlockCountVotePrefix, BlockHashKey, BlockHashKeyPrefix,
+<<<<<<< HEAD
 <<<<<<< HEAD
         ClaimedPegInOutpointKey, ClaimedPegInOutpointPrefixKey, DbKeyPrefix, FeeRateVoteKey,
         FeeRateVotePrefix, PegOutBitcoinTransaction, PegOutBitcoinTransactionPrefix,
@@ -1029,6 +1029,11 @@ mod fedimint_migration_tests {
         PegOutBitcoinTransaction, PegOutBitcoinTransactionPrefix, PegOutNonceKey,
         PegOutTxSignatureCI, PegOutTxSignatureCIPrefix, PendingTransactionKey,
 >>>>>>> e15578d52 (feat: enable wallet to vote on consensus version)
+=======
+        ConsensusVersionVoteKey, ConsensusVersionVotePrefix, DbKeyPrefix, FeeRateVoteKey,
+        FeeRateVotePrefix, PegOutBitcoinTransaction, PegOutBitcoinTransactionPrefix,
+        PegOutNonceKey, PegOutTxSignatureCI, PegOutTxSignatureCIPrefix, PendingTransactionKey,
+>>>>>>> aebd34e53 (feat: track utxos in consensus)
         PendingTransactionPrefixKey, UTXOKey, UTXOPrefixKey, UnsignedTransactionKey,
         UnsignedTransactionPrefixKey,
     };
@@ -1398,6 +1403,19 @@ mod fedimint_migration_tests {
                             );
                             info!("Validated ConsensusVersionVote");
 >>>>>>> e15578d52 (feat: enable wallet to vote on consensus version)
+                        }
+                        DbKeyPrefix::UnspentTxOut => {
+                            let utxos = dbtx
+                                .find_by_prefix(&ConsensusVersionVotePrefix)
+                                .await
+                                .collect::<Vec<_>>()
+                                .await;
+                            let num_utxos = utxos.len();
+                            ensure!(
+                                num_utxos > 0,
+                                "validate_migrations was not able to read any utxos"
+                            );
+                            info!("Validated UnspendTxOut");
                         }
                     }
                 }
