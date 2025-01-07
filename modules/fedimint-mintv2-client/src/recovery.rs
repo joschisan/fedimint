@@ -7,8 +7,9 @@ use fedimint_client::module::ClientContext;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped as _};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::secp256k1::{Keypair, PublicKey, SECP256K1};
+use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::{apply, async_trait_maybe_send, OutPoint};
+use fedimint_derive_secret::DerivableSecret;
 use fedimint_mintv2_common::{MintInput, MintOutput};
 use tracing::trace;
 
@@ -20,7 +21,7 @@ use crate::{MintClientInit, MintClientModule, MintClientStateMachines};
 #[derive(Clone, Debug)]
 pub struct MintRecovery {
     state: MintRecoveryState,
-    keypair: Keypair,
+    root_secret: DerivableSecret,
     client_ctx: ClientContext<MintClientModule>,
 }
 
@@ -44,7 +45,7 @@ impl RecoveryFromHistory for MintRecovery {
             state: MintRecoveryState {
                 requests: BTreeMap::new(),
             },
-            keypair: args.module_root_secret().clone().to_secp_key(SECP256K1),
+            root_secret: args.module_root_secret().clone(),
             client_ctx: args.context(),
         };
 
@@ -66,7 +67,7 @@ impl RecoveryFromHistory for MintRecovery {
                 (
                     MintRecovery {
                         state,
-                        keypair: args.module_root_secret().clone().to_secp_key(SECP256K1),
+                        root_secret: args.module_root_secret().clone(),
                         client_ctx: args.context(),
                     },
                     common,
@@ -126,10 +127,12 @@ impl RecoveryFromHistory for MintRecovery {
     ) -> anyhow::Result<()> {
         match output {
             MintOutput::V0(output) => {
-                if let Some(request) = NoteIssuanceRequest::recover(output.clone(), self.keypair) {
+                if let Some(request) =
+                    NoteIssuanceRequest::recover(output.clone(), &self.root_secret)
+                {
                     self.state
                         .requests
-                        .insert(request.keypair().public_key(), request);
+                        .insert(request.keypair(&self.root_secret).public_key(), request);
                 }
             }
             MintOutput::Default { variant, .. } => {

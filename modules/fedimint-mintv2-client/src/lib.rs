@@ -43,14 +43,17 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{
     ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
 };
+use fedimint_core::secp256k1::rand::{thread_rng, Rng};
 use fedimint_core::secp256k1::{Keypair, PublicKey};
 use fedimint_core::util::{BoxStream, NextOrPending};
 use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint, PeerId, TransactionId};
-use fedimint_mintv2_common::config::{denominations, FeeConsensus, MintClientConfig};
+use fedimint_derive_secret::DerivableSecret;
+use fedimint_mintv2_common::config::{client_denominations, FeeConsensus, MintClientConfig};
 use fedimint_mintv2_common::{MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, KIND};
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tbs::AggregatePublicKey;
 use thiserror::Error;
 
@@ -61,9 +64,7 @@ use crate::issuance::NoteIssuanceRequest;
 use crate::output::{MintOutputStateMachine, OutputSMCommon, OutputSMState};
 use crate::recovery::MintRecovery;
 
-const TARGET_PER_DENOMINATION: u64 = 4;
-
-const MAX_PER_DENOMINATION: u64 = 6;
+const TARGET_PER_DENOMINATION: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct SpendableNote {
@@ -88,9 +89,20 @@ impl SpendableNote {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MintOperationMeta {
-    Send { ecash: String },
-    Reissue { txid: TransactionId, amount: Amount },
-    Receive { txid: TransactionId, ecash: String },
+    Send {
+        ecash: String,
+        custom_meta: Value,
+    },
+    Reissue {
+        txid: TransactionId,
+        amount: Amount,
+        custom_meta: Value,
+    },
+    Receive {
+        txid: TransactionId,
+        ecash: String,
+        custom_meta: Value,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -121,10 +133,7 @@ impl ClientModuleInit for MintClientInit {
         Ok(MintClientModule {
             federation_id: *args.federation_id(),
             cfg: args.cfg().clone(),
-            keypair: args
-                .module_root_secret()
-                .clone()
-                .to_secp_key(fedimint_core::secp256k1::SECP256K1),
+            root_secret: args.module_root_secret().clone(),
             notifier: args.notifier().clone(),
             client_ctx: args.context(),
         })
@@ -148,7 +157,7 @@ impl ClientModuleInit for MintClientInit {
 pub struct MintClientModule {
     federation_id: FederationId,
     cfg: MintClientConfig,
-    keypair: Keypair,
+    root_secret: DerivableSecret,
     notifier: ModuleNotifier<MintClientStateMachines>,
     client_ctx: ClientContext<Self>,
 }
@@ -158,6 +167,7 @@ pub struct MintClientContext {
     client_ctx: ClientContext<MintClientModule>,
     tbs_agg_pks: BTreeMap<Amount, AggregatePublicKey>,
     tbs_pks: BTreeMap<Amount, BTreeMap<PeerId, tbs::PublicKeyShare>>,
+    root_secret: DerivableSecret,
 }
 
 impl Context for MintClientContext {
@@ -177,6 +187,7 @@ impl ClientModule for MintClientModule {
             client_ctx: self.client_ctx.clone(),
             tbs_agg_pks: self.cfg.tbs_agg_pks.clone(),
             tbs_pks: self.cfg.tbs_pks.clone(),
+            root_secret: self.root_secret.clone(),
         }
     }
 
@@ -218,31 +229,18 @@ impl ClientModule for MintClientModule {
         ClientInputBundle<MintInput, MintClientStateMachines>,
         ClientOutputBundle<MintOutput, MintClientStateMachines>,
     )> {
-        let consolidation = self.select_consolidation_input(dbtx).await;
-
-        for note in &consolidation {
-            self.remove_spendable_note(dbtx, note).await;
-        }
-
-        input_amount += consolidation.iter().map(|input| input.amount).sum();
-
-        output_amount += consolidation
-            .iter()
-            .map(|input| self.cfg.fee_consensus.fee(input.amount))
-            .sum();
-
-        let additional = self
-            .select_additional_input(dbtx, output_amount.saturating_sub(input_amount))
+        let funding_notes = self
+            .select_funding_input(dbtx, output_amount.saturating_sub(input_amount))
             .await
             .context("Insufficent funds")?;
 
-        for note in &additional {
+        for note in &funding_notes {
             self.remove_spendable_note(dbtx, note).await;
         }
 
-        input_amount += additional.iter().map(|input| input.amount).sum();
+        input_amount += funding_notes.iter().map(|input| input.amount).sum();
 
-        output_amount += additional
+        output_amount += funding_notes
             .iter()
             .map(|input| self.cfg.fee_consensus.fee(input.amount))
             .sum();
@@ -271,14 +269,13 @@ impl ClientModule for MintClientModule {
 
         assert!(output_amount <= input_amount);
 
-        let mut spendable_notes = consolidation
+        let mut spendable_notes = funding_notes
             .into_iter()
-            .chain(additional)
             .chain(input_notes)
             .collect::<Vec<SpendableNote>>();
 
         // We sort the notes by amount to minimize the leaked information.
-        spendable_notes.sort_by_key(|spendable_note| spendable_note.amount);
+        spendable_notes.sort_by_key(|note| note.amount);
 
         let input_bundle = self.create_input_bundle(operation_id, spendable_notes);
 
@@ -336,55 +333,57 @@ impl ClientModule for MintClientModule {
 }
 
 impl MintClientModule {
-    async fn select_consolidation_input(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-    ) -> Vec<SpendableNote> {
-        let mut notes = Vec::new();
-
-        for amount in denominations() {
-            let excess_notes = dbtx
-                .find_by_prefix(&SpendableNoteAmountPrefix(amount))
-                .await
-                .map(|entry| entry.0 .0)
-                .skip(MAX_PER_DENOMINATION as usize)
-                .collect::<Vec<SpendableNote>>()
-                .await;
-
-            notes.extend(excess_notes);
-        }
-
-        notes
-    }
-
-    async fn select_additional_input(
+    async fn select_funding_input(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         mut excess_output: Amount,
     ) -> Option<Vec<SpendableNote>> {
-        if excess_output == Amount::ZERO {
-            return Some(Vec::new());
+        let mut selected_notes = Vec::new();
+        let mut target_notes = Vec::new();
+        let mut excess_notes = Vec::new();
+
+        for amount in client_denominations().rev() {
+            let notes_amount = dbtx
+                .find_by_prefix(&SpendableNoteAmountPrefix(amount))
+                .await
+                .map(|entry| entry.0 .0)
+                .collect::<Vec<SpendableNote>>()
+                .await;
+
+            target_notes.extend(notes_amount.iter().take(TARGET_PER_DENOMINATION).cloned());
+
+            if notes_amount.len() > 2 * TARGET_PER_DENOMINATION {
+                for note in notes_amount.into_iter().skip(TARGET_PER_DENOMINATION) {
+                    let note_value = note
+                        .amount
+                        .checked_sub(self.cfg.fee_consensus.fee(note.amount))
+                        .expect("All our notes are economical");
+
+                    excess_output = excess_output.saturating_sub(note_value);
+
+                    selected_notes.push(note);
+                }
+            } else {
+                excess_notes.extend(notes_amount.into_iter().skip(TARGET_PER_DENOMINATION));
+            }
         }
 
-        let mut stream = dbtx
-            .find_by_prefix_sorted_descending(&SpendableNotePrefix)
-            .await
-            .map(|entry| entry.0 .0);
+        if excess_output == Amount::ZERO {
+            return Some(selected_notes);
+        }
 
-        let mut notes = Vec::new();
-
-        while let Some(note) = stream.next().await {
+        for note in excess_notes.into_iter().chain(target_notes) {
             let note_value = note
                 .amount
                 .checked_sub(self.cfg.fee_consensus.fee(note.amount))
                 .expect("All our notes are economical");
 
-            notes.push(note);
-
             excess_output = excess_output.saturating_sub(note_value);
 
+            selected_notes.push(note);
+
             if excess_output == Amount::ZERO {
-                return Some(notes);
+                return Some(selected_notes);
             }
         }
 
@@ -407,10 +406,10 @@ impl MintClientModule {
         let mut input_notes = Vec::new();
         let mut output_amounts = Vec::new();
 
-        for amount in denominations().filter(|amount| fee_consensus.min_denomination() <= *amount) {
+        for amount in client_denominations() {
             let n_amount = n_denominations.get(&amount).copied().unwrap_or(0);
 
-            let n_missing = TARGET_PER_DENOMINATION.saturating_sub(n_amount);
+            let n_missing = TARGET_PER_DENOMINATION.saturating_sub(n_amount as usize);
 
             for _ in 0..n_missing {
                 match excess_input.checked_sub(amount + fee_consensus.fee(amount)) {
@@ -472,14 +471,14 @@ impl MintClientModule {
     ) -> ClientOutputBundle<MintOutput, MintClientStateMachines> {
         let issuance_requests = requested_amounts
             .into_iter()
-            .map(|amount| NoteIssuanceRequest::new(amount, self.keypair.public_key()))
+            .map(|amount| NoteIssuanceRequest::new(amount, thread_rng().gen()))
             .collect::<Vec<NoteIssuanceRequest>>();
 
         ClientOutputBundle::new(
             issuance_requests
                 .iter()
                 .map(|request| ClientOutput {
-                    output: request.output(),
+                    output: request.output(&self.root_secret),
                     amount: request.amount,
                 })
                 .collect(),
@@ -554,32 +553,40 @@ impl MintClientModule {
     }
 
     /// Send ECash for the given amount with an optional description. The amount
-    /// will be rounded up to a multiple of the minimal economic denomination
-    /// which is the smallest denomiantion that is strictly larger then the
-    /// federation's base fee per ecash note. If the rounded amount cannot
-    /// be covered with the ecash notes in the client's database it will create
-    /// a transaction to reissue the required denominations. It is safe to
-    /// cancel the send method call before the reissue is complete in which case
-    /// the reissued notes are returned to the regular balance. To cancel a
-    /// succesful ecash send simply receive it yourself.
+    /// will be rounded up to a multiple of 1024 msats which is the smallest
+    /// denomination used throughout the client. If the rounded amount cannot
+    /// be covered with the ecash notes in the client's database and the offline
+    /// argument is set to false the client will create a transaction to
+    /// reissue the required denominations. It is safe to cancel the send
+    /// method call before the reissue is complete in which case the reissued
+    /// notes are returned to the regular balance. To cancel a succesful ecash
+    /// send simply receive it yourself.
     pub async fn send(
         &self,
         amount: Amount,
         memo: Option<String>,
+        offline: bool,
+        custom_meta: Value,
     ) -> Result<ECash, SendECashError> {
-        let amount = round_to_multiple(amount, self.cfg.fee_consensus.min_denomination());
+        let amount = round_to_multiple(amount, client_denominations().next().unwrap());
 
         if let Some(ecash) = self
             .client_ctx
             .module_db()
             .autocommit(
-                |dbtx, _| Box::pin(self.send_ecash_dbtx(dbtx, amount, memo.clone())),
+                |dbtx, _| {
+                    Box::pin(self.send_ecash_dbtx(dbtx, amount, memo.clone(), custom_meta.clone()))
+                },
                 Some(100),
             )
             .await
             .expect("Failed to commit dbtx after 100 retries")
         {
             return Ok(ecash);
+        }
+
+        if offline {
+            return Err(SendECashError::RequiresReissue);
         }
 
         self.client_ctx
@@ -601,6 +608,7 @@ impl MintClientModule {
                 |range| MintOperationMeta::Reissue {
                     txid: range.txid(),
                     amount,
+                    custom_meta: custom_meta.clone(),
                 },
                 TransactionBuilder::new().with_outputs(output),
             )
@@ -613,7 +621,7 @@ impl MintClientModule {
                 .map_err(|_| SendECashError::Failure)?;
         }
 
-        Box::pin(self.send(amount, memo)).await
+        Box::pin(self.send(amount, memo, offline, custom_meta)).await
     }
 
     async fn send_ecash_dbtx(
@@ -621,6 +629,7 @@ impl MintClientModule {
         dbtx: &mut DatabaseTransaction<'_>,
         mut remaining_amount: Amount,
         memo: Option<String>,
+        custom_meta: Value,
     ) -> Result<Option<ECash>, Infallible> {
         let mut stream = dbtx
             .find_by_prefix_sorted_descending(&SpendableNotePrefix)
@@ -657,6 +666,7 @@ impl MintClientModule {
                 MintCommonInit::KIND.as_str(),
                 MintOperationMeta::Send {
                     ecash: ecash.encode_base58(),
+                    custom_meta,
                 },
             )
             .await;
@@ -665,9 +675,19 @@ impl MintClientModule {
     }
 
     /// Receive the ECash by reissuing the notes and return the total amount of
-    /// the ecash. This method is idempotent.
-    pub async fn receive(&self, ecash: ECash) -> Result<Amount, ReceiveECashError> {
-        let operation_id = ecash.operation_id();
+    /// the ecash reissued. This method is idempotent. If the client is
+    /// currently offline and the offline arguement is set to false the
+    /// method will return an error. If you want to construct a reissue
+    /// transaction now regardless if your are online or not to receive the
+    /// ecash automatically as soon as you go online again set the offline
+    /// argument to true instead.
+    pub async fn receive(
+        &self,
+        ecash: ECash,
+        offline: bool,
+        custom_meta: Value,
+    ) -> Result<Amount, ReceiveECashError> {
+        let operation_id = OperationId::from_encodable(&ecash);
 
         if self.client_ctx.operation_exists(operation_id).await {
             self.client_ctx
@@ -687,16 +707,18 @@ impl MintClientModule {
         if ecash
             .notes()
             .iter()
-            .any(|note| note.amount < self.cfg.fee_consensus.min_denomination())
+            .any(|note| note.amount < self.cfg.fee_consensus.base_fee())
         {
             return Err(ReceiveECashError::UneconomicalDenomination);
         }
 
-        self.client_ctx
-            .global_api()
-            .session_count()
-            .await
-            .map_err(|_| ReceiveECashError::Offline)?;
+        if !offline {
+            self.client_ctx
+                .global_api()
+                .session_count()
+                .await
+                .map_err(|_| ReceiveECashError::Offline)?;
+        }
 
         let input = self.create_input_bundle(operation_id, ecash.notes());
         let input = self.client_ctx.make_client_inputs(input);
@@ -708,6 +730,7 @@ impl MintClientModule {
                 |range| MintOperationMeta::Receive {
                     txid: range.txid(),
                     ecash: ecash.encode_base58(),
+                    custom_meta: custom_meta.clone(),
                 },
                 TransactionBuilder::new().with_inputs(input),
             )
@@ -746,6 +769,8 @@ impl MintClientModule {
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum SendECashError {
+    #[error("The client needs to reiusse notes but the offline arguemnt is set to false")]
+    RequiresReissue,
     #[error("We need to reissue notes but the client is offline")]
     Offline,
     #[error("The clients balance is insufficient")]
@@ -823,10 +848,7 @@ fn represent_amount_with_fees(
     let mut amounts = Vec::new();
 
     // Add denominations with a greedy algorithm
-    for amount in denominations()
-        .filter(|amount| fee_consensus.min_denomination() <= *amount)
-        .rev()
-    {
+    for amount in client_denominations().rev() {
         let n_add = remaining_amount / (amount + fee_consensus.fee(amount));
 
         amounts.extend(std::iter::repeat(amount).take(n_add as usize));
@@ -844,7 +866,7 @@ fn represent_amount(mut remaining_amount: Amount) -> Vec<Amount> {
     let mut amounts = Vec::new();
 
     // Add denominations with a greedy algorithm
-    for amount in denominations().rev() {
+    for amount in client_denominations().rev() {
         let n_add = remaining_amount / amount;
 
         amounts.extend(std::iter::repeat(amount).take(n_add as usize));

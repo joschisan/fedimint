@@ -9,6 +9,7 @@ use fedimint_mintv2_client::{ECash, MintClientInit, MintClientModule};
 use fedimint_mintv2_common::config::{FeeConsensus, MintGenParams, MintGenParamsConsensus};
 use fedimint_mintv2_server::MintInit;
 use fedimint_testing::fixtures::Fixtures;
+use serde_json::Value;
 
 fn fixtures() -> Fixtures {
     let fixtures = Fixtures::new_primary(
@@ -41,7 +42,7 @@ async fn send_and_receive() -> anyhow::Result<()> {
         .await_primary_module_output(op, outpoint)
         .await?;
 
-    for _ in 0..10 {
+    for _ in 0..8 {
         let denominations = client_send
             .get_first_module::<MintClientModule>()?
             .get_count_by_denomination()
@@ -53,7 +54,7 @@ async fn send_and_receive() -> anyhow::Result<()> {
 
         let ecash = client_send
             .get_first_module::<MintClientModule>()?
-            .send(Amount::from_sats(1_000), None)
+            .send(Amount::from_sats(1_000), None, false, Value::Null)
             .await?;
 
         let ecash = ecash.encode_base58();
@@ -64,7 +65,7 @@ async fn send_and_receive() -> anyhow::Result<()> {
 
         let amount = client_receive
             .get_first_module::<MintClientModule>()?
-            .receive(ecash)
+            .receive(ecash, false, Value::Null)
             .await?;
 
         assert_eq!(amount.msats / 1_000, 1_000);

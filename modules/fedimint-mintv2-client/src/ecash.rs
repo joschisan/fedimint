@@ -1,14 +1,13 @@
 use std::io::Cursor;
 
 use fedimint_core::config::FederationId;
-use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::Amount;
 
 use crate::SpendableNote;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Encodable, Decodable)]
 pub struct ECash(Vec<ECashField>);
 
 #[derive(Clone, Debug, Decodable, Encodable)]
@@ -31,10 +30,6 @@ impl ECash {
                 .chain(memo.into_iter().map(ECashField::Memo))
                 .collect(),
         )
-    }
-
-    pub(crate) fn operation_id(&self) -> OperationId {
-        OperationId::from_encodable(&self.0)
     }
 
     pub fn amount(&self) -> Amount {
@@ -74,7 +69,7 @@ impl ECash {
     pub fn encode_base58(&self) -> String {
         format!(
             "fedimint{}",
-            bs58::encode(self.0.consensus_encode_to_vec()).into_string()
+            bs58::encode(self.consensus_encode_to_vec()).into_string()
         )
     }
 

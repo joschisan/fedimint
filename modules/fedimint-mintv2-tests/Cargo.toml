@@ -27,6 +27,7 @@ ff = "0.13.0"
 futures = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 strum = { workspace = true }
 tbs = { workspace = true }
 threshold_crypto = { workspace = true }

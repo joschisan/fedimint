@@ -91,10 +91,6 @@ impl SecretKeyShare {
 }
 
 impl BlindingKey {
-    pub fn from_seed(seed: &[u8; 32]) -> Self {
-        Self(Scalar::random(&mut ChaChaRng::from_seed(*seed)))
-    }
-
     pub fn random() -> BlindingKey {
         // TODO: fix rand incompatibities
         BlindingKey(Scalar::random(OsRng))

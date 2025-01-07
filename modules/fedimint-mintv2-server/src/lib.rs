@@ -31,7 +31,7 @@ use fedimint_core::{
     NumPeers, NumPeersExt, OutPoint, PeerId, ServerModule,
 };
 use fedimint_mintv2_common::config::{
-    denominations, MintClientConfig, MintConfig, MintConfigConsensus, MintConfigLocal,
+    consensus_denominations, MintClientConfig, MintConfig, MintConfigConsensus, MintConfigLocal,
     MintConfigPrivate, MintGenParams,
 };
 use fedimint_mintv2_common::endpoint_constants::SIGNATURE_SHARES_ENDPOINT;
@@ -140,12 +140,12 @@ impl ServerModuleInit for MintInit {
             .parse_params(params)
             .expect("Failed to parse mintv2 config gen params");
 
-        let tbs_agg_pks = denominations()
+        let tbs_agg_pks = consensus_denominations()
             .into_iter()
             .map(|amount| (amount, dealer_agg_pk(amount)))
             .collect::<BTreeMap<Amount, AggregatePublicKey>>();
 
-        let tbs_pks = denominations()
+        let tbs_pks = consensus_denominations()
             .into_iter()
             .map(|amount| {
                 let pks = peers
@@ -168,7 +168,7 @@ impl ServerModuleInit for MintInit {
                         fee_consensus: params.consensus.fee_consensus.clone(),
                     },
                     private: MintConfigPrivate {
-                        tbs_sks: denominations()
+                        tbs_sks: consensus_denominations()
                             .into_iter()
                             .map(|amount| (amount, dealer_sk(amount, peers.to_num_peers(), *peer)))
                             .collect(),
@@ -193,7 +193,10 @@ impl ServerModuleInit for MintInit {
         let mut tbs_agg_pks = BTreeMap::new();
         let mut tbs_pks = BTreeMap::new();
 
-        for (amount, dkg_keys) in peers.run_dkg_multi_g2(denominations().collect()).await? {
+        for (amount, dkg_keys) in peers
+            .run_dkg_multi_g2(consensus_denominations().collect())
+            .await?
+        {
             let (polynomial, sk) = dkg_keys.tbs();
 
             tbs_sks.insert(amount, sk);
@@ -238,7 +241,7 @@ impl ServerModuleInit for MintInit {
             "No msat 1 denomination"
         );
 
-        for amount in denominations() {
+        for amount in consensus_denominations() {
             let pk = config.private.tbs_sks[&amount].to_pub_key_share();
 
             ensure!(

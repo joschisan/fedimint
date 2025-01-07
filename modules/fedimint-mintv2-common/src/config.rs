@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::ops::Add;
 
 use fedimint_core::config::EmptyGenParams;
 use fedimint_core::core::ModuleKind;
@@ -22,8 +21,12 @@ pub struct MintGenParamsConsensus {
     pub fee_consensus: FeeConsensus,
 }
 
-pub fn denominations() -> impl DoubleEndedIterator<Item = Amount> {
-    (0..48).map(|power| Amount::from_msats(1 << power))
+pub fn consensus_denominations() -> impl DoubleEndedIterator<Item = Amount> {
+    (0..42).map(|power| Amount::from_msats(1 << power))
+}
+
+pub fn client_denominations() -> impl DoubleEndedIterator<Item = Amount> {
+    (10..42).map(|power| Amount::from_msats(1 << power))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -107,6 +110,10 @@ impl FeeConsensus {
         })
     }
 
+    pub fn base_fee(&self) -> Amount {
+        self.base
+    }
+
     pub fn fee(&self, amount: Amount) -> Amount {
         Amount::from_msats(self.fee_msats(amount.msats))
     }
@@ -117,10 +124,6 @@ impl FeeConsensus {
             .saturating_div(1_000_000)
             .checked_add(self.base.msats)
             .expect("The division creates sufficient headroom to add the base fee")
-    }
-
-    pub fn min_denomination(&self) -> Amount {
-        Amount::from_msats(self.base.msats.add(1).next_power_of_two())
     }
 }
 

@@ -1,7 +1,7 @@
-use bitcoin_hashes::sha256;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::secp256k1::{ecdh, rand, Keypair, PublicKey, SecretKey};
-use fedimint_core::{secp256k1, Amount, BitcoinHash};
+use fedimint_core::secp256k1::{Keypair, SECP256K1};
+use fedimint_core::Amount;
+use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_mintv2_common::{MintOutput, MintOutputV0};
 use tbs::{
     blind_message, unblind_signature, BlindedMessage, BlindedSignature, BlindingKey, Message,
@@ -9,75 +9,68 @@ use tbs::{
 
 use crate::SpendableNote;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct NoteIssuanceRequest {
     pub amount: Amount,
-    pub tweak: [u8; 32],
-    pub ephemeral_pk: PublicKey,
-}
-
-fn generate_ephemeral_tweak(static_pk: PublicKey) -> ([u8; 32], PublicKey) {
-    let keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
-
-    let tweak = ecdh::SharedSecret::new(&static_pk, &keypair.secret_key());
-
-    (tweak.secret_bytes(), keypair.public_key())
+    pub tweak: [u8; 8],
 }
 
 impl NoteIssuanceRequest {
-    pub fn new(amount: Amount, static_pk: PublicKey) -> NoteIssuanceRequest {
-        let (tweak, ephemeral_pk) = generate_ephemeral_tweak(static_pk);
-
-        NoteIssuanceRequest {
-            amount,
-            tweak,
-            ephemeral_pk,
-        }
+    pub fn new(amount: Amount, tweak: [u8; 8]) -> NoteIssuanceRequest {
+        NoteIssuanceRequest { amount, tweak }
     }
 
-    pub fn recover(output: MintOutputV0, static_keypair: Keypair) -> Option<NoteIssuanceRequest> {
-        let tweak = ecdh::SharedSecret::new(&output.ephemeral_pk, &static_keypair.secret_key());
-
+    pub fn recover(
+        output: MintOutputV0,
+        root_secret: &DerivableSecret,
+    ) -> Option<NoteIssuanceRequest> {
         let request = NoteIssuanceRequest {
             amount: output.amount,
-            tweak: tweak.secret_bytes(),
-            ephemeral_pk: output.ephemeral_pk,
+            tweak: output.tweak,
         };
 
-        if request.blinded_message() != output.nonce {
+        if request.blinded_message(root_secret) != output.nonce {
             return None;
         }
 
         Some(request)
     }
 
-    pub fn blinded_message(&self) -> BlindedMessage {
-        blind_message(self.message(), self.blinding_key())
+    fn secret(&self, root_secret: &DerivableSecret) -> DerivableSecret {
+        root_secret
+            .child_key(ChildId(self.amount.msats))
+            .child_key(ChildId(u64::from_be_bytes(self.tweak)))
     }
 
-    pub fn keypair(&self) -> Keypair {
-        SecretKey::from_slice(&self.tweak)
-            .expect("32 bytes, within curve order")
-            .keypair(secp256k1::SECP256K1)
+    pub fn blinded_message(&self, root_secret: &DerivableSecret) -> BlindedMessage {
+        blind_message(self.message(root_secret), self.blinding_key(root_secret))
     }
 
-    fn blinding_key(&self) -> BlindingKey {
-        BlindingKey::from_seed(self.tweak.consensus_hash::<sha256::Hash>().as_byte_array())
+    pub fn keypair(&self, root_secret: &DerivableSecret) -> Keypair {
+        self.secret(root_secret).to_secp_key(SECP256K1)
     }
 
-    fn message(&self) -> Message {
-        Message::from_bytes_sha256(&self.keypair().public_key().serialize())
+    fn blinding_key(&self, root_secret: &DerivableSecret) -> BlindingKey {
+        BlindingKey(self.secret(root_secret).to_bls12_381_key())
     }
 
-    pub fn output(&self) -> MintOutput {
-        MintOutput::new_v0(self.amount, self.blinded_message(), self.ephemeral_pk)
+    fn message(&self, root_secret: &DerivableSecret) -> Message {
+        Message::from_bytes_sha256(&self.keypair(root_secret).public_key().serialize())
     }
 
-    pub fn finalize(&self, blinded_signature: BlindedSignature) -> SpendableNote {
+    pub fn output(&self, root_secret: &DerivableSecret) -> MintOutput {
+        MintOutput::new_v0(self.amount, self.blinded_message(root_secret), self.tweak)
+    }
+
+    pub fn finalize(
+        &self,
+        root_secret: &DerivableSecret,
+        blinded_signature: BlindedSignature,
+    ) -> SpendableNote {
         SpendableNote {
             amount: self.amount,
-            signature: unblind_signature(self.blinding_key(), blinded_signature),
-            keypair: self.keypair(),
+            signature: unblind_signature(self.blinding_key(root_secret), blinded_signature),
+            keypair: self.keypair(root_secret),
         }
     }
 }

@@ -16,10 +16,15 @@ enum Opts {
         amount: Amount,
         #[arg(long)]
         memo: Option<String>,
+        #[arg(long)]
+        offline: bool,
     },
-    /// Receive the ECash by reissuing the notes and return the total amount of
-    /// the ecash. This method is idempotent.
-    Receive { ecash: String },
+    /// Receive the ECash by reissuing the notes and return the amount.
+    Receive {
+        ecash: String,
+        #[arg(long)]
+        offline: bool,
+    },
 }
 
 pub(crate) async fn handle_cli_command(
@@ -30,8 +35,19 @@ pub(crate) async fn handle_cli_command(
 
     match opts {
         Opts::Count => Ok(json(mint.get_count_by_denomination().await)),
-        Opts::Send { amount, memo } => Ok(json(mint.send(amount, memo).await?.encode_base58())),
-        Opts::Receive { ecash } => Ok(json(mint.receive(ECash::decode_base58(&ecash)?).await?)),
+        Opts::Send {
+            amount,
+            memo,
+            offline,
+        } => Ok(json(
+            mint.send(amount, memo, offline, Value::Null)
+                .await?
+                .encode_base58(),
+        )),
+        Opts::Receive { ecash, offline } => Ok(json(
+            mint.receive(ECash::decode_base58(&ecash)?, offline, Value::Null)
+                .await?,
+        )),
     }
 }
 

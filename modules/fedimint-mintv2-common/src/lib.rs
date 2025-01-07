@@ -101,11 +101,11 @@ impl std::fmt::Display for MintInputV0 {
 extensible_associated_module_type!(MintOutput, MintOutputV0, UnknownMintOutputVariantError);
 
 impl MintOutput {
-    pub fn new_v0(amount: Amount, nonce: BlindedMessage, ephemeral_pk: PublicKey) -> Self {
+    pub fn new_v0(amount: Amount, nonce: BlindedMessage, tweak: [u8; 8]) -> Self {
         MintOutput::V0(MintOutputV0 {
             amount,
             nonce,
-            ephemeral_pk,
+            tweak,
         })
     }
 }
@@ -114,7 +114,7 @@ impl MintOutput {
 pub struct MintOutputV0 {
     pub amount: Amount,
     pub nonce: BlindedMessage,
-    pub ephemeral_pk: PublicKey,
+    pub tweak: [u8; 8],
 }
 
 impl std::fmt::Display for MintOutputV0 {
