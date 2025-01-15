@@ -1047,7 +1047,7 @@ pub type DynClientConnector = Arc<dyn IClientConnector>;
 /// authenticated and encrypted for production deployments.
 #[async_trait]
 pub trait IClientConnector: Send + Sync + 'static {
-    fn peers(&self) -> Vec<PeerId>;
+    fn peers(&self) -> BTreeSet<PeerId>;
 
     async fn connect(&self, peer: PeerId) -> anyhow::Result<DynClientConnection>;
 
@@ -1077,7 +1077,66 @@ pub trait IClientConnection: Send + 'static {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
+pub struct ReconnectFederationApi {
+    peers: BTreeSet<PeerId>,
+    admin_id: Option<PeerId>,
+    module_id: Option<ModuleInstanceId>,
+    connections: ReconnectClientConnections,
+}
+
+impl ReconnectFederationApi {
+    pub fn new(connector: &DynClientConnector, admin_id: Option<PeerId>, tg: &TaskGroup) -> Self {
+        Self {
+            peers: connector.peers(),
+            admin_id,
+            module_id: None,
+            connections: ReconnectClientConnections::new(connector, tg),
+        }
+    }
+}
+
+impl IModuleFederationApi for ReconnectFederationApi {}
+
+#[apply(async_trait_maybe_send!)]
+impl IRawFederationApi for ReconnectFederationApi {
+    fn all_peers(&self) -> &BTreeSet<PeerId> {
+        &self.peers
+    }
+
+    fn self_peer(&self) -> Option<PeerId> {
+        self.admin_id
+    }
+
+    fn with_module(&self, id: ModuleInstanceId) -> DynModuleApi {
+        ReconnectFederationApi {
+            peers: self.peers.clone(),
+            admin_id: self.admin_id,
+            module_id: Some(id),
+            connections: self.connections.clone(),
+        }
+        .into()
+    }
+
+    async fn request_raw(
+        &self,
+        peer_id: PeerId,
+        method: &str,
+        params: &ApiRequestErased,
+    ) -> JsonRpcResult<Value> {
+        let method = match self.module_id {
+            Some(module_id) => ApiMethod::Module(module_id, method.to_string()),
+            None => ApiMethod::Core(method.to_string()),
+        };
+
+        self.connections
+            .request(peer_id, method, params.clone())
+            .await
+            .map_err(|e| JsonRpcClientError::Custom(e.to_string()))
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct ReconnectClientConnections {
     connections: BTreeMap<PeerId, ClientConnection>,
 }
@@ -1110,7 +1169,7 @@ impl ReconnectClientConnections {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ClientConnection {
     request_sender: async_channel::Sender<(ApiMethod, ApiRequestErased, oneshot::Sender<Value>)>,
 }
