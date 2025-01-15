@@ -2603,7 +2603,7 @@ impl ClientBuilder {
                 .map(|(peer_id, peer_url)| (*peer_id, peer_url.url.clone())),
             &api_secret,
             &connector,
-            &TaskGroup::new(),
+            TaskGroup::new(),
         );
         Client::download_backup_from_federation_static(
             &api,

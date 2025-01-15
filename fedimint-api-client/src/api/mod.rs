@@ -27,10 +27,10 @@ use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::module::{ApiAuth, ApiRequestErased, ApiVersion, SerdeModuleEncoding};
 use fedimint_core::net::api_announcement::SignedApiAnnouncement;
 use fedimint_core::session_outcome::{SessionOutcome, SessionStatus};
-use fedimint_core::task::{sleep_until, MaybeSend, MaybeSync, TaskGroup};
+use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::transaction::{Transaction, TransactionSubmissionOutcome};
-use fedimint_core::util::backoff_util::{api_networking_backoff, FibonacciBackoff};
-use fedimint_core::util::{FmtCompact as _, SafeUrl};
+use fedimint_core::util::backoff_util::api_networking_backoff;
+use fedimint_core::util::{retry, FmtCompact as _, SafeUrl};
 use fedimint_core::{
     apply, async_trait_maybe_send, dyn_newtype_define, util, NumPeersExt, PeerId, TransactionId,
 };
@@ -50,8 +50,7 @@ use jsonrpsee_ws_client::{WsClient, WsClientBuilder};
 use net::Connector;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::oneshot;
-use tokio::time::Instant;
+use tokio::sync::watch;
 #[cfg(not(target_family = "wasm"))]
 use tokio_rustls::rustls::RootCertStore;
 #[cfg(all(feature = "tor", not(target_family = "wasm")))]
@@ -439,7 +438,7 @@ impl DynGlobalApi {
         url: SafeUrl,
         api_secret: &Option<String>,
         connector: &Connector,
-        task_group: &TaskGroup,
+        task_group: TaskGroup,
     ) -> Self {
         Self::from_endpoints(once((peer, url)), api_secret, connector, task_group)
     }
@@ -448,7 +447,7 @@ impl DynGlobalApi {
         peers: impl IntoIterator<Item = (PeerId, SafeUrl)>,
         api_secret: &Option<String>,
         connector: &Connector,
-        task_group: &TaskGroup,
+        task_group: TaskGroup,
     ) -> Self {
         let connector = match connector {
             Connector::Tcp => {
@@ -471,7 +470,7 @@ impl DynGlobalApi {
             invite_code.peers(),
             &invite_code.api_secret(),
             connector,
-            &TaskGroup::new(),
+            TaskGroup::new(),
         )
     }
 }
@@ -1288,17 +1287,17 @@ impl IClientConnector for TorConnector {
 
 #[async_trait]
 impl IClientConnection for WsClient {
-    async fn request(
-        &mut self,
-        method: ApiMethod,
-        request: ApiRequestErased,
-    ) -> anyhow::Result<Value> {
+    async fn request(&self, method: ApiMethod, request: ApiRequestErased) -> anyhow::Result<Value> {
         let method = match method {
             ApiMethod::Core(method) => method,
             ApiMethod::Module(module_id, method) => format!("module_{module_id}_{method}"),
         };
 
         Ok(ClientT::request(self, &method, [request.to_json()]).await?)
+    }
+
+    async fn await_disconnection(&self) {
+        self.on_disconnect().await;
     }
 }
 
@@ -1326,25 +1325,23 @@ pub trait IClientConnector: Send + Sync + 'static {
     }
 }
 
-pub type DynClientConnection = Box<dyn IClientConnection>;
+pub type DynClientConnection = Arc<dyn IClientConnection>;
 
 #[async_trait]
-pub trait IClientConnection: Send + 'static {
-    async fn request(
-        &mut self,
-        method: ApiMethod,
-        request: ApiRequestErased,
-    ) -> anyhow::Result<Value>;
+pub trait IClientConnection: Debug + Send + Sync + 'static {
+    async fn request(&self, method: ApiMethod, request: ApiRequestErased) -> anyhow::Result<Value>;
+
+    async fn await_disconnection(&self);
 
     fn into_dyn(self) -> DynClientConnection
     where
         Self: Sized,
     {
-        Box::new(self)
+        Arc::new(self)
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct ReconnectFederationApi {
     peers: BTreeSet<PeerId>,
     admin_id: Option<PeerId>,
@@ -1353,7 +1350,7 @@ pub struct ReconnectFederationApi {
 }
 
 impl ReconnectFederationApi {
-    pub fn new(connector: &DynClientConnector, admin_id: Option<PeerId>, tg: &TaskGroup) -> Self {
+    pub fn new(connector: &DynClientConnector, admin_id: Option<PeerId>, tg: TaskGroup) -> Self {
         Self {
             peers: connector.peers(),
             admin_id,
@@ -1406,22 +1403,22 @@ impl IRawFederationApi for ReconnectFederationApi {
 #[derive(Clone, Debug)]
 pub struct ReconnectClientConnections {
     connections: BTreeMap<PeerId, ClientConnection>,
+    #[allow(dead_code)]
+    tg: TaskGroup,
 }
 
 impl ReconnectClientConnections {
-    pub fn new(connector: &DynClientConnector, tg: &TaskGroup) -> Self {
+    pub fn new(connector: &DynClientConnector, tg: TaskGroup) -> Self {
         ReconnectClientConnections {
             connections: connector
                 .peers()
                 .into_iter()
-                .map(|peer| (peer, ClientConnection::new(peer, connector.clone(), tg)))
+                .map(|peer| (peer, ClientConnection::new(peer, connector.clone(), &tg)))
                 .collect(),
+            tg,
         }
     }
-}
 
-impl ReconnectClientConnections {
-    #[allow(unused)]
     async fn request(
         &self,
         peer: PeerId,
@@ -1431,6 +1428,8 @@ impl ReconnectClientConnections {
         self.connections
             .get(&peer)
             .expect("Could not find client connection for peer {peer}")
+            .connection()
+            .context("Peer is disconnected")?
             .request(method, request)
             .await
     }
@@ -1438,7 +1437,7 @@ impl ReconnectClientConnections {
 
 #[derive(Clone, Debug)]
 struct ClientConnection {
-    request_sender: async_channel::Sender<(ApiMethod, ApiRequestErased, oneshot::Sender<Value>)>,
+    receiver: watch::Receiver<Option<DynClientConnection>>,
 }
 
 impl ClientConnection {
@@ -1447,130 +1446,45 @@ impl ClientConnection {
         connector: DynClientConnector,
         task_group: &TaskGroup,
     ) -> ClientConnection {
-        let (request_sender, request_receiver) = async_channel::bounded(1024);
+        let (sender, receiver) = watch::channel(None);
 
         task_group.spawn_cancellable(
-            format!("io-state-machine-{peer}"),
+            format!("peer-api-reconnection-{peer}"),
             async move {
-                info!(target: LOG_CLIENT_NET_API, "Starting peer connection state machine");
+                loop {
+                    let connection = retry(
+                        "reconnect-peer-api-{peer}",
+                        api_networking_backoff(),
+                        || connector.connect(peer),
+                    )
+                    .await
+                    .expect("Unlimited retries");
 
-                let mut state_machine = ClientConnectionStateMachine {
-                    common: ClientConnectionSMCommon {
-                        request_receiver,
-                        connector,
-                        peer,
-                    },
-                    state: ClientConnectionSMState::Disconnected(api_networking_backoff()),
-                };
+                    info!(target: LOG_CLIENT_NET_API, "Connected to peer api");
 
-                while let Some(sm) = state_machine.state_transition().await {
-                    state_machine = sm;
+                    if sender.send(Some(connection.clone())).is_err() {
+                        break;
+                    }
+
+                    connection.await_disconnection().await;
+
+                    info!(target: LOG_CLIENT_NET_API, "Disconnected from peer api");
+
+                    if sender.send(None).is_err() {
+                        break;
+                    }
                 }
 
-                info!(target: LOG_CLIENT_NET_API, "Shutting down peer connection state machine");
+                info!(target: LOG_CLIENT_NET_API, "Shutting down peer api reconnection task");
             }
-            .instrument(info_span!("io-state-machine", ?peer)),
+            .instrument(info_span!("peer-api-reconnection-{peer}", ?peer)),
         );
 
-        ClientConnection { request_sender }
+        ClientConnection { receiver }
     }
 
-    async fn request(&self, method: ApiMethod, request: ApiRequestErased) -> anyhow::Result<Value> {
-        let (sender, receiver) = oneshot::channel();
-
-        self.request_sender
-            .try_send((method, request, sender))
-            .context("Request queue is full")?;
-
-        receiver.await.context("Peer is disconnected")
-    }
-}
-
-struct ClientConnectionStateMachine {
-    state: ClientConnectionSMState,
-    common: ClientConnectionSMCommon,
-}
-
-struct ClientConnectionSMCommon {
-    request_receiver:
-        async_channel::Receiver<(ApiMethod, ApiRequestErased, oneshot::Sender<Value>)>,
-    connector: DynClientConnector,
-    peer: PeerId,
-}
-
-enum ClientConnectionSMState {
-    Disconnected(FibonacciBackoff),
-    Connected(DynClientConnection),
-}
-
-impl ClientConnectionStateMachine {
-    async fn state_transition(mut self) -> Option<Self> {
-        match self.state {
-            ClientConnectionSMState::Disconnected(disconnected) => {
-                self.common.transition_disconnected(disconnected).await
-            }
-            ClientConnectionSMState::Connected(connected) => {
-                self.common.transition_connected(connected).await
-            }
-        }
-        .map(|state| ClientConnectionStateMachine {
-            common: self.common,
-            state,
-        })
-    }
-}
-
-impl ClientConnectionSMCommon {
-    async fn transition_connected(
-        &mut self,
-        mut connection: DynClientConnection,
-    ) -> Option<ClientConnectionSMState> {
-        let (method, request, sender) = self.request_receiver.recv().await.ok()?;
-
-        match connection.request(method, request).await {
-            Ok(response) => {
-                sender.send(response).ok();
-
-                Some(ClientConnectionSMState::Connected(connection))
-            }
-            Err(error) => {
-                info!(target: LOG_CLIENT_NET_API, "Disconnected from peer: {}",  error);
-
-                Some(ClientConnectionSMState::Disconnected(
-                    api_networking_backoff(),
-                ))
-            }
-        }
-    }
-
-    async fn transition_disconnected(
-        &mut self,
-        mut backoff: FibonacciBackoff,
-    ) -> Option<ClientConnectionSMState> {
-        let reconnect_at = Instant::now() + backoff.next().expect("Unlimited retries.");
-
-        // We need to continuously drain the message queues while we are disconnected in
-        // order for the requests to fail quickly.
-
-        loop {
-            tokio::select! {
-                () = sleep_until(reconnect_at) => break,
-                _ = self.request_receiver.recv() => {},
-            }
-        }
-
-        info!(target: LOG_CLIENT_NET_API, "Attempting to reconnect to peer");
-
-        match self.connector.connect(self.peer).await {
-            Ok(connection) => {
-                info!(target: LOG_CLIENT_NET_API, "Connected to peer");
-
-                return Some(ClientConnectionSMState::Connected(connection));
-            }
-            Err(e) => warn!(target: LOG_CLIENT_NET_API, "Failed to connect to peer: {e}"),
-        }
-
-        Some(ClientConnectionSMState::Disconnected(backoff))
+    fn connection(&self) -> Option<DynClientConnection> {
+        self.receiver.borrow().as_ref().cloned()
     }
 }
 
