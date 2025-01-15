@@ -880,6 +880,7 @@ pub enum DkgPeerMsg {
 
 #[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]
 pub enum DkgMessage {
+    Hash(sha256::Hash),
     Commitment(Vec<(G1Projective, G2Projective)>),
     Share(Scalar),
 }
