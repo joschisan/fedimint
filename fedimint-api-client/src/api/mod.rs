@@ -1036,6 +1036,259 @@ where
 }
 
 #[derive(Debug, Clone)]
+pub struct WebsocketConnector {
+    peers: BTreeMap<PeerId, SafeUrl>,
+    api_secret: Option<String>,
+}
+
+impl WebsocketConnector {
+    pub fn new(peers: BTreeMap<PeerId, SafeUrl>, api_secret: Option<String>) -> Self {
+        Self { peers, api_secret }
+    }
+}
+
+#[async_trait]
+impl IClientConnector for WebsocketConnector {
+    fn peers(&self) -> BTreeSet<PeerId> {
+        self.peers.keys().copied().collect()
+    }
+
+    async fn connect(&self, peer: PeerId) -> anyhow::Result<DynClientConnection> {
+        let api_endpoint = self
+            .peers
+            .get(&peer)
+            .expect("Could not find websocket api endpoint for peer {peer}");
+
+        #[cfg(not(target_family = "wasm"))]
+        let mut client = {
+            let webpki_roots = webpki_roots::TLS_SERVER_ROOTS.iter().cloned();
+            let mut root_certs = RootCertStore::empty();
+            root_certs.extend(webpki_roots);
+
+            let tls_cfg = CustomCertStore::builder()
+                .with_root_certificates(root_certs)
+                .with_no_client_auth();
+
+            WsClientBuilder::default()
+                .max_concurrent_requests(u16::MAX as usize)
+                .with_custom_cert_store(tls_cfg)
+        };
+
+        #[cfg(target_family = "wasm")]
+        let client = WsClientBuilder::default().max_concurrent_requests(u16::MAX as usize);
+
+        if let Some(api_secret) = &self.api_secret {
+            #[cfg(not(target_family = "wasm"))]
+            {
+                // on native platforms, jsonrpsee-client ignores `user:pass@...` in the Url,
+                // but we can set up the headers manually
+                let mut headers = HeaderMap::new();
+
+                let auth = base64::engine::general_purpose::STANDARD
+                    .encode(format!("fedimint:{api_secret}"));
+
+                headers.insert(
+                    "Authorization",
+                    HeaderValue::from_str(&format!("Basic {auth}")).expect("Can't fail"),
+                );
+
+                client = client.set_headers(headers);
+            }
+            #[cfg(target_family = "wasm")]
+            {
+                // on wasm, url will be handled by the browser, which should take care of
+                // `user:pass@...`
+                let mut url = url.clone();
+                url.set_username("fedimint").map_err(|_| {
+                    JsonRpcClientError::Transport(anyhow::format_err!("invalid username").into())
+                })?;
+                url.set_password(Some(&api_secret)).map_err(|_| {
+                    JsonRpcClientError::Transport(anyhow::format_err!("invalid secret").into())
+                })?;
+                return client.build(url.as_str()).await;
+            }
+        }
+
+        let client = client.build(api_endpoint.as_str()).await?;
+
+        Ok(client.into_dyn())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TorConnector {
+    peers: BTreeMap<PeerId, SafeUrl>,
+    api_secret: Option<String>,
+}
+
+impl TorConnector {
+    pub fn new(peers: BTreeMap<PeerId, SafeUrl>, api_secret: Option<String>) -> Self {
+        Self { peers, api_secret }
+    }
+}
+
+#[async_trait]
+impl IClientConnector for TorConnector {
+    fn peers(&self) -> BTreeSet<PeerId> {
+        self.peers.keys().copied().collect()
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn connect(&self, peer: PeerId) -> anyhow::Result<DynClientConnection> {
+        let api_endpoint = self
+            .peers
+            .get(&peer)
+            .expect("Could not find websocket api endpoint for peer {peer}");
+
+        let tor_config = TorClientConfig::default();
+        let tor_client = TorClient::create_bootstrapped(tor_config)
+            .await
+            .map_err(|e| JsonRpcClientError::Transport(e.into()))?
+            .isolated_client();
+
+        debug!("Successfully created and bootstrapped the `TorClient`, for given `TorConfig`.");
+
+        // TODO: (@leonardo) should we implement our `IntoTorAddr` for `SafeUrl`
+        // instead?
+        let addr = (
+            api_endpoint
+                .host_str()
+                .expect("It should've asserted for `host` on construction"),
+            api_endpoint
+                .port_or_known_default()
+                .expect("It should've asserted for `port`, or used a default one, on construction"),
+        );
+        let tor_addr = TorAddr::from(addr).map_err(|e| JsonRpcClientError::Transport(e.into()))?;
+        let tor_addr_clone = tor_addr.clone();
+
+        debug!(
+            ?tor_addr,
+            ?addr,
+            "Successfully created `TorAddr` for given address (i.e. host and port)"
+        );
+
+        // TODO: It can be updated to use `is_onion_address()` implementation,
+        // once https://gitlab.torproject.org/tpo/core/arti/-/merge_requests/2214 lands.
+        let anonymized_stream = if api_endpoint.is_onion_address() {
+            let mut stream_prefs = arti_client::StreamPrefs::default();
+            stream_prefs.connect_to_onion_services(arti_client::config::BoolOrAuto::Explicit(true));
+
+            let anonymized_stream = tor_client
+                .connect_with_prefs(tor_addr, &stream_prefs)
+                .await
+                .map_err(|e| JsonRpcClientError::Transport(e.into()))?;
+
+            debug!(
+                ?tor_addr_clone,
+                "Successfully connected to onion address `TorAddr`, and established an anonymized `DataStream`"
+            );
+            anonymized_stream
+        } else {
+            let anonymized_stream = tor_client
+                .connect(tor_addr)
+                .await
+                .map_err(|e| JsonRpcClientError::Transport(e.into()))?;
+
+            debug!(?tor_addr_clone, "Successfully connected to `Hostname`or `Ip` `TorAddr`, and established an anonymized `DataStream`");
+            anonymized_stream
+        };
+
+        let is_tls = match api_endpoint.scheme() {
+            "wss" => true,
+            "ws" => false,
+            unexpected_scheme => {
+                let error =
+                    format!("`{unexpected_scheme}` not supported, it's expected `ws` or `wss`!");
+                return Err(anyhow!(error));
+            }
+        };
+
+        let tls_connector = if is_tls {
+            let webpki_roots = webpki_roots::TLS_SERVER_ROOTS.iter().cloned();
+            let mut root_certs = RootCertStore::empty();
+            root_certs.extend(webpki_roots);
+
+            let tls_config = TlsClientConfig::builder()
+                .with_root_certificates(root_certs)
+                .with_no_client_auth();
+            let tls_connector = TlsConnector::from(Arc::new(tls_config));
+            Some(tls_connector)
+        } else {
+            None
+        };
+
+        let mut ws_client_builder =
+            WsClientBuilder::default().max_concurrent_requests(u16::MAX as usize);
+
+        if let Some(api_secret) = &self.api_secret {
+            // on native platforms, jsonrpsee-client ignores `user:pass@...` in the Url,
+            // but we can set up the headers manually
+            let mut headers = HeaderMap::new();
+
+            let auth =
+                base64::engine::general_purpose::STANDARD.encode(format!("fedimint:{api_secret}"));
+
+            headers.insert(
+                "Authorization",
+                HeaderValue::from_str(&format!("Basic {auth}")).expect("Can't fail"),
+            );
+
+            ws_client_builder = ws_client_builder.set_headers(headers);
+        }
+
+        match tls_connector {
+            None => {
+                let client = ws_client_builder
+                    .build_with_stream(api_endpoint.as_str(), anonymized_stream)
+                    .await?;
+
+                Ok(client.into_dyn())
+            }
+            Some(tls_connector) => {
+                let host = api_endpoint
+                    .host_str()
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| {
+                        JsonRpcClientError::Transport(anyhow!("Invalid host!").into())
+                    })?;
+
+                // FIXME: (@leonardo) Is this leaking any data ? Should investigate it further
+                // if it's really needed.
+                let server_name = rustls_pki_types::ServerName::try_from(host)
+                    .map_err(|e| JsonRpcClientError::Transport(e.into()))?;
+
+                let anonymized_tls_stream = tls_connector
+                    .connect(server_name, anonymized_stream)
+                    .await
+                    .map_err(|e| JsonRpcClientError::Transport(e.into()))?;
+
+                let client = ws_client_builder
+                    .build_with_stream(api_endpoint.as_str(), anonymized_tls_stream)
+                    .await?;
+
+                Ok(client.into_dyn())
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl IClientConnection for WsClient {
+    async fn request(
+        &mut self,
+        method: ApiMethod,
+        request: ApiRequestErased,
+    ) -> anyhow::Result<Value> {
+        let method = match method {
+            ApiMethod::Core(method) => method,
+            ApiMethod::Module(module_id, method) => format!("module_{module_id}_{method}"),
+        };
+
+        Ok(ClientT::request(self, &method, [request.to_json()]).await?)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum ApiMethod {
     Core(String),
     Module(ModuleInstanceId, String),
