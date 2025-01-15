@@ -4,9 +4,10 @@ use std::pin::Pin;
 use std::result;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 #[cfg(all(feature = "tor", not(target_family = "wasm")))]
 use arti_client::{TorAddr, TorClient, TorClientConfig};
+use async_trait::async_trait;
 use base64::Engine as _;
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1;
@@ -25,9 +26,9 @@ use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::module::{ApiAuth, ApiRequestErased, ApiVersion, SerdeModuleEncoding};
 use fedimint_core::net::api_announcement::SignedApiAnnouncement;
 use fedimint_core::session_outcome::{SessionOutcome, SessionStatus};
-use fedimint_core::task::{MaybeSend, MaybeSync};
+use fedimint_core::task::{sleep_until, MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::transaction::{Transaction, TransactionSubmissionOutcome};
-use fedimint_core::util::backoff_util::api_networking_backoff;
+use fedimint_core::util::backoff_util::{api_networking_backoff, FibonacciBackoff};
 use fedimint_core::util::{FmtCompact as _, SafeUrl};
 use fedimint_core::{
     apply, async_trait_maybe_send, dyn_newtype_define, util, NumPeersExt, PeerId, TransactionId,
@@ -49,11 +50,13 @@ use jsonrpsee_ws_client::{WsClient, WsClientBuilder};
 use net::Connector;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::oneshot;
+use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
 use tokio_rustls::rustls::RootCertStore;
 #[cfg(all(feature = "tor", not(target_family = "wasm")))]
 use tokio_rustls::{rustls::ClientConfig as TlsClientConfig, TlsConnector};
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, info, info_span, instrument, trace, warn, Instrument};
 
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 mod error;
@@ -1029,6 +1032,219 @@ where
         }
 
         unreachable!();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ApiMethod {
+    Core(String),
+    Module(ModuleInstanceId, String),
+}
+
+pub type DynClientConnector = Arc<dyn IClientConnector>;
+
+/// Allows to connect to peers. Connections are request based and should be
+/// authenticated and encrypted for production deployments.
+#[async_trait]
+pub trait IClientConnector: Send + Sync + 'static {
+    fn peers(&self) -> Vec<PeerId>;
+
+    async fn connect(&self, peer: PeerId) -> anyhow::Result<DynClientConnection>;
+
+    fn into_dyn(self) -> DynClientConnector
+    where
+        Self: Sized,
+    {
+        Arc::new(self)
+    }
+}
+
+pub type DynClientConnection = Box<dyn IClientConnection>;
+
+#[async_trait]
+pub trait IClientConnection: Send + 'static {
+    async fn request(
+        &mut self,
+        method: ApiMethod,
+        request: ApiRequestErased,
+    ) -> anyhow::Result<Value>;
+
+    fn into_dyn(self) -> DynClientConnection
+    where
+        Self: Sized,
+    {
+        Box::new(self)
+    }
+}
+
+#[derive(Clone)]
+pub struct ReconnectClientConnections {
+    connections: BTreeMap<PeerId, ClientConnection>,
+}
+
+impl ReconnectClientConnections {
+    pub fn new(connector: &DynClientConnector, tg: &TaskGroup) -> Self {
+        ReconnectClientConnections {
+            connections: connector
+                .peers()
+                .into_iter()
+                .map(|peer| (peer, ClientConnection::new(peer, connector.clone(), tg)))
+                .collect(),
+        }
+    }
+}
+
+impl ReconnectClientConnections {
+    #[allow(unused)]
+    async fn request(
+        &self,
+        peer: PeerId,
+        method: ApiMethod,
+        request: ApiRequestErased,
+    ) -> anyhow::Result<Value> {
+        self.connections
+            .get(&peer)
+            .expect("Could not find client connection for peer {peer}")
+            .request(method, request)
+            .await
+    }
+}
+
+#[derive(Clone)]
+struct ClientConnection {
+    request_sender: async_channel::Sender<(ApiMethod, ApiRequestErased, oneshot::Sender<Value>)>,
+}
+
+impl ClientConnection {
+    fn new(
+        peer: PeerId,
+        connector: DynClientConnector,
+        task_group: &TaskGroup,
+    ) -> ClientConnection {
+        let (request_sender, request_receiver) = async_channel::bounded(1024);
+
+        task_group.spawn_cancellable(
+            format!("io-state-machine-{peer}"),
+            async move {
+                info!(target: LOG_CLIENT_NET_API, "Starting peer connection state machine");
+
+                let mut state_machine = ClientConnectionStateMachine {
+                    common: ClientConnectionSMCommon {
+                        request_receiver,
+                        connector,
+                        peer,
+                    },
+                    state: ClientConnectionSMState::Disconnected(api_networking_backoff()),
+                };
+
+                while let Some(sm) = state_machine.state_transition().await {
+                    state_machine = sm;
+                }
+
+                info!(target: LOG_CLIENT_NET_API, "Shutting down peer connection state machine");
+            }
+            .instrument(info_span!("io-state-machine", ?peer)),
+        );
+
+        ClientConnection { request_sender }
+    }
+
+    async fn request(&self, method: ApiMethod, request: ApiRequestErased) -> anyhow::Result<Value> {
+        let (sender, receiver) = oneshot::channel();
+
+        self.request_sender
+            .try_send((method, request, sender))
+            .context("Request queue is full")?;
+
+        receiver.await.context("Peer is disconnected")
+    }
+}
+
+struct ClientConnectionStateMachine {
+    state: ClientConnectionSMState,
+    common: ClientConnectionSMCommon,
+}
+
+struct ClientConnectionSMCommon {
+    request_receiver:
+        async_channel::Receiver<(ApiMethod, ApiRequestErased, oneshot::Sender<Value>)>,
+    connector: DynClientConnector,
+    peer: PeerId,
+}
+
+enum ClientConnectionSMState {
+    Disconnected(FibonacciBackoff),
+    Connected(DynClientConnection),
+}
+
+impl ClientConnectionStateMachine {
+    async fn state_transition(mut self) -> Option<Self> {
+        match self.state {
+            ClientConnectionSMState::Disconnected(disconnected) => {
+                self.common.transition_disconnected(disconnected).await
+            }
+            ClientConnectionSMState::Connected(connected) => {
+                self.common.transition_connected(connected).await
+            }
+        }
+        .map(|state| ClientConnectionStateMachine {
+            common: self.common,
+            state,
+        })
+    }
+}
+
+impl ClientConnectionSMCommon {
+    async fn transition_connected(
+        &mut self,
+        mut connection: DynClientConnection,
+    ) -> Option<ClientConnectionSMState> {
+        let (method, request, sender) = self.request_receiver.recv().await.ok()?;
+
+        match connection.request(method, request).await {
+            Ok(response) => {
+                sender.send(response).ok();
+
+                Some(ClientConnectionSMState::Connected(connection))
+            }
+            Err(error) => {
+                info!(target: LOG_CLIENT_NET_API, "Disconnected from peer: {}",  error);
+
+                Some(ClientConnectionSMState::Disconnected(
+                    api_networking_backoff(),
+                ))
+            }
+        }
+    }
+
+    async fn transition_disconnected(
+        &mut self,
+        mut backoff: FibonacciBackoff,
+    ) -> Option<ClientConnectionSMState> {
+        let reconnect_at = Instant::now() + backoff.next().expect("Unlimited retries.");
+
+        // We need to continuously drain the message queues while we are disconnected in
+        // order for the requests to fail quickly.
+
+        loop {
+            tokio::select! {
+                () = sleep_until(reconnect_at) => break,
+                _ = self.request_receiver.recv() => {},
+            }
+        }
+
+        info!(target: LOG_CLIENT_NET_API, "Attempting to reconnect to peer");
+
+        match self.connector.connect(self.peer).await {
+            Ok(connection) => {
+                info!(target: LOG_CLIENT_NET_API, "Connected to peer");
+
+                return Some(ClientConnectionSMState::Connected(connection));
+            }
+            Err(e) => warn!(target: LOG_CLIENT_NET_API, "Failed to connect to peer: {e}"),
+        }
+
+        Some(ClientConnectionSMState::Disconnected(backoff))
     }
 }
 
