@@ -173,6 +173,7 @@ pub async fn run(
             api_urls,
             &force_api_secrets.get_active(),
             &Connector::default(),
+            task_group,
         ),
         self_id_str: cfg.local.identity.to_string(),
         peer_id_str: (0..cfg.consensus.api_endpoints.len())

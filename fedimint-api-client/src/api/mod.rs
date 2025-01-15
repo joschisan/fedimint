@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Debug;
+use std::iter::once;
 use std::pin::Pin;
 use std::result;
 use std::sync::Arc;
@@ -37,7 +38,6 @@ use fedimint_logging::{LOG_CLIENT_NET_API, LOG_NET_API};
 use futures::future::pending;
 use futures::stream::FuturesUnordered;
 use futures::{Future, StreamExt};
-use itertools::Itertools;
 use jsonrpsee_core::client::ClientT;
 pub use jsonrpsee_core::client::Error as JsonRpcClientError;
 use jsonrpsee_core::DeserializeOwned;
@@ -439,30 +439,40 @@ impl DynGlobalApi {
         url: SafeUrl,
         api_secret: &Option<String>,
         connector: &Connector,
+        task_group: &TaskGroup,
     ) -> Self {
-        GlobalFederationApiWithCache::new(WsFederationApi::new(
-            connector,
-            vec![(peer, url)],
-            api_secret,
-        ))
-        .into()
+        Self::from_endpoints(once((peer, url)), api_secret, connector, task_group)
     }
 
     pub fn from_endpoints(
         peers: impl IntoIterator<Item = (PeerId, SafeUrl)>,
         api_secret: &Option<String>,
         connector: &Connector,
+        task_group: &TaskGroup,
     ) -> Self {
-        GlobalFederationApiWithCache::new(WsFederationApi::new(connector, peers, api_secret)).into()
+        let connector = match connector {
+            Connector::Tcp => {
+                WebsocketConnector::new(peers.into_iter().collect(), api_secret.clone()).into_dyn()
+            }
+            #[cfg(all(feature = "tor", not(target_family = "wasm")))]
+            Connector::Tor => {
+                TorConnector::new(peers.into_iter().collect(), api_secret.clone()).into_dyn()
+            }
+            #[cfg(all(feature = "tor", target_family = "wasm"))]
+            Connector::Tor => unimplemented!(),
+        };
+
+        GlobalFederationApiWithCache::new(ReconnectFederationApi::new(&connector, None, task_group))
+            .into()
     }
 
     pub fn from_invite_code(connector: &Connector, invite_code: &InviteCode) -> Self {
-        GlobalFederationApiWithCache::new(WsFederationApi::new(
-            connector,
-            invite_code.peers().into_iter().collect_vec(),
+        Self::from_endpoints(
+            invite_code.peers(),
             &invite_code.api_secret(),
-        ))
-        .into()
+            connector,
+            &TaskGroup::new(),
+        )
     }
 }
 
@@ -1098,14 +1108,17 @@ impl IClientConnector for WebsocketConnector {
             {
                 // on wasm, url will be handled by the browser, which should take care of
                 // `user:pass@...`
-                let mut url = url.clone();
+                let mut url = api_endpoint.clone();
                 url.set_username("fedimint").map_err(|_| {
                     JsonRpcClientError::Transport(anyhow::format_err!("invalid username").into())
                 })?;
                 url.set_password(Some(&api_secret)).map_err(|_| {
                     JsonRpcClientError::Transport(anyhow::format_err!("invalid secret").into())
                 })?;
-                return client.build(url.as_str()).await;
+
+                let client = client.build(url.as_str()).await?;
+
+                return Ok(client.into_dyn());
             }
         }
 
@@ -1127,6 +1140,7 @@ impl TorConnector {
     }
 }
 
+#[cfg(all(feature = "tor", not(target_family = "wasm")))]
 #[async_trait]
 impl IClientConnector for TorConnector {
     fn peers(&self) -> BTreeSet<PeerId> {
