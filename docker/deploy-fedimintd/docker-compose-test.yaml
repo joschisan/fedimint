@@ -1,0 +1,104 @@
+version: "3.3"
+
+services:
+  fedimintd1:
+    image: fedimint/fedimintd:master
+    platform: linux/amd64
+    ports:
+      - "8261:8173"  # P2P
+      - "8271:8174"  # API
+      - "8281:8175"  # UI
+    volumes:
+      - fedimintd_data_1:/data
+    environment:
+      - FM_FEDIMINTD_DATA_DIR=/data
+      - FM_BIND_P2P=0.0.0.0:8173
+      - FM_BIND_API=0.0.0.0:8174
+      - FM_P2P_URL=fedimint://fedimintd1:8173
+      - FM_API_URL=ws://fedimintd1:8174
+      - FM_FEDIMINTD_PASSWORD=password
+      - FM_DEFAULT_BITCOIN_RPC_KIND=esplora
+      - FM_DEFAULT_BITCOIN_RPC_URL=https://blockstream.info/api
+      - FM_BITCOIN_NETWORK=bitcoin
+    networks:
+      - fedimint_network
+
+  fedimintd2:
+    image: fedimint/fedimintd:master
+    platform: linux/amd64
+    ports:
+      - "8262:8173"  # P2P
+      - "8272:8174"  # API
+      - "8282:8175"  # UI
+    volumes:
+      - fedimintd_data_2:/data
+    environment:
+      - FM_FEDIMINTD_DATA_DIR=/data
+      - FM_BIND_P2P=0.0.0.0:8173
+      - FM_BIND_API=0.0.0.0:8174
+      - FM_P2P_URL=fedimint://fedimintd2:8173
+      - FM_API_URL=ws://fedimintd2:8174
+      - FM_FEDIMINTD_PASSWORD=password
+      - FM_DEFAULT_BITCOIN_RPC_KIND=esplora
+      - FM_DEFAULT_BITCOIN_RPC_URL=https://blockstream.info/api
+      - FM_BITCOIN_NETWORK=bitcoin
+    networks:
+      - fedimint_network
+
+  fedimintd3:
+    image: fedimint/fedimintd:master
+    platform: linux/amd64
+    ports:
+      - "8263:8173"  # P2P
+      - "8273:8174"  # API
+      - "8283:8175"  # UI
+    volumes:
+      - fedimintd_data_3:/data
+    environment:
+      - FM_FEDIMINTD_DATA_DIR=/data
+      - FM_BIND_P2P=0.0.0.0:8173
+      - FM_BIND_API=0.0.0.0:8174
+      - FM_P2P_URL=fedimint://fedimintd3:8173
+      - FM_API_URL=ws://fedimintd3:8174
+      - FM_FEDIMINTD_PASSWORD=password
+      - FM_DEFAULT_BITCOIN_RPC_KIND=esplora
+      - FM_DEFAULT_BITCOIN_RPC_URL=https://blockstream.info/api
+      - FM_BITCOIN_NETWORK=bitcoin
+    networks:
+      - fedimint_network
+
+  fedimintd4:
+    image: fedimint/fedimintd:master
+    platform: linux/amd64
+    ports:
+      - "8264:8173"  # P2P
+      - "8274:8174"  # API
+      - "8284:8175"  # UI
+    volumes:
+      - fedimintd_data_4:/data
+    environment:
+      - FM_FEDIMINTD_DATA_DIR=/data
+      - FM_BIND_P2P=0.0.0.0:8173
+      - FM_BIND_API=0.0.0.0:8174
+      - FM_P2P_URL=fedimint://fedimintd4:8173
+      - FM_API_URL=ws://fedimintd4:8174
+      - FM_FEDIMINTD_PASSWORD=password
+      - FM_DEFAULT_BITCOIN_RPC_KIND=esplora
+      - FM_DEFAULT_BITCOIN_RPC_URL=https://blockstream.info/api
+      - FM_BITCOIN_NETWORK=bitcoin
+    networks:
+      - fedimint_network
+
+networks:
+  fedimint_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
+volumes:
+  fedimintd_data_1:
+  fedimintd_data_2:
+  fedimintd_data_3:
+  fedimintd_data_4: 
