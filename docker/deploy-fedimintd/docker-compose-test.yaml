@@ -20,6 +20,7 @@ services:
       - FM_DEFAULT_BITCOIN_RPC_KIND=esplora
       - FM_DEFAULT_BITCOIN_RPC_URL=https://blockstream.info/api
       - FM_BITCOIN_NETWORK=bitcoin
+      - FM_FORCE_IROH=1
     networks:
       - fedimint_network
 
@@ -42,6 +43,7 @@ services:
       - FM_DEFAULT_BITCOIN_RPC_KIND=esplora
       - FM_DEFAULT_BITCOIN_RPC_URL=https://blockstream.info/api
       - FM_BITCOIN_NETWORK=bitcoin
+      - FM_FORCE_IROH=1
     networks:
       - fedimint_network
 
@@ -64,6 +66,7 @@ services:
       - FM_DEFAULT_BITCOIN_RPC_KIND=esplora
       - FM_DEFAULT_BITCOIN_RPC_URL=https://blockstream.info/api
       - FM_BITCOIN_NETWORK=bitcoin
+      - FM_FORCE_IROH=1
     networks:
       - fedimint_network
 
@@ -86,6 +89,7 @@ services:
       - FM_DEFAULT_BITCOIN_RPC_KIND=esplora
       - FM_DEFAULT_BITCOIN_RPC_URL=https://blockstream.info/api
       - FM_BITCOIN_NETWORK=bitcoin
+      - FM_FORCE_IROH=1
     networks:
       - fedimint_network
 
