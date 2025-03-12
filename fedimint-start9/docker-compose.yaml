@@ -1,0 +1,20 @@
+version: "3.7"
+
+services:
+  fedimintd:
+    image: fedimint/fedimintd:v0.6.0
+    container_name: fedimintd
+    restart: unless-stopped
+    stop_grace_period: 1m
+    volumes:
+      - ${APP_DATA_DIR}:/data
+    environment:
+      # Pass through the original Start9 variables for the entrypoint script
+      - DEPENDENCY_CONFIG=${DEPENDENCY_CONFIG}
+      - TOR_ADDRESS=${TOR_ADDRESS}
+      - APP_DATA_DIR=${APP_DATA_DIR}
+      - FM_FORCE_IROH=true
+    ports:
+      - "8080:8175"  # Web UI port
+      - "8174:8174"  # API port
+      - "8173:8173"  # P2P port 

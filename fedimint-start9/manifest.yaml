@@ -1,0 +1,47 @@
+id: fedimint
+version: 0.1.0
+title: "Fedimint"
+description:
+  short: "Federated e-cash mint"
+  long: "Fedimint is a federated e-cash system built on Bitcoin, enabling privacy-preserving, community-based custody."
+release-notes: "Initial release of Fedimint for Start9."
+license: MIT
+wrapper-repo: "https://github.com/fedimint/fedimint"
+upstream-repo: "https://github.com/fedimint/fedimint"
+support-site: "https://fedimint.org"
+marketing-site: "https://fedimint.org"
+build: 
+  path: "."
+assets:
+  icon: "artifacts/icon.png"
+  banner: "artifacts/banner.png"
+main:
+  type: "docker-compose"
+  compose-file: "docker-compose.yaml"
+  entrypoint: "scripts/start9-entrypoint.sh"
+interfaces:
+  ui:
+    name: "Web UI"
+    description: "Fedimint Web Interface"
+    tor-only: false
+    ui: true
+    port: 8080
+  api:
+    name: "API"
+    description: "Fedimint API for client connections"
+    tor-only: false
+    ui: false
+    port: 8174
+  p2p:
+    name: "P2P"
+    description: "Fedimint P2P for federation connections"
+    tor-only: false
+    ui: false
+    port: 8173
+dependencies:
+  bitcoind:
+    version: ">=25.0.0 <26.0.0"
+    requirement:
+      type: "required"
+      description: "Fedimintd requires Bitcoin Core to function"
+config: {} 
