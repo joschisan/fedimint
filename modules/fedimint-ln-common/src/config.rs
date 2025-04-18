@@ -1,8 +1,8 @@
 pub use bitcoin::Network;
+use fedimint_core::config::EmptyGenParams;
 use fedimint_core::core::ModuleKind;
 use fedimint_core::encoding::btc::NetworkLegacyEncodingWrapper;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::envs::BitcoinRpcConfig;
 use fedimint_core::{Amount, msats, plugin_types_trait_impl_config};
 use lightning_invoice::RoutingFees;
 use serde::{Deserialize, Serialize};
@@ -12,14 +12,14 @@ use crate::LightningCommonInit;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LightningGenParams {
-    pub local: LightningGenParamsLocal,
+    pub local: EmptyGenParams,
     pub consensus: LightningGenParamsConsensus,
 }
 
 impl LightningGenParams {
-    pub fn regtest(bitcoin_rpc: BitcoinRpcConfig) -> Self {
+    pub fn regtest() -> Self {
         Self {
-            local: LightningGenParamsLocal { bitcoin_rpc },
+            local: EmptyGenParams {},
             consensus: LightningGenParamsConsensus {
                 network: Network::Regtest,
             },
@@ -33,11 +33,6 @@ pub struct LightningGenParamsConsensus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LightningGenParamsLocal {
-    pub bitcoin_rpc: BitcoinRpcConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LightningConfig {
     pub local: LightningConfigLocal,
     pub private: LightningConfigPrivate,
@@ -45,10 +40,7 @@ pub struct LightningConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Decodable, Encodable)]
-pub struct LightningConfigLocal {
-    /// Configures which bitcoin RPC to use
-    pub bitcoin_rpc: BitcoinRpcConfig,
-}
+pub struct LightningConfigLocal;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct LightningConfigConsensus {
@@ -94,7 +86,7 @@ impl std::fmt::Display for LightningClientConfig {
 plugin_types_trait_impl_config!(
     LightningCommonInit,
     LightningGenParams,
-    LightningGenParamsLocal,
+    EmptyGenParams,
     LightningGenParamsConsensus,
     LightningConfig,
     LightningConfigLocal,

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use bitcoin::Network;
 use bitcoin::secp256k1::SecretKey;
+use fedimint_core::config::EmptyGenParams;
 use fedimint_core::core::ModuleKind;
 use fedimint_core::encoding::btc::NetworkLegacyEncodingWrapper;
 use fedimint_core::encoding::{Decodable, Encodable};
@@ -22,14 +23,14 @@ const DEFAULT_DEPOSIT_FEE_SATS: u64 = 1000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletGenParams {
-    pub local: WalletGenParamsLocal,
+    pub local: EmptyGenParams,
     pub consensus: WalletGenParamsConsensus,
 }
 
 impl WalletGenParams {
-    pub fn regtest(bitcoin_rpc: BitcoinRpcConfig) -> WalletGenParams {
+    pub fn regtest() -> WalletGenParams {
         WalletGenParams {
-            local: WalletGenParamsLocal { bitcoin_rpc },
+            local: EmptyGenParams {},
             consensus: WalletGenParamsConsensus {
                 network: Network::Regtest,
                 finality_delay: 10,
@@ -45,11 +46,6 @@ impl WalletGenParams {
             },
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WalletGenParamsLocal {
-    pub bitcoin_rpc: BitcoinRpcConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,10 +69,7 @@ pub struct WalletConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Decodable, Encodable)]
-pub struct WalletConfigLocal {
-    /// Configures which bitcoin RPC to use
-    pub bitcoin_rpc: BitcoinRpcConfig,
-}
+pub struct WalletConfigLocal;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WalletConfigPrivate {
@@ -159,7 +152,6 @@ impl WalletConfig {
         threshold: usize,
         network: Network,
         finality_delay: u32,
-        bitcoin_rpc: BitcoinRpcConfig,
         client_default_bitcoin_rpc: BitcoinRpcConfig,
         fee_consensus: FeeConsensus,
     ) -> Self {
@@ -180,7 +172,7 @@ impl WalletConfig {
         };
 
         Self {
-            local: WalletConfigLocal { bitcoin_rpc },
+            local: WalletConfigLocal {},
             private: WalletConfigPrivate { peg_in_key: sk },
             consensus: WalletConfigConsensus {
                 network: NetworkLegacyEncodingWrapper(network),
@@ -198,7 +190,7 @@ impl WalletConfig {
 plugin_types_trait_impl_config!(
     WalletCommonInit,
     WalletGenParams,
-    WalletGenParamsLocal,
+    EmptyGenParams,
     WalletGenParamsConsensus,
     WalletConfig,
     WalletConfigLocal,

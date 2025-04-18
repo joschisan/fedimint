@@ -2,21 +2,18 @@ use bitcoincore_rpc::bitcoin::Network;
 use fedimint_core::config::{EmptyGenParams, ServerModuleConfigGenParamsRegistry};
 use fedimint_core::envs::{BitcoinRpcConfig, FM_USE_UNKNOWN_MODULE_ENV, is_env_var_set};
 use fedimint_ln_server::LightningInit;
-use fedimint_ln_server::common::config::{
-    LightningGenParams, LightningGenParamsConsensus, LightningGenParamsLocal,
-};
+use fedimint_ln_server::common::config::LightningGenParamsConsensus;
 use fedimint_meta_server::{MetaGenParams, MetaInit};
 use fedimint_mint_server::MintInit;
 use fedimint_mint_server::common::config::{MintGenParams, MintGenParamsConsensus};
 use fedimint_server::core::ServerModuleInit as _;
 use fedimint_unknown_server::UnknownInit;
 use fedimint_unknown_server::common::config::UnknownGenParams;
-use fedimint_wallet_client::config::{
-    WalletGenParams, WalletGenParamsConsensus, WalletGenParamsLocal,
-};
+use fedimint_wallet_client::config::WalletGenParamsConsensus;
 use fedimint_wallet_server::WalletInit;
 use fedimintd::default_esplora_server;
 use fedimintd::envs::FM_DISABLE_META_MODULE_ENV;
+use serde::{Deserialize, Serialize};
 
 use crate::util::supports_lnv2;
 
@@ -29,8 +26,8 @@ pub fn attach_default_module_init_params(
 ) {
     module_init_params.attach_config_gen_params(
         LightningInit::kind(),
-        LightningGenParams {
-            local: LightningGenParamsLocal {
+        LightningGenParamsLegacy {
+            local: GenParamsLocalLegacy {
                 bitcoin_rpc: bitcoin_rpc.clone(),
             },
             consensus: LightningGenParamsConsensus { network },
@@ -50,8 +47,8 @@ pub fn attach_default_module_init_params(
 
     module_init_params.attach_config_gen_params(
         WalletInit::kind(),
-        WalletGenParams {
-            local: WalletGenParamsLocal {
+        WalletGenParamsLegacy {
+            local: GenParamsLocalLegacy {
                 bitcoin_rpc: bitcoin_rpc.clone(),
             },
             consensus: WalletGenParamsConsensus {
@@ -66,8 +63,8 @@ pub fn attach_default_module_init_params(
     if supports_lnv2() {
         module_init_params.attach_config_gen_params(
             fedimint_lnv2_server::LightningInit::kind(),
-            fedimint_lnv2_common::config::LightningGenParams {
-                local: fedimint_lnv2_common::config::LightningGenParamsLocal {
+            LightningV2GenParamsLegacy {
+                local: GenParamsLocalLegacy {
                     bitcoin_rpc: bitcoin_rpc.clone(),
                 },
                 consensus: fedimint_lnv2_common::config::LightningGenParamsConsensus {
@@ -86,5 +83,67 @@ pub fn attach_default_module_init_params(
     if is_env_var_set(FM_USE_UNKNOWN_MODULE_ENV) {
         module_init_params
             .attach_config_gen_params(UnknownInit::kind(), UnknownGenParams::default());
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenParamsLocalLegacy {
+    pub bitcoin_rpc: BitcoinRpcConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LightningGenParamsLegacy {
+    pub local: GenParamsLocalLegacy,
+    pub consensus: LightningGenParamsConsensus,
+}
+
+impl fedimint_core::config::ModuleInitParams for LightningGenParamsLegacy {
+    type Local = GenParamsLocalLegacy;
+    type Consensus = LightningGenParamsConsensus;
+
+    fn from_parts(local: Self::Local, consensus: Self::Consensus) -> Self {
+        Self { local, consensus }
+    }
+
+    fn to_parts(self) -> (Self::Local, Self::Consensus) {
+        (self.local, self.consensus)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletGenParamsLegacy {
+    pub local: GenParamsLocalLegacy,
+    pub consensus: WalletGenParamsConsensus,
+}
+
+impl fedimint_core::config::ModuleInitParams for WalletGenParamsLegacy {
+    type Local = GenParamsLocalLegacy;
+    type Consensus = WalletGenParamsConsensus;
+
+    fn from_parts(local: Self::Local, consensus: Self::Consensus) -> Self {
+        Self { local, consensus }
+    }
+
+    fn to_parts(self) -> (Self::Local, Self::Consensus) {
+        (self.local, self.consensus)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LightningV2GenParamsLegacy {
+    pub local: GenParamsLocalLegacy,
+    pub consensus: fedimint_lnv2_common::config::LightningGenParamsConsensus,
+}
+
+impl fedimint_core::config::ModuleInitParams for LightningV2GenParamsLegacy {
+    type Local = GenParamsLocalLegacy;
+    type Consensus = fedimint_lnv2_common::config::LightningGenParamsConsensus;
+
+    fn from_parts(local: Self::Local, consensus: Self::Consensus) -> Self {
+        Self { local, consensus }
+    }
+
+    fn to_parts(self) -> (Self::Local, Self::Consensus) {
+        (self.local, self.consensus)
     }
 }

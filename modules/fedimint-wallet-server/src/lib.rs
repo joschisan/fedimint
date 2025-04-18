@@ -324,7 +324,6 @@ impl ServerModuleInit for WalletInit {
                     peers.to_num_peers().threshold(),
                     params.consensus.network,
                     params.consensus.finality_delay,
-                    params.local.bitcoin_rpc.clone(),
                     params.consensus.client_default_bitcoin_rpc.clone(),
                     params.consensus.fee_consensus,
                 );
@@ -360,7 +359,6 @@ impl ServerModuleInit for WalletInit {
             peers.num_peers().threshold(),
             params.consensus.network,
             params.consensus.finality_delay,
-            params.local.bitcoin_rpc.clone(),
             params.consensus.client_default_bitcoin_rpc.clone(),
             params.consensus.fee_consensus,
         );

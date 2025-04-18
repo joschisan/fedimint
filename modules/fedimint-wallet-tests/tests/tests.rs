@@ -9,6 +9,7 @@ use bitcoin::secp256k1;
 use fedimint_api_client::api::DynGlobalApi;
 use fedimint_client::ClientHandleArc;
 use fedimint_client::secret::{PlainRootSecretStrategy, RootSecretStrategy};
+use fedimint_core::config::EmptyGenParams;
 use fedimint_core::db::mem_impl::MemDatabase;
 use fedimint_core::db::{DatabaseTransaction, IRawDatabaseExt};
 use fedimint_core::envs::BitcoinRpcConfig;
@@ -40,7 +41,7 @@ use tracing::{info, warn};
 
 fn fixtures() -> Fixtures {
     let fixtures = Fixtures::new_primary(DummyClientInit, DummyInit, DummyGenParams::default());
-    let wallet_params = WalletGenParams::regtest(fixtures.bitcoin_server());
+    let wallet_params = WalletGenParams::regtest();
     let wallet_client = WalletClientInit::new(fixtures.bitcoin_client());
     fixtures.with_module(wallet_client, WalletInit, wallet_params)
 }
@@ -1053,9 +1054,7 @@ fn build_wallet_server_configs(
         &WalletInit,
         &peers,
         &fedimint_core::config::ConfigGenModuleParams::from_typed(WalletGenParams {
-            local: fedimint_wallet_common::config::WalletGenParamsLocal {
-                bitcoin_rpc: bitcoin_rpc.clone(),
-            },
+            local: EmptyGenParams {},
             consensus: fedimint_wallet_common::config::WalletGenParamsConsensus {
                 network: bitcoin::Network::Regtest,
                 finality_delay: 10,

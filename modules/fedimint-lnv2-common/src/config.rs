@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 pub use bitcoin::Network;
+use fedimint_core::config::EmptyGenParams;
 use fedimint_core::core::ModuleKind;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::envs::BitcoinRpcConfig;
 use fedimint_core::{Amount, PeerId, plugin_types_trait_impl_config};
 use group::Curve;
 use serde::{Deserialize, Serialize};
@@ -13,15 +13,15 @@ use crate::LightningCommonInit;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LightningGenParams {
-    pub local: LightningGenParamsLocal,
+    pub local: EmptyGenParams,
     pub consensus: LightningGenParamsConsensus,
 }
 
 impl LightningGenParams {
     #[allow(clippy::missing_panics_doc)]
-    pub fn regtest(bitcoin_rpc: BitcoinRpcConfig) -> Self {
+    pub fn regtest() -> Self {
         Self {
-            local: LightningGenParamsLocal { bitcoin_rpc },
+            local: EmptyGenParams {},
             consensus: LightningGenParamsConsensus {
                 fee_consensus: FeeConsensus::new(1000).expect("Relative fee is within range"),
                 network: Network::Regtest,
@@ -37,11 +37,6 @@ pub struct LightningGenParamsConsensus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LightningGenParamsLocal {
-    pub bitcoin_rpc: BitcoinRpcConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LightningConfig {
     pub local: LightningConfigLocal,
     pub private: LightningConfigPrivate,
@@ -49,9 +44,7 @@ pub struct LightningConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Decodable, Encodable)]
-pub struct LightningConfigLocal {
-    pub bitcoin_rpc: BitcoinRpcConfig,
-}
+pub struct LightningConfigLocal;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct LightningConfigConsensus {
@@ -84,7 +77,7 @@ impl std::fmt::Display for LightningClientConfig {
 plugin_types_trait_impl_config!(
     LightningCommonInit,
     LightningGenParams,
-    LightningGenParamsLocal,
+    EmptyGenParams,
     LightningGenParamsConsensus,
     LightningConfig,
     LightningConfigLocal,
@@ -198,14 +191,5 @@ fn migrate_config_private(
 ) -> LightningConfigPrivate {
     LightningConfigPrivate {
         sk: SecretKeyShare(config.threshold_sec_key.0.0.0),
-    }
-}
-
-#[allow(dead_code)]
-fn migrate_config_local(
-    config: fedimint_ln_common::config::LightningConfigLocal,
-) -> LightningConfigLocal {
-    LightningConfigLocal {
-        bitcoin_rpc: config.bitcoin_rpc,
     }
 }

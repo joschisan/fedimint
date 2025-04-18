@@ -13,16 +13,12 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::ModuleKind;
 use fedimint_core::db::Database;
-use fedimint_core::envs::{
-    BitcoinRpcConfig, FM_ENABLE_MODULE_LNV2_ENV, FM_USE_UNKNOWN_MODULE_ENV, is_env_var_set,
-};
+use fedimint_core::envs::{FM_ENABLE_MODULE_LNV2_ENV, FM_USE_UNKNOWN_MODULE_ENV, is_env_var_set};
 use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl, handle_version_hash_command};
 use fedimint_core::{crit, timing};
-use fedimint_ln_common::config::{
-    LightningGenParams, LightningGenParamsConsensus, LightningGenParamsLocal,
-};
+use fedimint_ln_common::config::{LightningGenParams, LightningGenParamsConsensus};
 use fedimint_ln_server::LightningInit;
 use fedimint_logging::{LOG_CORE, LOG_SERVER, TracingSetup};
 use fedimint_meta_server::{MetaGenParams, MetaInit};
@@ -39,9 +35,7 @@ use fedimint_server_core::bitcoin_rpc::IServerBitcoinRpc;
 use fedimint_unknown_common::config::UnknownGenParams;
 use fedimint_unknown_server::UnknownInit;
 use fedimint_wallet_server::WalletInit;
-use fedimint_wallet_server::common::config::{
-    WalletGenParams, WalletGenParamsConsensus, WalletGenParamsLocal,
-};
+use fedimint_wallet_server::common::config::{WalletGenParams, WalletGenParamsConsensus};
 use futures::FutureExt;
 use tracing::{debug, error, info};
 
@@ -306,29 +300,12 @@ impl Fedimintd {
     pub fn with_default_modules(self) -> anyhow::Result<Self> {
         let network = self.opts.bitcoin_network;
 
-        let bitcoin_rpc_config = match (
-            self.opts.bitcoind_url.as_ref(),
-            self.opts.esplora_url.as_ref(),
-        ) {
-            (Some(url), None) => BitcoinRpcConfig {
-                kind: "bitcoind".to_string(),
-                url: url.clone(),
-            },
-            (None, Some(url)) => BitcoinRpcConfig {
-                kind: "esplora".to_string(),
-                url: url.clone(),
-            },
-            _ => unreachable!("ArgGroup already enforced XOR relation"),
-        };
-
         let s = self
             .with_module_kind(LightningInit)
             .with_module_instance(
                 LightningInit::kind(),
                 LightningGenParams {
-                    local: LightningGenParamsLocal {
-                        bitcoin_rpc: bitcoin_rpc_config.clone(),
-                    },
+                    local: EmptyGenParams::default(),
                     consensus: LightningGenParamsConsensus { network },
                 },
             )
@@ -349,9 +326,7 @@ impl Fedimintd {
             .with_module_instance(
                 WalletInit::kind(),
                 WalletGenParams {
-                    local: WalletGenParamsLocal {
-                        bitcoin_rpc: bitcoin_rpc_config.clone(),
-                    },
+                    local: EmptyGenParams::default(),
                     consensus: WalletGenParamsConsensus {
                         network,
                         finality_delay: 10,
@@ -370,9 +345,7 @@ impl Fedimintd {
                 .with_module_instance(
                     fedimint_lnv2_server::LightningInit::kind(),
                     fedimint_lnv2_common::config::LightningGenParams {
-                        local: fedimint_lnv2_common::config::LightningGenParamsLocal {
-                            bitcoin_rpc: bitcoin_rpc_config.clone(),
-                        },
+                        local: EmptyGenParams::default(),
                         consensus: fedimint_lnv2_common::config::LightningGenParamsConsensus {
                             // TODO: actually make the relative fee configurable
                             fee_consensus: fedimint_lnv2_common::config::FeeConsensus::new(100)?,
