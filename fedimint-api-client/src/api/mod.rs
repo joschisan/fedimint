@@ -15,7 +15,7 @@ use base64::Engine as _;
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1;
 pub use error::{FederationError, OutputOutcomeError, PeerError};
-use fedimint_core::admin_client::{PeerServerParamsLegacy, ServerStatusLegacy, SetupStatus};
+use fedimint_core::admin_client::{LegacySetupStatus, PeerServerParamsLegacy, ServerStatusLegacy};
 use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
 use fedimint_core::core::backup::SignedBackupRequest;
 use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, OutputOutcome};
@@ -488,7 +488,7 @@ pub trait IGlobalFederationApi: IRawFederationApi {
     /// Must be called first before any other calls to the API
     async fn set_password(&self, auth: ApiAuth) -> FederationResult<()>;
 
-    async fn setup_status(&self, auth: ApiAuth) -> FederationResult<SetupStatus>;
+    async fn setup_status(&self, auth: ApiAuth) -> FederationResult<LegacySetupStatus>;
 
     async fn set_local_params(
         &self,

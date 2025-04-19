@@ -6,7 +6,9 @@ use std::sync::Arc;
 use anyhow::{anyhow, format_err};
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1;
-use fedimint_core::admin_client::{PeerServerParamsLegacy, SetLocalParamsRequest, SetupStatus};
+use fedimint_core::admin_client::{
+    LegacySetupStatus, PeerServerParamsLegacy, SetLocalParamsRequest,
+};
 use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::core::backup::SignedBackupRequest;
@@ -353,7 +355,7 @@ where
             .await
     }
 
-    async fn setup_status(&self, auth: ApiAuth) -> FederationResult<SetupStatus> {
+    async fn setup_status(&self, auth: ApiAuth) -> FederationResult<LegacySetupStatus> {
         self.request_admin(SETUP_STATUS_ENDPOINT, ApiRequestErased::default(), auth)
             .await
     }
