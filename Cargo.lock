@@ -4222,6 +4222,7 @@ name = "fedimintd"
 version = "0.8.0-alpha"
 dependencies = [
  "anyhow",
+ "axum 0.8.3",
  "bitcoin",
  "clap",
  "fedimint-build",
@@ -4244,6 +4245,7 @@ dependencies = [
  "fedimint-unknown-server",
  "fedimint-wallet-server",
  "futures",
+ "serde",
  "serde_json",
  "tikv-jemallocator",
  "tokio",

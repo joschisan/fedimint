@@ -128,7 +128,7 @@ async fn setup_submit(
 
     match state
         .api
-        .set_local_parameters(ApiAuth(input.password), input.name, federation_name)
+        .init_setup(ApiAuth(input.password), input.name, federation_name)
         .await
     {
         Ok(_) => Redirect::to(LOGIN_ROUTE).into_response(),
@@ -267,7 +267,7 @@ async fn post_add_setup_code(
         return Redirect::to(LOGIN_ROUTE).into_response();
     }
 
-    match state.api.add_peer_setup_code(input.peer_info).await {
+    match state.api.add_setup_code(input.peer_info).await {
         Ok(..) => Redirect::to(FEDERATION_SETUP_ROUTE).into_response(),
         Err(e) => {
             let content = html! {

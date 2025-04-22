@@ -42,7 +42,6 @@ use fedimint_server_core::ServerModuleInitRegistry;
 use fedimint_server_core::bitcoin_rpc::DynServerBitcoinRpc;
 use fedimint_server_core::dashboard_ui::DynDashboardApi;
 use fedimint_server_core::setup_ui::{DynSetupApi, ISetupApi};
-use jsonrpsee::RpcModule;
 use net::api::ApiSecrets;
 use net::p2p::P2PStatusReceivers;
 use net::p2p_connector::IrohConnector;
@@ -235,21 +234,7 @@ pub async fn run_config_gen(
 
     let (cgp_sender, mut cgp_receiver) = tokio::sync::mpsc::channel(1);
 
-    let setup_api = SetupApi::new(settings.clone(), db.clone(), cgp_sender);
-
-    let mut rpc_module = RpcModule::new(setup_api.clone());
-
-    net::api::attach_endpoints(&mut rpc_module, config::setup::server_endpoints(), None);
-
-    let api_handler = net::api::spawn(
-        "setup",
-        // config gen always uses ws api
-        settings.api_bind,
-        rpc_module,
-        10,
-        api_secrets.clone(),
-    )
-    .await;
+    let setup_api = SetupApi::new(settings.clone(), cgp_sender);
 
     let ui_task_group = TaskGroup::new();
 
@@ -272,12 +257,6 @@ pub async fn run_config_gen(
         .recv()
         .await
         .expect("Config gen params receiver closed unexpectedly");
-
-    api_handler
-        .stop()
-        .expect("Config api should still be running");
-
-    api_handler.stopped().await;
 
     ui_task_group
         .shutdown_join_all(None)

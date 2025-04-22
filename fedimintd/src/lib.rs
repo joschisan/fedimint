@@ -6,6 +6,7 @@
 #![allow(clippy::return_self_not_must_use)]
 #![allow(clippy::large_futures)]
 
+pub mod custom_setup_ui;
 pub mod envs;
 mod metrics;
 
@@ -20,6 +21,7 @@ use fedimint_core::config::{EmptyGenParams, ServerModuleConfigGenParamsRegistry}
 use fedimint_core::db::Database;
 use fedimint_core::envs::{
     BitcoinRpcConfig, FM_ENABLE_MODULE_LNV2_ENV, FM_USE_UNKNOWN_MODULE_ENV, is_env_var_set,
+    is_running_in_test_env,
 };
 use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::task::TaskGroup;
@@ -52,9 +54,9 @@ use tracing::{debug, error, info};
 use crate::envs::{
     FM_API_URL_ENV, FM_BIND_API_ENV, FM_BIND_METRCIS_ENV, FM_BIND_P2P_ENV,
     FM_BIND_TOKIO_CONSOLE_ENV, FM_BIND_UI_ENV, FM_BITCOIN_NETWORK_ENV, FM_BITCOIND_URL_ENV,
-    FM_DATA_DIR_ENV, FM_DB_CHECKPOINT_RETENTION_ENV, FM_DISABLE_META_MODULE_ENV,
-    FM_ENABLE_IROH_ENV, FM_ESPLORA_URL_ENV, FM_FORCE_API_SECRETS_ENV, FM_P2P_URL_ENV,
-    FM_PORT_ESPLORA_ENV,
+    FM_CUSTOM_SETUP_UI_ENV, FM_DATA_DIR_ENV, FM_DB_CHECKPOINT_RETENTION_ENV,
+    FM_DISABLE_META_MODULE_ENV, FM_ENABLE_IROH_ENV, FM_ESPLORA_URL_ENV, FM_FORCE_API_SECRETS_ENV,
+    FM_P2P_URL_ENV, FM_PORT_ESPLORA_ENV,
 };
 use crate::metrics::APP_START_TS;
 
@@ -144,6 +146,10 @@ struct ServerOpts {
     /// Number of checkpoints from the current session to retain on disk
     #[arg(long, env = FM_DB_CHECKPOINT_RETENTION_ENV, default_value = "1")]
     db_checkpoint_retention: u64,
+
+    /// Enable http/json rest api for a custom setup UI or automated setup
+    #[arg(long, env = FM_CUSTOM_SETUP_UI_ENV)]
+    custom_setup_ui: bool,
 
     /// Comma separated list of API secrets.
     ///
@@ -271,7 +277,11 @@ pub async fn run(
         server_gens,
         root_task_group.clone(),
         dyn_server_bitcoin_rpc,
-        Box::new(fedimint_server_ui::setup::router),
+        if server_opts.custom_setup_ui || is_running_in_test_env() {
+            Box::new(custom_setup_ui::router)
+        } else {
+            Box::new(fedimint_server_ui::setup::router)
+        },
         Box::new(fedimint_server_ui::dashboard::router),
         server_opts.db_checkpoint_retention,
     )
