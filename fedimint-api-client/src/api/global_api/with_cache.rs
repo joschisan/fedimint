@@ -4,21 +4,17 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::{anyhow, format_err};
-use bitcoin::hashes::sha256;
 use bitcoin::secp256k1;
-use fedimint_core::admin_client::PeerServerParamsLegacy;
 use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::core::backup::SignedBackupRequest;
 use fedimint_core::endpoint_constants::{
-    ADD_CONFIG_GEN_PEER_ENDPOINT, API_ANNOUNCEMENTS_ENDPOINT, AUDIT_ENDPOINT, AUTH_ENDPOINT,
-    AWAIT_SESSION_OUTCOME_ENDPOINT, AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT,
-    BACKUP_STATISTICS_ENDPOINT, CONFIG_GEN_PEERS_ENDPOINT, FEDIMINTD_VERSION_ENDPOINT,
-    GUARDIAN_CONFIG_BACKUP_ENDPOINT, RECOVER_ENDPOINT, RESTART_FEDERATION_SETUP_ENDPOINT,
-    SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT,
-    SET_PASSWORD_ENDPOINT, SHUTDOWN_ENDPOINT, SIGN_API_ANNOUNCEMENT_ENDPOINT, START_DKG_ENDPOINT,
-    STATUS_ENDPOINT, SUBMIT_API_ANNOUNCEMENT_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
-    VERIFIED_CONFIGS_ENDPOINT, VERIFY_CONFIG_HASH_ENDPOINT,
+    API_ANNOUNCEMENTS_ENDPOINT, AUDIT_ENDPOINT, AUTH_ENDPOINT, AWAIT_SESSION_OUTCOME_ENDPOINT,
+    AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT, BACKUP_STATISTICS_ENDPOINT,
+    FEDIMINTD_VERSION_ENDPOINT, GUARDIAN_CONFIG_BACKUP_ENDPOINT, RECOVER_ENDPOINT,
+    RESTART_FEDERATION_SETUP_ENDPOINT, SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT,
+    SESSION_STATUS_V2_ENDPOINT, SHUTDOWN_ENDPOINT, SIGN_API_ANNOUNCEMENT_ENDPOINT, STATUS_ENDPOINT,
+    SUBMIT_API_ANNOUNCEMENT_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };
 use fedimint_core::module::audit::AuditSummary;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -344,46 +340,6 @@ where
             ApiRequestErased::new(id),
         )
         .await
-    }
-
-    async fn set_password(&self, auth: ApiAuth) -> FederationResult<()> {
-        self.request_admin(SET_PASSWORD_ENDPOINT, ApiRequestErased::default(), auth)
-            .await
-    }
-
-    async fn add_config_gen_peer(&self, peer: PeerServerParamsLegacy) -> FederationResult<()> {
-        self.request_admin_no_auth(ADD_CONFIG_GEN_PEER_ENDPOINT, ApiRequestErased::new(peer))
-            .await
-    }
-
-    async fn get_config_gen_peers(&self) -> FederationResult<Vec<PeerServerParamsLegacy>> {
-        self.request_admin_no_auth(CONFIG_GEN_PEERS_ENDPOINT, ApiRequestErased::default())
-            .await
-    }
-
-    async fn start_dkg(&self, auth: ApiAuth) -> FederationResult<()> {
-        self.request_admin(START_DKG_ENDPOINT, ApiRequestErased::default(), auth)
-            .await
-    }
-
-    async fn get_verify_config_hash(
-        &self,
-        auth: ApiAuth,
-    ) -> FederationResult<BTreeMap<PeerId, sha256::Hash>> {
-        self.request_admin(
-            VERIFY_CONFIG_HASH_ENDPOINT,
-            ApiRequestErased::default(),
-            auth,
-        )
-        .await
-    }
-
-    async fn verified_configs(
-        &self,
-        auth: ApiAuth,
-    ) -> FederationResult<BTreeMap<PeerId, sha256::Hash>> {
-        self.request_admin(VERIFIED_CONFIGS_ENDPOINT, ApiRequestErased::default(), auth)
-            .await
     }
 
     async fn status(&self) -> FederationResult<StatusResponse> {

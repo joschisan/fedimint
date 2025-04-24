@@ -12,10 +12,9 @@ use arti_client::{TorAddr, TorClient, TorClientConfig};
 use async_channel::bounded;
 use async_trait::async_trait;
 use base64::Engine as _;
-use bitcoin::hashes::sha256;
 use bitcoin::secp256k1;
 pub use error::{FederationError, OutputOutcomeError, PeerError};
-use fedimint_core::admin_client::{PeerServerParamsLegacy, ServerStatusLegacy};
+use fedimint_core::admin_client::ServerStatusLegacy;
 use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
 use fedimint_core::core::backup::SignedBackupRequest;
 use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, OutputOutcome};
@@ -482,45 +481,6 @@ pub trait IGlobalFederationApi: IRawFederationApi {
         &self,
         id: &secp256k1::PublicKey,
     ) -> FederationResult<BTreeMap<PeerId, Option<ClientBackupSnapshot>>>;
-
-    /// Sets the password used to decrypt the configs and authenticate
-    ///
-    /// Must be called first before any other calls to the API
-    async fn set_password(&self, auth: ApiAuth) -> FederationResult<()>;
-
-    /// During config gen, used for an API-to-API call that adds a peer's server
-    /// connection info to the leader.
-    ///
-    /// Note this call will fail until the leader has their API running and has
-    /// `set_server_connections` so clients should retry.
-    ///
-    /// This call is not authenticated because it's guardian-to-guardian
-    async fn add_config_gen_peer(&self, peer: PeerServerParamsLegacy) -> FederationResult<()>;
-
-    /// During config gen, gets all the server connections we've received from
-    /// peers using `add_config_gen_peer`
-    ///
-    /// Could be called on the leader, so it's not authenticated
-    async fn get_config_gen_peers(&self) -> FederationResult<Vec<PeerServerParamsLegacy>>;
-
-    /// Runs DKG, can only be called once after configs have been generated in
-    /// `get_consensus_config_gen_params`.  If DKG fails this returns a 500
-    /// error and config gen must be restarted.
-    async fn start_dkg(&self, auth: ApiAuth) -> FederationResult<()>;
-
-    /// After DKG, returns the hash of the consensus config tweaked with our id.
-    /// We need to share this with all other peers to complete verification.
-    async fn get_verify_config_hash(
-        &self,
-        auth: ApiAuth,
-    ) -> FederationResult<BTreeMap<PeerId, sha256::Hash>>;
-
-    /// Updates local state and notify leader that we have verified configs.
-    /// This allows for a synchronization point, before we start consensus.
-    async fn verified_configs(
-        &self,
-        auth: ApiAuth,
-    ) -> FederationResult<BTreeMap<PeerId, sha256::Hash>>;
 
     /// Returns the status of the server
     async fn status(&self) -> FederationResult<StatusResponse>;
