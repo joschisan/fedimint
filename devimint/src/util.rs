@@ -16,7 +16,7 @@ use fedimint_core::envs::{
     is_env_var_set,
 };
 use fedimint_core::module::ApiAuth;
-use fedimint_core::task::{self, block_in_place, block_on};
+use fedimint_core::task::{self};
 use fedimint_core::time::now;
 use fedimint_core::util::FmtCompactAnyhow as _;
 use fedimint_core::util::backoff_util::custom_backoff;
@@ -26,7 +26,7 @@ use serde::de::DeserializeOwned;
 use tokio::fs::OpenOptions;
 use tokio::process::Child;
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::envs::{
     FM_BACKWARDS_COMPATIBILITY_TEST_ENV, FM_BITCOIN_CLI_BASE_EXECUTABLE_ENV,
@@ -62,20 +62,7 @@ pub fn parse_map(s: &str) -> Result<BTreeMap<String, String>> {
     Ok(map)
 }
 
-fn send_sigterm(child: &Child) {
-    send_signal(child, nix::sys::signal::Signal::SIGTERM);
-}
-
-fn send_sigkill(child: &Child) {
-    send_signal(child, nix::sys::signal::Signal::SIGKILL);
-}
-
-fn send_signal(child: &Child, signal: nix::sys::signal::Signal) {
-    let _ = nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(child.id().expect("pid should be present") as _),
-        signal,
-    );
-}
+use crate::process_reaper;
 
 /// Kills process when all references to ProcessHandle are dropped.
 ///
@@ -87,7 +74,7 @@ pub struct ProcessHandle(Arc<Mutex<ProcessHandleInner>>);
 impl ProcessHandle {
     pub async fn terminate(&self) -> Result<()> {
         let mut inner = self.0.lock().await;
-        inner.terminate().await?;
+        inner.terminate();
         Ok(())
     }
 
@@ -109,43 +96,28 @@ pub struct ProcessHandleInner {
 }
 
 impl ProcessHandleInner {
-    async fn terminate(&mut self) -> anyhow::Result<()> {
-        if let Some(child) = self.child.as_mut() {
+    /// Signal and wait for the child to be reaped.
+    ///
+    /// Blocks synchronously. This matters for:
+    /// - explicit `terminate().await` callers that `rm -rf` the data dir right
+    ///   after;
+    /// - `Drop` at program exit, so children don't outlive `devimint` and race
+    ///   post-test cleanup in `fm-run-test`.
+    ///
+    /// The wait is a plain `CondVar::wait` in the reaper — we never
+    /// `block_on` an async fn, so we don't reintroduce the panic-unsafe
+    /// executor-stall hazard that motivated this PR.
+    fn terminate(&mut self) {
+        if let Some(child) = self.child.take() {
             debug!(
                 target: LOG_DEVIMINT,
-                name=%self.name,
-                signal="SIGTERM",
-                "sending signal to terminate child process"
+                name = %self.name,
+                "killing child process"
             );
 
-            send_sigterm(child);
-
-            if (fedimint_core::runtime::timeout(Duration::from_secs(2), child.wait()).await)
-                .is_err()
-            {
-                debug!(
-                    target: LOG_DEVIMINT,
-                    name=%self.name,
-                    signal="SIGKILL",
-                    "sending signal to terminate child process"
-                );
-
-                send_sigkill(child);
-
-                match fedimint_core::runtime::timeout(Duration::from_secs(5), child.wait()).await {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(err)) => {
-                        bail!("Failed to terminate child process {}: {}", self.name, err);
-                    }
-                    Err(_) => {
-                        bail!("Failed to terminate child process {}: timeout", self.name);
-                    }
-                }
-            }
+            process_reaper::kill_process(&child);
+            process_reaper::reap_killed_processes();
         }
-        // only drop the child handle if succeeded to terminate
-        self.child.take();
-        Ok(())
     }
 
     async fn await_terminated(&mut self) -> anyhow::Result<()> {
@@ -180,27 +152,7 @@ impl Drop for ProcessHandleInner {
             return;
         }
 
-        if std::thread::panicking() {
-            // Doing block_in_place + block on trickery
-            // breaks down during panics, so let's just
-            // try to kill it and move on
-            if let Some(mut child) = self.child.take() {
-                send_sigterm(&child);
-                let _ = child.try_wait();
-            }
-            return;
-        }
-
-        block_in_place(|| {
-            if let Err(err) = block_on(self.terminate()) {
-                warn!(
-                    target: LOG_DEVIMINT,
-                    name=%self.name,
-                    err = %err.fmt_compact_anyhow(),
-                    "Error terminating process on drop"
-                );
-            }
-        });
+        self.terminate();
     }
 }
 
@@ -216,6 +168,9 @@ impl ProcessManager {
 
     /// Logs to $FM_LOGS_DIR/{name}.{out,err}
     pub async fn spawn_daemon(&self, name: &str, mut cmd: Command) -> Result<ProcessHandle> {
+        // Reap any recently killed processes so their resources
+        // (ports, file locks) are fully released before we bind new ones.
+        process_reaper::reap_killed_processes();
         debug!(target: LOG_DEVIMINT, %name, "Spawning daemon");
         let logs_dir = env::var(FM_LOGS_DIR_ENV)?;
         let path = format!("{logs_dir}/{name}.log");
