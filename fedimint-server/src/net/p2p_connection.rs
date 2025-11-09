@@ -67,6 +67,11 @@ where
 
         bincode::serialize_into(&mut bytes, &message)?;
 
+        // 1kb of dummy bytes
+        for _ in 0..900 {
+            bytes.push(0u8);
+        }
+
         let mut sink = self.open_uni().await?;
 
         sink.write_all(&bytes).await?;
@@ -77,9 +82,13 @@ where
     }
 
     async fn receive(&mut self) -> anyhow::Result<M> {
-        Ok(bincode::deserialize_from(Cursor::new(
-            &self.accept_uni().await?.read_to_end(1_000_000_000).await?,
-        ))?)
+        let mut data = self.accept_uni().await?.read_to_end(1_000_000_000).await?;
+
+        for _ in 0..900 {
+            data.pop();
+        }
+
+        Ok(bincode::deserialize_from(Cursor::new(&data))?)
     }
 
     fn rtt(&self) -> Duration {
