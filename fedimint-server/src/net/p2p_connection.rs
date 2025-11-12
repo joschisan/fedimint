@@ -5,6 +5,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use bytes::Bytes;
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::module::registry::ModuleRegistry;
 use futures::{SinkExt, StreamExt};
 use iroh::endpoint::Connection;
 use serde::Serialize;
@@ -60,12 +61,10 @@ where
 #[async_trait]
 impl<M> IP2PConnection<M> for Connection
 where
-    M: Serialize + DeserializeOwned + Send + 'static,
+    M: Encodable + Decodable + Send + 'static,
 {
     async fn send(&mut self, message: M) -> anyhow::Result<()> {
-        let mut bytes = Vec::new();
-
-        bincode::serialize_into(&mut bytes, &message)?;
+        let bytes = message.consensus_encode_to_vec();
 
         let mut sink = self.open_uni().await?;
 
@@ -77,9 +76,10 @@ where
     }
 
     async fn receive(&mut self) -> anyhow::Result<M> {
-        Ok(bincode::deserialize_from(Cursor::new(
+        Ok(M::consensus_decode_whole(
             &self.accept_uni().await?.read_to_end(1_000_000_000).await?,
-        ))?)
+            &ModuleRegistry::default(),
+        )?)
     }
 
     fn rtt(&self) -> Duration {
