@@ -561,6 +561,7 @@ impl ClientModuleInit for MintClientInit {
             secp: Secp256k1::new(),
             notifier: args.notifier().clone(),
             client_ctx: args.context(),
+            balance_update_sender: tokio::sync::watch::channel(()).0,
         })
     }
 
@@ -623,7 +624,6 @@ impl ClientModuleInit for MintClientInit {
 /// spend the e-cash note. Only the client that possesses the `DerivableSecret`
 /// can derive the correct spend key to spend the e-cash note. This ensures that
 /// only the owner of the e-cash note can spend it.
-#[derive(Debug)]
 pub struct MintClientModule {
     federation_id: FederationId,
     cfg: MintClientConfig,
@@ -631,10 +631,22 @@ pub struct MintClientModule {
     secp: Secp256k1<All>,
     notifier: ModuleNotifier<MintClientStateMachines>,
     pub client_ctx: ClientContext<Self>,
+    balance_update_sender: tokio::sync::watch::Sender<()>,
+}
+
+impl fmt::Debug for MintClientModule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MintClientModule")
+            .field("federation_id", &self.federation_id)
+            .field("cfg", &self.cfg)
+            .field("notifier", &self.notifier)
+            .field("client_ctx", &self.client_ctx)
+            .finish_non_exhaustive()
+    }
 }
 
 // TODO: wrap in Arc
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MintClientContext {
     pub federation_id: FederationId,
     pub client_ctx: ClientContext<MintClientModule>,
@@ -645,6 +657,15 @@ pub struct MintClientContext {
     // FIXME: putting a DB ref here is an antipattern, global context should become more powerful
     // but we need to consider it more carefully as its APIs will be harder to change.
     pub module_db: Database,
+    pub balance_update_sender: tokio::sync::watch::Sender<()>,
+}
+
+impl fmt::Debug for MintClientContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MintClientContext")
+            .field("federation_id", &self.federation_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl MintClientContext {
@@ -678,6 +699,7 @@ impl ClientModule for MintClientModule {
             peer_tbs_pks: self.cfg.peer_tbs_pks.clone(),
             secret: self.secret.clone(),
             module_db: self.client_ctx.module_db().clone(),
+            balance_update_sender: self.balance_update_sender.clone(),
         }
     }
 
@@ -818,55 +840,9 @@ impl ClientModule for MintClientModule {
     }
 
     async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()> {
-        Box::pin(
-            self.notifier
-                .subscribe_all_operations()
-                .filter_map(|state| async move {
-                    #[allow(deprecated)]
-                    match state {
-                        MintClientStateMachines::Output(MintOutputStateMachine {
-                            state: MintOutputStates::Succeeded(_),
-                            ..
-                        })
-                        | MintClientStateMachines::Input(MintInputStateMachine {
-                            state: MintInputStates::Created(_) | MintInputStates::CreatedBundle(_),
-                            ..
-                        })
-                        | MintClientStateMachines::OOB(MintOOBStateMachine {
-                            state: MintOOBStates::Created(_) | MintOOBStates::CreatedMulti(_),
-                            ..
-                        }) => Some(()),
-                        // The negative cases are enumerated explicitly to avoid missing new
-                        // variants that need to trigger balance updates
-                        MintClientStateMachines::Output(MintOutputStateMachine {
-                            state:
-                                MintOutputStates::Created(_)
-                                | MintOutputStates::CreatedMulti(_)
-                                | MintOutputStates::Failed(_)
-                                | MintOutputStates::Aborted(_),
-                            ..
-                        })
-                        | MintClientStateMachines::Input(MintInputStateMachine {
-                            state:
-                                MintInputStates::Error(_)
-                                | MintInputStates::Success(_)
-                                | MintInputStates::Refund(_)
-                                | MintInputStates::RefundedBundle(_)
-                                | MintInputStates::RefundedPerNote(_)
-                                | MintInputStates::RefundSuccess(_),
-                            ..
-                        })
-                        | MintClientStateMachines::OOB(MintOOBStateMachine {
-                            state:
-                                MintOOBStates::TimeoutRefund(_)
-                                | MintOOBStates::UserRefund(_)
-                                | MintOOBStates::UserRefundMulti(_),
-                            ..
-                        })
-                        | MintClientStateMachines::Restore(_) => None,
-                    }
-                }),
-        )
+        Box::pin(tokio_stream::wrappers::WatchStream::new(
+            self.balance_update_sender.subscribe(),
+        ))
     }
 
     async fn leave(&self, dbtx: &mut DatabaseTransaction<'_>) -> anyhow::Result<()> {
@@ -1040,6 +1016,9 @@ impl MintClientModule {
             debug!(target: LOG_CLIENT_MODULE_MINT, %amount, %note, "Spending note as sufficient input to fund a tx");
             MintClientModule::delete_spendable_note(&self.client_ctx, dbtx, amount, note).await;
         }
+
+        let sender = self.balance_update_sender.clone();
+        dbtx.on_commit(move || sender.send_replace(()));
 
         let inputs = self.create_input_from_notes(selected_notes)?;
 
@@ -1287,6 +1266,9 @@ impl MintClientModule {
             selected_notes_decoded.push((amount, spendable_note_decoded));
         }
 
+        let sender = self.balance_update_sender.clone();
+        dbtx.on_commit(move || sender.send_replace(()));
+
         self.create_input_from_notes(selected_notes_decoded.into_iter().collect())
     }
 
@@ -1349,6 +1331,9 @@ impl MintClientModule {
             debug!(target: LOG_CLIENT_MODULE_MINT, %amount, %note, "Spending note as oob");
             MintClientModule::delete_spendable_note(&self.client_ctx, dbtx, amount, note).await;
         }
+
+        let sender = self.balance_update_sender.clone();
+        dbtx.on_commit(move || sender.send_replace(()));
 
         let state_machines = vec![MintClientStateMachines::OOB(MintOOBStateMachine {
             operation_id,
@@ -1922,6 +1907,9 @@ impl MintClientModule {
             MintClientModule::delete_spendable_note(&self.client_ctx, dbtx, note_amount, note)
                 .await;
         }
+
+        let sender = self.balance_update_sender.clone();
+        dbtx.on_commit(move || sender.send_replace(()));
 
         let operation_id = spendable_notes_to_operation_id(&selected_notes);
 
