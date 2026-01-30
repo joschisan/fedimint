@@ -271,6 +271,9 @@ impl Event for EventBackupDone {
 
 impl Client {
     /// Create a backup, include provided `metadata`
+    #[deprecated(
+        note = "Recovery is now efficient enough that backups are no longer necessary. Backups will be removed in v0.13.0 due to backups being inherently complicated and brittle."
+    )]
     pub async fn create_backup(&self, metadata: Metadata) -> anyhow::Result<ClientBackup> {
         let session_count = self.api.session_count().await?;
         let mut modules = BTreeMap::new();
@@ -305,6 +308,10 @@ impl Client {
     }
 
     /// Prepare an encrypted backup and send it to federation for storing
+    #[deprecated(
+        note = "Recovery is now efficient enough that backups are no longer necessary. Backups will be removed in v0.13.0 due to backups being inherently complicated and brittle."
+    )]
+    #[allow(deprecated)]
     pub async fn backup_to_federation(&self, metadata: Metadata) -> Result<()> {
         ensure!(
             !self.has_pending_recoveries(),
@@ -330,6 +337,9 @@ impl Client {
     }
 
     /// Validate backup before sending it to federation
+    #[deprecated(
+        note = "Recovery is now efficient enough that backups are no longer necessary. Backups will be removed in v0.13.0 due to backups being inherently complicated and brittle."
+    )]
     pub fn validate_backup(&self, backup: &EncryptedClientBackup) -> Result<()> {
         if BACKUP_REQUEST_MAX_PAYLOAD_SIZE_BYTES < backup.len() {
             bail!("Backup payload too large");
@@ -338,6 +348,10 @@ impl Client {
     }
 
     /// Upload `backup` to federation
+    #[deprecated(
+        note = "Recovery is now efficient enough that backups are no longer necessary. Backups will be removed in v0.13.0 due to backups being inherently complicated and brittle."
+    )]
+    #[allow(deprecated)]
     pub async fn upload_backup(&self, backup: &EncryptedClientBackup) -> Result<()> {
         self.validate_backup(backup)?;
         let size = backup.len();
@@ -356,6 +370,10 @@ impl Client {
         Ok(())
     }
 
+    #[deprecated(
+        note = "Recovery is now efficient enough that backups are no longer necessary. Backups will be removed in v0.13.0 due to backups being inherently complicated and brittle."
+    )]
+    #[allow(deprecated)]
     pub async fn download_backup_from_federation(&self) -> Result<Option<ClientBackup>> {
         Self::download_backup_from_federation_static(
             &self.api,
@@ -366,6 +384,10 @@ impl Client {
     }
 
     /// Download most recent valid backup found from the Federation
+    #[deprecated(
+        note = "Recovery is now efficient enough that backups are no longer necessary. Backups will be removed in v0.13.0 due to backups being inherently complicated and brittle."
+    )]
+    #[allow(deprecated)]
     pub async fn download_backup_from_federation_static(
         api: &DynGlobalApi,
         root_secret: &DerivableSecret,
@@ -406,10 +428,16 @@ impl Client {
 
     /// Backup id derived from the root secret key (public key used to self-sign
     /// backup requests)
+    #[deprecated(
+        note = "Recovery is now efficient enough that backups are no longer necessary. Backups will be removed in v0.13.0 due to backups being inherently complicated and brittle."
+    )]
     pub fn get_backup_id(&self) -> PublicKey {
         self.get_derived_backup_signing_key().public_key()
     }
 
+    #[deprecated(
+        note = "Recovery is now efficient enough that backups are no longer necessary. Backups will be removed in v0.13.0 due to backups being inherently complicated and brittle."
+    )]
     pub fn get_backup_id_static(root_secret: &DerivableSecret) -> PublicKey {
         Self::get_derived_backup_signing_key_static(root_secret).public_key()
     }
