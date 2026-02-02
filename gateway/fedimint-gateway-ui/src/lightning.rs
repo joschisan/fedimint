@@ -850,6 +850,7 @@ where
                             thead {
                                 tr {
                                     th { "Remote PubKey" }
+                                    th { "Alias" }
                                     th { "Funding OutPoint" }
                                     th { "Size (sats)" }
                                     th { "Active" }
@@ -872,6 +873,13 @@ where
 
                                     tr {
                                         td { (ch.remote_pubkey.to_string()) }
+                                        td {
+                                            @if let Some(alias) = &ch.remote_node_alias {
+                                                (alias)
+                                            } @else {
+                                                span class="text-muted" { "-" }
+                                            }
+                                        }
                                         td { (funding_outpoint) }
                                         td { (ch.channel_size_sats) }
                                         td {
@@ -916,7 +924,7 @@ where
                                     }
 
                                     tr class="collapse" id=(row_id) {
-                                        td colspan="6" {
+                                        td colspan="7" {
                                             div class="card card-body" {
                                                 form
                                                     hx-post=(CLOSE_CHANNEL_ROUTE)

@@ -596,6 +596,9 @@ impl Gatewayd {
                     serde_json::from_value::<bitcoin::OutPoint>(v.clone())
                         .expect("Could not deserialize outpoint")
                 });
+                let remote_node_alias = channel
+                    .get("remote_node_alias")
+                    .map(std::string::ToString::to_string);
                 Ok(ChannelInfo {
                     remote_pubkey: remote_pubkey
                         .parse()
@@ -605,6 +608,7 @@ impl Gatewayd {
                     inbound_liquidity_sats,
                     is_active,
                     funding_outpoint,
+                    remote_node_alias,
                 })
             })
             .collect::<Result<Vec<ChannelInfo>>>()?;

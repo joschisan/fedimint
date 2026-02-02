@@ -17,7 +17,7 @@ use fedimint_gateway_common::{
 use fedimint_ln_common::contracts::Preimage;
 use fedimint_logging::LOG_LIGHTNING;
 use ldk_node::lightning::ln::msgs::SocketAddress;
-use ldk_node::lightning::routing::gossip::NodeAlias;
+use ldk_node::lightning::routing::gossip::{NodeAlias, NodeId};
 use ldk_node::payment::{PaymentDirection, PaymentKind, PaymentStatus, SendingParameters};
 use lightning::ln::channelmanager::PaymentId;
 use lightning::offers::offer::{Offer, OfferId};
@@ -650,8 +650,23 @@ impl ILnRpcClient for GatewayLdkClient {
 
     async fn list_channels(&self) -> Result<ListChannelsResponse, LightningRpcError> {
         let mut channels = Vec::new();
+        let network_graph = self.node.network_graph();
 
         for channel_details in self.node.list_channels().iter() {
+            // Look up peer alias from network graph
+            let remote_node_alias = {
+                let node_id = NodeId::from_pubkey(&channel_details.counterparty_node_id);
+                network_graph.node(&node_id).and_then(|node_info| {
+                    node_info
+                        .announcement_info
+                        .as_ref()
+                        .and_then(|announcement| {
+                            let alias = announcement.alias().to_string();
+                            if alias.is_empty() { None } else { Some(alias) }
+                        })
+                })
+            };
+
             channels.push(ChannelInfo {
                 remote_pubkey: channel_details.counterparty_node_id,
                 channel_size_sats: channel_details.channel_value_sats,
@@ -659,6 +674,7 @@ impl ILnRpcClient for GatewayLdkClient {
                 inbound_liquidity_sats: channel_details.inbound_capacity_msat / 1000,
                 is_active: channel_details.is_usable,
                 funding_outpoint: channel_details.funding_txo,
+                remote_node_alias,
             });
         }
 

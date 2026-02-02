@@ -1370,6 +1370,11 @@ impl ILnRpcClient for GatewayLndClient {
                             inbound_liquidity_sats,
                             is_active: channel.active,
                             funding_outpoint,
+                            remote_node_alias: if channel.peer_alias.is_empty() {
+                                None
+                            } else {
+                                Some(channel.peer_alias.clone())
+                            },
                         }
                     })
                     .collect(),
