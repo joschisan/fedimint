@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use clap::{Parser, Subcommand};
@@ -14,10 +12,9 @@ use fedimint_core::core::OperationId;
 use fedimint_core::encoding::Encodable;
 use fedimint_core::task::{self};
 use fedimint_core::util::{backoff_util, retry};
+use fedimint_lnurl::{LnurlResponse, VerifyResponse, parse_lnurl};
 use fedimint_lnv2_client::FinalSendOperationState;
-use fedimint_lnv2_common::lnurl::VerifyResponse;
 use lightning_invoice::Bolt11Invoice;
-use lnurl::lnurl::LnUrl;
 use serde::Deserialize;
 use substring::Substring;
 use tokio::try_join;
@@ -580,34 +577,29 @@ async fn generate_lnurl(
 }
 
 fn verify_preimage(response: &VerifyResponse, invoice: &Bolt11Invoice) {
-    let preimage = response
-        .preimage
-        .as_ref()
-        .expect("Payment should be settled");
+    let preimage = response.preimage.expect("Payment should be settled");
 
-    let payment_hash = hex_conservative::decode_to_array::<32>(preimage)
-        .expect("Valid hex")
-        .consensus_hash::<sha256::Hash>();
+    let payment_hash = preimage.consensus_hash::<sha256::Hash>();
 
     assert_eq!(payment_hash, *invoice.payment_hash());
 }
 
 async fn verify_payment(verify_url: &str) -> anyhow::Result<VerifyResponse> {
-    let response = reqwest::get(verify_url)
+    reqwest::get(verify_url)
         .await?
-        .json::<VerifyResponse>()
-        .await?;
-
-    Ok(response)
+        .json::<LnurlResponse<VerifyResponse>>()
+        .await?
+        .into_result()
+        .map_err(anyhow::Error::msg)
 }
 
 async fn verify_payment_wait(verify_url: String) -> anyhow::Result<VerifyResponse> {
-    let response = reqwest::get(format!("{verify_url}?wait"))
+    reqwest::get(format!("{verify_url}?wait"))
         .await?
-        .json::<VerifyResponse>()
-        .await?;
-
-    Ok(response)
+        .json::<LnurlResponse<VerifyResponse>>()
+        .await?
+        .into_result()
+        .map_err(anyhow::Error::msg)
 }
 
 #[derive(Deserialize, Clone)]
@@ -622,12 +614,9 @@ struct LnUrlPayInvoiceResponse {
 }
 
 async fn fetch_invoice(lnurl: String, amount_msat: u64) -> anyhow::Result<(Bolt11Invoice, String)> {
-    let endpoint = LnUrl::from_str(&lnurl)?;
+    let url = parse_lnurl(&lnurl).ok_or_else(|| anyhow::anyhow!("Invalid LNURL"))?;
 
-    let response = reqwest::get(endpoint.url)
-        .await?
-        .json::<LnUrlPayResponse>()
-        .await?;
+    let response = reqwest::get(url).await?.json::<LnUrlPayResponse>().await?;
 
     let callback_url = format!("{}?amount={}", response.callback, amount_msat);
 

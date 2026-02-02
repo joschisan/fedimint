@@ -23,7 +23,6 @@ fedimint-core = { workspace = true }
 fedimint-ln-common = { workspace = true }
 group = { workspace = true }
 lightning-invoice = { workspace = true }
-lnurl-rs = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

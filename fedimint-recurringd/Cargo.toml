@@ -25,12 +25,12 @@ fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-derive-secret = { workspace = true }
 fedimint-ln-client = { workspace = true }
+fedimint-lnurl = { workspace = true }
 fedimint-logging = { workspace = true }
 fedimint-mint-client = { workspace = true }
 fedimint-rocksdb = { workspace = true }
 futures = { workspace = true }
 lightning-invoice = { workspace = true }
-lnurl-rs = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

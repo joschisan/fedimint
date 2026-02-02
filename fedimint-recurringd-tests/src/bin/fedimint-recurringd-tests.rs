@@ -3,7 +3,6 @@ use std::ops::ControlFlow;
 use devimint::tests::log_binary_versions;
 use devimint::util::{almost_equal, poll};
 use devimint::{DevFed, cmd};
-use lightning_invoice::Bolt11Invoice;
 use tracing::info;
 
 #[tokio::main]
@@ -76,13 +75,12 @@ async fn main() -> anyhow::Result<()> {
             assert_eq!(listed_lnurl["lnurl"].as_str().unwrap(), &lnurl);
             assert_eq!(listed_lnurl["last_derivation_index"].as_i64().unwrap(), 0);
 
-            let invoice = cmd!("lnurlp", "--amount", "1000sat", lnurl)
-                .out_string()
-                .await?
-                .parse::<Bolt11Invoice>()
-                .unwrap();
-
-            gw_ldk_second.pay_invoice(invoice.clone()).await?;
+            let url = fedimint_lnurl::parse_lnurl(&lnurl).expect("valid lnurl");
+            let pay_response = fedimint_lnurl::request(&url).await.expect("pay request");
+            let invoice_response = fedimint_lnurl::get_invoice(&pay_response, 1_000_000)
+                .await
+                .expect("invoice request");
+            gw_ldk_second.pay_invoice(invoice_response.pr.clone()).await?;
 
             let invoice_op_id = poll("lnurl_receive", || async {
                 cmd!(client, "dev", "wait", "2")
@@ -128,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
             );
             assert_eq!(
                 await_invoice_result["invoice"].as_str().unwrap(),
-                &invoice.to_string()
+                &invoice_response.pr.to_string()
             );
 
             let client_balance = client.balance().await?;

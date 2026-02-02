@@ -18,6 +18,7 @@ use fedimint_core::secp256k1::Scalar;
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, BitcoinHash};
+use fedimint_lnurl::{PayResponse, pay_request_tag};
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::{
     GatewayConnection, PaymentFee, RealGatewayConnection, RoutingInfo,
@@ -28,8 +29,6 @@ use fedimint_lnv2_common::{
 };
 use fedimint_logging::TracingSetup;
 use lightning_invoice::Bolt11Invoice;
-use lnurl::Tag;
-use lnurl::pay::PayResponse;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::cors;
@@ -120,11 +119,8 @@ async fn pay(
         callback: format!("{}invoice/{payload}", base_url(&headers)),
         max_sendable: MAX_SENDABLE_MSAT,
         min_sendable: MIN_SENDABLE_MSAT,
-        tag: Tag::PayRequest,
+        tag: pay_request_tag(),
         metadata: "LNv2 Payment".to_string(),
-        comment_allowed: None,
-        allows_nostr: None,
-        nostr_pubkey: None,
     };
 
     Ok(Json(response))

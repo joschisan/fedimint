@@ -26,12 +26,10 @@ use fedimint_ln_client::{
     LightningClientInit, LightningClientModule, LightningOperationMeta,
     LightningOperationMetaVariant, LnReceiveState, tweak_user_key,
 };
+use fedimint_lnurl::{PayResponse, encode_lnurl, pay_request_tag};
 use fedimint_mint_client::MintClientInit;
 use futures::StreamExt;
 use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Sha256};
-use lnurl::Tag;
-use lnurl::lnurl::LnUrl;
-use lnurl::pay::PayResponse;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, RwLock};
 use tracing::{info, warn};
@@ -218,11 +216,10 @@ impl RecurringInvoiceServer {
     }
 
     fn create_lnurl(&self, payment_code_id: PaymentCodeId) -> String {
-        let lnurl = LnUrl::from_url(format!(
-            "{}lnv1/paycodes/{}",
-            self.base_url, payment_code_id
-        ));
-        lnurl.encode()
+        let url = format!("{}lnv1/paycodes/{}", self.base_url, payment_code_id)
+            .parse()
+            .expect("valid URL");
+        encode_lnurl(&url)
     }
 
     pub async fn lnurl_pay(
@@ -236,11 +233,8 @@ impl RecurringInvoiceServer {
             callback: format!("{}lnv1/paycodes/{}/invoice", self.base_url, payment_code_id),
             max_sendable: 100000000000,
             min_sendable: 1,
-            tag: Tag::PayRequest,
+            tag: pay_request_tag(),
             metadata: meta,
-            comment_allowed: None,
-            allows_nostr: None,
-            nostr_pubkey: None,
         })
     }
 

@@ -14,6 +14,7 @@ path = "src/bin/fedimint-recurringd-tests.rs"
 [dependencies]
 anyhow = { workspace = true }
 devimint = { workspace = true }
+fedimint-lnurl = { workspace = true }
 lightning-invoice = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
