@@ -1352,6 +1352,10 @@ impl ClientPreview {
     }
 
     /// Download most recent valid backup found from the Federation
+    #[deprecated(
+        note = "Recovery is now efficient enough that backups are no longer necessary. Backups will be removed in v0.13.0 due to backups being inherently complicated and brittle."
+    )]
+    #[allow(deprecated)]
     pub async fn download_backup_from_federation(
         &self,
         pre_root_secret: RootSecret,
