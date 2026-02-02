@@ -1,6 +1,8 @@
 use std::convert::Infallible;
+use std::fmt;
+#[cfg(not(target_family = "wasm"))]
+use std::panic;
 use std::sync::Arc;
-use std::{fmt, panic};
 
 use fedimint_core::runtime::JoinHandle;
 use fedimint_logging::LOG_TASK;

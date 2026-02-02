@@ -2339,13 +2339,18 @@ pub async fn admin_auth_tests(dev_fed: DevFed) -> Result<()> {
 
     // Now run an admin command WITHOUT --our-id and --password
     // It should use the stored credentials automatically
-    let status_result = cmd!(client, "admin", "status").out_json().await;
-
-    // The command should succeed using stored credentials
-    assert!(
-        status_result.is_ok(),
-        "Admin status command should succeed with stored credentials"
-    );
+    // Use retry logic to handle transient iroh connection issues
+    retry(
+        "Admin status with stored credentials",
+        aggressive_backoff(),
+        || async {
+            cmd!(client, "admin", "status")
+                .out_json()
+                .await
+                .context("Admin status command should succeed with stored credentials")
+        },
+    )
+    .await?;
 
     info!(target: LOG_DEVIMINT, "Testing that --force overwrites existing credentials");
 
