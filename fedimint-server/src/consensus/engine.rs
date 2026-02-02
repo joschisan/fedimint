@@ -513,7 +513,7 @@ impl ConsensusEngine {
         // signature or a signed session outcome arrives from our peers
         while signatures.len() < self.num_peers().threshold() {
             tokio::select! {
-                // TODO: remove this branch in 0.11.0
+                // TODO: remove this branch in 0.12.0
                 result = ordered_unit_receiver.recv() => {
                     let ordered_unit = result.ok()?;
 
