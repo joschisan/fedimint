@@ -18,7 +18,7 @@ use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::module::{ApiRequestErased, SerdeModuleEncoding};
-use fedimint_core::net::peers::DynP2PConnections;
+use fedimint_core::net::peers::{DynP2PConnections, Recipient};
 use fedimint_core::runtime::spawn;
 use fedimint_core::secp256k1::schnorr;
 use fedimint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
@@ -256,7 +256,6 @@ impl ConsensusEngine {
         // we can use an unbounded channel here since the number and size of units
         // ordered in a single aleph session is bounded as described above
         let (unit_data_sender, unit_data_receiver) = async_channel::unbounded();
-        let (signature_sender, signature_receiver) = watch::channel(None);
         let (timestamp_sender, timestamp_receiver) = async_channel::unbounded();
         let (terminator_sender, terminator_receiver) = futures::channel::oneshot::channel();
 
@@ -271,7 +270,6 @@ impl ConsensusEngine {
                 aleph_bft::LocalIO::new(
                     DataProvider::new(
                         self.submission_receiver.clone(),
-                        signature_receiver,
                         timestamp_sender,
                         self.is_recovery().await,
                     ),
@@ -297,7 +295,6 @@ impl ConsensusEngine {
             .complete_signed_session_outcome(
                 session_index,
                 unit_data_receiver,
-                signature_sender,
                 timestamp_receiver,
                 signed_outcomes_receiver,
                 signatures_receiver,
@@ -339,16 +336,14 @@ impl ConsensusEngine {
             .is_some()
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn complete_signed_session_outcome(
         &self,
         session_index: u64,
         ordered_unit_receiver: Receiver<OrderedUnit>,
-        signature_sender: watch::Sender<Option<schnorr::Signature>>,
         timestamp_receiver: Receiver<Instant>,
         signed_outcomes_receiver: Receiver<(PeerId, SignedSessionOutcome)>,
         signatures_receiver: Receiver<(PeerId, schnorr::Signature)>,
-        _connections: DynP2PConnections<P2PMessage>,
+        connections: DynP2PConnections<P2PMessage>,
     ) -> Option<SignedSessionOutcome> {
         // It is guaranteed that aleph bft will always replay all previously processed
         // items from the current session from index zero
@@ -563,10 +558,6 @@ impl ConsensusEngine {
 
         let our_signature = keychain.sign_schnorr(&header);
 
-        // Send our own signature to the data provider to be submitted to AlephBFT
-        #[allow(clippy::disallowed_methods)]
-        signature_sender.send(Some(our_signature)).ok()?;
-
         let mut signatures = BTreeMap::from_iter([(self.identity(), our_signature)]);
 
         let items_dump = tokio::sync::OnceCell::new();
@@ -672,11 +663,10 @@ impl ConsensusEngine {
                     );
                 }
                 _ = signature_broadcast_interval.tick() => {
-                    // TODO: start sending the new messages in 0.11.0
-                    // connections.send(
-                    //     Recipient::Everyone,
-                    //     P2PMessage::SessionSignature(our_signature),
-                    // );
+                    connections.send(
+                        Recipient::Everyone,
+                        P2PMessage::SessionSignature(our_signature),
+                    );
                 }
                 _ = index_broadcast_interval.tick() => {
                     // TODO: start sending the new messages in 0.11.0
