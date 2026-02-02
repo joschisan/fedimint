@@ -7,17 +7,13 @@ use std::time::{Duration, Instant};
 use aleph_bft::Keychain as KeychainTrait;
 use anyhow::{anyhow, bail};
 use async_channel::Receiver;
-use fedimint_api_client::api::{DynGlobalApi, FederationApiExt, ServerError};
-use fedimint_api_client::query::FilterMap;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::core::{DynOutput, MODULE_INSTANCE_ID_GLOBAL};
 use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::Decodable;
-use fedimint_core::endpoint_constants::AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT;
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
-use fedimint_core::module::{ApiRequestErased, SerdeModuleEncoding};
 use fedimint_core::net::peers::{DynP2PConnections, Recipient};
 use fedimint_core::runtime::spawn;
 use fedimint_core::secp256k1::schnorr;
@@ -62,7 +58,6 @@ const DB_CHECKPOINTS_DIR: &str = "db_checkpoints";
 pub struct ConsensusEngine {
     pub modules: ServerModuleRegistry,
     pub db: Database,
-    pub federation_api: DynGlobalApi,
     pub cfg: ServerConfig,
     pub submission_receiver: Receiver<ConsensusItem>,
     pub shutdown_receiver: watch::Receiver<Option<u64>>,
@@ -282,6 +277,7 @@ impl ConsensusEngine {
                     signed_outcomes_sender,
                     signatures_sender,
                     self.db.clone(),
+                    self.decoders(),
                 ),
                 Keychain::new(&self.cfg),
                 Spawner::new(self.task_group.make_subgroup()),
@@ -352,11 +348,6 @@ impl ConsensusEngine {
         // We request the signed session outcome every three seconds from a random peer
         let mut index_broadcast_interval = tokio::time::interval(Duration::from_secs(3));
 
-        let mut request_signed_session_outcome = Box::pin(async {
-            self.request_signed_session_outcome(&self.federation_api, session_index)
-                .await
-        });
-
         // We build a session outcome out of the ordered batches until either we have
         // processed broadcast_rounds_per_session rounds or a threshold signed
         // session outcome is obtained from our peers
@@ -417,52 +408,6 @@ impl ConsensusEngine {
                             }
                         }
                     }
-                },
-                // TODO: remove this branch in 0.11.0
-                signed_session_outcome = &mut request_signed_session_outcome => {
-                    info!(
-                        target: LOG_CONSENSUS,
-                        ?session_index,
-                        "Recovered signed session outcome from peers while processing consensus items"
-                    );
-
-                    let pending_accepted_items = self.pending_accepted_items().await;
-
-                    // this panics if we have more accepted items than the signed session outcome
-                    let (processed, unprocessed) = signed_session_outcome
-                        .session_outcome
-                        .items
-                        .split_at(pending_accepted_items.len());
-
-                    info!(
-                        target: LOG_CONSENSUS,
-                        session_index,
-                        processed = %processed.len(),
-                        unprocessed = %unprocessed.len(),
-                        "Processing remaining items..."
-                    );
-
-                    assert!(
-                        processed.iter().eq(pending_accepted_items.iter()),
-                        "Consensus Failure: pending accepted items disagree with federation consensus"
-                    );
-
-                    for (accepted_item, item_index) in unprocessed.iter().zip(processed.len()..) {
-                        if let Err(err) = self.process_consensus_item(
-                            session_index,
-                            item_index as u64,
-                            accepted_item.item.clone(),
-                            accepted_item.peer
-                        ).await {
-                            panic!(
-                                "Consensus Failure: rejected item accepted by federation consensus: {accepted_item:?}, items: {}+{}, session_idx: {session_index}, item_idx: {item_index}, err: {err}",
-                                processed.len(),
-                                unprocessed.len(),
-                            );
-                        }
-                    }
-
-                    return Some(signed_session_outcome);
                 },
                 result = signed_outcomes_receiver.recv() => {
                     let (peer_id, p2p_outcome) = result.ok()?;
@@ -529,11 +474,10 @@ impl ConsensusEngine {
                     );
                 }
                 _ = index_broadcast_interval.tick() => {
-                    // TODO: start sending the new messages in 0.11.0
-                    // connections.send(
-                    //     Recipient::Peer(self.random_peer()),
-                    //     P2PMessage::SessionIndex(session_index),
-                    // );
+                    connections.send(
+                        Recipient::Peer(self.random_peer()),
+                        P2PMessage::SessionIndex(session_index),
+                    );
                 }
             }
         }
@@ -620,22 +564,6 @@ impl ConsensusEngine {
                         "Invalid P2P signature from peer"
                     );
                 }
-                // TODO: remove this branch in 0.11.0
-                signed_session_outcome = &mut request_signed_session_outcome => {
-                    info!(
-                        target: LOG_CONSENSUS,
-                        ?session_index,
-                        "Recovered signed session outcome from peers while collecting signatures"
-                    );
-
-                    assert_eq!(
-                        header,
-                        signed_session_outcome.session_outcome.header(session_index),
-                        "Consensus Failure: header disagrees with federation consensus"
-                    );
-
-                    return Some(signed_session_outcome);
-                },
                 result = signed_outcomes_receiver.recv() => {
                     let (peer_id, p2p_outcome) = result.ok()?;
 
@@ -669,11 +597,10 @@ impl ConsensusEngine {
                     );
                 }
                 _ = index_broadcast_interval.tick() => {
-                    // TODO: start sending the new messages in 0.11.0
-                    // connections.send(
-                    //     Recipient::Peer(self.random_peer()),
-                    //     P2PMessage::SessionIndex(session_index),
-                    // );
+                    connections.send(
+                        Recipient::Peer(self.random_peer()),
+                        P2PMessage::SessionIndex(session_index),
+                    );
                 }
             }
         }
@@ -691,7 +618,6 @@ impl ConsensusEngine {
     }
 
     /// Returns a random peer ID excluding ourselves
-    #[allow(unused)]
     fn random_peer(&self) -> PeerId {
         self.num_peers()
             .peer_ids()
@@ -1052,41 +978,6 @@ impl ConsensusEngine {
                 panic!("Unexpected consensus item type: {variant}")
             }
         }
-    }
-
-    async fn request_signed_session_outcome(
-        &self,
-        federation_api: &DynGlobalApi,
-        index: u64,
-    ) -> SignedSessionOutcome {
-        let decoders = self.decoders();
-        let keychain = Keychain::new(&self.cfg);
-        let threshold = self.num_peers().threshold();
-
-        let filter_map = move |response: SerdeModuleEncoding<SignedSessionOutcome>| {
-            let signed_session_outcome = response
-                .try_into_inner(&decoders)
-                .map_err(|x| ServerError::ResponseDeserialization(x.into()))?;
-            let header = signed_session_outcome.session_outcome.header(index);
-            if signed_session_outcome.signatures.len() == threshold
-                && signed_session_outcome
-                    .signatures
-                    .iter()
-                    .all(|(peer_id, sig)| keychain.verify_schnorr(&header, sig, *peer_id))
-            {
-                Ok(signed_session_outcome)
-            } else {
-                Err(ServerError::InvalidResponse(anyhow!("Invalid signatures")))
-            }
-        };
-
-        federation_api
-            .request_with_strategy_retry(
-                FilterMap::new(filter_map.clone()),
-                AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT.to_string(),
-                ApiRequestErased::new(index),
-            )
-            .await
     }
 
     /// Returns the number of sessions already saved in the database. This count
