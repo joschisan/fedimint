@@ -8,7 +8,9 @@ use fedimint_ui_common::UiState;
 use fedimint_ui_common::auth::UserAuth;
 use maud::{Markup, html};
 
-use crate::{CONNECT_FEDERATION_ROUTE, DynGatewayApi, redirect_error, redirect_success};
+use crate::{
+    CONNECT_FEDERATION_ROUTE, DynGatewayApi, redirect_error, redirect_success_with_export_reminder,
+};
 
 pub fn render() -> Markup {
     html!(
@@ -44,8 +46,8 @@ pub async fn connect_federation_handler<E: Display>(
     match state.api.handle_connect_federation(payload).await {
         Ok(info) => {
             // Redirect back to dashboard on success
-            redirect_success(format!(
-                "Successfully joined {}",
+            redirect_success_with_export_reminder(format!(
+                "Successfully joined {}.",
                 info.federation_name
                     .unwrap_or("Unnamed Federation".to_string())
             ))

@@ -25,6 +25,7 @@ use serde::Deserialize;
 use crate::{
     DEPOSIT_ADDRESS_ROUTE, DynGatewayApi, RECEIVE_ECASH_ROUTE, SET_FEES_ROUTE, SPEND_ECASH_ROUTE,
     WITHDRAW_CONFIRM_ROUTE, WITHDRAW_PREVIEW_ROUTE, redirect_error, redirect_success,
+    redirect_success_with_export_reminder,
 };
 
 #[derive(Deserialize)]
@@ -463,8 +464,8 @@ pub async fn leave_federation_handler<E: Display>(
         {
             Ok(info) => {
                 // Redirect back to dashboard after success
-                redirect_success(format!(
-                    "Successfully left {}",
+                redirect_success_with_export_reminder(format!(
+                    "Successfully left {}.",
                     info.federation_name
                         .unwrap_or("Unnamed Federation".to_string())
                 ))
