@@ -12,8 +12,8 @@ use fedimint_core::time::now;
 use fedimint_gateway_common::{
     ChannelInfo, CloseChannelsWithPeerRequest, CreateInvoiceForOperatorPayload, CreateOfferPayload,
     GatewayBalances, GatewayInfo, LightningInfo, LightningMode, ListTransactionsPayload,
-    ListTransactionsResponse, OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentStatus,
-    SendOnchainRequest,
+    ListTransactionsResponse, OpenChannelRequest, PayInvoiceForOperatorPayload, PayOfferPayload,
+    PaymentStatus, SendOnchainRequest,
 };
 use fedimint_logging::LOG_GATEWAY_UI;
 use fedimint_ui_common::UiState;
@@ -25,9 +25,9 @@ use serde::Deserialize;
 use tracing::debug;
 
 use crate::{
-    CHANNEL_FRAGMENT_ROUTE, CLOSE_CHANNEL_ROUTE, CREATE_RECEIVE_INVOICE_ROUTE, DynGatewayApi,
-    LN_ONCHAIN_ADDRESS_ROUTE, OPEN_CHANNEL_ROUTE, PAY_BOLT11_INVOICE_ROUTE,
-    PAYMENTS_FRAGMENT_ROUTE, SEND_ONCHAIN_ROUTE, TRANSACTIONS_FRAGMENT_ROUTE,
+    CHANNEL_FRAGMENT_ROUTE, CLOSE_CHANNEL_ROUTE, CREATE_RECEIVE_INVOICE_ROUTE,
+    DETECT_PAYMENT_TYPE_ROUTE, DynGatewayApi, LN_ONCHAIN_ADDRESS_ROUTE, OPEN_CHANNEL_ROUTE,
+    PAY_UNIFIED_ROUTE, PAYMENTS_FRAGMENT_ROUTE, SEND_ONCHAIN_ROUTE, TRANSACTIONS_FRAGMENT_ROUTE,
     WALLET_FRAGMENT_ROUTE,
 };
 
@@ -529,6 +529,30 @@ pub struct ReceiveResults {
     pub bolt12_error: Option<String>,
 }
 
+/// Detected payment string type for unified send
+#[derive(Debug, Clone, PartialEq)]
+pub enum PaymentStringType {
+    Bolt11,
+    Bolt12,
+    Unknown,
+}
+
+/// Detects the payment type from the payment string prefix
+fn detect_payment_type(payment_string: &str) -> PaymentStringType {
+    let lower = payment_string.trim().to_lowercase();
+
+    // BOLT11 prefixes: lnbc (mainnet), lntb (testnet), lnbcrt (regtest)
+    if lower.starts_with("lnbc") || lower.starts_with("lntb") || lower.starts_with("lnbcrt") {
+        PaymentStringType::Bolt11
+    }
+    // BOLT12 offer prefix
+    else if lower.starts_with("lno") {
+        PaymentStringType::Bolt12
+    } else {
+        PaymentStringType::Unknown
+    }
+}
+
 /// Helper to deserialize empty strings as None
 fn empty_string_as_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
@@ -557,6 +581,26 @@ pub struct CreateReceiveInvoicePayload {
     /// Description (optional)
     #[serde(default)]
     pub description: Option<String>,
+}
+
+/// Form payload for unified send (BOLT11 or BOLT12)
+#[derive(Debug, Deserialize)]
+pub struct UnifiedSendPayload {
+    /// The payment string (BOLT11 invoice or BOLT12 offer)
+    pub payment_string: String,
+    /// Amount in msats (optional, for variable-amount BOLT12 offers)
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub amount_msats: Option<u64>,
+    /// Payer note (optional, BOLT12 only)
+    #[serde(default)]
+    pub payer_note: Option<String>,
+}
+
+/// Form payload for payment type detection
+#[derive(Debug, Deserialize)]
+pub struct DetectPaymentTypePayload {
+    /// The payment string to detect
+    pub payment_string: String,
 }
 
 /// Renders a QR code with copyable text for an invoice or offer
@@ -663,27 +707,47 @@ where
                         { "Receive" }
                     }
 
-                    // Send form
+                    // Send form - Unified BOLT11/BOLT12
                     div id="pay-invoice-form" class="card card-body mt-3 d-none" {
                         form
-                            id="pay-ln-invoice-form"
-                            hx-post=(PAY_BOLT11_INVOICE_ROUTE)
+                            id="unified-send-form"
+                            hx-post=(PAY_UNIFIED_ROUTE)
                             hx-target="#payments-container"
-                            hw-swap="outerHTML"
+                            hx-swap="outerHTML"
                         {
                             div class="mb-3" {
-                                label class="form-label" for="invoice" { "Bolt11 Invoice" }
+                                @if is_lnd {
+                                    label class="form-label" for="payment_string" {
+                                        "Payment String"
+                                        small class="text-muted ms-2" { "(BOLT11 invoice)" }
+                                    }
+                                } @else {
+                                    label class="form-label" for="payment_string" {
+                                        "Payment String"
+                                        small class="text-muted ms-2" { "(BOLT11 invoice or BOLT12 offer)" }
+                                    }
+                                }
+
                                 input type="text"
                                     class="form-control"
-                                    id="invoice"
-                                    name="invoice"
-                                    required;
+                                    id="payment_string"
+                                    name="payment_string"
+                                    required
+                                    hx-post=(DETECT_PAYMENT_TYPE_ROUTE)
+                                    hx-trigger="input changed delay:500ms"
+                                    hx-target="#bolt12-fields"
+                                    hx-swap="innerHTML"
+                                    hx-include="[name='payment_string']";
                             }
+
+                            // Dynamic fields container - populated via HTMX when BOLT12 detected
+                            div id="bolt12-fields" {}
 
                             button
                                 type="submit"
+                                id="send-submit-btn"
                                 class="btn btn-success btn-sm"
-                            { "Pay Invoice" }
+                            { "Pay" }
                         }
                     }
 
@@ -1547,6 +1611,218 @@ where
                 None,
                 None,
                 Some(format!("Failed to pay invoice: {e}")),
+                is_lnd,
+            );
+            Html(markup.into_string())
+        }
+    }
+}
+
+/// Handler to detect payment type and return appropriate form fields
+pub async fn detect_payment_type_handler<E>(
+    State(state): State<UiState<DynGatewayApi<E>>>,
+    _auth: UserAuth,
+    Form(payload): Form<DetectPaymentTypePayload>,
+) -> Html<String>
+where
+    E: std::fmt::Display,
+{
+    let is_lnd = matches!(state.api.lightning_mode(), LightningMode::Lnd { .. });
+    let payment_type = detect_payment_type(&payload.payment_string);
+
+    let markup = match payment_type {
+        PaymentStringType::Bolt12 if is_lnd => {
+            // LND cannot pay BOLT12 - show error
+            html! {
+                div class="alert alert-danger mt-2" {
+                    strong { "BOLT12 offers are not supported with LND." }
+                    p class="mb-0 mt-1" { "Please use a BOLT11 invoice instead." }
+                }
+                script {
+                    (PreEscaped("document.getElementById('send-submit-btn').disabled = true;"))
+                }
+            }
+        }
+        PaymentStringType::Bolt12 => {
+            // Show optional BOLT12 fields
+            html! {
+                div class="mt-3 p-2 bg-light rounded" {
+                    div class="mb-2" {
+                        label class="form-label" for="amount_msats" {
+                            "Amount (msats)"
+                            small class="text-muted ms-2" { "(optional for fixed-amount offers)" }
+                        }
+                        input type="number"
+                            class="form-control"
+                            id="amount_msats"
+                            name="amount_msats"
+                            min="1"
+                            placeholder="Leave empty for fixed-amount offers";
+                    }
+
+                    div class="mb-2" {
+                        label class="form-label" for="payer_note" {
+                            "Payer Note"
+                            small class="text-muted ms-2" { "(optional)" }
+                        }
+                        input type="text"
+                            class="form-control"
+                            id="payer_note"
+                            name="payer_note"
+                            placeholder="Optional note to recipient";
+                    }
+                }
+                script {
+                    (PreEscaped("document.getElementById('send-submit-btn').disabled = false;"))
+                }
+            }
+        }
+        PaymentStringType::Bolt11 => {
+            // Clear any previous BOLT12 fields, enable submit
+            html! {
+                script {
+                    (PreEscaped("document.getElementById('send-submit-btn').disabled = false;"))
+                }
+            }
+        }
+        PaymentStringType::Unknown => {
+            // Show validation hint if there's some input
+            if payload.payment_string.trim().is_empty() {
+                html! {}
+            } else {
+                html! {
+                    div class="alert alert-warning mt-2" {
+                        small { "Could not detect payment type. Please paste a valid BOLT11 invoice (starting with lnbc/lntb/lnbcrt) or BOLT12 offer (starting with lno)." }
+                    }
+                }
+            }
+        }
+    };
+
+    Html(markup.into_string())
+}
+
+/// Unified handler for paying BOLT11 invoices or BOLT12 offers
+pub async fn pay_unified_handler<E>(
+    State(state): State<UiState<DynGatewayApi<E>>>,
+    _auth: UserAuth,
+    Form(payload): Form<UnifiedSendPayload>,
+) -> Html<String>
+where
+    E: std::fmt::Display,
+{
+    let is_lnd = matches!(state.api.lightning_mode(), LightningMode::Lnd { .. });
+    let payment_type = detect_payment_type(&payload.payment_string);
+    let balances_result = state.api.handle_get_balances_msg().await;
+
+    match payment_type {
+        PaymentStringType::Bolt12 if is_lnd => {
+            // Should not happen if detection works, but handle gracefully
+            let markup = payments_fragment_markup(
+                &balances_result,
+                None,
+                None,
+                Some(
+                    "BOLT12 offers are not supported with LND. Please use a BOLT11 invoice."
+                        .to_string(),
+                ),
+                is_lnd,
+            );
+            Html(markup.into_string())
+        }
+        PaymentStringType::Bolt12 => {
+            // Pay BOLT12 offer
+            let offer_payload = PayOfferPayload {
+                offer: payload.payment_string,
+                amount: payload.amount_msats.map(fedimint_core::Amount::from_msats),
+                quantity: None,
+                payer_note: payload.payer_note,
+            };
+
+            match state
+                .api
+                .handle_pay_offer_for_operator_msg(offer_payload)
+                .await
+            {
+                Ok(response) => {
+                    let markup = payments_fragment_markup(
+                        &balances_result,
+                        None,
+                        Some(format!(
+                            "Successfully paid BOLT12 offer. Preimage: {}",
+                            response.preimage
+                        )),
+                        None,
+                        is_lnd,
+                    );
+                    Html(markup.into_string())
+                }
+                Err(e) => {
+                    let markup = payments_fragment_markup(
+                        &balances_result,
+                        None,
+                        None,
+                        Some(format!("Failed to pay BOLT12 offer: {e}")),
+                        is_lnd,
+                    );
+                    Html(markup.into_string())
+                }
+            }
+        }
+        PaymentStringType::Bolt11 => {
+            // Parse and pay BOLT11 invoice
+            match payload
+                .payment_string
+                .trim()
+                .parse::<lightning_invoice::Bolt11Invoice>()
+            {
+                Ok(invoice) => {
+                    let bolt11_payload = PayInvoiceForOperatorPayload { invoice };
+                    match state
+                        .api
+                        .handle_pay_invoice_for_operator_msg(bolt11_payload)
+                        .await
+                    {
+                        Ok(preimage) => {
+                            let markup = payments_fragment_markup(
+                                &balances_result,
+                                None,
+                                Some(format!("Successfully paid invoice. Preimage: {preimage}")),
+                                None,
+                                is_lnd,
+                            );
+                            Html(markup.into_string())
+                        }
+                        Err(e) => {
+                            let markup = payments_fragment_markup(
+                                &balances_result,
+                                None,
+                                None,
+                                Some(format!("Failed to pay invoice: {e}")),
+                                is_lnd,
+                            );
+                            Html(markup.into_string())
+                        }
+                    }
+                }
+                Err(e) => {
+                    let markup = payments_fragment_markup(
+                        &balances_result,
+                        None,
+                        None,
+                        Some(format!("Invalid BOLT11 invoice: {e}")),
+                        is_lnd,
+                    );
+                    Html(markup.into_string())
+                }
+            }
+        }
+        PaymentStringType::Unknown => {
+            let markup = payments_fragment_markup(
+                &balances_result,
+                None,
+                None,
+                Some("Could not detect payment type. Please provide a valid BOLT11 invoice or BOLT12 offer.".to_string()),
                 is_lnd,
             );
             Html(markup.into_string())
