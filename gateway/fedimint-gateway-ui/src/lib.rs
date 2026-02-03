@@ -93,6 +93,7 @@ pub(crate) const CREATE_WALLET_ROUTE: &str = "/ui/wallet/create";
 pub(crate) const RECOVER_WALLET_ROUTE: &str = "/ui/wallet/recover";
 pub(crate) const MNEMONIC_IFRAME_ROUTE: &str = "/ui/mnemonic/iframe";
 pub(crate) const EXPORT_INVITE_CODES_ROUTE: &str = "/ui/export-invite-codes";
+pub(crate) const IMPORT_INVITE_CODES_ROUTE: &str = "/ui/federations/import";
 
 #[derive(Default, Deserialize)]
 pub struct DashboardQuery {
@@ -387,7 +388,7 @@ where
 
         div class="row gy-4 mt-2" {
             div class="col-md-12" {
-                (connect_fed::render())
+                (connect_fed::render(&gateway_info.gateway_state))
             }
         }
 
@@ -448,6 +449,158 @@ where
         .expect("Failed to build response")
 }
 
+async fn import_invite_codes_handler<E>(
+    State(state): State<UiState<DynGatewayApi<E>>>,
+    _auth: UserAuth,
+    mut multipart: axum::extract::Multipart,
+) -> impl IntoResponse
+where
+    E: std::fmt::Display,
+{
+    const MAX_FILE_SIZE: usize = 1024 * 1024; // 1MB
+
+    // Check gateway is in Running state
+    let gateway_info = match state.api.handle_get_info().await {
+        Ok(info) => info,
+        Err(err) => {
+            return redirect_error(format!("Failed to get gateway info: {err}")).into_response();
+        }
+    };
+
+    if gateway_info.gateway_state != "Running" {
+        return redirect_error(
+            "Gateway must be in Running state to recover federations. Please wait for the gateway to finish starting up.".to_string(),
+        )
+        .into_response();
+    }
+
+    // Extract file from multipart
+    let field = match multipart.next_field().await {
+        Ok(Some(field)) => field,
+        Ok(None) => {
+            return redirect_error("No file uploaded".to_string()).into_response();
+        }
+        Err(err) => {
+            return redirect_error(format!("Failed to read uploaded file: {err}")).into_response();
+        }
+    };
+
+    // Get file data
+    let data = match field.bytes().await {
+        Ok(data) => data,
+        Err(err) => {
+            return redirect_error(format!("Failed to read file data: {err}")).into_response();
+        }
+    };
+
+    // Check file size
+    if data.len() > MAX_FILE_SIZE {
+        return redirect_error(format!(
+            "File too large. Maximum size is {}MB.",
+            MAX_FILE_SIZE / (1024 * 1024)
+        ))
+        .into_response();
+    }
+
+    // Parse JSON
+    let invite_codes: BTreeMap<FederationId, Vec<InviteCode>> = match serde_json::from_slice(&data)
+    {
+        Ok(codes) => codes,
+        Err(err) => {
+            return redirect_error(format!(
+                "Failed to parse JSON file. Expected format: BTreeMap<FederationId, Vec<InviteCode>>. Error: {err}"
+            ))
+            .into_response();
+        }
+    };
+
+    if invite_codes.is_empty() {
+        return redirect_error("No federations found in the uploaded file".to_string())
+            .into_response();
+    }
+
+    // Process each federation
+    let mut recovered = Vec::new();
+    let mut skipped = Vec::new();
+    let mut failed = Vec::new();
+
+    for (federation_id, codes) in invite_codes {
+        if codes.is_empty() {
+            failed.push((federation_id, "No invite codes available".to_string()));
+            continue;
+        }
+
+        // Check if federation already exists
+        let already_joined = gateway_info
+            .federations
+            .iter()
+            .any(|f| f.federation_id == federation_id);
+
+        if already_joined {
+            skipped.push(federation_id);
+            continue;
+        }
+
+        // Try to join with the first invite code and recover=true
+        let invite_code_str = codes[0].to_string();
+        let payload = ConnectFedPayload {
+            invite_code: invite_code_str,
+            use_tor: None,
+            recover: Some(true),
+        };
+
+        match state.api.handle_connect_federation(payload).await {
+            Ok(info) => {
+                recovered.push((federation_id, info.federation_name));
+            }
+            Err(err) => {
+                failed.push((federation_id, err.to_string()));
+            }
+        }
+    }
+
+    // Build result message
+    let total = recovered.len() + skipped.len() + failed.len();
+    let mut msg_parts = vec![format!(
+        "Processed {} of {} federations.",
+        recovered.len() + failed.len(),
+        total
+    )];
+
+    if !recovered.is_empty() {
+        let names: Vec<String> = recovered
+            .iter()
+            .map(|(id, name)| {
+                name.as_ref()
+                    .map(|n| format!("{} ({})", n, id))
+                    .unwrap_or_else(|| id.to_string())
+            })
+            .collect();
+        msg_parts.push(format!("Recovered: {}", names.join(", ")));
+    }
+
+    if !skipped.is_empty() {
+        let ids: Vec<String> = skipped.iter().map(|id| id.to_string()).collect();
+        msg_parts.push(format!("Skipped (already joined): {}", ids.join(", ")));
+    }
+
+    if !failed.is_empty() {
+        let failures: Vec<String> = failed
+            .iter()
+            .map(|(id, err)| format!("{} (error: {})", id, err))
+            .collect();
+        msg_parts.push(format!("Failed: {}", failures.join(", ")));
+    }
+
+    let message = msg_parts.join(" ");
+
+    if failed.is_empty() {
+        redirect_success_with_export_reminder(message).into_response()
+    } else {
+        redirect_error(message).into_response()
+    }
+}
+
 pub fn router<E: Display + Send + Sync + std::fmt::Debug + 'static>(
     api: DynGatewayApi<E>,
 ) -> Router {
@@ -487,6 +640,7 @@ pub fn router<E: Display + Send + Sync + std::fmt::Debug + 'static>(
         )
         .route(STOP_GATEWAY_ROUTE, post(stop_gateway_handler))
         .route(EXPORT_INVITE_CODES_ROUTE, get(export_invite_codes_handler))
+        .route(IMPORT_INVITE_CODES_ROUTE, post(import_invite_codes_handler))
         .route(WITHDRAW_PREVIEW_ROUTE, post(withdraw_preview_handler))
         .route(WITHDRAW_CONFIRM_ROUTE, post(withdraw_confirm_handler))
         .route(PAYMENT_LOG_ROUTE, get(payment_log_fragment_handler))
