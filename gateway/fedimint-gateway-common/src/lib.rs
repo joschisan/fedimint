@@ -324,6 +324,7 @@ pub struct ChannelInfo {
     pub inbound_liquidity_sats: u64,
     pub is_active: bool,
     pub funding_outpoint: Option<OutPoint>,
+    pub remote_node_alias: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
