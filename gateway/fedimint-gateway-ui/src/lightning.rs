@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::str::FromStr;
 use std::time::{Duration, UNIX_EPOCH};
 
 use axum::Form;
@@ -18,6 +19,7 @@ use fedimint_gateway_common::{
 use fedimint_logging::LOG_GATEWAY_UI;
 use fedimint_ui_common::UiState;
 use fedimint_ui_common::auth::UserAuth;
+use lightning::offers::offer::{Amount, Offer};
 use maud::{Markup, PreEscaped, html};
 use qrcode::QrCode;
 use qrcode::render::svg;
@@ -1645,37 +1647,142 @@ where
         }
         PaymentStringType::Bolt12 => {
             // Show optional BOLT12 fields
-            html! {
-                div class="mt-3 p-2 bg-light rounded" {
-                    div class="mb-2" {
-                        label class="form-label" for="amount_msats" {
-                            "Amount (msats)"
-                            small class="text-muted ms-2" { "(optional for fixed-amount offers)" }
+            let offer = Offer::from_str(&payload.payment_string);
+
+            if let Ok(offer) = offer {
+                html! {
+                    div class="mt-3 p-2 bg-light rounded" {
+
+                        @match offer.amount() {
+                            Some(Amount::Bitcoin { amount_msats }) => {
+                                div class="mb-2" {
+                                    label class="form-label" for="amount_msats" {
+                                        "Amount (msats)"
+                                        small class="text-muted ms-2" { "(fixed by offer)" }
+                                    }
+
+                                    input
+                                        type="number"
+                                        class="form-control"
+                                        id="amount_msats"
+                                        name="amount_msats"
+                                        value=(amount_msats)
+                                        readonly
+                                        ;
+                                }
+                            }
+                            Some(_) => {
+                                div class="alert alert-danger mb-2" {
+                                    strong { "Unsupported offer currency." }
+                                    " Only Bitcoin-denominated BOLT12 offers are supported."
+                                }
+                            }
+                            None => {
+                                div class="mb-2" {
+                                    label class="form-label" for="amount_msats" {
+                                        "Amount (msats)"
+                                        small class="text-muted ms-2" { "(required)" }
+                                    }
+
+                                    input
+                                        type="number"
+                                        class="form-control"
+                                        id="amount_msats"
+                                        name="amount_msats"
+                                        min="1"
+                                        placeholder="Enter amount in msats"
+                                        ;
+                                }
+                            }
                         }
-                        input type="number"
-                            class="form-control"
-                            id="amount_msats"
-                            name="amount_msats"
-                            min="1"
-                            placeholder="Leave empty for fixed-amount offers";
+
+                        // Only show payer note if we didn't hit an error
+                        @if matches!(offer.amount(), Some(Amount::Bitcoin { .. }) | None) {
+                            div class="mb-2" {
+                                label class="form-label" for="payer_note" {
+                                    "Payer Note"
+                                    small class="text-muted ms-2" { "(optional)" }
+                                }
+                                input
+                                    type="text"
+                                    class="form-control"
+                                    id="payer_note"
+                                    name="payer_note"
+                                    placeholder="Optional note to recipient"
+                                    ;
+                            }
+                        }
                     }
 
-                    div class="mb-2" {
-                        label class="form-label" for="payer_note" {
-                            "Payer Note"
-                            small class="text-muted ms-2" { "(optional)" }
+                    // Enable submit only if the offer is usable
+                    @if matches!(offer.amount(), Some(Amount::Bitcoin { .. }) | None) {
+                        script {
+                            (PreEscaped(
+                                "document.getElementById('send-submit-btn').disabled = false;"
+                            ))
                         }
-                        input type="text"
-                            class="form-control"
-                            id="payer_note"
-                            name="payer_note"
-                            placeholder="Optional note to recipient";
                     }
                 }
-                script {
-                    (PreEscaped("document.getElementById('send-submit-btn').disabled = false;"))
+            } else {
+                html! {
+                    div class="alert alert-warning mt-2" {
+                        small { "Invalid BOLT12 Offer" }
+                    }
                 }
             }
+
+            /*
+            if let Ok(offer) = offer {
+                match offer.amount() {
+                    Some(Amount::Bitcoin { amount_msats }) => {
+
+                    }
+                    Some(_) => {
+
+                    }
+                    None => {
+
+                    }
+                }
+                html! {
+                    div class="mt-3 p-2 bg-light rounded" {
+                        div class="mb-2" {
+                            label class="form-label" for="amount_msats" {
+                                "Amount (msats)"
+                                small class="text-muted ms-2" { "(optional for fixed-amount offers)" }
+                            }
+                            input type="number"
+                                class="form-control"
+                                id="amount_msats"
+                                name="amount_msats"
+                                min="1"
+                                placeholder="Leave empty for fixed-amount offers";
+                        }
+
+                        div class="mb-2" {
+                            label class="form-label" for="payer_note" {
+                                "Payer Note"
+                                small class="text-muted ms-2" { "(optional)" }
+                            }
+                            input type="text"
+                                class="form-control"
+                                id="payer_note"
+                                name="payer_note"
+                                placeholder="Optional note to recipient";
+                        }
+                    }
+                    script {
+                        (PreEscaped("document.getElementById('send-submit-btn').disabled = false;"))
+                    }
+                }
+            } else {
+                html! {
+                    div class="alert alert-warning mt-2" {
+                        small { "Invalid BOLT12 Offer" }
+                    }
+                }
+            }
+            */
         }
         PaymentStringType::Bolt11 => {
             // Clear any previous BOLT12 fields, enable submit
