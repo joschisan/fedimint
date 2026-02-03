@@ -10,9 +10,10 @@ use chrono::{TimeZone, Utc};
 use fedimint_core::bitcoin::Network;
 use fedimint_core::time::now;
 use fedimint_gateway_common::{
-    ChannelInfo, CloseChannelsWithPeerRequest, CreateInvoiceForOperatorPayload, GatewayBalances,
-    GatewayInfo, LightningInfo, LightningMode, ListTransactionsPayload, ListTransactionsResponse,
-    OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentStatus, SendOnchainRequest,
+    ChannelInfo, CloseChannelsWithPeerRequest, CreateInvoiceForOperatorPayload, CreateOfferPayload,
+    GatewayBalances, GatewayInfo, LightningInfo, LightningMode, ListTransactionsPayload,
+    ListTransactionsResponse, OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentStatus,
+    SendOnchainRequest,
 };
 use fedimint_logging::LOG_GATEWAY_UI;
 use fedimint_ui_common::UiState;
@@ -20,10 +21,11 @@ use fedimint_ui_common::auth::UserAuth;
 use maud::{Markup, PreEscaped, html};
 use qrcode::QrCode;
 use qrcode::render::svg;
+use serde::Deserialize;
 use tracing::debug;
 
 use crate::{
-    CHANNEL_FRAGMENT_ROUTE, CLOSE_CHANNEL_ROUTE, CREATE_BOLT11_INVOICE_ROUTE, DynGatewayApi,
+    CHANNEL_FRAGMENT_ROUTE, CLOSE_CHANNEL_ROUTE, CREATE_RECEIVE_INVOICE_ROUTE, DynGatewayApi,
     LN_ONCHAIN_ADDRESS_ROUTE, OPEN_CHANNEL_ROUTE, PAY_BOLT11_INVOICE_ROUTE,
     PAYMENTS_FRAGMENT_ROUTE, SEND_ONCHAIN_ROUTE, TRANSACTIONS_FRAGMENT_ROUTE,
     WALLET_FRAGMENT_ROUTE,
@@ -324,7 +326,7 @@ where
                             { "Refresh" }
                         }
 
-                        (payments_fragment_markup(&balances_result, None, None, None))
+                        (payments_fragment_markup(&balances_result, None, None, None, is_lnd))
                     }
 
                     // ──────────────────────────────────────────
@@ -512,11 +514,98 @@ where
     )
 }
 
+/// Results from the unified receive invoice handler
+#[derive(Default)]
+pub struct ReceiveResults {
+    /// BOLT11 invoice if generated (requires amount)
+    pub bolt11_invoice: Option<String>,
+    /// BOLT12 offer if generated (works with or without amount)
+    pub bolt12_offer: Option<String>,
+    /// Whether BOLT12 is supported (false for LND)
+    pub bolt12_supported: bool,
+    /// Error message for BOLT11 generation
+    pub bolt11_error: Option<String>,
+    /// Error message for BOLT12 generation
+    pub bolt12_error: Option<String>,
+}
+
+/// Helper to deserialize empty strings as None
+fn empty_string_as_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    match opt {
+        Some(s) if s.trim().is_empty() => Ok(None),
+        Some(s) => s
+            .trim()
+            .parse::<T>()
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
+}
+
+/// Form payload for unified receive invoice/offer generation
+#[derive(Debug, Deserialize)]
+pub struct CreateReceiveInvoicePayload {
+    /// Amount in msats (optional - required for BOLT11, optional for BOLT12)
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub amount_msats: Option<u64>,
+    /// Description (optional)
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Renders a QR code with copyable text for an invoice or offer
+fn render_qr_with_copy(value: &str, label: &str) -> Markup {
+    let code = QrCode::new(value).expect("Failed to generate QR code");
+    let qr_svg = code.render::<svg::Color>().build();
+
+    html! {
+        div class="card card-body bg-light d-flex flex-column align-items-center" {
+            span class="fw-bold mb-3" { (label) ":" }
+
+            div class="d-flex flex-row align-items-center gap-3 flex-wrap"
+                style="width: 100%;"
+            {
+                // Copyable input + text
+                div class="d-flex flex-column flex-grow-1"
+                    style="min-width: 300px;"
+                {
+                    input type="text"
+                        readonly
+                        class="form-control mb-2"
+                        style="text-align:left; font-family: monospace; font-size:1rem;"
+                        value=(value)
+                        onclick="copyToClipboard(this)"
+                    {}
+                    small class="text-muted" { "Click to copy" }
+                }
+
+                // QR code
+                div class="border rounded p-2 bg-white d-flex justify-content-center align-items-center"
+                    style="width: 300px; height: 300px; min-width: 200px; min-height: 200px;"
+                {
+                    (PreEscaped(format!(
+                        r#"<svg style="width: 100%; height: 100%; display: block;">{}</svg>"#,
+                        qr_svg.replace("width=", "data-width=")
+                              .replace("height=", "data-height=")
+                    )))
+                }
+            }
+        }
+    }
+}
+
 pub fn payments_fragment_markup<E>(
     balances_result: &Result<GatewayBalances, E>,
-    created_invoice: Option<String>,
+    receive_results: Option<&ReceiveResults>,
     success_msg: Option<String>,
     error_msg: Option<String>,
+    is_lnd: bool,
 ) -> Markup
 where
     E: std::fmt::Display,
@@ -599,70 +688,151 @@ where
                     }
 
                     // Receive form
-                    div id="receive-form" class={
-                        @if created_invoice.is_some() { "card card-body mt-3 d-none" }
-                        @else { "card card-body mt-3 d-none" }
-                    } {
+                    div id="receive-form" class="card card-body mt-3 d-none" {
                         form
                             id="create-ln-invoice-form"
-                            hx-post=(CREATE_BOLT11_INVOICE_ROUTE)
+                            hx-post=(CREATE_RECEIVE_INVOICE_ROUTE)
                             hx-target="#payments-container"
                             hx-swap="outerHTML"
                         {
                             div class="mb-3" {
-                                label class="form-label" for="amount_msats" { "Amount (msats)" }
+                                label class="form-label" for="amount_msats" {
+                                    "Amount (msats)"
+                                    @if !is_lnd {
+                                        small class="text-muted ms-2" { "(optional for BOLT12)" }
+                                    }
+                                }
                                 input type="number"
                                     class="form-control"
                                     id="amount_msats"
                                     name="amount_msats"
                                     min="1"
-                                    required;
+                                    placeholder="e.g. 100000";
+
+                                // Show hint about amount requirement
+                                @if is_lnd {
+                                    small class="text-muted" {
+                                        "Amount is required (BOLT12 not supported on LND)"
+                                    }
+                                }
+                            }
+
+                            div class="mb-3" {
+                                label class="form-label" for="description" { "Description (optional)" }
+                                input type="text"
+                                    class="form-control"
+                                    id="description"
+                                    name="description"
+                                    placeholder="Payment for...";
                             }
 
                             button
                                 type="submit"
                                 class="btn btn-success btn-sm"
-                            { "Create Bolt11 Invoice" }
+                            { "Generate Payment Request" }
                         }
                     }
 
                     // ──────────────────────────────────────────
-                    //  SHOW CREATED INVOICE
+                    //  SHOW CREATED INVOICE/OFFER WITH TABS
                     // ──────────────────────────────────────────
-                    @if let Some(invoice) = created_invoice {
+                    @if let Some(results) = receive_results {
+                        @let has_bolt11 = results.bolt11_invoice.is_some();
+                        @let has_bolt12 = results.bolt12_offer.is_some();
+                        @let show_tabs = has_bolt11 || has_bolt12 ||
+                                         results.bolt11_error.is_some() ||
+                                         results.bolt12_error.is_some();
 
-                        @let code =
-                            QrCode::new(&invoice).expect("Failed to generate QR code");
-                        @let qr_svg = code.render::<svg::Color>().build();
+                        @if show_tabs {
+                            div class="card card-body mt-4" {
+                                // Bootstrap tabs for BOLT11 / BOLT12
+                                // Default to BOLT11 if available, otherwise BOLT12
+                                @let bolt11_is_default = has_bolt11;
+                                @let bolt12_is_default = !has_bolt11 && has_bolt12;
 
-                        div class="card card-body mt-4" {
-
-                            div class="card card-body bg-light d-flex flex-column align-items-center" {
-                                span class="fw-bold mb-3" { "Bolt11 Invoice:" }
-
-                                // Flex container: address on left, QR on right
-                                div class="d-flex flex-row align-items-center gap-3 flex-wrap" style="width: 100%;" {
-
-                                    // Copyable input + text
-                                    div class="d-flex flex-column flex-grow-1" style="min-width: 300px;" {
-                                        input type="text"
-                                            readonly
-                                            class="form-control mb-2"
-                                            style="text-align:left; font-family: monospace; font-size:1rem;"
-                                            value=(invoice)
-                                            onclick="copyToClipboard(this)"
-                                        {}
-                                        small class="text-muted" { "Click to copy" }
+                                ul class="nav nav-tabs" id="invoiceTabs" role="tablist" {
+                                    // BOLT11 tab
+                                    li class="nav-item" role="presentation" {
+                                        @if has_bolt11 {
+                                            button class={ @if bolt11_is_default { "nav-link active" } @else { "nav-link" } }
+                                                id="bolt11-tab"
+                                                data-bs-toggle="tab"
+                                                data-bs-target="#bolt11-pane"
+                                                type="button"
+                                                role="tab"
+                                            { "BOLT11" }
+                                        } @else {
+                                            button class="nav-link disabled"
+                                                id="bolt11-tab"
+                                                type="button"
+                                                title=(results.bolt11_error.as_deref()
+                                                    .unwrap_or("Amount required for BOLT11"))
+                                            {
+                                                "BOLT11"
+                                                span class="ms-1 text-muted" { "(unavailable)" }
+                                            }
+                                        }
                                     }
 
-                                    // QR code
-                                    div class="border rounded p-2 bg-white d-flex justify-content-center align-items-center"
-                                        style="width: 300px; height: 300px; min-width: 200px; min-height: 200px;"
+                                    // BOLT12 tab (only show if supported, i.e. not LND)
+                                    @if results.bolt12_supported {
+                                        li class="nav-item" role="presentation" {
+                                            @if has_bolt12 {
+                                                button class={ @if bolt12_is_default { "nav-link active" } @else { "nav-link" } }
+                                                    id="bolt12-tab"
+                                                    data-bs-toggle="tab"
+                                                    data-bs-target="#bolt12-pane"
+                                                    type="button"
+                                                    role="tab"
+                                                { "BOLT12" }
+                                            } @else if let Some(err) = &results.bolt12_error {
+                                                button class="nav-link disabled"
+                                                    id="bolt12-tab"
+                                                    type="button"
+                                                    title=(err)
+                                                {
+                                                    "BOLT12"
+                                                    span class="ms-1 text-muted" { "(error)" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Tab content
+                                div class="tab-content mt-3" id="invoiceTabsContent" {
+                                    // BOLT11 pane
+                                    div class={ @if bolt11_is_default { "tab-pane fade show active" } @else { "tab-pane fade" } }
+                                        id="bolt11-pane"
+                                        role="tabpanel"
                                     {
-                                        (PreEscaped(format!(
-                                            r#"<svg style="width: 100%; height: 100%; display: block;">{}</svg>"#,
-                                            qr_svg.replace("width=", "data-width=").replace("height=", "data-height=")
-                                        )))
+                                        @if let Some(invoice) = &results.bolt11_invoice {
+                                            (render_qr_with_copy(invoice, "BOLT11 Invoice"))
+                                        } @else if let Some(err) = &results.bolt11_error {
+                                            div class="alert alert-warning" {
+                                                (err)
+                                            }
+                                        } @else {
+                                            div class="alert alert-info" {
+                                                "Amount is required to generate a BOLT11 invoice."
+                                            }
+                                        }
+                                    }
+
+                                    // BOLT12 pane (only show if supported, i.e. not LND)
+                                    @if results.bolt12_supported {
+                                        div class={ @if bolt12_is_default { "tab-pane fade show active" } @else { "tab-pane fade" } }
+                                            id="bolt12-pane"
+                                            role="tabpanel"
+                                        {
+                                            @if let Some(offer) = &results.bolt12_offer {
+                                                (render_qr_with_copy(offer, "BOLT12 Offer"))
+                                            } @else if let Some(err) = &results.bolt12_error {
+                                                div class="alert alert-danger" {
+                                                    "Failed to generate BOLT12 offer: " (err)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1214,8 +1384,9 @@ pub async fn payments_fragment_handler<E>(
 where
     E: std::fmt::Display,
 {
+    let is_lnd = matches!(state.api.lightning_mode(), LightningMode::Lnd { .. });
     let balances_result = state.api.handle_get_balances_msg().await;
-    let markup = payments_fragment_markup(&balances_result, None, None, None);
+    let markup = payments_fragment_markup(&balances_result, None, None, None, is_lnd);
     Html(markup.into_string())
 }
 
@@ -1227,6 +1398,7 @@ pub async fn create_bolt11_invoice_handler<E>(
 where
     E: std::fmt::Display,
 {
+    let is_lnd = matches!(state.api.lightning_mode(), LightningMode::Lnd { .. });
     let invoice_result = state
         .api
         .handle_create_invoice_for_operator_msg(payload)
@@ -1235,8 +1407,13 @@ where
 
     match invoice_result {
         Ok(invoice) => {
+            let results = ReceiveResults {
+                bolt11_invoice: Some(invoice.to_string()),
+                bolt12_supported: !is_lnd,
+                ..Default::default()
+            };
             let markup =
-                payments_fragment_markup(&balances_result, Some(invoice.to_string()), None, None);
+                payments_fragment_markup(&balances_result, Some(&results), None, None, is_lnd);
             Html(markup.into_string())
         }
         Err(e) => {
@@ -1245,10 +1422,100 @@ where
                 None,
                 None,
                 Some(format!("Failed to create invoice: {e}")),
+                is_lnd,
             );
             Html(markup.into_string())
         }
     }
+}
+
+pub async fn create_receive_invoice_handler<E>(
+    State(state): State<UiState<DynGatewayApi<E>>>,
+    _auth: UserAuth,
+    Form(payload): Form<CreateReceiveInvoicePayload>,
+) -> Html<String>
+where
+    E: std::fmt::Display,
+{
+    let is_lnd = matches!(state.api.lightning_mode(), LightningMode::Lnd { .. });
+    let has_amount = payload.amount_msats.is_some() && payload.amount_msats != Some(0);
+
+    let mut results = ReceiveResults {
+        bolt12_supported: !is_lnd,
+        ..Default::default()
+    };
+
+    // Validate: LND requires amount
+    if is_lnd && !has_amount {
+        let balances_result = state.api.handle_get_balances_msg().await;
+        let markup = payments_fragment_markup(
+            &balances_result,
+            None,
+            None,
+            Some("Amount is required when using LND (BOLT12 not supported)".to_string()),
+            is_lnd,
+        );
+        return Html(markup.into_string());
+    }
+
+    // Generate BOLT11 if amount is provided
+    if let Some(amount_msats) = payload.amount_msats {
+        if amount_msats > 0 {
+            let bolt11_payload = CreateInvoiceForOperatorPayload {
+                amount_msats,
+                expiry_secs: None,
+                description: payload.description.clone(),
+            };
+
+            match state
+                .api
+                .handle_create_invoice_for_operator_msg(bolt11_payload)
+                .await
+            {
+                Ok(invoice) => {
+                    results.bolt11_invoice = Some(invoice.to_string());
+                }
+                Err(e) => {
+                    results.bolt11_error = Some(format!("Failed to create BOLT11: {e}"));
+                }
+            }
+        }
+    } else {
+        results.bolt11_error = Some("Amount required for BOLT11 invoice".to_string());
+    }
+
+    // Generate BOLT12 offer if not LND
+    if !is_lnd {
+        let bolt12_payload = CreateOfferPayload {
+            amount: payload.amount_msats.and_then(|a| {
+                if a > 0 {
+                    Some(fedimint_core::Amount::from_msats(a))
+                } else {
+                    None
+                }
+            }),
+            description: payload.description,
+            expiry_secs: None,
+            quantity: None,
+        };
+
+        match state
+            .api
+            .handle_create_offer_for_operator_msg(bolt12_payload)
+            .await
+        {
+            Ok(response) => {
+                results.bolt12_offer = Some(response.offer);
+            }
+            Err(e) => {
+                results.bolt12_error = Some(e.to_string());
+            }
+        }
+    }
+
+    let balances_result = state.api.handle_get_balances_msg().await;
+    let markup = payments_fragment_markup(&balances_result, Some(&results), None, None, is_lnd);
+    Html(markup.into_string())
 }
 
 pub async fn pay_bolt11_invoice_handler<E>(
@@ -1259,6 +1526,7 @@ pub async fn pay_bolt11_invoice_handler<E>(
 where
     E: std::fmt::Display,
 {
+    let is_lnd = matches!(state.api.lightning_mode(), LightningMode::Lnd { .. });
     let send_result = state.api.handle_pay_invoice_for_operator_msg(payload).await;
     let balances_result = state.api.handle_get_balances_msg().await;
 
@@ -1269,6 +1537,7 @@ where
                 None,
                 Some(format!("Successfully paid invoice. Preimage: {preimage}")),
                 None,
+                is_lnd,
             );
             Html(markup.into_string())
         }
@@ -1278,6 +1547,7 @@ where
                 None,
                 None,
                 Some(format!("Failed to pay invoice: {e}")),
+                is_lnd,
             );
             Html(markup.into_string())
         }

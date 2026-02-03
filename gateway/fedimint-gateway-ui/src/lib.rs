@@ -51,9 +51,9 @@ use crate::federation::{
 };
 use crate::lightning::{
     channels_fragment_handler, close_channel_handler, create_bolt11_invoice_handler,
-    generate_receive_address_handler, open_channel_handler, pay_bolt11_invoice_handler,
-    payments_fragment_handler, send_onchain_handler, transactions_fragment_handler,
-    wallet_fragment_handler,
+    create_receive_invoice_handler, generate_receive_address_handler, open_channel_handler,
+    pay_bolt11_invoice_handler, payments_fragment_handler, send_onchain_handler,
+    transactions_fragment_handler, wallet_fragment_handler,
 };
 use crate::mnemonic::{mnemonic_iframe_handler, mnemonic_reveal_handler};
 use crate::payment_summary::payment_log_fragment_handler;
@@ -72,6 +72,7 @@ pub(crate) const LN_ONCHAIN_ADDRESS_ROUTE: &str = "/ui/wallet/receive";
 pub(crate) const DEPOSIT_ADDRESS_ROUTE: &str = "/ui/federations/deposit-address";
 pub(crate) const PAYMENTS_FRAGMENT_ROUTE: &str = "/ui/payments/fragment";
 pub(crate) const CREATE_BOLT11_INVOICE_ROUTE: &str = "/ui/payments/receive/bolt11";
+pub(crate) const CREATE_RECEIVE_INVOICE_ROUTE: &str = "/ui/payments/receive";
 pub(crate) const PAY_BOLT11_INVOICE_ROUTE: &str = "/ui/payments/send/bolt11";
 pub(crate) const TRANSACTIONS_FRAGMENT_ROUTE: &str = "/ui/transactions/fragment";
 pub(crate) const RECEIVE_ECASH_ROUTE: &str = "/ui/federations/receive";
@@ -415,6 +416,10 @@ pub fn router<E: Display + Send + Sync + std::fmt::Debug + 'static>(
         .route(
             CREATE_BOLT11_INVOICE_ROUTE,
             post(create_bolt11_invoice_handler),
+        )
+        .route(
+            CREATE_RECEIVE_INVOICE_ROUTE,
+            post(create_receive_invoice_handler),
         )
         .route(PAY_BOLT11_INVOICE_ROUTE, post(pay_bolt11_invoice_handler))
         .route(
