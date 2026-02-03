@@ -7,7 +7,7 @@ use axum::Form;
 use axum::extract::{Query, State};
 use axum::response::Html;
 use chrono::offset::LocalResult;
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use fedimint_core::bitcoin::Network;
 use fedimint_core::time::now;
 use fedimint_gateway_common::{
@@ -20,6 +20,7 @@ use fedimint_logging::LOG_GATEWAY_UI;
 use fedimint_ui_common::UiState;
 use fedimint_ui_common::auth::UserAuth;
 use lightning::offers::offer::{Amount, Offer};
+use lightning_invoice::Bolt11Invoice;
 use maud::{Markup, PreEscaped, html};
 use qrcode::QrCode;
 use qrcode::render::svg;
@@ -1730,47 +1731,64 @@ where
                     }
                 }
             }
+        }
+        PaymentStringType::Bolt11 => {
+            // Clear any previous BOLT12 fields, enable submit
+            let bolt11 = Bolt11Invoice::from_str(&payload.payment_string);
+            if let Ok(bolt11) = bolt11 {
+                let amount = bolt11.amount_milli_satoshis();
+                let payee_pub_key = bolt11.payee_pub_key();
+                let payment_hash = bolt11.payment_hash();
+                let expires_at = bolt11.expires_at();
 
-            /*
-            if let Ok(offer) = offer {
-                match offer.amount() {
-                    Some(Amount::Bitcoin { amount_msats }) => {
-
-                    }
-                    Some(_) => {
-
-                    }
-                    None => {
-
-                    }
-                }
                 html! {
                     div class="mt-3 p-2 bg-light rounded" {
                         div class="mb-2" {
-                            label class="form-label" for="amount_msats" {
-                                "Amount (msats)"
-                                small class="text-muted ms-2" { "(optional for fixed-amount offers)" }
+                            strong { "Amount: " }
+                            @match amount {
+                                Some(msats) => {
+                                    span { (format!("{msats} msats")) }
+                                }
+                                None => {
+                                    span class="text-muted" { "Amount not specified" }
+                                }
                             }
-                            input type="number"
-                                class="form-control"
-                                id="amount_msats"
-                                name="amount_msats"
-                                min="1"
-                                placeholder="Leave empty for fixed-amount offers";
                         }
 
                         div class="mb-2" {
-                            label class="form-label" for="payer_note" {
-                                "Payer Note"
-                                small class="text-muted ms-2" { "(optional)" }
+                            strong { "Payee Public Key: " }
+                            @match payee_pub_key {
+                                Some(pk) => {
+                                    code { (pk.to_string()) }
+                                }
+                                None => {
+                                    span class="text-muted" { "Not provided" }
+                                }
                             }
-                            input type="text"
-                                class="form-control"
-                                id="payer_note"
-                                name="payer_note"
-                                placeholder="Optional note to recipient";
+                        }
+
+                        div class="mb-2" {
+                            strong { "Payment Hash: " }
+                            code { (payment_hash.to_string()) }
+                        }
+
+                        div class="mb-2" {
+                            strong { "Expires At: " }
+                            @match expires_at {
+                                Some(unix_ts) => {
+                                    @let datetime: DateTime<Utc> =
+                                        DateTime::<Utc>::from(UNIX_EPOCH + unix_ts);
+                                    span {
+                                        (datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                                    }
+                                }
+                                None => {
+                                    span class="text-muted" { "No expiry" }
+                                }
+                            }
                         }
                     }
+
                     script {
                         (PreEscaped("document.getElementById('send-submit-btn').disabled = false;"))
                     }
@@ -1778,17 +1796,8 @@ where
             } else {
                 html! {
                     div class="alert alert-warning mt-2" {
-                        small { "Invalid BOLT12 Offer" }
+                        small { "Invalid BOLT11 Invoice" }
                     }
-                }
-            }
-            */
-        }
-        PaymentStringType::Bolt11 => {
-            // Clear any previous BOLT12 fields, enable submit
-            html! {
-                script {
-                    (PreEscaped("document.getElementById('send-submit-btn').disabled = false;"))
                 }
             }
         }
