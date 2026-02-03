@@ -23,13 +23,14 @@ use fedimint_core::secp256k1::serde::Deserialize;
 use fedimint_core::task::TaskGroup;
 use fedimint_gateway_common::{
     ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConnectFedPayload,
-    CreateInvoiceForOperatorPayload, DepositAddressPayload, FederationInfo, GatewayBalances,
-    GatewayInfo, LeaveFedPayload, LightningMode, ListTransactionsPayload, ListTransactionsResponse,
-    MnemonicResponse, OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentLogPayload,
-    PaymentLogResponse, PaymentSummaryPayload, PaymentSummaryResponse, ReceiveEcashPayload,
-    ReceiveEcashResponse, SendOnchainRequest, SetFeesPayload, SetMnemonicPayload,
-    SpendEcashPayload, SpendEcashResponse, WithdrawPayload, WithdrawPreviewPayload,
-    WithdrawPreviewResponse, WithdrawResponse,
+    CreateInvoiceForOperatorPayload, CreateOfferPayload, CreateOfferResponse,
+    DepositAddressPayload, FederationInfo, GatewayBalances, GatewayInfo, LeaveFedPayload,
+    LightningMode, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
+    OpenChannelRequest, PayInvoiceForOperatorPayload, PayOfferPayload, PayOfferResponse,
+    PaymentLogPayload, PaymentLogResponse, PaymentSummaryPayload, PaymentSummaryResponse,
+    ReceiveEcashPayload, ReceiveEcashResponse, SendOnchainRequest, SetFeesPayload,
+    SetMnemonicPayload, SpendEcashPayload, SpendEcashResponse, WithdrawPayload,
+    WithdrawPreviewPayload, WithdrawPreviewResponse, WithdrawResponse,
 };
 use fedimint_ln_common::contracts::Preimage;
 use fedimint_logging::LOG_GATEWAY_UI;
@@ -219,6 +220,16 @@ pub trait IAdminGateway {
 
     async fn handle_set_mnemonic_msg(&self, payload: SetMnemonicPayload)
     -> Result<(), Self::Error>;
+
+    async fn handle_create_offer_for_operator_msg(
+        &self,
+        payload: CreateOfferPayload,
+    ) -> Result<CreateOfferResponse, Self::Error>;
+
+    async fn handle_pay_offer_for_operator_msg(
+        &self,
+        payload: PayOfferPayload,
+    ) -> Result<PayOfferResponse, Self::Error>;
 }
 
 async fn login_form<E>(State(_state): State<UiState<DynGatewayApi<E>>>) -> impl IntoResponse {
