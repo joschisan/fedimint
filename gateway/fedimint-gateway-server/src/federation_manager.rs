@@ -7,6 +7,7 @@ use bitcoin::secp256k1::Keypair;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::config::{FederationId, FederationIdPrefix, JsonClientConfig};
 use fedimint_core::db::{Committable, DatabaseTransaction, NonCommittable};
+use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::{FmtCompactAnyhow as _, Spanned};
 use fedimint_gateway_common::FederationInfo;
 use fedimint_gateway_server_db::GatewayDbtxNcExt as _;
@@ -329,6 +330,28 @@ impl FederationManager {
                 info!(federation_id = %federation_id, "Successfully backed up federation");
             }
         }
+    }
+
+    pub async fn all_invite_codes(&self) -> BTreeMap<FederationId, Vec<InviteCode>> {
+        let mut invite_codes = BTreeMap::new();
+
+        for (federation_id, client) in &self.clients {
+            let peer_urls = client.value().get_peer_urls().await;
+
+            let fed_invite_codes = futures::future::join_all(
+                peer_urls
+                    .keys()
+                    .map(|peer_id| async move { client.value().invite_code(*peer_id).await }),
+            )
+            .await
+            .into_iter()
+            .flatten()
+            .collect();
+
+            invite_codes.insert(*federation_id, fed_invite_codes);
+        }
+
+        invite_codes
     }
 
     // TODO(tvolk131): Set this value in the constructor.

@@ -7,6 +7,7 @@ mod mnemonic;
 mod payment_summary;
 mod setup;
 
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
@@ -19,6 +20,8 @@ use axum::{Form, Router};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use fedimint_core::bitcoin::Network;
+use fedimint_core::config::FederationId;
+use fedimint_core::invite_code::InviteCode;
 use fedimint_core::secp256k1::serde::Deserialize;
 use fedimint_core::task::TaskGroup;
 use fedimint_gateway_common::{
@@ -211,6 +214,8 @@ pub trait IAdminGateway {
         &self,
         payload: PaymentLogPayload,
     ) -> Result<PaymentLogResponse, Self::Error>;
+
+    async fn handle_export_invite_codes(&self) -> BTreeMap<FederationId, Vec<InviteCode>>;
 
     fn get_password_hash(&self) -> String;
 

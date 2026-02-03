@@ -2487,6 +2487,13 @@ impl IAdminGateway for Gateway {
         })
     }
 
+    /// Returns a `BTreeMap` that is keyed by the `FederationId` and contains
+    /// all the invite codes for the federation.
+    async fn handle_export_invite_codes(&self) -> BTreeMap<FederationId, Vec<InviteCode>> {
+        let fed_manager = self.federation_manager.read().await;
+        fed_manager.all_invite_codes().await
+    }
+
     fn get_password_hash(&self) -> String {
         self.bcrypt_password_hash.to_string()
     }
