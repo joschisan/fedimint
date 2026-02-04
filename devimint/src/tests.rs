@@ -15,7 +15,7 @@ use fedimint_core::envs::{FM_DISABLE_BASE_FEES_ENV, FM_ENABLE_MODULE_LNV2_ENV, i
 use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::net::api_announcement::SignedApiAnnouncement;
 use fedimint_core::task::block_in_place;
-use fedimint_core::util::backoff_util::{aggressive_backoff, aggressive_backoff_long};
+use fedimint_core::util::backoff_util::aggressive_backoff;
 use fedimint_core::util::{retry, write_overwrite_async};
 use fedimint_core::{Amount, PeerId};
 use fedimint_ln_client::LightningPaymentOutcome;
@@ -2291,6 +2291,10 @@ pub async fn admin_auth_tests(dev_fed: DevFed) -> Result<()> {
 
     let DevFed { fed, .. } = dev_fed;
 
+    // Ensure all federation peers are ready before starting the test
+    // This prevents flaky failures due to Iroh connection timeouts
+    fed.await_all_peers().await?;
+
     let client = fed.new_joined_client("admin-auth-test-client").await?;
 
     let peer_id = 0;
@@ -2299,28 +2303,24 @@ pub async fn admin_auth_tests(dev_fed: DevFed) -> Result<()> {
 
     // First, store the admin credentials using the auth command
     // Use --no-verify to skip interactive verification in tests
-    // Use retry logic to handle transient iroh connection issues in CI
-    let auth_result = retry("Admin auth command", aggressive_backoff_long(), || async {
-        cmd!(
-            client,
-            "--our-id",
-            &peer_id.to_string(),
-            "--password",
-            "pass",
-            "admin",
-            "auth",
-            "--peer-id",
-            &peer_id.to_string(),
-            "--password",
-            "pass",
-            "--no-verify",
-            "--force"
-        )
-        .out_json()
-        .await
-        .context("Admin auth command failed")
-    })
-    .await?;
+    let auth_result = cmd!(
+        client,
+        "--our-id",
+        &peer_id.to_string(),
+        "--password",
+        "pass",
+        "admin",
+        "auth",
+        "--peer-id",
+        &peer_id.to_string(),
+        "--password",
+        "pass",
+        "--no-verify",
+        "--force"
+    )
+    .out_json()
+    .await
+    .context("Admin auth command failed")?;
 
     info!(target: LOG_DEVIMINT, ?auth_result, "Admin auth command completed");
 
@@ -2344,48 +2344,34 @@ pub async fn admin_auth_tests(dev_fed: DevFed) -> Result<()> {
 
     // Now run an admin command WITHOUT --our-id and --password
     // It should use the stored credentials automatically
-    // Use retry logic to handle transient iroh connection issues
-    retry(
-        "Admin status with stored credentials",
-        aggressive_backoff_long(),
-        || async {
-            cmd!(client, "admin", "status")
-                .out_json()
-                .await
-                .context("Admin status command should succeed with stored credentials")
-        },
-    )
-    .await?;
+    let status_result = cmd!(client, "admin", "status")
+        .out_json()
+        .await
+        .context("Admin status command should succeed with stored credentials")?;
+
+    info!(target: LOG_DEVIMINT, ?status_result, "Admin status with stored credentials succeeded");
 
     info!(target: LOG_DEVIMINT, "Testing that --force overwrites existing credentials");
 
     // Test that --force allows overwriting
-    // Use retry logic to handle transient iroh connection issues in CI
-    let auth_result_force = retry(
-        "Admin auth force overwrite",
-        aggressive_backoff_long(),
-        || async {
-            cmd!(
-                client,
-                "--our-id",
-                &peer_id.to_string(),
-                "--password",
-                "pass",
-                "admin",
-                "auth",
-                "--peer-id",
-                &peer_id.to_string(),
-                "--password",
-                "pass",
-                "--no-verify",
-                "--force"
-            )
-            .out_json()
-            .await
-            .context("Admin auth force overwrite failed")
-        },
+    let auth_result_force = cmd!(
+        client,
+        "--our-id",
+        &peer_id.to_string(),
+        "--password",
+        "pass",
+        "admin",
+        "auth",
+        "--peer-id",
+        &peer_id.to_string(),
+        "--password",
+        "pass",
+        "--no-verify",
+        "--force"
     )
-    .await?;
+    .out_json()
+    .await
+    .context("Admin auth force overwrite failed")?;
 
     assert_eq!(
         auth_result_force.get("status").and_then(|v| v.as_str()),
