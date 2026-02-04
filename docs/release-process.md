@@ -119,7 +119,7 @@ git tag -a -s v0.5.0-rc.0
 git push upstream v0.5.0-rc.0
 ```
 
-Publish to crates.io (`@elsirion`, `@dpc`, and `@bradleystachurski` are the only users with permissions)
+Publish to crates.io (`@elsirion` and `@dpc` are the only users with permissions)
 
 ```
 just publish-release
