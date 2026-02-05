@@ -30,6 +30,7 @@ fedimint-logging = { workspace = true }
 fedimint-mint-client = { workspace = true }
 fedimint-ui-common = { workspace = true }
 fedimint-wallet-client = { workspace = true }
+lightning = { workspace = true }
 lightning-invoice = { workspace = true }
 maud = { workspace = true }
 qrcode = { workspace = true }

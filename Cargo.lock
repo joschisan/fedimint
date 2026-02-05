@@ -3467,6 +3467,7 @@ dependencies = [
  "fedimint-mint-client",
  "fedimint-ui-common",
  "fedimint-wallet-client",
+ "lightning",
  "lightning-invoice",
  "maud",
  "qrcode",

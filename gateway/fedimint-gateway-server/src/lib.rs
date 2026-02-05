@@ -1260,41 +1260,6 @@ impl Gateway {
         Ok(invoice)
     }
 
-    /// Creates a BOLT12 offer using the gateway's lightning node
-    pub async fn handle_create_offer_for_operator_msg(
-        &self,
-        payload: CreateOfferPayload,
-    ) -> AdminResult<CreateOfferResponse> {
-        let lightning_context = self.get_lightning_context().await?;
-        let offer = lightning_context.lnrpc.create_offer(
-            payload.amount,
-            payload.description,
-            payload.expiry_secs,
-            payload.quantity,
-        )?;
-        Ok(CreateOfferResponse { offer })
-    }
-
-    /// Pays a BOLT12 offer using the gateway's lightning node
-    pub async fn handle_pay_offer_for_operator_msg(
-        &self,
-        payload: PayOfferPayload,
-    ) -> AdminResult<PayOfferResponse> {
-        let lightning_context = self.get_lightning_context().await?;
-        let preimage = lightning_context
-            .lnrpc
-            .pay_offer(
-                payload.offer,
-                payload.quantity,
-                payload.amount,
-                payload.payer_note,
-            )
-            .await?;
-        Ok(PayOfferResponse {
-            preimage: preimage.to_string(),
-        })
-    }
-
     /// Registers the gateway with each specified federation.
     async fn register_federations(
         &self,
@@ -2473,6 +2438,41 @@ impl IAdminGateway for Gateway {
         let _ = mnemonic_sender.send(());
 
         Ok(())
+    }
+
+    /// Creates a BOLT12 offer using the gateway's lightning node
+    async fn handle_create_offer_for_operator_msg(
+        &self,
+        payload: CreateOfferPayload,
+    ) -> AdminResult<CreateOfferResponse> {
+        let lightning_context = self.get_lightning_context().await?;
+        let offer = lightning_context.lnrpc.create_offer(
+            payload.amount,
+            payload.description,
+            payload.expiry_secs,
+            payload.quantity,
+        )?;
+        Ok(CreateOfferResponse { offer })
+    }
+
+    /// Pays a BOLT12 offer using the gateway's lightning node
+    async fn handle_pay_offer_for_operator_msg(
+        &self,
+        payload: PayOfferPayload,
+    ) -> AdminResult<PayOfferResponse> {
+        let lightning_context = self.get_lightning_context().await?;
+        let preimage = lightning_context
+            .lnrpc
+            .pay_offer(
+                payload.offer,
+                payload.quantity,
+                payload.amount,
+                payload.payer_note,
+            )
+            .await?;
+        Ok(PayOfferResponse {
+            preimage: preimage.to_string(),
+        })
     }
 
     fn get_password_hash(&self) -> String {
