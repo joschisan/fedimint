@@ -301,7 +301,32 @@ impl Opts {
         peer_urls: &BTreeMap<PeerId, SafeUrl>,
         api_secret: Option<&str>,
     ) -> CliResult<DynGlobalApi> {
-        let our_id = self.our_id.ok_or_cli_msg("Admin client needs our-id set")?;
+        self.admin_client_with_db(peer_urls, api_secret, None).await
+    }
+
+    async fn admin_client_with_db(
+        &self,
+        peer_urls: &BTreeMap<PeerId, SafeUrl>,
+        api_secret: Option<&str>,
+        db: Option<&Database>,
+    ) -> CliResult<DynGlobalApi> {
+        // First try CLI argument, then stored credentials
+        let our_id = if let Some(id) = self.our_id {
+            id
+        } else if let Some(db) = db {
+            if let Some(stored_creds) = load_admin_creds(db).await {
+                stored_creds.peer_id
+            } else {
+                return Err(CliError {
+                    error: "Admin client needs our-id set (no stored credentials found)"
+                        .to_string(),
+                });
+            }
+        } else {
+            return Err(CliError {
+                error: "Admin client needs our-id set".to_string(),
+            });
+        };
 
         DynGlobalApi::new_admin(
             self.make_endpoints().await.map_err(|e| CliError {
@@ -1055,9 +1080,10 @@ impl FedimintCli {
                 let client = self.client_open(&cli).await?;
 
                 let status = cli
-                    .admin_client(
+                    .admin_client_with_db(
                         &client.get_peer_urls().await,
                         client.api_secret().as_deref(),
+                        Some(client.db()),
                     )
                     .await?
                     .status()
