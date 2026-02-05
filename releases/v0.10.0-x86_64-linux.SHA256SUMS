@@ -1,0 +1,10 @@
+fa344192dc31cdd0a8ab316aa81117fa00f84bfa3ff5bd0a89b30b52f8bde594  v0.10.0-x86_64-linux/fedimint-cli
+9ba2135c9d7716f8314da134458d702af3faf1faf223341acbd6eaa73cf08dce  v0.10.0-x86_64-linux/fedimint-dbtool
+8fbb6def82bcdadac366fa4cf8ec3a424385f4cb7354baa812c17dccc75031ed  v0.10.0-x86_64-linux/fedimintd
+4d41d4858af96cd8312d6efad472e8130cee346ff835481a237cbf4fe1a17d1c  v0.10.0-x86_64-linux/gateway-cli
+c8ecb98d19e9a6222128c22b76e900e7fc55313d6476eb5b28f4ee75ee570ab3  v0.10.0-x86_64-linux/gatewayd
+adcfce203e01bbd83141e1867ce5ad8ad823165bea534eef5459d808c4d32c7c  v0.10.0-x86_64-linux/nixos/fedimint-cli
+9757cb091eae373a5bf79dc614b5cb9d97beb572342f5628728e4dc6f4570ee2  v0.10.0-x86_64-linux/nixos/fedimint-dbtool
+22637141d5ae671b0b3135b78b2c5aee7e98a6ed96eb1944e5f5b184105afd5b  v0.10.0-x86_64-linux/nixos/fedimintd
+22e87fa23bdf0029cf98c29ae70418b1c8339eb261ea6257c4ad890a12de8949  v0.10.0-x86_64-linux/nixos/gateway-cli
+859aa498c2433958c9160aada6b69befd09b3fdf68f7342467603adf66e71096  v0.10.0-x86_64-linux/nixos/gatewayd
