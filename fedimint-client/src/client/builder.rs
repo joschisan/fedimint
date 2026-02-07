@@ -63,6 +63,7 @@ use crate::db::{
     ClientModuleRecoveryState, ClientPreRootSecretHashKey, InitMode, InitState,
     PendingClientConfigKey, apply_migrations_client_module_dbtx,
 };
+use crate::expiration::run_expiration_status_task;
 use crate::guardian_metadata::run_guardian_metadata_refresh_task;
 use crate::meta::MetaService;
 use crate::module_init::ClientModuleInitRegistry;
@@ -1048,6 +1049,19 @@ impl ClientBuilder {
                         .wait_for_initialized_connections()
                         .await;
                     run_guardian_metadata_refresh_task(client_inner.clone()).await
+                }
+            });
+
+        client_inner
+            .task_group
+            .spawn_cancellable("update-expiration-status", {
+                let client_inner = client_inner.clone();
+                async move {
+                    client_inner
+                        .connectors
+                        .wait_for_initialized_connections()
+                        .await;
+                    run_expiration_status_task(client_inner.clone()).await
                 }
             });
 

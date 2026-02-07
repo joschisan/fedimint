@@ -11,7 +11,9 @@ use fedimint_aead::{encrypt, get_encryption_key, random_salt};
 use fedimint_api_client::api::{
     LegacyFederationStatus, LegacyP2PConnectionStatus, LegacyPeerStatus, StatusResponse,
 };
-use fedimint_core::admin_client::{GuardianConfigBackup, ServerStatusLegacy, SetupStatus};
+use fedimint_core::admin_client::{
+    ExpirationStatus, GuardianConfigBackup, ServerStatusLegacy, SetupStatus,
+};
 use fedimint_core::backup::{
     BackupStatistics, ClientBackupKey, ClientBackupKeyPrefix, ClientBackupSnapshot,
 };
@@ -28,13 +30,14 @@ use fedimint_core::endpoint_constants::{
     AWAIT_SESSION_OUTCOME_ENDPOINT, AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT,
     AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT, BACKUP_STATISTICS_ENDPOINT, CHAIN_ID_ENDPOINT,
     CHANGE_PASSWORD_ENDPOINT, CLIENT_CONFIG_ENDPOINT, CLIENT_CONFIG_JSON_ENDPOINT,
-    CONSENSUS_ORD_LATENCY_ENDPOINT, FEDERATION_ID_ENDPOINT, FEDIMINTD_VERSION_ENDPOINT,
-    GUARDIAN_CONFIG_BACKUP_ENDPOINT, GUARDIAN_METADATA_ENDPOINT, INVITE_CODE_ENDPOINT,
-    P2P_CONNECTION_STATUS_ENDPOINT, RECOVER_ENDPOINT, SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT,
-    SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT,
-    SETUP_STATUS_ENDPOINT, SHUTDOWN_ENDPOINT, SIGN_API_ANNOUNCEMENT_ENDPOINT,
-    SIGN_GUARDIAN_METADATA_ENDPOINT, STATUS_ENDPOINT, SUBMIT_API_ANNOUNCEMENT_ENDPOINT,
-    SUBMIT_GUARDIAN_METADATA_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT, VERSION_ENDPOINT,
+    CONSENSUS_ORD_LATENCY_ENDPOINT, EXPIRATION_STATUS_ENDPOINT, FEDERATION_ID_ENDPOINT,
+    FEDIMINTD_VERSION_ENDPOINT, GUARDIAN_CONFIG_BACKUP_ENDPOINT, GUARDIAN_METADATA_ENDPOINT,
+    INVITE_CODE_ENDPOINT, P2P_CONNECTION_STATUS_ENDPOINT, RECOVER_ENDPOINT,
+    SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT,
+    SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT, SHUTDOWN_ENDPOINT,
+    SIGN_API_ANNOUNCEMENT_ENDPOINT, SIGN_GUARDIAN_METADATA_ENDPOINT, STATUS_ENDPOINT,
+    SUBMIT_API_ANNOUNCEMENT_ENDPOINT, SUBMIT_GUARDIAN_METADATA_ENDPOINT,
+    SUBMIT_TRANSACTION_ENDPOINT, VERSION_ENDPOINT,
 };
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::{Audit, AuditSummary};
@@ -74,6 +77,7 @@ use crate::config::{ServerConfig, legacy_consensus_config_hash};
 use crate::consensus::db::{AcceptedItemPrefix, AcceptedTransactionKey, SignedSessionOutcomeKey};
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::transaction::{TxProcessingMode, process_transaction_with_dbtx};
+use crate::db::ExpirationStatusKey;
 use crate::metrics::{BACKUP_WRITE_SIZE_BYTES, STORED_BACKUPS_COUNT};
 use crate::net::api::HasApiContext;
 use crate::net::api::announcement::{ApiAnnouncementKey, ApiAnnouncementPrefix};
@@ -805,6 +809,29 @@ impl IDashboardApi for ConsensusApi {
         self.change_guardian_password(new_password, guardian_auth)
             .map_err(|e| e.to_string())
     }
+
+    async fn expiration_status(&self) -> Option<ExpirationStatus> {
+        self.db
+            .begin_transaction_nc()
+            .await
+            .get_value(&ExpirationStatusKey)
+            .await
+    }
+
+    async fn set_expiration_status(&self, status: Option<ExpirationStatus>) {
+        let mut dbtx = self.db.begin_transaction().await;
+
+        match status {
+            Some(a) => {
+                dbtx.insert_entry(&ExpirationStatusKey, &a).await;
+            }
+            None => {
+                dbtx.remove_entry(&ExpirationStatusKey).await;
+            }
+        }
+
+        dbtx.commit_tx().await;
+    }
 }
 
 pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
@@ -1108,6 +1135,13 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
                     .get_chain_id()
                     .await
                     .map_err(|e| ApiError::server_error(e.to_string()))
+            }
+        },
+        api_endpoint! {
+            EXPIRATION_STATUS_ENDPOINT,
+            ApiVersion::new(0, 7),
+            async |fedimint: &ConsensusApi, _context, _v: ()| -> Option<ExpirationStatus> {
+                Ok(fedimint.expiration_status().await)
             }
         },
     ]

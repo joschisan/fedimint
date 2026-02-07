@@ -34,6 +34,7 @@ use fedimint_client_module::{
     ModuleRecoveryCompleted, TransactionUpdates, TxCreatedEvent,
 };
 use fedimint_connectors::ConnectorRegistry;
+use fedimint_core::admin_client::ExpirationStatus;
 use fedimint_core::config::{
     ClientConfig, FederationId, GlobalClientConfig, JsonClientConfig, ModuleInitRegistry,
 };
@@ -207,6 +208,19 @@ impl Client {
 
     pub fn api_clone(&self) -> DynGlobalApi {
         self.api.clone()
+    }
+
+    /// Get the expiration status from local DB cache.
+    ///
+    /// This is a fast, non-blocking read from the local database. The value
+    /// is refreshed daily by a background task. Returns `None` if no
+    /// expiration has been set or if the cache hasn't been populated yet.
+    pub async fn expiration_status(&self) -> Option<ExpirationStatus> {
+        self.db()
+            .begin_transaction_nc()
+            .await
+            .get_value(&crate::db::ExpirationStatusKey)
+            .await
     }
 
     /// Returns a stream that emits the current connection status of all peers

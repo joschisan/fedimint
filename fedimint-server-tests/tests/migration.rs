@@ -210,7 +210,8 @@ async fn test_server_db_migrations() -> anyhow::Result<()> {
                     DbKeyPrefix::Module
                     | DbKeyPrefix::ServerInfo
                     | DbKeyPrefix::DatabaseVersion
-                    | DbKeyPrefix::ClientBackup => {}
+                    | DbKeyPrefix::ClientBackup
+                    | DbKeyPrefix::ExpirationStatus => {}
                     DbKeyPrefix::ApiAnnouncements => {
                         let announcements = dbtx
                             .find_by_prefix(&ApiAnnouncementPrefix)

@@ -1,16 +1,17 @@
 pub mod audit;
+pub mod backup;
 pub mod bitcoin;
 pub(crate) mod consensus_explorer;
+pub mod expiration;
 pub mod general;
 pub mod invite;
 pub mod latency;
 pub mod modules;
 
 use axum::Router;
-use axum::body::Body;
 use axum::extract::{Form, State};
 use axum::http::{StatusCode, header};
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum_extra::extract::cookie::CookieJar;
 use consensus_explorer::consensus_explorer_view;
@@ -24,8 +25,8 @@ use {fedimint_lnv2_server, fedimint_meta_server, fedimint_wallet_server};
 
 use crate::dashboard::modules::{lnv2, meta, wallet};
 use crate::{
-    CHANGE_PASSWORD_ROUTE, DOWNLOAD_BACKUP_ROUTE, EXPLORER_IDX_ROUTE, EXPLORER_ROUTE, LoginInput,
-    METRICS_ROUTE, login_submit_response,
+    CHANGE_PASSWORD_ROUTE, CLEAR_EXPIRATION_ROUTE, DOWNLOAD_BACKUP_ROUTE, EXPLORER_IDX_ROUTE,
+    EXPLORER_ROUTE, LoginInput, METRICS_ROUTE, SET_EXPIRATION_ROUTE, login_submit_response,
 };
 
 // Dashboard login form handler
@@ -47,28 +48,6 @@ async fn login_submit(
         input,
     )
     .into_response()
-}
-
-// Download backup handler
-async fn download_backup(
-    State(state): State<UiState<DynDashboardApi>>,
-    user_auth: UserAuth,
-) -> impl IntoResponse {
-    let api_auth = state.api.auth().await;
-    let backup = state
-        .api
-        .download_guardian_config_backup(&api_auth.0, &user_auth.guardian_auth_token)
-        .await;
-    let filename = "guardian-backup.tar";
-
-    Response::builder()
-        .header(header::CONTENT_TYPE, "application/x-tar")
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{filename}\""),
-        )
-        .body(Body::from(backup.tar_archive_bytes))
-        .expect("Failed to build response")
 }
 
 // Prometheus metrics handler
@@ -189,6 +168,7 @@ async fn dashboard_view(
     let audit_summary = state.api.federation_audit().await;
     let bitcoin_rpc_url = state.api.bitcoin_rpc_url().await;
     let bitcoin_rpc_status = state.api.bitcoin_rpc_status().await;
+    let expiration_status = state.api.expiration_status().await;
 
     let content = html! {
         div class="row gy-4" {
@@ -244,36 +224,13 @@ async fn dashboard_view(
             }
         }
 
-        // Guardian Configuration Backup section
+        // Guardian Configuration Backup and Expiration Status section
         div class="row gy-4 mt-4" {
-            div class="col-12" {
-                div class="card" {
-                    div class="card-header bg-warning text-dark" {
-                        h5 class="mb-0" { "Guardian Configuration Backup" }
-                    }
-                    div class="card-body" {
-                        div class="row" {
-                            div class="col-lg-6 mb-3 mb-lg-0" {
-                                p {
-                                    "You only need to download this backup once."
-                                }
-                                p {
-                                    "Use it to restore your guardian if your server fails."
-                                }
-                                a href="/download-backup" class="btn btn-outline-warning btn-lg mt-2" {
-                                    "Download Guardian Backup"
-                                }
-                            }
-                            div class="col-lg-6" {
-                                div class="alert alert-warning mb-0" {
-                                    strong { "Security Warning" }
-                                    br;
-                                    "Store this file securely since anyone with it and your password can run your guardian node."
-                                }
-                            }
-                        }
-                    }
-                }
+            div class="col-lg-6" {
+                (backup::render())
+            }
+            div class="col-lg-6" {
+                (expiration::render(expiration_status.as_ref()))
             }
         }
 
@@ -334,9 +291,14 @@ pub fn router(api: DynDashboardApi) -> Router {
         .route(LOGIN_ROUTE, get(login_form).post(login_submit))
         .route(EXPLORER_ROUTE, get(consensus_explorer_view))
         .route(EXPLORER_IDX_ROUTE, get(consensus_explorer_view))
-        .route(DOWNLOAD_BACKUP_ROUTE, get(download_backup))
+        .route(DOWNLOAD_BACKUP_ROUTE, get(backup::download))
         .route(CHANGE_PASSWORD_ROUTE, post(change_password))
         .route(METRICS_ROUTE, get(metrics_handler))
+        .route(SET_EXPIRATION_ROUTE, post(expiration::post_set_expiration))
+        .route(
+            CLEAR_EXPIRATION_ROUTE,
+            post(expiration::post_clear_expiration),
+        )
         .with_static_routes();
 
     // routeradd LNv2 gateway routes if the module exists

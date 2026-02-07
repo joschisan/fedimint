@@ -16,7 +16,9 @@ pub use fedimint_connectors::error::ServerError;
 use fedimint_connectors::{
     ConnectionPool, ConnectorRegistry, DynGuaridianConnection, IGuardianConnection,
 };
-use fedimint_core::admin_client::{GuardianConfigBackup, ServerStatusLegacy, SetupStatus};
+use fedimint_core::admin_client::{
+    ExpirationStatus, GuardianConfigBackup, ServerStatusLegacy, SetupStatus,
+};
 use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
 use fedimint_core::core::backup::SignedBackupRequest;
 use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, ModuleKind, OutputOutcome};
@@ -589,6 +591,14 @@ pub trait IGlobalFederationApi: IRawFederationApi {
     /// Returns the chain ID (bitcoin block hash at height 1) from the
     /// federation
     async fn chain_id(&self) -> FederationResult<ChainId>;
+
+    /// Fetch the federation's expiration status with threshold
+    /// consensus verification.
+    ///
+    /// Returns `Some(announcement)` if the federation has announced
+    /// expiration and a threshold of guardians agree. Returns `None` if
+    /// no expiration has been announced.
+    async fn expiration_status(&self) -> FederationResult<Option<ExpirationStatus>>;
 }
 
 pub fn deserialize_outcome<R>(

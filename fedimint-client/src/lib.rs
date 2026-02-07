@@ -81,6 +81,9 @@ mod api_announcements;
 /// Guardian metadata handling
 mod guardian_metadata;
 
+/// Expiration status handling
+mod expiration;
+
 /// Core [`Client`]
 mod client;
 

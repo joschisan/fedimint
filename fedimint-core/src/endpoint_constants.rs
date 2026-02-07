@@ -42,3 +42,4 @@ pub const SIGN_GUARDIAN_METADATA_ENDPOINT: &str = "sign_guardian_metadata";
 pub const FEDIMINTD_VERSION_ENDPOINT: &str = "fedimintd_version";
 pub const CHANGE_PASSWORD_ENDPOINT: &str = "change_password";
 pub const CHAIN_ID_ENDPOINT: &str = "chain_id";
+pub const EXPIRATION_STATUS_ENDPOINT: &str = "expiration_status";

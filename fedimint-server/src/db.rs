@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use bitcoin::hex::DisplayHex as _;
+use fedimint_core::admin_client::ExpirationStatus;
 use fedimint_core::db::{
     DatabaseTransaction, IDatabaseTransactionOpsCore as _, MODULE_GLOBAL_PREFIX,
 };
@@ -20,6 +21,7 @@ pub enum DbKeyPrefix {
     ApiAnnouncements = 0x06,
     ServerInfo = 0x07,
     GuardianMetadata = 0x08,
+    ExpirationStatus = 0x09,
 
     DatabaseVersion = fedimint_core::db::DbKeyPrefix::DatabaseVersion as u8,
     ClientBackup = fedimint_core::db::DbKeyPrefix::ClientBackup as u8,
@@ -66,5 +68,15 @@ impl_db_record!(
     key = ServerInfoKey,
     value = ServerInfo,
     db_prefix = DbKeyPrefix::ServerInfo,
+    notify_on_modify = false,
+);
+
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct ExpirationStatusKey;
+
+impl_db_record!(
+    key = ExpirationStatusKey,
+    value = ExpirationStatus,
+    db_prefix = DbKeyPrefix::ExpirationStatus,
     notify_on_modify = false,
 );

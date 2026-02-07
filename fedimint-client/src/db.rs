@@ -61,6 +61,7 @@ pub enum DbKeyPrefix {
     ChainId = 0x3c,
     ClientModuleRecovery = 0x40,
     GuardianMetadata = 0x42,
+    ExpirationStatus = 0x43,
 
     DatabaseVersion = fedimint_core::db::DbKeyPrefix::DatabaseVersion as u8,
     ClientBackup = fedimint_core::db::DbKeyPrefix::ClientBackup as u8,
@@ -468,6 +469,15 @@ impl_db_record!(
 );
 
 impl_db_lookup!(key = MetaFieldKey, query_prefix = MetaFieldPrefix);
+
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct ExpirationStatusKey;
+
+impl_db_record!(
+    key = ExpirationStatusKey,
+    value = fedimint_core::admin_client::ExpirationStatus,
+    db_prefix = DbKeyPrefix::ExpirationStatus,
+);
 
 pub fn get_core_client_database_migrations()
 -> BTreeMap<DatabaseVersion, fedimint_core::db::ClientCoreDbMigrationFn> {

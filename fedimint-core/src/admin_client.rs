@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::ModuleKind;
 use crate::encoding::{Decodable, Encodable};
+use crate::invite_code::InviteCode;
 
 /// The state of the server returned via APIs
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Eq, PartialEq, Encodable, Decodable)]
@@ -60,4 +61,14 @@ pub struct SetLocalParamsRequest {
 pub struct GuardianConfigBackup {
     #[serde(with = "crate::hex::serde")]
     pub tar_archive_bytes: Vec<u8>,
+}
+
+/// Status indicating that a federation is expiring, with a target date
+/// and optional successor federation invite code for users to migrate to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable)]
+pub struct ExpirationStatus {
+    /// Expiration date as a unix timestamp (midnight UTC)
+    pub date: u64,
+    /// Optional invite code for the successor federation
+    pub successor: Option<InviteCode>,
 }
