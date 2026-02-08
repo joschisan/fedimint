@@ -39,9 +39,9 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::{DynInput, DynOutput, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{
-    Database, DatabaseRecord, IReadDatabaseTransactionOps as _, IReadDatabaseTransactionOpsTyped,
-    IWriteDatabaseTransactionOpsTyped as _, NonCommittable, ReadDatabaseTransaction,
-    WriteDatabaseTransaction,
+    AutocommitError, Database, DatabaseRecord, IReadDatabaseTransactionOps as _,
+    IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped as _, NonCommittable,
+    ReadDatabaseTransaction, WriteDatabaseTransaction,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::endpoint_constants::{CLIENT_CONFIG_ENDPOINT, VERSION_ENDPOINT};
@@ -600,6 +600,11 @@ impl Client {
     /// ## Errors
     /// The function will return an error if the operation with given ID already
     /// exists.
+    ///
+    /// ## Panics
+    /// The function will panic if the database transaction collides with
+    /// other and fails with others too often, this should not happen except for
+    /// excessively concurrent scenarios.
     pub async fn finalize_and_submit_transaction<F, M>(
         &self,
         operation_id: OperationId,
@@ -611,28 +616,50 @@ impl Client {
         F: Fn(OutPointRange) -> M + Clone + MaybeSend + MaybeSync,
         M: serde::Serialize + MaybeSend,
     {
-        let mut dbtx = self.db.begin_write_transaction().await;
+        let operation_type = operation_type.to_owned();
 
-        if Client::operation_exists_dbtx(&mut dbtx.to_ref_nc(), operation_id).await {
-            bail!("There already exists an operation with id {operation_id:?}")
-        }
+        let autocommit_res = self
+            .db
+            .autocommit(
+                |dbtx, _| {
+                    let operation_type = operation_type.clone();
+                    let tx_builder = tx_builder.clone();
+                    let operation_meta_gen = operation_meta_gen.clone();
+                    Box::pin(async move {
+                        if Client::operation_exists_dbtx(dbtx, operation_id).await {
+                            bail!("There already exists an operation with id {operation_id:?}")
+                        }
 
-        let out_point_range = self
-            .finalize_and_submit_transaction_inner(&mut dbtx.to_ref_nc(), operation_id, tx_builder)
-            .await?;
+                        let out_point_range = self
+                            .finalize_and_submit_transaction_inner(dbtx, operation_id, tx_builder)
+                            .await?;
 
-        self.operation_log()
-            .add_operation_log_entry_dbtx(
-                &mut dbtx.to_ref_nc(),
-                operation_id,
-                operation_type,
-                operation_meta_gen(out_point_range),
+                        self.operation_log()
+                            .add_operation_log_entry_dbtx(
+                                dbtx,
+                                operation_id,
+                                &operation_type,
+                                operation_meta_gen(out_point_range),
+                            )
+                            .await;
+
+                        Ok(out_point_range)
+                    })
+                },
+                Some(100),
             )
             .await;
 
-        dbtx.commit_tx().await;
-
-        Ok(out_point_range)
+        match autocommit_res {
+            Ok(txid) => Ok(txid),
+            Err(AutocommitError::ClosureError { error, .. }) => Err(error),
+            Err(AutocommitError::CommitFailed {
+                attempts,
+                last_error,
+            }) => panic!(
+                "Failed to commit tx submission dbtx after {attempts} attempts: {last_error}"
+            ),
+        }
     }
 
     async fn finalize_and_submit_transaction_inner(
@@ -1355,9 +1382,23 @@ impl Client {
 
     /// Set the client [`Metadata`]
     pub async fn set_metadata(&self, metadata: &Metadata) {
-        let mut dbtx = self.db.begin_write_transaction().await;
+        self.db
+            .autocommit::<_, _, anyhow::Error>(
+                |dbtx, _| {
+                    Box::pin(async {
+                        Self::set_metadata_dbtx(dbtx, metadata).await;
+                        Ok(())
+                    })
+                },
+                None,
+            )
+            .await
+            .expect("Failed to autocommit metadata");
+    }
+
+    /// Set the client [`Metadata`]
+    pub async fn set_metadata_dbtx(dbtx: &mut WriteDatabaseTransaction<'_>, metadata: &Metadata) {
         dbtx.insert_new_entry(&ClientMetadataKey, metadata).await;
-        dbtx.commit_tx().await;
     }
 
     pub fn has_pending_recoveries(&self) -> bool {
@@ -1645,17 +1686,36 @@ impl Client {
     pub async fn get_guardian_public_keys_blocking(
         &self,
     ) -> BTreeMap<PeerId, fedimint_core::secp256k1::PublicKey> {
-        let config = self.config().await;
+        self.db
+            .autocommit(
+                |dbtx, _| {
+                    Box::pin(async move {
+                        let config = self.config().await;
 
+                        let guardian_pub_keys = self
+                            .get_or_backfill_broadcast_public_keys(dbtx, config)
+                            .await;
+
+                        Result::<_, ()>::Ok(guardian_pub_keys)
+                    })
+                },
+                None,
+            )
+            .await
+            .expect("Will retry forever")
+    }
+
+    async fn get_or_backfill_broadcast_public_keys(
+        &self,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
+        config: ClientConfig,
+    ) -> BTreeMap<PeerId, PublicKey> {
         match config.global.broadcast_public_keys {
             Some(guardian_pub_keys) => guardian_pub_keys,
             _ => {
-                // Fetch config update before acquiring write transaction to avoid deadlock
                 let (guardian_pub_keys, new_config) = self.fetch_and_update_config(config).await;
 
-                let mut dbtx = self.db.begin_write_transaction().await;
                 dbtx.insert_entry(&ClientConfigKey, &new_config).await;
-                dbtx.commit_tx().await;
                 *(self.config.write().await) = new_config;
                 guardian_pub_keys
             }

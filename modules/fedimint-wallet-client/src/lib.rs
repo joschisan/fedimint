@@ -48,7 +48,7 @@ use fedimint_client_module::transaction::{
 use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{
-    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+    AutocommitError, Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
     ReadDatabaseTransaction, WriteDatabaseTransaction,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
@@ -992,43 +992,54 @@ impl WalletClientModule {
     {
         let extra_meta_value =
             serde_json::to_value(extra_meta).expect("Failed to serialize extra meta");
-
-        let mut dbtx = self.db.begin_write_transaction().await;
-
         let (operation_id, address, tweak_idx) = self
-            .allocate_deposit_address_inner(&mut dbtx.to_ref_nc())
-            .await;
+            .db
+            .autocommit(
+                move |dbtx, _| {
+                    let extra_meta_value_inner = extra_meta_value.clone();
+                    Box::pin(async move {
+                        let (operation_id, address, tweak_idx) = self
+                            .allocate_deposit_address_inner(dbtx)
+                            .await;
 
-        self.client_ctx
-            .manual_operation_start_dbtx(
-                &mut dbtx.to_ref_nc(),
-                operation_id,
-                WalletCommonInit::KIND.as_str(),
-                WalletOperationMeta {
-                    variant: WalletOperationMetaVariant::Deposit {
-                        address: address.clone().into_unchecked(),
-                        tweak_idx: Some(tweak_idx),
-                        expires_at: None,
-                    },
-                    extra_meta: extra_meta_value,
+                        self.client_ctx.manual_operation_start_dbtx(
+                            dbtx,
+                            operation_id,
+                            WalletCommonInit::KIND.as_str(),
+                            WalletOperationMeta {
+                                variant: WalletOperationMetaVariant::Deposit {
+                                    address: address.clone().into_unchecked(),
+                                    tweak_idx: Some(tweak_idx),
+                                    expires_at: None,
+                                },
+                                extra_meta: extra_meta_value_inner,
+                            },
+                            vec![]
+                        ).await?;
+
+                        debug!(target: LOG_CLIENT_MODULE_WALLET, %tweak_idx, %address, "Derived a new deposit address");
+
+                        // Begin watching the script address
+                        self.rpc.watch_script_history(&address.script_pubkey()).await?;
+
+                        let sender = self.pegin_monitor_wakeup_sender.clone();
+                        dbtx.on_commit(move || {
+                            sender.send_replace(());
+                        });
+
+                        Ok((operation_id, address, tweak_idx))
+                    })
                 },
-                vec![],
+                Some(100),
             )
-            .await?;
-
-        debug!(target: LOG_CLIENT_MODULE_WALLET, %tweak_idx, %address, "Derived a new deposit address");
-
-        // Begin watching the script address
-        self.rpc
-            .watch_script_history(&address.script_pubkey())
-            .await?;
-
-        let sender = self.pegin_monitor_wakeup_sender.clone();
-        dbtx.on_commit(move || {
-            sender.send_replace(());
-        });
-
-        dbtx.commit_tx().await;
+            .await
+            .map_err(|e| match e {
+                AutocommitError::CommitFailed {
+                    last_error,
+                    attempts,
+                } => anyhow!("Failed to commit after {attempts} attempts: {last_error}"),
+                AutocommitError::ClosureError { error, .. } => error,
+            })?;
 
         Ok((operation_id, address, tweak_idx))
     }
@@ -1276,29 +1287,37 @@ impl WalletClientModule {
 
     /// Schedule given address for immediate re-check for deposits
     pub async fn recheck_pegin_address(&self, tweak_idx: TweakIdx) -> anyhow::Result<()> {
-        let mut dbtx = self.db.begin_write_transaction().await;
+        self.db
+            .autocommit(
+                |dbtx, _| {
+                    Box::pin(async {
+                        let db_key = PegInTweakIndexKey(tweak_idx);
+                        let db_val = dbtx
+                            .get_value(&db_key)
+                            .await
+                            .ok_or_else(|| anyhow::format_err!("DBKey not found"))?;
 
-        let db_key = PegInTweakIndexKey(tweak_idx);
-        let db_val = dbtx
-            .get_value(&db_key)
-            .await
-            .ok_or_else(|| anyhow::format_err!("DBKey not found"))?;
+                        dbtx.insert_entry(
+                            &db_key,
+                            &PegInTweakIndexData {
+                                next_check_time: Some(fedimint_core::time::now()),
+                                ..db_val
+                            },
+                        )
+                        .await;
 
-        dbtx.insert_entry(
-            &db_key,
-            &PegInTweakIndexData {
-                next_check_time: Some(fedimint_core::time::now()),
-                ..db_val
-            },
-        )
-        .await;
+                        let sender = self.pegin_monitor_wakeup_sender.clone();
+                        dbtx.on_commit(move || {
+                            sender.send_replace(());
+                        });
 
-        let sender = self.pegin_monitor_wakeup_sender.clone();
-        dbtx.on_commit(move || {
-            sender.send_replace(());
-        });
+                        Ok::<_, anyhow::Error>(())
+                    })
+                },
+                Some(100),
+            )
+            .await?;
 
-        dbtx.commit_tx().await;
         Ok(())
     }
 

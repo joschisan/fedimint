@@ -31,7 +31,7 @@ use fedimint_client_module::{
 use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
-use fedimint_core::db::ReadDatabaseTransaction;
+use fedimint_core::db::{AutocommitError, ReadDatabaseTransaction};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{Amounts, ApiVersion, ModuleInit, MultiApiVersion};
 use fedimint_core::util::{FmtCompact, SafeUrl, Spanned};
@@ -635,63 +635,61 @@ impl GatewayClientModule {
             .verify_pruned_invoice(pay_invoice_payload.payment_data)
             .await?;
 
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
-        let operation_id = OperationId(payload.contract_id.to_byte_array());
+        self.client_ctx.module_db()
+            .autocommit(
+                |dbtx, _| {
+                    Box::pin(async {
+                        let operation_id = OperationId(payload.contract_id.to_byte_array());
 
-        self.client_ctx
-            .log_event(
-                &mut dbtx.to_ref_nc(),
-                OutgoingPaymentStarted {
-                    contract_id: payload.contract_id,
-                    invoice_amount: payload
-                        .payment_data
-                        .amount()
-                        .expect("LNv1 invoices should have an amount"),
-                    operation_id,
+                        self.client_ctx.log_event(dbtx, OutgoingPaymentStarted {
+                            contract_id: payload.contract_id,
+                            invoice_amount: payload.payment_data.amount().expect("LNv1 invoices should have an amount"),
+                            operation_id,
+                        }).await;
+
+                        let state_machines =
+                            vec![GatewayClientStateMachines::Pay(GatewayPayStateMachine {
+                                common: GatewayPayCommon { operation_id },
+                                state: GatewayPayStates::PayInvoice(GatewayPayInvoice {
+                                    pay_invoice_payload: payload.clone(),
+                                }),
+                            })];
+
+                        let dyn_states = state_machines
+                            .into_iter()
+                            .map(|s| self.client_ctx.make_dyn(s))
+                            .collect();
+
+                            match self.client_ctx.add_state_machines_dbtx(dbtx, dyn_states).await {
+                                Ok(()) => {
+                                    self.client_ctx
+                                        .add_operation_log_entry_dbtx(
+                                            dbtx,
+                                            operation_id,
+                                            KIND.as_str(),
+                                            GatewayMeta::Pay,
+                                        )
+                                        .await;
+                                }
+                                Err(AddStateMachinesError::StateAlreadyExists) => {
+                                    info!("State machine for operation {} already exists, will not add a new one", operation_id.fmt_short());
+                                }
+                                Err(other) => {
+                                    anyhow::bail!("Failed to add state machines: {other:?}")
+                                }
+                            }
+                            Ok(operation_id)
+                    })
                 },
+                Some(100),
             )
-            .await;
-
-        let state_machines = vec![GatewayClientStateMachines::Pay(GatewayPayStateMachine {
-            common: GatewayPayCommon { operation_id },
-            state: GatewayPayStates::PayInvoice(GatewayPayInvoice {
-                pay_invoice_payload: payload.clone(),
-            }),
-        })];
-
-        let dyn_states = state_machines
-            .into_iter()
-            .map(|s| self.client_ctx.make_dyn(s))
-            .collect();
-
-        let add_result = self
-            .client_ctx
-            .add_state_machines_dbtx(&mut dbtx.to_ref_nc(), dyn_states)
-            .await;
-
-        match add_result {
-            Ok(()) => {
-                self.client_ctx
-                    .add_operation_log_entry_dbtx(
-                        &mut dbtx.to_ref_nc(),
-                        operation_id,
-                        KIND.as_str(),
-                        GatewayMeta::Pay,
-                    )
-                    .await;
-            }
-            Err(AddStateMachinesError::StateAlreadyExists) => {
-                info!(
-                    "State machine for operation {} already exists, will not add a new one",
-                    operation_id.fmt_short()
-                );
-            }
-            Err(other) => {
-                anyhow::bail!("Failed to add state machines: {other:?}")
-            }
-        }
-        dbtx.commit_tx().await;
-        Ok(operation_id)
+            .await
+            .map_err(|e| match e {
+                AutocommitError::ClosureError { error, .. } => error,
+                AutocommitError::CommitFailed { last_error, .. } => {
+                    anyhow::anyhow!("Commit to DB failed: {last_error}")
+                }
+            })
     }
 
     pub async fn gateway_subscribe_ln_pay(

@@ -68,7 +68,7 @@ use fedimint_core::base32::{FEDIMINT_PREFIX, encode_prefixed};
 use fedimint_core::config::{FederationId, FederationIdPrefix};
 use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{
-    Committable, Database, DatabaseVersion, IReadDatabaseTransactionOpsTyped,
+    AutocommitError, Database, DatabaseVersion, IReadDatabaseTransactionOpsTyped,
     IWriteDatabaseTransactionOpsTyped, ReadDatabaseTransaction, WriteDatabaseTransaction,
 };
 use fedimint_core::encoding::{Decodable, DecodeError, Encodable};
@@ -987,8 +987,21 @@ impl ClientModule for MintClientModule {
     }
 
     async fn backup(&self) -> anyhow::Result<EcashBackup> {
-        let mut dbtx = self.client_ctx.module_db().begin_read_transaction().await;
-        self.prepare_plaintext_ecash_backup(&mut dbtx).await
+        self.client_ctx
+            .module_db()
+            .autocommit(
+                |dbtx_ctx, _| {
+                    Box::pin(async { self.prepare_plaintext_ecash_backup(dbtx_ctx).await })
+                },
+                None,
+            )
+            .await
+            .map_err(|e| match e {
+                AutocommitError::ClosureError { error, .. } => error,
+                AutocommitError::CommitFailed { last_error, .. } => {
+                    anyhow!("Commit to DB failed: {last_error}")
+                }
+            })
     }
 
     fn supports_being_primary(&self) -> PrimaryModuleSupport {
@@ -1582,7 +1595,7 @@ impl MintClientModule {
 
     async fn spend_notes_oob(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_, Committable>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         notes_selector: &impl NotesSelector,
         amount: Amount,
         try_cancel_after: Duration,
@@ -1949,70 +1962,87 @@ impl MintClientModule {
         let extra_meta = serde_json::to_value(extra_meta)
             .expect("MintClientModule::spend_notes extra_meta is serializable");
 
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
-
-        let (operation_id, states, notes) = self
-            .spend_notes_oob(
-                &mut dbtx,
-                notes_selector,
-                requested_amount,
-                try_cancel_after,
-            )
-            .await?;
-
-        let oob_notes = if include_invite {
-            OOBNotes::new_with_invite(notes, &self.client_ctx.get_invite_code().await)
-        } else {
-            OOBNotes::new(federation_id_prefix, notes)
-        };
-
         self.client_ctx
-            .add_state_machines_dbtx(
-                &mut dbtx.to_ref_nc(),
-                self.client_ctx.map_dyn(states).collect(),
-            )
-            .await?;
-        self.client_ctx
-            .add_operation_log_entry_dbtx(
-                &mut dbtx.to_ref_nc(),
-                operation_id,
-                MintCommonInit::KIND.as_str(),
-                MintOperationMeta {
-                    variant: MintOperationMetaVariant::SpendOOB {
-                        requested_amount,
-                        oob_notes: oob_notes.clone(),
-                    },
-                    amount: oob_notes.total_amount(),
-                    extra_meta,
+            .module_db()
+            .autocommit(
+                |dbtx, _| {
+                    let extra_meta = extra_meta.clone();
+                    Box::pin(async {
+                        let (operation_id, states, notes) = self
+                            .spend_notes_oob(
+                                dbtx,
+                                notes_selector,
+                                requested_amount,
+                                try_cancel_after,
+                            )
+                            .await?;
+
+                        let oob_notes = if include_invite {
+                            OOBNotes::new_with_invite(
+                                notes,
+                                &self.client_ctx.get_invite_code().await,
+                            )
+                        } else {
+                            OOBNotes::new(federation_id_prefix, notes)
+                        };
+
+                        self.client_ctx
+                            .add_state_machines_dbtx(
+                                dbtx,
+                                self.client_ctx.map_dyn(states).collect(),
+                            )
+                            .await?;
+                        self.client_ctx
+                            .add_operation_log_entry_dbtx(
+                                dbtx,
+                                operation_id,
+                                MintCommonInit::KIND.as_str(),
+                                MintOperationMeta {
+                                    variant: MintOperationMetaVariant::SpendOOB {
+                                        requested_amount,
+                                        oob_notes: oob_notes.clone(),
+                                    },
+                                    amount: oob_notes.total_amount(),
+                                    extra_meta,
+                                },
+                            )
+                            .await;
+                        self.client_ctx
+                            .log_event(
+                                dbtx,
+                                OOBNotesSpent {
+                                    requested_amount,
+                                    spent_amount: oob_notes.total_amount(),
+                                    timeout: try_cancel_after,
+                                    include_invite,
+                                },
+                            )
+                            .await;
+
+                        self.client_ctx
+                            .log_event(
+                                dbtx,
+                                SendPaymentEvent {
+                                    operation_id,
+                                    amount: oob_notes.total_amount(),
+                                    oob_notes: encode_prefixed(FEDIMINT_PREFIX, &oob_notes),
+                                },
+                            )
+                            .await;
+
+                        Ok((operation_id, oob_notes))
+                    })
                 },
+                Some(100),
             )
-            .await;
-        self.client_ctx
-            .log_event(
-                &mut dbtx.to_ref_nc(),
-                OOBNotesSpent {
-                    requested_amount,
-                    spent_amount: oob_notes.total_amount(),
-                    timeout: try_cancel_after,
-                    include_invite,
-                },
-            )
-            .await;
-
-        self.client_ctx
-            .log_event(
-                &mut dbtx.to_ref_nc(),
-                SendPaymentEvent {
-                    operation_id,
-                    amount: oob_notes.total_amount(),
-                    oob_notes: encode_prefixed(FEDIMINT_PREFIX, &oob_notes),
-                },
-            )
-            .await;
-
-        dbtx.commit_tx().await;
-
-        Ok((operation_id, oob_notes))
+            .await
+            .map_err(|e| match e {
+                AutocommitError::CommitFailed {
+                    last_error,
+                    attempts,
+                } => anyhow::anyhow!("Commit failed after {attempts} attempts: {last_error}"),
+                AutocommitError::ClosureError { error, .. } => error,
+            })
     }
 
     /// Send e-cash notes for the requested amount.
@@ -2052,11 +2082,28 @@ impl MintClientModule {
             .expect("MintClientModule::send_oob_notes extra_meta is serializable");
 
         // Try to spend exact notes from our current balance
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
         let oob_notes: Option<OOBNotes> = self
-            .try_spend_exact_notes_dbtx(&mut dbtx, amount, self.federation_id, extra_meta.clone())
-            .await;
-        dbtx.commit_tx().await;
+            .client_ctx
+            .module_db()
+            .autocommit(
+                |dbtx, _| {
+                    let extra_meta = extra_meta.clone();
+                    Box::pin(async {
+                        self.try_spend_exact_notes_dbtx(
+                            dbtx,
+                            amount,
+                            self.federation_id,
+                            extra_meta,
+                        )
+                        .await
+                        .map(Ok::<OOBNotes, anyhow::Error>)
+                        .transpose()
+                    })
+                },
+                Some(100),
+            )
+            .await
+            .expect("Failed to commit dbtx after 100 retries");
 
         if let Some(oob_notes) = oob_notes {
             return Ok(oob_notes);
@@ -2362,10 +2409,20 @@ impl MintClientModule {
     }
 
     pub async fn advance_note_idx(&self, amount: Amount) -> anyhow::Result<DerivableSecret> {
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
-        let secret = self.new_note_secret(amount, &mut dbtx).await;
-        dbtx.commit_tx().await;
-        Ok(secret)
+        let db = self.client_ctx.module_db().clone();
+
+        Ok(db
+            .autocommit(
+                |dbtx, _| {
+                    Box::pin(async {
+                        Ok::<DerivableSecret, anyhow::Error>(
+                            self.new_note_secret(amount, dbtx).await,
+                        )
+                    })
+                },
+                None,
+            )
+            .await?)
     }
 
     /// Returns secrets for the note indices that were reused by previous

@@ -482,11 +482,22 @@ where
             "Finalizing restore"
         );
 
-        let mut dbtx = db.begin_write_transaction().await;
-        state.delete_dbtx(&mut dbtx.to_ref_nc()).await;
-        state.finalize_dbtx(&mut dbtx.to_ref_nc()).await?;
-        Recovery::store_finalized(&mut dbtx.to_ref_nc(), true).await;
-        dbtx.commit_tx().await;
+        db.autocommit(
+            |dbtx, _| {
+                let state = state.clone();
+                {
+                    Box::pin(async move {
+                        state.delete_dbtx(dbtx).await;
+                        state.finalize_dbtx(dbtx).await?;
+                        Recovery::store_finalized(dbtx, true).await;
+
+                        Ok::<_, anyhow::Error>(())
+                    })
+                }
+            },
+            None,
+        )
+        .await?;
 
         Ok(())
     }

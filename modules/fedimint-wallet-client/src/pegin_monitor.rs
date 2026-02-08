@@ -8,8 +8,8 @@ use fedimint_client_module::module::{ClientContext, OutPointRange};
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{
-    Database, IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
-    WriteDatabaseTransaction,
+    AutocommitError, Database, IReadDatabaseTransactionOpsTyped as _,
+    IWriteDatabaseTransactionOpsTyped as _, WriteDatabaseTransaction,
 };
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::module::Amounts;
@@ -187,30 +187,40 @@ async fn check_and_claim_idx_pegins(
             let next_check_time = CheckOutcome::retry_delay_vec(&outcomes, due_val.creation_time)
                 .map(|duration| now + duration);
 
-            let mut dbtx = db.begin_write_transaction().await;
-            let claimed_now = CheckOutcome::get_claimed_now_outpoints(&outcomes);
+            db
+                .autocommit(
+                    |dbtx, _| {
+                        Box::pin(async {
+                            let claimed_now = CheckOutcome::get_claimed_now_outpoints(&outcomes);
 
-            let claimed_sender = pengin_claimed_sender.clone();
-            dbtx.on_commit(move || {
-                claimed_sender.send_replace(());
-            });
+                            let claimed_sender = pengin_claimed_sender.clone();
+                            dbtx.on_commit(move || {
+                                claimed_sender.send_replace(());
+                            });
 
-            let peg_in_tweak_index_data = PegInTweakIndexData {
-                next_check_time,
-                last_check_time: Some(now),
-                claimed: [due_val.claimed.clone(), claimed_now].concat(),
-                ..due_val
-            };
-            trace!(
-                target: LOG_CLIENT_MODULE_WALLET,
-                tweak_idx=%due_key.0,
-                due_in_secs=?next_check_time.map(|next_check_time| next_check_time.duration_since(now).unwrap_or_default().as_secs()),
-                data=?peg_in_tweak_index_data,
-                "Updating"
-            );
-            dbtx.insert_entry(&due_key, &peg_in_tweak_index_data).await;
+                            let peg_in_tweak_index_data = PegInTweakIndexData {
+                                next_check_time,
+                                last_check_time: Some(now),
+                                claimed: [due_val.claimed.clone(), claimed_now].concat(),
+                                ..due_val
+                            };
+                            trace!(
+                                target: LOG_CLIENT_MODULE_WALLET,
+                                tweak_idx=%due_key.0,
+                                due_in_secs=?next_check_time.map(|next_check_time| next_check_time.duration_since(now).unwrap_or_default().as_secs()),
+                                data=?peg_in_tweak_index_data,
+                                "Updating"
+                            );
+                            dbtx
+                                .insert_entry(&due_key, &peg_in_tweak_index_data)
+                                .await;
 
-            dbtx.commit_tx().await;
+                            Ok::<_, anyhow::Error>(())
+                        })
+                    },
+                    None,
+                )
+                .await?;
         }
         Err(err) => {
             debug!(target: LOG_CLIENT_MODULE_WALLET, err = %err.fmt_compact_anyhow(), tweak_idx=%due_key.0, "Error checking tweak_idx");
@@ -477,42 +487,57 @@ async fn claim_peg_in(
 
     debug!(target: LOG_CLIENT_MODULE_WALLET, %out_point, "Claiming a peg-in");
 
-    let mut dbtx = client_ctx.module_db().begin_write_transaction().await;
+    client_ctx
+        .module_db()
+        .autocommit(
+            |dbtx, _| {
+                Box::pin(async {
+                    let maybe_change_range = claim_peg_in_inner(
+                        client_ctx,
+                        dbtx,
+                        transaction,
+                        out_point.vout,
+                        tweak_key,
+                        tx_out_proof.clone(),
+                        operation_id,
+                        federation_knows_utxo,
+                    )
+                    .await;
 
-    let maybe_change_range = claim_peg_in_inner(
-        client_ctx,
-        &mut dbtx,
-        transaction,
-        out_point.vout,
-        tweak_key,
-        tx_out_proof.clone(),
-        operation_id,
-        federation_knows_utxo,
-    )
-    .await;
+                    let claimed_pegin_data = if let Some(change_range) = maybe_change_range {
+                        ClaimedPegInData {
+                            claim_txid: change_range.txid(),
+                            change: change_range.into_iter().collect(),
+                        }
+                    } else {
+                        ClaimedPegInData {
+                            claim_txid: TransactionId::from_byte_array([0; 32]),
+                            change: vec![],
+                        }
+                    };
 
-    let claimed_pegin_data = if let Some(change_range) = maybe_change_range {
-        ClaimedPegInData {
-            claim_txid: change_range.txid(),
-            change: change_range.into_iter().collect(),
-        }
-    } else {
-        ClaimedPegInData {
-            claim_txid: TransactionId::from_byte_array([0; 32]),
-            change: vec![],
-        }
-    };
+                    dbtx.insert_entry(
+                        &ClaimedPegInKey {
+                            peg_in_index: tweak_idx,
+                            btc_out_point: out_point,
+                        },
+                        &claimed_pegin_data,
+                    )
+                    .await;
 
-    dbtx.insert_entry(
-        &ClaimedPegInKey {
-            peg_in_index: tweak_idx,
-            btc_out_point: out_point,
-        },
-        &claimed_pegin_data,
-    )
-    .await;
-
-    dbtx.commit_tx().await;
+                    Ok(())
+                })
+            },
+            Some(100),
+        )
+        .await
+        .map_err(|e| match e {
+            AutocommitError::CommitFailed {
+                last_error,
+                attempts,
+            } => anyhow::anyhow!("Failed to commit after {attempts} attempts: {last_error}"),
+            AutocommitError::ClosureError { error, .. } => error,
+        })?;
 
     Ok(())
 }

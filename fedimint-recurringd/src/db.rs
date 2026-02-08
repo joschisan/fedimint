@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{
-    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+    AutocommitError, Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
     WriteDatabaseTransaction,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
@@ -55,21 +55,34 @@ pub async fn try_add_federation_database(
     federation_id: FederationId,
     db_prefix: FederationDbPrefix,
 ) -> Result<(), FederationDbPrefix> {
-    let mut dbtx = db.begin_write_transaction().await;
+    db.autocommit(
+        |dbtx, _| {
+            Box::pin(async move {
+                if let Some(federation_db_entry) =
+                    dbtx.get_value(&FederationClientKey { federation_id }).await
+                {
+                    return Err(federation_db_entry.db_prefix);
+                }
 
-    if let Some(federation_db_entry) = dbtx.get_value(&FederationClientKey { federation_id }).await
-    {
-        return Err(federation_db_entry.db_prefix);
-    }
+                dbtx.insert_new_entry(
+                    &FederationClientKey { federation_id },
+                    &FederationClientEntry { db_prefix },
+                )
+                .await;
 
-    dbtx.insert_new_entry(
-        &FederationClientKey { federation_id },
-        &FederationClientEntry { db_prefix },
+                Ok(())
+            })
+        },
+        None,
     )
-    .await;
-
-    dbtx.commit_tx().await;
-    Ok(())
+    .await
+    .map_err(|e| match e {
+        AutocommitError::CommitFailed { .. } => unreachable!("will keep retrying"),
+        AutocommitError::ClosureError { error, .. } => {
+            // TODO: clean up DB once parallel joins are enabled
+            error
+        }
+    })
 }
 
 pub async fn load_federation_client_databases(db: &Database) -> HashMap<FederationId, Database> {

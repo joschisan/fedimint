@@ -193,24 +193,31 @@ pub(crate) async fn store_api_announcement_updates(
     db: &Database,
     announcements: &BTreeMap<PeerId, SignedApiAnnouncement>,
 ) {
-    let mut dbtx = db.begin_write_transaction().await;
+    db
+        .autocommit(
+            |dbtx, _|{
+                let announcements_inner = announcements.clone();
+            Box::pin(async move {
+                for (peer, new_announcement) in announcements_inner {
+                    let replace_current_announcement = dbtx
+                        .get_value(&ApiAnnouncementKey(peer))
+                        .await.is_none_or(|current_announcement| {
+                            current_announcement.api_announcement.nonce
+                                < new_announcement.api_announcement.nonce
+                        });
+                    if replace_current_announcement {
+                        debug!(target: LOG_CLIENT, ?peer, %new_announcement.api_announcement.api_url, "Updating API announcement");
+                        dbtx.insert_entry(&ApiAnnouncementKey(peer), &new_announcement)
+                            .await;
+                    }
+                }
 
-    for (peer, new_announcement) in announcements {
-        let replace_current_announcement = dbtx
-            .get_value(&ApiAnnouncementKey(*peer))
-            .await
-            .is_none_or(|current_announcement| {
-                current_announcement.api_announcement.nonce
-                    < new_announcement.api_announcement.nonce
-            });
-        if replace_current_announcement {
-            debug!(target: LOG_CLIENT, ?peer, %new_announcement.api_announcement.api_url, "Updating API announcement");
-            dbtx.insert_entry(&ApiAnnouncementKey(*peer), new_announcement)
-                .await;
-        }
-    }
-
-    dbtx.commit_tx().await;
+                Result::<(), ()>::Ok(())
+            })},
+            None,
+        )
+        .await
+        .expect("Will never return an error");
 }
 
 /// Returns a list of all peers and their respective API URLs taking into
