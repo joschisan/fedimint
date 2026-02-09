@@ -60,6 +60,7 @@ pub enum DbKeyPrefix {
     EventLogTrimable = fedimint_eventlog::DB_KEY_PREFIX_EVENT_LOG_TRIMABLE,
     ChainId = 0x3c,
     ClientModuleRecovery = 0x40,
+    GuardianMetadata = 0x42,
 
     DatabaseVersion = fedimint_core::db::DbKeyPrefix::DatabaseVersion as u8,
     ClientBackup = fedimint_core::db::DbKeyPrefix::ClientBackup as u8,
