@@ -21,6 +21,7 @@ use axum::routing::{get, post};
 use axum::{Form, Router};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
+use fedimint_core::PeerId;
 use fedimint_core::bitcoin::Network;
 use fedimint_core::config::FederationId;
 use fedimint_core::invite_code::InviteCode;
@@ -224,7 +225,9 @@ pub trait IAdminGateway {
         payload: PaymentLogPayload,
     ) -> Result<PaymentLogResponse, Self::Error>;
 
-    async fn handle_export_invite_codes(&self) -> BTreeMap<FederationId, Vec<InviteCode>>;
+    async fn handle_export_invite_codes(
+        &self,
+    ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>;
 
     fn get_password_hash(&self) -> String;
 
@@ -391,8 +394,12 @@ where
             }
         }
 
-        @for fed in gateway_info.federations {
-            (federation::render(&fed))
+        @let invite_codes = state.api.handle_export_invite_codes().await;
+        @let empty_map = BTreeMap::new();
+
+        @for fed in &gateway_info.federations {
+            @let fed_codes = invite_codes.get(&fed.federation_id).unwrap_or(&empty_map);
+            (federation::render(fed, fed_codes))
         }
     };
 
@@ -424,7 +431,16 @@ async fn export_invite_codes_handler<E>(
 where
     E: std::fmt::Display,
 {
-    let invite_codes = state.api.handle_export_invite_codes().await;
+    let invite_codes: BTreeMap<FederationId, Vec<InviteCode>> = state
+        .api
+        .handle_export_invite_codes()
+        .await
+        .into_iter()
+        .map(|(fed_id, peers)| {
+            let codes = peers.into_values().map(|(_, code)| code).collect();
+            (fed_id, codes)
+        })
+        .collect();
     let json = match serde_json::to_string_pretty(&invite_codes) {
         Ok(json) => json,
         Err(err) => {

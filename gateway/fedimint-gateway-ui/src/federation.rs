@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
@@ -8,7 +9,8 @@ use axum::response::{Html, IntoResponse};
 use bitcoin::Address;
 use bitcoin::address::NetworkUnchecked;
 use fedimint_core::config::FederationId;
-use fedimint_core::{Amount, BitcoinAmountOrAll};
+use fedimint_core::invite_code::InviteCode;
+use fedimint_core::{Amount, BitcoinAmountOrAll, PeerId};
 use fedimint_gateway_common::{
     DepositAddressPayload, FederationInfo, LeaveFedPayload, ReceiveEcashPayload, SetFeesPayload,
     SpendEcashPayload, WithdrawPayload, WithdrawPreviewPayload,
@@ -59,6 +61,13 @@ pub fn scripts() -> Markup {
                 setTimeout(() => hint.textContent = 'Click to copy', 2000);
             }
 
+            function copyText(input) {
+                input.select();
+                document.execCommand('copy');
+                input.style.outline = '2px solid #28a745';
+                setTimeout(() => input.style.outline = '', 1500);
+            }
+
             // Initialize Bootstrap tooltips
             document.addEventListener('DOMContentLoaded', function() {
                 var tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
@@ -71,7 +80,10 @@ pub fn scripts() -> Markup {
     )
 }
 
-pub fn render(fed: &FederationInfo) -> Markup {
+pub fn render(
+    fed: &FederationInfo,
+    invite_codes: &BTreeMap<PeerId, (String, InviteCode)>,
+) -> Markup {
     html!(
         @let bal = fed.balance_msat;
         @let balance_class = if bal == Amount::ZERO {
@@ -154,6 +166,15 @@ pub fn render(fed: &FederationInfo) -> Markup {
                                     type="button"
                                     role="tab"
                                 { "Receive" }
+                            }
+                            li class="nav-item" role="presentation" {
+                                button class="nav-link"
+                                    id=(format!("peers-tab-{}", fed.federation_id))
+                                    data-bs-toggle="tab"
+                                    data-bs-target=(format!("#peers-tab-pane-{}", fed.federation_id))
+                                    type="button"
+                                    role="tab"
+                                { "Peers" }
                             }
                         }
 
@@ -425,6 +446,87 @@ pub fn render(fed: &FederationInfo) -> Markup {
                                 }
 
                                 div id=(format!("receive-result-{}", fed.federation_id)) class="mt-3" {}
+                            }
+
+                            // ──────────────────────────────────────────
+                            //   TAB: PEERS
+                            // ──────────────────────────────────────────
+                            div class="tab-pane fade"
+                                id=(format!("peers-tab-pane-{}", fed.federation_id))
+                                role="tabpanel"
+                                aria-labelledby=(format!("peers-tab-{}", fed.federation_id))
+                            {
+                                @if invite_codes.is_empty() {
+                                    div class="alert alert-secondary" {
+                                        "No invite codes found for this federation."
+                                    }
+                                } @else {
+                                    table class="table table-sm" {
+                                        thead {
+                                            tr {
+                                                th { "Peer ID" }
+                                                th { "Name" }
+                                                th { "Invite Code" }
+                                            }
+                                        }
+                                        tbody {
+                                            @for (peer_id, (name, code)) in invite_codes {
+                                                @let code_str = code.to_string();
+                                                @let modal_id = format!("qr-modal-{}-{}", fed.federation_id, peer_id);
+                                                @let qr = QrCode::new(code_str.as_bytes()).expect("Failed to generate QR code");
+                                                @let qr_svg = qr.render::<svg::Color>().build();
+                                                tr {
+                                                    td { (peer_id) }
+                                                    td { (name) }
+                                                    td {
+                                                        div class="d-flex align-items-center gap-1" {
+                                                            input type="text"
+                                                                class="form-control form-control-sm"
+                                                                value=(code_str)
+                                                                readonly
+                                                                onclick="copyText(this)"
+                                                                style="cursor: pointer; font-size: 0.75rem;";
+                                                            button type="button"
+                                                                class="btn btn-sm btn-outline-secondary"
+                                                                data-bs-toggle="modal"
+                                                                data-bs-target=(format!("#{}", modal_id))
+                                                                title="Show QR Code"
+                                                            { "QR" }
+                                                        }
+
+                                                        // QR Code Modal
+                                                        div class="modal fade"
+                                                            id=(modal_id)
+                                                            tabindex="-1"
+                                                            aria-hidden="true"
+                                                        {
+                                                            div class="modal-dialog modal-dialog-centered" {
+                                                                div class="modal-content" {
+                                                                    div class="modal-header" {
+                                                                        h5 class="modal-title" {
+                                                                            "Invite Code — Peer " (peer_id) " (" (name) ")"
+                                                                        }
+                                                                        button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" {}
+                                                                    }
+                                                                    div class="modal-body d-flex justify-content-center" {
+                                                                        div class="border rounded p-2 bg-white"
+                                                                            style="width: 300px; height: 300px;"
+                                                                        {
+                                                                            (PreEscaped(format!(
+                                                                                r#"<svg style="width: 100%; height: 100%; display: block;">{}</svg>"#,
+                                                                                qr_svg.replace("width=", "data-width=").replace("height=", "data-height=")
+                                                                            )))
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

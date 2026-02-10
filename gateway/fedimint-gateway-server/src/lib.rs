@@ -65,7 +65,8 @@ use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::backoff_util::fibonacci_max_one_hour;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned, retry};
 use fedimint_core::{
-    Amount, BitcoinAmountOrAll, crit, fedimint_build_code_version_env, get_network_for_address,
+    Amount, BitcoinAmountOrAll, PeerId, crit, fedimint_build_code_version_env,
+    get_network_for_address,
 };
 use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId, StructuredPaymentEvents};
 use fedimint_gateway_common::{
@@ -2488,8 +2489,10 @@ impl IAdminGateway for Gateway {
     }
 
     /// Returns a `BTreeMap` that is keyed by the `FederationId` and contains
-    /// all the invite codes for the federation.
-    async fn handle_export_invite_codes(&self) -> BTreeMap<FederationId, Vec<InviteCode>> {
+    /// all the invite codes (with peer names) for the federation.
+    async fn handle_export_invite_codes(
+        &self,
+    ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>> {
         let fed_manager = self.federation_manager.read().await;
         fed_manager.all_invite_codes().await
     }
