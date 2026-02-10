@@ -14,7 +14,7 @@ path = "src/lib.rs"
 
 [dependencies]
 async-trait = { workspace = true }
-axum = { workspace = true, features = ["macros"] }
+axum = { workspace = true, features = ["macros", "multipart"] }
 axum-extra = { workspace = true, features = ["cookie"] }
 bcrypt = { workspace = true }
 bip39 = { workspace = true }

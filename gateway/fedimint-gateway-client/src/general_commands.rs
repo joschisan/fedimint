@@ -7,8 +7,8 @@ use fedimint_core::time::now;
 use fedimint_core::util::SafeUrl;
 use fedimint_eventlog::{EventKind, EventLogId};
 use fedimint_gateway_client::{
-    connect_federation, get_balances, get_info, get_mnemonic, leave_federation, payment_log,
-    payment_summary, stop,
+    connect_federation, get_balances, get_info, get_invite_codes, get_mnemonic, leave_federation,
+    payment_log, payment_summary, stop,
 };
 use fedimint_gateway_common::{
     ConnectFedPayload, LeaveFedPayload, PaymentLogPayload, PaymentSummaryPayload,
@@ -76,6 +76,8 @@ pub enum GeneralCommands {
         #[clap(long)]
         end: Option<u64>,
     },
+    /// List all invite codes of each federation the gateway has joined
+    InviteCodes,
 }
 
 impl GeneralCommands {
@@ -177,6 +179,10 @@ impl GeneralCommands {
                 )
                 .await?;
                 print_response(payment_summary);
+            }
+            Self::InviteCodes => {
+                let invite_codes = get_invite_codes(client, base_url).await?;
+                print_response(invite_codes);
             }
         }
 

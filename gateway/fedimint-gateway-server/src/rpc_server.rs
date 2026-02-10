@@ -19,14 +19,15 @@ use fedimint_gateway_common::{
     CloseChannelsWithPeerRequest, ConfigPayload, ConnectFedPayload,
     CreateInvoiceForOperatorPayload, CreateOfferPayload, DepositAddressPayload,
     DepositAddressRecheckPayload, GATEWAY_INFO_ENDPOINT, GET_BALANCES_ENDPOINT,
-    GET_INVOICE_ENDPOINT, GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GetInvoiceRequest, LEAVE_FED_ENDPOINT,
-    LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT, LeaveFedPayload, ListTransactionsPayload,
-    MNEMONIC_ENDPOINT, OPEN_CHANNEL_ENDPOINT, OpenChannelRequest,
-    PAY_INVOICE_FOR_OPERATOR_ENDPOINT, PAY_OFFER_FOR_OPERATOR_ENDPOINT, PAYMENT_LOG_ENDPOINT,
-    PAYMENT_SUMMARY_ENDPOINT, PayInvoiceForOperatorPayload, PayOfferPayload, PaymentLogPayload,
-    PaymentSummaryPayload, RECEIVE_ECASH_ENDPOINT, ReceiveEcashPayload, SEND_ONCHAIN_ENDPOINT,
-    SET_FEES_ENDPOINT, SPEND_ECASH_ENDPOINT, STOP_ENDPOINT, SendOnchainRequest, SetFeesPayload,
-    SetMnemonicPayload, SpendEcashPayload, V1_API_ENDPOINT, WITHDRAW_ENDPOINT, WithdrawPayload,
+    GET_INVOICE_ENDPOINT, GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GetInvoiceRequest,
+    INVITE_CODES_ENDPOINT, LEAVE_FED_ENDPOINT, LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT,
+    LeaveFedPayload, ListTransactionsPayload, MNEMONIC_ENDPOINT, OPEN_CHANNEL_ENDPOINT,
+    OpenChannelRequest, PAY_INVOICE_FOR_OPERATOR_ENDPOINT, PAY_OFFER_FOR_OPERATOR_ENDPOINT,
+    PAYMENT_LOG_ENDPOINT, PAYMENT_SUMMARY_ENDPOINT, PayInvoiceForOperatorPayload, PayOfferPayload,
+    PaymentLogPayload, PaymentSummaryPayload, RECEIVE_ECASH_ENDPOINT, ReceiveEcashPayload,
+    SEND_ONCHAIN_ENDPOINT, SET_FEES_ENDPOINT, SPEND_ECASH_ENDPOINT, STOP_ENDPOINT,
+    SendOnchainRequest, SetFeesPayload, SetMnemonicPayload, SpendEcashPayload, V1_API_ENDPOINT,
+    WITHDRAW_ENDPOINT, WithdrawPayload,
 };
 use fedimint_gateway_ui::IAdminGateway;
 use fedimint_ln_common::gateway_endpoint_constants::{
@@ -436,6 +437,13 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup, handlers: &mut Handlers)
         is_authenticated,
         authenticated_routes,
     );
+    let authenticated_routes = register_get_handler(
+        handlers,
+        INVITE_CODES_ENDPOINT,
+        invite_codes,
+        is_authenticated,
+        authenticated_routes,
+    );
     let authenticated_routes = authenticated_routes.layer(middleware::from_fn(auth_middleware));
 
     Router::new()
@@ -761,4 +769,12 @@ async fn pay_offer_operator(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let response = gateway.handle_pay_offer_for_operator_msg(payload).await?;
     Ok(Json(json!(response)))
+}
+
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn invite_codes(
+    Extension(gateway): Extension<Arc<Gateway>>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let invite_codes = gateway.handle_export_invite_codes().await;
+    Ok(Json(json!(invite_codes)))
 }

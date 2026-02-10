@@ -7,18 +7,23 @@ mod mnemonic;
 mod payment_summary;
 mod setup;
 
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
 use ::bitcoin::{Address, Txid};
 use async_trait::async_trait;
+use axum::body::Body;
 use axum::extract::{Query, State};
-use axum::response::{Html, IntoResponse, Redirect};
+use axum::http::header;
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use fedimint_core::bitcoin::Network;
+use fedimint_core::config::FederationId;
+use fedimint_core::invite_code::InviteCode;
 use fedimint_core::secp256k1::serde::Deserialize;
 use fedimint_core::task::TaskGroup;
 use fedimint_gateway_common::{
@@ -87,16 +92,23 @@ pub(crate) const PAYMENT_LOG_ROUTE: &str = "/ui/payment-log";
 pub(crate) const CREATE_WALLET_ROUTE: &str = "/ui/wallet/create";
 pub(crate) const RECOVER_WALLET_ROUTE: &str = "/ui/wallet/recover";
 pub(crate) const MNEMONIC_IFRAME_ROUTE: &str = "/ui/mnemonic/iframe";
+pub(crate) const EXPORT_INVITE_CODES_ROUTE: &str = "/ui/export-invite-codes";
 
 #[derive(Default, Deserialize)]
 pub struct DashboardQuery {
     pub success: Option<String>,
     pub ui_error: Option<String>,
+    pub show_export_reminder: Option<bool>,
 }
 
 fn redirect_success(msg: String) -> impl IntoResponse {
     let encoded: String = url::form_urlencoded::byte_serialize(msg.as_bytes()).collect();
     Redirect::to(&format!("/?success={}", encoded))
+}
+
+pub(crate) fn redirect_success_with_export_reminder(msg: String) -> impl IntoResponse {
+    let encoded: String = url::form_urlencoded::byte_serialize(msg.as_bytes()).collect();
+    Redirect::to(&format!("/?success={}&show_export_reminder=true", encoded))
 }
 
 fn redirect_error(msg: String) -> impl IntoResponse {
@@ -212,6 +224,8 @@ pub trait IAdminGateway {
         payload: PaymentLogPayload,
     ) -> Result<PaymentLogResponse, Self::Error>;
 
+    async fn handle_export_invite_codes(&self) -> BTreeMap<FederationId, Vec<InviteCode>>;
+
     fn get_password_hash(&self) -> String;
 
     fn gatewayd_version(&self) -> String;
@@ -309,7 +323,13 @@ where
 
         @if let Some(success) = msg.success {
             div class="alert alert-success mt-2 d-flex justify-content-between align-items-center" {
-                span { (success) }
+                span {
+                    (success)
+                    @if msg.show_export_reminder.unwrap_or(false) {
+                        " "
+                        a href=(EXPORT_INVITE_CODES_ROUTE) { "Export your invite codes for backup." }
+                    }
+                }
                 a href=(ROOT_ROUTE)
                 class="ms-3 text-decoration-none text-dark fw-bold"
                 style="font-size: 1.5rem; line-height: 1; cursor: pointer;"
@@ -328,7 +348,10 @@ where
 
         div class="row mt-4" {
             div class="col-md-12 text-end" {
-                form action=(STOP_GATEWAY_ROUTE) method="post" {
+                a href=(EXPORT_INVITE_CODES_ROUTE) class="btn btn-outline-primary me-2" {
+                    "Export Invite Codes"
+                }
+                form action=(STOP_GATEWAY_ROUTE) method="post" style="display: inline;" {
                     button class="btn btn-outline-danger" type="submit"
                         onclick="return confirm('Are you sure you want to safely stop the gateway? The gateway will wait for outstanding payments and then shutdown.');"
                     {
@@ -364,7 +387,7 @@ where
 
         div class="row gy-4 mt-2" {
             div class="col-md-12" {
-                (connect_fed::render())
+                (connect_fed::render(&gateway_info.gateway_state))
             }
         }
 
@@ -392,6 +415,37 @@ where
         Ok(_) => redirect_success("Gateway is safely shutting down...".to_string()).into_response(),
         Err(err) => redirect_error(format!("Failed to stop gateway: {err}")).into_response(),
     }
+}
+
+async fn export_invite_codes_handler<E>(
+    State(state): State<UiState<DynGatewayApi<E>>>,
+    _auth: UserAuth,
+) -> impl IntoResponse
+where
+    E: std::fmt::Display,
+{
+    let invite_codes = state.api.handle_export_invite_codes().await;
+    let json = match serde_json::to_string_pretty(&invite_codes) {
+        Ok(json) => json,
+        Err(err) => {
+            return Response::builder()
+                .status(500)
+                .body(Body::from(format!(
+                    "Failed to serialize invite codes: {err}"
+                )))
+                .expect("Failed to build error response");
+        }
+    };
+    let filename = "gateway-invite-codes.json";
+
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{filename}\""),
+        )
+        .body(Body::from(json))
+        .expect("Failed to build response")
 }
 
 pub fn router<E: Display + Send + Sync + std::fmt::Debug + 'static>(
@@ -432,6 +486,7 @@ pub fn router<E: Display + Send + Sync + std::fmt::Debug + 'static>(
             get(transactions_fragment_handler),
         )
         .route(STOP_GATEWAY_ROUTE, post(stop_gateway_handler))
+        .route(EXPORT_INVITE_CODES_ROUTE, get(export_invite_codes_handler))
         .route(WITHDRAW_PREVIEW_ROUTE, post(withdraw_preview_handler))
         .route(WITHDRAW_CONFIRM_ROUTE, post(withdraw_confirm_handler))
         .route(PAYMENT_LOG_ROUTE, get(payment_log_fragment_handler))

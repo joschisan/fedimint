@@ -35,6 +35,7 @@ pub const CONNECT_FED_ENDPOINT: &str = "/connect_fed";
 pub const CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT: &str = "/create_bolt11_invoice_for_operator";
 pub const CREATE_BOLT12_OFFER_FOR_OPERATOR_ENDPOINT: &str = "/create_bolt12_offer_for_operator";
 pub const GATEWAY_INFO_ENDPOINT: &str = "/info";
+pub const INVITE_CODES_ENDPOINT: &str = "/invite_codes";
 pub const GET_BALANCES_ENDPOINT: &str = "/balances";
 pub const GET_INVOICE_ENDPOINT: &str = "/get_invoice";
 pub const GET_LN_ONCHAIN_ADDRESS_ENDPOINT: &str = "/get_ln_onchain_address";
