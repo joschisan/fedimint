@@ -19,9 +19,7 @@ use fedimint_core::secp256k1::rand::thread_rng;
 use fedimint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use fedimint_core::transaction::{Transaction, TransactionSignature};
 use fedimint_core::{Amount, BitcoinHash, PeerId, TransactionId, anyhow};
-use fedimint_dummy_common::{
-    DummyCommonInit, DummyInput, DummyInputV1, DummyOutput, DummyOutputV1,
-};
+use fedimint_dummy_common::{DummyCommonInit, DummyInput, DummyOutput};
 use fedimint_dummy_server::Dummy;
 use fedimint_logging::{LOG_DB, TracingSetup};
 use fedimint_server::consensus::db::{
@@ -32,6 +30,7 @@ use fedimint_server::consensus::db::{
 use fedimint_server::core::ServerModule;
 use fedimint_server::db::DbKeyPrefix;
 use fedimint_server::net::api::announcement::{ApiAnnouncementKey, ApiAnnouncementPrefix};
+use fedimint_server::net::api::guardian_metadata::GuardianMetadataPrefix;
 use fedimint_testing_core::db::{
     BYTE_32, TEST_MODULE_INSTANCE_ID, snapshot_db_migrations_with_decoders,
     validate_migrations_global,
@@ -64,23 +63,20 @@ async fn create_server_db_with_v0_data(db: Database) {
         &mut thread_rng(),
     );
     let transaction = Transaction {
-        inputs: vec![DynInput::from_typed::<DummyInput>(
+        inputs: vec![DynInput::from_typed(
             0,
-            DummyInputV1 {
+            DummyInput {
                 amount: Amount::ZERO,
                 unit: AmountUnit::BITCOIN,
-                account: key_pair.public_key(),
-            }
-            .into(),
+                pub_key: key_pair.public_key(),
+            },
         )],
-        outputs: vec![DynOutput::from_typed::<DummyOutput>(
+        outputs: vec![DynOutput::from_typed(
             0,
-            DummyOutputV1 {
+            DummyOutput {
                 amount: Amount::ZERO,
                 unit: AmountUnit::BITCOIN,
-                account: key_pair.public_key(),
-            }
-            .into(),
+            },
         )],
         nonce: [0x42; 8],
         signatures: TransactionSignature::NaiveMultisig(vec![schnorr]),
@@ -223,6 +219,14 @@ async fn test_server_db_migrations() -> anyhow::Result<()> {
                             .await;
 
                         assert_eq!(announcements.len(), 1);
+                    }
+                    DbKeyPrefix::GuardianMetadata => {
+                        // Guardian metadata is optional, just verify we can query it
+                        let _metadata = dbtx
+                            .find_by_prefix(&GuardianMetadataPrefix)
+                            .await
+                            .collect::<Vec<_>>()
+                            .await;
                     }
                 }
             }

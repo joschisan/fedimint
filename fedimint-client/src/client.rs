@@ -15,6 +15,7 @@ use fedimint_api_client::api::global_api::with_request_hook::ApiRequestHook;
 use fedimint_api_client::api::{
     ApiVersionSet, DynGlobalApi, FederationApiExt as _, FederationResult, IGlobalFederationApi,
 };
+use fedimint_bitcoind::DynBitcoindRpc;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
     ClientContextIface, ClientModule, ClientModuleRegistry, DynClientModule, FinalClientIface,
@@ -162,6 +163,18 @@ pub struct Client {
     request_hook: ApiRequestHook,
     iroh_enable_dht: bool,
     iroh_enable_next: bool,
+    /// User-provided Bitcoin RPC client for modules to use
+    ///
+    /// Stored here for potential future access; currently passed to modules
+    /// during initialization.
+    #[allow(dead_code)]
+    user_bitcoind_rpc: Option<DynBitcoindRpc>,
+    /// User-provided Bitcoin RPC factory for when ChainId is not available
+    ///
+    /// This is used as a fallback when the federation doesn't support ChainId.
+    /// Modules can call this with a URL from their config to get an RPC client.
+    pub(crate) user_bitcoind_rpc_no_chain_id:
+        Option<fedimint_client_module::module::init::BitcoindRpcNoChainIdFactory>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1620,6 +1633,20 @@ impl Client {
             .await
     }
 
+    /// Returns guardian metadata stored in the client database
+    pub async fn get_guardian_metadata(
+        &self,
+    ) -> BTreeMap<PeerId, fedimint_core::net::guardian_metadata::SignedGuardianMetadata> {
+        self.db()
+            .begin_transaction_nc()
+            .await
+            .find_by_prefix(&crate::guardian_metadata::GuardianMetadataPrefix)
+            .await
+            .map(|(key, metadata)| (key.0, metadata))
+            .collect()
+            .await
+    }
+
     /// Returns a list of guardian API URLs
     pub async fn get_peer_urls(&self) -> BTreeMap<PeerId, SafeUrl> {
         get_api_urls(&self.db, &self.config().await).await
@@ -1796,6 +1823,7 @@ impl Client {
                         });
                     }
                 }
+                #[allow(deprecated)]
                 "backup_to_federation" => {
                     let metadata = if params.is_null() {
                         Metadata::from_json_serialized(serde_json::json!({}))

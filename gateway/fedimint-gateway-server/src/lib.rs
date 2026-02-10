@@ -97,8 +97,8 @@ use fedimint_gwv2_client::{
 use fedimint_lightning::lnd::GatewayLndClient;
 use fedimint_lightning::{
     CreateInvoiceRequest, ILnRpcClient, InterceptPaymentRequest, InterceptPaymentResponse,
-    InvoiceDescription, LightningContext, LightningRpcError, PayInvoiceResponse, PaymentAction,
-    RouteHtlcStream, ldk,
+    InvoiceDescription, LightningContext, LightningRpcError, LnRpcTracked, PayInvoiceResponse,
+    PaymentAction, RouteHtlcStream, ldk,
 };
 use fedimint_ln_client::pay::PaymentData;
 use fedimint_ln_common::LightningCommonInit;
@@ -729,8 +729,20 @@ impl Gateway {
                     }
 
                     if let GatewayState::NotConfigured{ .. } = self_copy.get_state().await {
-                        info!(target: LOG_GATEWAY, "Waiting for the mnemonic to be set before starting lightning receive loop.");
+                        info!(
+                            target: LOG_GATEWAY,
+                            "Waiting for the mnemonic to be set before starting lightning receive loop."
+                        );
+                        info!(
+                            target: LOG_GATEWAY,
+                            "You might need to provide it from the UI or refer to documentation w.r.t how to initialize it."
+                        );
+
                         let _ = mnemonic_receiver.recv().await;
+                        info!(
+                            target: LOG_GATEWAY,
+                            "Received mnemonic, attempting to start lightning receive loop"
+                        );
                     }
 
                     let payment_stream_task_group = tg.make_subgroup();
@@ -812,7 +824,7 @@ impl Gateway {
         }
 
         let lightning_context = LightningContext {
-            lnrpc: ln_client,
+            lnrpc: LnRpcTracked::new(ln_client, "gateway"),
             lightning_public_key,
             lightning_alias,
             lightning_network,
@@ -1179,6 +1191,7 @@ impl Gateway {
             )))?
             .value();
         let metadata: BTreeMap<String, String> = BTreeMap::new();
+        #[allow(deprecated)]
         client
             .backup_to_federation(fedimint_client::backup::Metadata::from_json_serialized(
                 metadata,
@@ -1257,41 +1270,6 @@ impl Gateway {
         let lightning_context = self.get_lightning_context().await?;
         let invoice = lightning_context.lnrpc.get_invoice(payload).await?;
         Ok(invoice)
-    }
-
-    /// Creates a BOLT12 offer using the gateway's lightning node
-    pub async fn handle_create_offer_for_operator_msg(
-        &self,
-        payload: CreateOfferPayload,
-    ) -> AdminResult<CreateOfferResponse> {
-        let lightning_context = self.get_lightning_context().await?;
-        let offer = lightning_context.lnrpc.create_offer(
-            payload.amount,
-            payload.description,
-            payload.expiry_secs,
-            payload.quantity,
-        )?;
-        Ok(CreateOfferResponse { offer })
-    }
-
-    /// Pays a BOLT12 offer using the gateway's lightning node
-    pub async fn handle_pay_offer_for_operator_msg(
-        &self,
-        payload: PayOfferPayload,
-    ) -> AdminResult<PayOfferResponse> {
-        let lightning_context = self.get_lightning_context().await?;
-        let preimage = lightning_context
-            .lnrpc
-            .pay_offer(
-                payload.offer,
-                payload.quantity,
-                payload.amount,
-                payload.payer_note,
-            )
-            .await?;
-        Ok(PayOfferResponse {
-            preimage: preimage.to_string(),
-        })
     }
 
     /// Registers the gateway with each specified federation.
@@ -2474,6 +2452,41 @@ impl IAdminGateway for Gateway {
         Ok(())
     }
 
+    /// Creates a BOLT12 offer using the gateway's lightning node
+    async fn handle_create_offer_for_operator_msg(
+        &self,
+        payload: CreateOfferPayload,
+    ) -> AdminResult<CreateOfferResponse> {
+        let lightning_context = self.get_lightning_context().await?;
+        let offer = lightning_context.lnrpc.create_offer(
+            payload.amount,
+            payload.description,
+            payload.expiry_secs,
+            payload.quantity,
+        )?;
+        Ok(CreateOfferResponse { offer })
+    }
+
+    /// Pays a BOLT12 offer using the gateway's lightning node
+    async fn handle_pay_offer_for_operator_msg(
+        &self,
+        payload: PayOfferPayload,
+    ) -> AdminResult<PayOfferResponse> {
+        let lightning_context = self.get_lightning_context().await?;
+        let preimage = lightning_context
+            .lnrpc
+            .pay_offer(
+                payload.offer,
+                payload.quantity,
+                payload.amount,
+                payload.payer_note,
+            )
+            .await?;
+        Ok(PayOfferResponse {
+            preimage: preimage.to_string(),
+        })
+    }
+
     fn get_password_hash(&self) -> String {
         self.bcrypt_password_hash.to_string()
     }
@@ -2746,7 +2759,7 @@ impl Gateway {
         Ok(VerifyResponse {
             status: "OK".to_string(),
             settled: true,
-            preimage: Some(preimage),
+            preimage: Some(hex::encode(preimage)),
         })
     }
 

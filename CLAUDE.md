@@ -10,7 +10,7 @@ Fedimint is a modular framework for building federated financial applications. I
 
 ### Build and Development
 - `just build` - Build the entire workspace
-- `just check` - Run cargo check on everything  
+- `just check` - Run cargo check on everything
 - `just test` - Run tests (builds first)
 - `cargo check -q` - Quick syntax/type checking
 - `just lint` - Run linters (git pre-commit hook)
@@ -22,7 +22,7 @@ Fedimint is a modular framework for building federated financial applications. I
 - `just final-check` - All checks recommended before opening a PR
 - `just check-wasm` - Verify WASM compatibility
 
-### Development Environment  
+### Development Environment
 - `just devimint-env` - Spawn development federation environment
 - `just devimint-env-pre-dkg` - Start pre-DKG federation on fixed ports
 - `nix develop` - Enter Nix development shell
@@ -44,7 +44,7 @@ Fedimint is a modular framework for building federated financial applications. I
 Each module follows a three-crate pattern:
 ```
 fedimint-<module>-common/     # Shared types and config
-fedimint-<module>-client/     # Client-side functionality  
+fedimint-<module>-client/     # Client-side functionality
 fedimint-<module>-server/     # Server-side consensus logic
 ```
 
@@ -98,10 +98,13 @@ fedimint-<module>-server/     # Server-side consensus logic
 
 ### Adding New Module Functionality
 1. Implement consensus logic in `*-server` crate
-2. Add client-side operations in `*-client` crate  
+2. Add client-side operations in `*-client` crate
 3. Update shared types in `*-common` crate
 4. Add integration tests in `*-tests` crate
 5. Update database migrations if needed
+
+### After Making Code Changes
+- Always run `just format` after making code changes to ensure formatting is correct
 
 ### Before Opening a PR
 Run `just final-check` which includes:

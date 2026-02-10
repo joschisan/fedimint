@@ -23,13 +23,14 @@ use fedimint_core::secp256k1::serde::Deserialize;
 use fedimint_core::task::TaskGroup;
 use fedimint_gateway_common::{
     ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConnectFedPayload,
-    CreateInvoiceForOperatorPayload, DepositAddressPayload, FederationInfo, GatewayBalances,
-    GatewayInfo, LeaveFedPayload, LightningMode, ListTransactionsPayload, ListTransactionsResponse,
-    MnemonicResponse, OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentLogPayload,
-    PaymentLogResponse, PaymentSummaryPayload, PaymentSummaryResponse, ReceiveEcashPayload,
-    ReceiveEcashResponse, SendOnchainRequest, SetFeesPayload, SetMnemonicPayload,
-    SpendEcashPayload, SpendEcashResponse, WithdrawPayload, WithdrawPreviewPayload,
-    WithdrawPreviewResponse, WithdrawResponse,
+    CreateInvoiceForOperatorPayload, CreateOfferPayload, CreateOfferResponse,
+    DepositAddressPayload, FederationInfo, GatewayBalances, GatewayInfo, LeaveFedPayload,
+    LightningMode, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
+    OpenChannelRequest, PayInvoiceForOperatorPayload, PayOfferPayload, PayOfferResponse,
+    PaymentLogPayload, PaymentLogResponse, PaymentSummaryPayload, PaymentSummaryResponse,
+    ReceiveEcashPayload, ReceiveEcashResponse, SendOnchainRequest, SetFeesPayload,
+    SetMnemonicPayload, SpendEcashPayload, SpendEcashResponse, WithdrawPayload,
+    WithdrawPreviewPayload, WithdrawPreviewResponse, WithdrawResponse,
 };
 use fedimint_ln_common::contracts::Preimage;
 use fedimint_logging::LOG_GATEWAY_UI;
@@ -50,10 +51,12 @@ use crate::federation::{
 };
 use crate::lightning::{
     channels_fragment_handler, close_channel_handler, create_bolt11_invoice_handler,
-    generate_receive_address_handler, open_channel_handler, pay_bolt11_invoice_handler,
+    create_receive_invoice_handler, detect_payment_type_handler, generate_receive_address_handler,
+    open_channel_handler, pay_bolt11_invoice_handler, pay_unified_handler,
     payments_fragment_handler, send_onchain_handler, transactions_fragment_handler,
     wallet_fragment_handler,
 };
+use crate::mnemonic::{mnemonic_iframe_handler, mnemonic_reveal_handler};
 use crate::payment_summary::payment_log_fragment_handler;
 use crate::setup::{create_wallet_handler, recover_wallet_form, recover_wallet_handler};
 pub type DynGatewayApi<E> = Arc<dyn IAdminGateway<Error = E> + Send + Sync + 'static>;
@@ -70,7 +73,10 @@ pub(crate) const LN_ONCHAIN_ADDRESS_ROUTE: &str = "/ui/wallet/receive";
 pub(crate) const DEPOSIT_ADDRESS_ROUTE: &str = "/ui/federations/deposit-address";
 pub(crate) const PAYMENTS_FRAGMENT_ROUTE: &str = "/ui/payments/fragment";
 pub(crate) const CREATE_BOLT11_INVOICE_ROUTE: &str = "/ui/payments/receive/bolt11";
+pub(crate) const CREATE_RECEIVE_INVOICE_ROUTE: &str = "/ui/payments/receive";
 pub(crate) const PAY_BOLT11_INVOICE_ROUTE: &str = "/ui/payments/send/bolt11";
+pub(crate) const PAY_UNIFIED_ROUTE: &str = "/ui/payments/send";
+pub(crate) const DETECT_PAYMENT_TYPE_ROUTE: &str = "/ui/payments/detect";
 pub(crate) const TRANSACTIONS_FRAGMENT_ROUTE: &str = "/ui/transactions/fragment";
 pub(crate) const RECEIVE_ECASH_ROUTE: &str = "/ui/federations/receive";
 pub(crate) const STOP_GATEWAY_ROUTE: &str = "/ui/stop";
@@ -80,6 +86,7 @@ pub(crate) const SPEND_ECASH_ROUTE: &str = "/ui/federations/spend";
 pub(crate) const PAYMENT_LOG_ROUTE: &str = "/ui/payment-log";
 pub(crate) const CREATE_WALLET_ROUTE: &str = "/ui/wallet/create";
 pub(crate) const RECOVER_WALLET_ROUTE: &str = "/ui/wallet/recover";
+pub(crate) const MNEMONIC_IFRAME_ROUTE: &str = "/ui/mnemonic/iframe";
 
 #[derive(Default, Deserialize)]
 pub struct DashboardQuery {
@@ -217,6 +224,16 @@ pub trait IAdminGateway {
 
     async fn handle_set_mnemonic_msg(&self, payload: SetMnemonicPayload)
     -> Result<(), Self::Error>;
+
+    async fn handle_create_offer_for_operator_msg(
+        &self,
+        payload: CreateOfferPayload,
+    ) -> Result<CreateOfferResponse, Self::Error>;
+
+    async fn handle_pay_offer_for_operator_msg(
+        &self,
+        payload: PayOfferPayload,
+    ) -> Result<PayOfferResponse, Self::Error>;
 }
 
 async fn login_form<E>(State(_state): State<UiState<DynGatewayApi<E>>>) -> impl IntoResponse {
@@ -335,7 +352,7 @@ where
                 (bitcoin::render(&state.api).await)
             }
             div class="col-md-6" {
-                (mnemonic::render(&state.api).await)
+                (mnemonic::render())
             }
         }
 
@@ -403,7 +420,13 @@ pub fn router<E: Display + Send + Sync + std::fmt::Debug + 'static>(
             CREATE_BOLT11_INVOICE_ROUTE,
             post(create_bolt11_invoice_handler),
         )
+        .route(
+            CREATE_RECEIVE_INVOICE_ROUTE,
+            post(create_receive_invoice_handler),
+        )
         .route(PAY_BOLT11_INVOICE_ROUTE, post(pay_bolt11_invoice_handler))
+        .route(PAY_UNIFIED_ROUTE, post(pay_unified_handler))
+        .route(DETECT_PAYMENT_TYPE_ROUTE, post(detect_payment_type_handler))
         .route(
             TRANSACTIONS_FRAGMENT_ROUTE,
             get(transactions_fragment_handler),
@@ -416,6 +439,10 @@ pub fn router<E: Display + Send + Sync + std::fmt::Debug + 'static>(
         .route(
             RECOVER_WALLET_ROUTE,
             get(recover_wallet_form).post(recover_wallet_handler),
+        )
+        .route(
+            MNEMONIC_IFRAME_ROUTE,
+            get(mnemonic_iframe_handler).post(mnemonic_reveal_handler),
         )
         .with_static_routes();
 
