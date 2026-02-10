@@ -21,12 +21,12 @@ use axum::routing::{get, post};
 use axum::{Form, Router};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use fedimint_core::PeerId;
 use fedimint_core::bitcoin::Network;
 use fedimint_core::config::FederationId;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::secp256k1::serde::Deserialize;
 use fedimint_core::task::TaskGroup;
+use fedimint_core::{PeerId, TieredCounts};
 use fedimint_gateway_common::{
     ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConnectFedPayload,
     CreateInvoiceForOperatorPayload, CreateOfferPayload, CreateOfferResponse,
@@ -251,6 +251,11 @@ pub trait IAdminGateway {
         &self,
         payload: PayOfferPayload,
     ) -> Result<PayOfferResponse, Self::Error>;
+
+    async fn handle_get_note_summary_msg(
+        &self,
+        federation_id: &FederationId,
+    ) -> Result<TieredCounts, Self::Error>;
 }
 
 async fn login_form<E>(State(_state): State<UiState<DynGatewayApi<E>>>) -> impl IntoResponse {
@@ -399,7 +404,8 @@ where
 
         @for fed in &gateway_info.federations {
             @let fed_codes = invite_codes.get(&fed.federation_id).unwrap_or(&empty_map);
-            (federation::render(fed, fed_codes))
+            @let note_summary = state.api.handle_get_note_summary_msg(&fed.federation_id).await;
+            (federation::render(fed, fed_codes, &note_summary))
         }
     };
 

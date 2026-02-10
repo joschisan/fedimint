@@ -65,7 +65,7 @@ use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::backoff_util::fibonacci_max_one_hour;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned, retry};
 use fedimint_core::{
-    Amount, BitcoinAmountOrAll, PeerId, crit, fedimint_build_code_version_env,
+    Amount, BitcoinAmountOrAll, PeerId, TieredCounts, crit, fedimint_build_code_version_env,
     get_network_for_address,
 };
 use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId, StructuredPaymentEvents};
@@ -2495,6 +2495,16 @@ impl IAdminGateway for Gateway {
     ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>> {
         let fed_manager = self.federation_manager.read().await;
         fed_manager.all_invite_codes().await
+    }
+
+    /// Returns `TieredCounts` which describes the breakdown of notes in the
+    /// gateway's wallet for the given `FederationId`
+    async fn handle_get_note_summary_msg(
+        &self,
+        federation_id: &FederationId,
+    ) -> AdminResult<TieredCounts> {
+        let fed_manager = self.federation_manager.read().await;
+        fed_manager.get_note_summary(federation_id).await
     }
 
     fn get_password_hash(&self) -> String {

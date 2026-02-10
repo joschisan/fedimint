@@ -10,7 +10,7 @@ use bitcoin::Address;
 use bitcoin::address::NetworkUnchecked;
 use fedimint_core::config::FederationId;
 use fedimint_core::invite_code::InviteCode;
-use fedimint_core::{Amount, BitcoinAmountOrAll, PeerId};
+use fedimint_core::{Amount, BitcoinAmountOrAll, PeerId, TieredCounts};
 use fedimint_gateway_common::{
     DepositAddressPayload, FederationInfo, LeaveFedPayload, ReceiveEcashPayload, SetFeesPayload,
     SpendEcashPayload, WithdrawPayload, WithdrawPreviewPayload,
@@ -80,9 +80,10 @@ pub fn scripts() -> Markup {
     )
 }
 
-pub fn render(
+pub fn render<E: Display>(
     fed: &FederationInfo,
     invite_codes: &BTreeMap<PeerId, (String, InviteCode)>,
+    note_summary: &Result<TieredCounts, E>,
 ) -> Markup {
     html!(
         @let bal = fed.balance_msat;
@@ -175,6 +176,15 @@ pub fn render(
                                     type="button"
                                     role="tab"
                                 { "Peers" }
+                            }
+                            li class="nav-item" role="presentation" {
+                                button class="nav-link"
+                                    id=(format!("notes-tab-{}", fed.federation_id))
+                                    data-bs-toggle="tab"
+                                    data-bs-target=(format!("#notes-tab-pane-{}", fed.federation_id))
+                                    type="button"
+                                    role="tab"
+                                { "Notes" }
                             }
                         }
 
@@ -524,6 +534,56 @@ pub fn render(
                                                     }
                                                 }
                                             }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ──────────────────────────────────────────
+                            //   TAB: NOTES
+                            // ──────────────────────────────────────────
+                            div class="tab-pane fade"
+                                id=(format!("notes-tab-pane-{}", fed.federation_id))
+                                role="tabpanel"
+                                aria-labelledby=(format!("notes-tab-{}", fed.federation_id))
+                            {
+                                @match &note_summary {
+                                    Ok(notes) => {
+                                        @if notes.is_empty() {
+                                            div class="alert alert-secondary" {
+                                                "No notes in wallet."
+                                            }
+                                        } @else {
+                                            table class="table table-sm table-bordered mb-0" {
+                                                thead {
+                                                    tr class="table-light" {
+                                                        th { "Denomination" }
+                                                        th { "Count" }
+                                                        th { "Subtotal" }
+                                                    }
+                                                }
+                                                tbody {
+                                                    @for (denomination, count) in notes.iter() {
+                                                        tr {
+                                                            td { (denomination) }
+                                                            td { (count) }
+                                                            td { (denomination * (count as u64)) }
+                                                        }
+                                                    }
+                                                }
+                                                tfoot {
+                                                    tr class="table-light fw-bold" {
+                                                        td { "Total" }
+                                                        td { (notes.count_items()) }
+                                                        td { (notes.total_amount()) }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(err) => {
+                                        div class="alert alert-warning" {
+                                            "Could not load note summary: " (err)
                                         }
                                     }
                                 }
