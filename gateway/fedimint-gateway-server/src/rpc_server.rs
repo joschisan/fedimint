@@ -33,6 +33,7 @@ use fedimint_gateway_ui::IAdminGateway;
 use fedimint_ln_common::gateway_endpoint_constants::{
     GET_GATEWAY_ID_ENDPOINT, PAY_INVOICE_ENDPOINT,
 };
+use fedimint_lnurl::LnurlResponse;
 use fedimint_lnv2_common::endpoint_constants::{
     CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
 };
@@ -668,7 +669,7 @@ pub(crate) async fn verify_bolt11_preimage_v2_get(
         .await
         .map_err(|e| LnurlError::internal(anyhow!(e)))?;
 
-    Ok(Json(json!(response)))
+    Ok(Json(json!(LnurlResponse::Ok(response))))
 }
 
 #[instrument(target = LOG_GATEWAY, skip_all, err)]

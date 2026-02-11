@@ -1069,15 +1069,21 @@ impl LightningClientModule {
             gateways
         };
 
-        let lnurl = lnurl::generate_lnurl(
-            &recurringd,
-            self.federation_id,
-            self.lnurl_keypair.public_key(),
-            self.cfg.tpe_agg_pk,
-            gateways,
+        let payload = fedimint_core::base32::encode_prefixed(
+            fedimint_core::base32::FEDIMINT_PREFIX,
+            &lnurl::LnurlRequest {
+                federation_id: self.federation_id,
+                recipient_pk: self.lnurl_keypair.public_key(),
+                aggregate_pk: self.cfg.tpe_agg_pk,
+                gateways,
+            },
         );
 
-        Ok(lnurl)
+        let url = format!("{recurringd}pay/{payload}")
+            .parse()
+            .expect("valid URL");
+
+        Ok(fedimint_lnurl::encode_lnurl(&url))
     }
 
     fn spawn_receive_lnurl_task(

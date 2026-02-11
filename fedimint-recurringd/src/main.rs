@@ -19,11 +19,11 @@ use fedimint_ln_client::recurring::api::{
     RecurringPaymentRegistrationRequest, RecurringPaymentRegistrationResponse,
 };
 use fedimint_ln_client::recurring::{PaymentCodeId, PaymentCodeRootKey};
+use fedimint_lnurl::{LnurlResponse, PayResponse};
 use fedimint_logging::TracingSetup;
 use fedimint_recurringd::{LNURLPayInvoice, PaymentCodeInvoice, RecurringInvoiceServer};
 use fedimint_rocksdb::RocksDb;
 use lightning_invoice::Bolt11Invoice;
-use lnurl::pay::PayResponse;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::cors;
@@ -152,25 +152,38 @@ struct GetInvoiceParams {
 async fn lnurl_pay(
     State(app_state): State<AppState>,
     Path(payment_code_id): Path<PaymentCodeId>,
-) -> Result<Json<PayResponse>, ApiError> {
-    Ok(Json(
-        app_state
+) -> Json<LnurlResponse<PayResponse>> {
+    Json(
+        match app_state
             .recurring_invoice_server
             .lnurl_pay(payment_code_id)
-            .await?,
-    ))
+            .await
+        {
+            Ok(response) => LnurlResponse::Ok(response),
+            Err(e) => LnurlResponse::Error {
+                reason: e.to_string(),
+            },
+        },
+    )
 }
 
 async fn lnurl_pay_invoice(
     State(app_state): State<AppState>,
     Path(payment_code_id): Path<PaymentCodeId>,
     Query(params): Query<GetInvoiceParams>,
-) -> Result<Json<LNURLPayInvoice>, ApiError> {
-    let invoice = app_state
-        .recurring_invoice_server
-        .lnurl_invoice(payment_code_id, params.amount)
-        .await?;
-    Ok(Json(invoice))
+) -> Json<LnurlResponse<LNURLPayInvoice>> {
+    Json(
+        match app_state
+            .recurring_invoice_server
+            .lnurl_invoice(payment_code_id, params.amount)
+            .await
+        {
+            Ok(invoice) => LnurlResponse::Ok(invoice),
+            Err(e) => LnurlResponse::Error {
+                reason: e.to_string(),
+            },
+        },
+    )
 }
 
 async fn await_invoice(

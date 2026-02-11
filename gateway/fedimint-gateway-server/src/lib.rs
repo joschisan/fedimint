@@ -105,12 +105,12 @@ use fedimint_ln_common::LightningCommonInit;
 use fedimint_ln_common::config::LightningClientConfig;
 use fedimint_ln_common::contracts::outgoing::OutgoingContractAccount;
 use fedimint_ln_common::contracts::{IdentifiableContract, Preimage};
+use fedimint_lnurl::VerifyResponse;
 use fedimint_lnv2_common::Bolt11InvoiceDescription;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::{
     CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
-use fedimint_lnv2_common::lnurl::VerifyResponse;
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mint_client::{
     MintClientInit, MintClientModule, SelectNotesWithAtleastAmount, SelectNotesWithExactAmount,
@@ -2744,7 +2744,6 @@ impl Gateway {
 
         if !(wait || client.operation_exists(operation_id).await) {
             return Ok(VerifyResponse {
-                status: "OK".to_string(),
                 settled: false,
                 preimage: None,
             });
@@ -2764,9 +2763,8 @@ impl Gateway {
         }?;
 
         Ok(VerifyResponse {
-            status: "OK".to_string(),
             settled: true,
-            preimage: Some(hex::encode(preimage)),
+            preimage: Some(preimage),
         })
     }
 

@@ -3381,6 +3381,7 @@ dependencies = [
  "fedimint-ln-client",
  "fedimint-ln-common",
  "fedimint-ln-server",
+ "fedimint-lnurl",
  "fedimint-lnv2-client",
  "fedimint-lnv2-common",
  "fedimint-lnv2-server",
@@ -3723,6 +3724,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fedimint-lnurl"
+version = "0.11.0-alpha"
+dependencies = [
+ "bech32",
+ "lightning-invoice",
+ "reqwest 0.12.22",
+ "serde",
+ "serde_with",
+ "url",
+]
+
+[[package]]
 name = "fedimint-lnv2-client"
 version = "0.11.0-alpha"
 dependencies = [
@@ -3738,6 +3751,7 @@ dependencies = [
  "fedimint-core",
  "fedimint-derive-secret",
  "fedimint-eventlog",
+ "fedimint-lnurl",
  "fedimint-lnv2-common",
  "fedimint-logging",
  "fedimint-tpe",
@@ -3766,7 +3780,6 @@ dependencies = [
  "fedimint-tpe",
  "group",
  "lightning-invoice",
- "lnurl-rs",
  "rand 0.8.5",
  "reqwest 0.12.22",
  "serde",
@@ -3816,15 +3829,14 @@ dependencies = [
  "fedimint-dummy-common",
  "fedimint-dummy-server",
  "fedimint-ln-common",
+ "fedimint-lnurl",
  "fedimint-lnv2-client",
  "fedimint-lnv2-common",
  "fedimint-lnv2-server",
  "fedimint-logging",
  "fedimint-testing",
- "hex-conservative 1.0.1",
  "itertools 0.14.0",
  "lightning-invoice",
- "lnurl-rs",
  "reqwest 0.12.22",
  "serde",
  "serde_json",
@@ -4121,12 +4133,12 @@ dependencies = [
  "fedimint-core",
  "fedimint-derive-secret",
  "fedimint-ln-client",
+ "fedimint-lnurl",
  "fedimint-logging",
  "fedimint-mint-client",
  "fedimint-rocksdb",
  "futures",
  "lightning-invoice",
- "lnurl-rs",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -4141,6 +4153,7 @@ version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
  "devimint",
+ "fedimint-lnurl",
  "lightning-invoice",
  "reqwest 0.12.22",
  "serde_json",
@@ -4158,11 +4171,11 @@ dependencies = [
  "clap",
  "fedimint-connectors",
  "fedimint-core",
+ "fedimint-lnurl",
  "fedimint-lnv2-common",
  "fedimint-logging",
  "fedimint-tpe",
  "lightning-invoice",
- "lnurl-rs",
  "serde",
  "serde_json",
  "tokio",
@@ -6861,19 +6874,6 @@ dependencies = [
  "serde",
  "serde_json",
  "url",
-]
-
-[[package]]
-name = "lnurlp"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "clap",
- "fedimint-core",
- "lightning-invoice",
- "lnurl-rs",
- "reqwest 0.12.22",
- "tokio",
 ]
 
 [[package]]

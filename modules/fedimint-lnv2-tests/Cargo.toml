@@ -34,15 +34,14 @@ fedimint-dummy-client = { workspace = true }
 fedimint-dummy-common = { workspace = true }
 fedimint-dummy-server = { workspace = true }
 fedimint-ln-common = { workspace = true }
+fedimint-lnurl = { workspace = true }
 fedimint-lnv2-client = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 fedimint-lnv2-server = { workspace = true }
 fedimint-logging = { workspace = true }
 fedimint-testing = { workspace = true }
-hex-conservative = { workspace = true }
 itertools = { workspace = true }
 lightning-invoice = { workspace = true }
-lnurl-rs = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

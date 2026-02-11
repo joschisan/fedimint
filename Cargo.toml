@@ -25,6 +25,7 @@ members = [
     "fedimint-derive",
     "fedimint-eventlog",
     "fedimint-fountain",
+    "fedimint-lnurl",
     "fedimint-load-test-tool",
     "fedimint-logging",
     "fedimint-metrics",
@@ -53,7 +54,6 @@ members = [
     "gateway/fedimint-gateway-ui",
     "gateway/fedimint-lightning",
     "gateway/integration_tests",
-    "lnurlp",
     "modules/fedimint-dummy-client",
     "modules/fedimint-dummy-common",
     "modules/fedimint-dummy-server",
@@ -195,6 +195,7 @@ fedimint-lightning = { package = "fedimint-lightning", path = "./gateway/fedimin
 fedimint-ln-client = { path = "./modules/fedimint-ln-client", version = "=0.11.0-alpha" }
 fedimint-ln-common = { path = "./modules/fedimint-ln-common", version = "=0.11.0-alpha" }
 fedimint-ln-server = { path = "./modules/fedimint-ln-server", version = "=0.11.0-alpha" }
+fedimint-lnurl = { path = "./fedimint-lnurl", version = "=0.11.0-alpha" }
 fedimint-lnv2-client = { path = "./modules/fedimint-lnv2-client", version = "=0.11.0-alpha" }
 fedimint-lnv2-common = { path = "./modules/fedimint-lnv2-common", version = "=0.11.0-alpha" }
 fedimint-lnv2-server = { path = "./modules/fedimint-lnv2-server", version = "=0.11.0-alpha" }
@@ -298,6 +299,7 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde-big-array = "0.5.1"
 serde_json = "1.0.141"
 serde_millis = "0.1.1"
+serde_with = { version = "3", features = ["hex"] }
 serdect = "0.2.0"
 sha3 = "0.10.8"
 slotmap = "1.0.7"
