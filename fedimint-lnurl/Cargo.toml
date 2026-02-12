@@ -7,6 +7,10 @@ readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
 
+[lib]
+name = "fedimint_lnurl"
+path = "src/lib.rs"
+
 [dependencies]
 bech32 = { workspace = true }
 lightning-invoice = { workspace = true }
