@@ -1079,11 +1079,9 @@ impl LightningClientModule {
             },
         );
 
-        let url = format!("{recurringd}pay/{payload}")
-            .parse()
-            .expect("valid URL");
-
-        Ok(fedimint_lnurl::encode_lnurl(&url))
+        Ok(fedimint_lnurl::encode_lnurl(&format!(
+            "{recurringd}pay/{payload}"
+        )))
     }
 
     fn spawn_receive_lnurl_task(

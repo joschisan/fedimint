@@ -160,9 +160,7 @@ async fn lnurl_pay(
             .await
         {
             Ok(response) => LnurlResponse::Ok(response),
-            Err(e) => LnurlResponse::Error {
-                reason: e.to_string(),
-            },
+            Err(e) => LnurlResponse::error(e.to_string()),
         },
     )
 }
@@ -179,9 +177,7 @@ async fn lnurl_pay_invoice(
             .await
         {
             Ok(invoice) => LnurlResponse::Ok(invoice),
-            Err(e) => LnurlResponse::Error {
-                reason: e.to_string(),
-            },
+            Err(e) => LnurlResponse::error(e.to_string()),
         },
     )
 }

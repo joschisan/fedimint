@@ -3731,8 +3731,8 @@ dependencies = [
  "lightning-invoice",
  "reqwest 0.12.22",
  "serde",
+ "serde_json",
  "serde_with",
- "url",
 ]
 
 [[package]]
@@ -4177,7 +4177,6 @@ dependencies = [
  "fedimint-tpe",
  "lightning-invoice",
  "serde",
- "serde_json",
  "tokio",
  "tower-http",
  "tracing",

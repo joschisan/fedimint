@@ -216,10 +216,10 @@ impl RecurringInvoiceServer {
     }
 
     fn create_lnurl(&self, payment_code_id: PaymentCodeId) -> String {
-        let url = format!("{}lnv1/paycodes/{}", self.base_url, payment_code_id)
-            .parse()
-            .expect("valid URL");
-        encode_lnurl(&url)
+        encode_lnurl(&format!(
+            "{}lnv1/paycodes/{}",
+            self.base_url, payment_code_id
+        ))
     }
 
     pub async fn lnurl_pay(
