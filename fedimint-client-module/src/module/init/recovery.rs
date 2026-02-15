@@ -24,7 +24,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
 
 use super::{ClientModuleInit, ClientModuleRecoverArgs};
-use crate::module::recovery::RecoveryProgress;
 use crate::module::{ClientContext, ClientModule};
 
 #[allow(clippy::struct_field_names)]
@@ -407,6 +406,7 @@ where
                 target: LOG_CLIENT_RECOVERY,
                 "Previously finalized, exiting"
             );
+            self.update_recovery_progress(1, 1);
             return Ok(());
         }
         let current_session_count = client_ctx.global_api().session_count().await?;
@@ -428,6 +428,15 @@ where
                     end_session: current_session_count + 1,
                 })
             };
+
+        self.update_recovery_progress(
+            (common_state.next_session - common_state.start_session)
+                .try_into()
+                .unwrap_or(u32::MAX),
+            (common_state.end_session - common_state.start_session)
+                .try_into()
+                .unwrap_or(u32::MAX),
+        );
 
         let block_stream_session_range = common_state.next_session..common_state.end_session;
         debug!(target: LOG_CLIENT_RECOVERY, range = ?block_stream_session_range, "Starting block streaming");
@@ -460,14 +469,14 @@ where
             state.store_dbtx(&mut dbtx.to_ref_nc(), &common_state).await;
             dbtx.commit_tx().await;
 
-            self.update_recovery_progress(RecoveryProgress {
-                complete: (common_state.next_session - common_state.start_session)
+            self.update_recovery_progress(
+                (common_state.next_session - common_state.start_session)
                     .try_into()
                     .unwrap_or(u32::MAX),
-                total: (common_state.end_session - common_state.start_session)
+                (common_state.end_session - common_state.start_session)
                     .try_into()
                     .unwrap_or(u32::MAX),
-            });
+            );
         }
 
         state.pre_finalize().await?;

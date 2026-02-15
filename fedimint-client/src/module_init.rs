@@ -8,7 +8,7 @@ use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{
     BitcoindRpcNoChainIdFactory, ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
-use fedimint_client_module::module::recovery::{DynModuleBackup, RecoveryProgress};
+use fedimint_client_module::module::recovery::DynModuleBackup;
 use fedimint_client_module::module::{ClientContext, DynClientModule, FinalClientIface};
 use fedimint_client_module::{ClientModule, ModuleInstanceId, ModuleKind};
 use fedimint_connectors::ConnectorRegistry;
@@ -54,7 +54,7 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
         api: DynGlobalApi,
         admin_auth: Option<ApiAuth>,
         snapshot: Option<&DynModuleBackup>,
-        progress_tx: watch::Sender<RecoveryProgress>,
+        recovery_progress_sender: watch::Sender<BTreeMap<ModuleInstanceId, f64>>,
         task_group: TaskGroup,
         user_bitcoind_rpc: Option<DynBitcoindRpc>,
         user_bitcoind_rpc_no_chain_id: Option<BitcoindRpcNoChainIdFactory>,
@@ -124,7 +124,7 @@ where
         api: DynGlobalApi,
         admin_auth: Option<ApiAuth>,
         snapshot: Option<&DynModuleBackup>,
-        progress_tx: watch::Sender<RecoveryProgress>,
+        recovery_progress_sender: watch::Sender<BTreeMap<ModuleInstanceId, f64>>,
         task_group: TaskGroup,
         user_bitcoind_rpc: Option<DynBitcoindRpc>,
         user_bitcoind_rpc_no_chain_id: Option<BitcoindRpcNoChainIdFactory>,
@@ -158,7 +158,8 @@ where
                     global_dbtx_access_token,
                     module_db,
                 ),
-                progress_tx,
+                module_instance_id: instance_id,
+                recovery_progress_sender,
                 task_group,
                 user_bitcoind_rpc,
                 user_bitcoind_rpc_no_chain_id,

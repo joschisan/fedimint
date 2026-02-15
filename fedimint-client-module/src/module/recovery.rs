@@ -116,10 +116,7 @@ impl IntoDynInstance for NoModuleBackup {
     }
 }
 
-/// Progress of the recovery
-///
-/// This includes "magic" value: if `total` is `0` the progress is "not started
-/// yet"/"empty"/"none"
+/// Progress of the recovery as `complete` out of `total` items.
 #[derive(Debug, Copy, Clone, Encodable, Decodable, Serialize, Deserialize)]
 pub struct RecoveryProgress {
     pub complete: u32,
@@ -127,34 +124,16 @@ pub struct RecoveryProgress {
 }
 
 impl RecoveryProgress {
+    pub fn new(complete: u32, total: u32) -> Self {
+        Self { complete, total }
+    }
+
     pub fn is_done(self) -> bool {
-        !self.is_none() && self.total <= self.complete
+        self.total <= self.complete
     }
 
-    pub fn none() -> RecoveryProgress {
-        Self {
-            complete: 0,
-            total: 0,
-        }
-    }
-
-    pub fn is_none(self) -> bool {
-        self.total == 0
-    }
-
-    pub fn to_complete(self) -> RecoveryProgress {
-        if self.is_none() {
-            // Since we don't have a valid "total", we make up a 1 out of 1
-            Self {
-                complete: 1,
-                total: 1,
-            }
-        } else {
-            Self {
-                complete: self.total,
-                total: self.total,
-            }
-        }
+    pub fn to_fraction(self) -> f64 {
+        f64::from(self.complete) / f64::from(self.total)
     }
 }
 

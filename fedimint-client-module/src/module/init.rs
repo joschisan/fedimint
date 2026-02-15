@@ -9,7 +9,7 @@ use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_bitcoind::DynBitcoindRpc;
 use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::config::FederationId;
-use fedimint_core::core::ModuleKind;
+use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::{Database, DatabaseVersion};
 use fedimint_core::module::{ApiAuth, ApiVersion, CommonModuleInit, ModuleInit, MultiApiVersion};
 use fedimint_core::task::TaskGroup;
@@ -20,7 +20,6 @@ use fedimint_logging::LOG_CLIENT;
 use tracing::warn;
 
 use super::ClientContext;
-use super::recovery::RecoveryProgress;
 use crate::db::ClientModuleMigrationFn;
 use crate::module::ClientModule;
 use crate::sm::ModuleNotifier;
@@ -179,7 +178,8 @@ where
     pub admin_auth: Option<ApiAuth>,
     pub module_api: DynModuleApi,
     pub context: ClientContext<<C as ClientModuleInit>::Module>,
-    pub progress_tx: tokio::sync::watch::Sender<RecoveryProgress>,
+    pub module_instance_id: ModuleInstanceId,
+    pub recovery_progress_sender: tokio::sync::watch::Sender<BTreeMap<ModuleInstanceId, f64>>,
     pub task_group: TaskGroup,
     /// User-provided Bitcoin RPC client
     ///
@@ -258,20 +258,13 @@ where
         self.context.clone()
     }
 
-    pub fn update_recovery_progress(&self, progress: RecoveryProgress) {
-        // we want a warning if the send channel was not connected to
-        #[allow(clippy::disallowed_methods)]
-        if progress.is_done() {
-            // Recovery is complete when the recovery function finishes. To avoid
-            // confusing any downstream code, we never send completed process.
-            warn!(target: LOG_CLIENT, "Module trying to send a completed recovery progress. Ignoring");
-        } else if progress.is_none() {
-            // Recovery starts with "none" none progress. To avoid
-            // confusing any downstream code, we never send none process afterwards.
-            warn!(target: LOG_CLIENT, "Module trying to send a none recovery progress. Ignoring");
-        } else if self.progress_tx.send(progress).is_err() {
-            warn!(target: LOG_CLIENT, "Module trying to send a recovery progress but nothing is listening");
-        }
+    pub fn update_recovery_progress(&self, complete: u32, total: u32) {
+        self.recovery_progress_sender.send_modify(|map| {
+            map.insert(
+                self.module_instance_id,
+                f64::from(complete) / f64::from(total),
+            );
+        });
     }
 
     /// Returns the user-provided Bitcoin RPC client, if any
@@ -307,11 +300,29 @@ pub trait ClientModuleInit: ModuleInit + Sized {
     /// Recover the state of the client module, optionally from an existing
     /// snapshot.
     ///
+    /// # Recovery Progress Contract
+    ///
+    /// Implementations must uphold the following invariants:
+    ///
+    /// 1. **Send initial progress immediately**: The first call to
+    ///    [`ClientModuleRecoverArgs::update_recovery_progress`] must happen
+    ///    before any async work, so that the progress stream has a value right
+    ///    away. On restart, this initial value should reflect any previously
+    ///    persisted progress.
+    ///
+    /// 2. **Send a complete state when done**: Before returning `Ok(())`, the
+    ///    implementation must send a final progress update where `complete ==
+    ///    total`.
+    ///
+    /// 3. **Persist completion across restarts**: Recovery completion must be
+    ///    persisted to the database so that recovery is not repeated after a
+    ///    crash or restart.
+    ///
     /// If `Err` is returned, the higher level client/application might try
     /// again at a different time (client restarted, code version changed, etc.)
     async fn recover(
         &self,
-        _args: &ClientModuleRecoverArgs<Self>,
+        args: &ClientModuleRecoverArgs<Self>,
         _snapshot: Option<&<Self::Module as ClientModule>::Backup>,
     ) -> anyhow::Result<()> {
         warn!(
@@ -319,6 +330,7 @@ pub trait ClientModuleInit: ModuleInit + Sized {
             kind = %<Self::Module as ClientModule>::kind(),
             "Module does not support recovery, completing without doing anything"
         );
+        args.update_recovery_progress(1, 1);
         Ok(())
     }
 

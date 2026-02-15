@@ -392,12 +392,6 @@ pub struct ClientModuleRecoveryState {
     pub progress: RecoveryProgress,
 }
 
-impl ClientModuleRecoveryState {
-    pub fn is_done(&self) -> bool {
-        self.progress.is_done()
-    }
-}
-
 impl_db_record!(
     key = ClientModuleRecovery,
     value = ClientModuleRecoveryState,

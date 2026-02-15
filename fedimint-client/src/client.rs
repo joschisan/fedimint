@@ -16,7 +16,6 @@ use fedimint_api_client::api::{
     ApiVersionSet, DynGlobalApi, FederationApiExt as _, FederationResult, IGlobalFederationApi,
 };
 use fedimint_bitcoind::DynBitcoindRpc;
-use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
     ClientContextIface, ClientModule, ClientModuleRegistry, DynClientModule, FinalClientIface,
     IClientModule, IdxRange, OutPointRange, PrimaryModulePriority,
@@ -83,10 +82,10 @@ use crate::backup::Metadata;
 use crate::client::event_log::DefaultApplicationEventLogKey;
 use crate::db::{
     ApiSecretKey, CachedApiVersionSet, CachedApiVersionSetKey, ChainIdKey,
-    ChronologicalOperationLogKey, ClientConfigKey, ClientMetadataKey, ClientModuleRecovery,
-    ClientModuleRecoveryState, EncodedClientSecretKey, OperationLogKey, PeerLastApiVersionsSummary,
-    PeerLastApiVersionsSummaryKey, PendingClientConfigKey, apply_migrations_core_client_dbtx,
-    get_decoded_client_secret, verify_client_db_integrity_dbtx,
+    ChronologicalOperationLogKey, ClientConfigKey, ClientMetadataKey, EncodedClientSecretKey,
+    OperationLogKey, PeerLastApiVersionsSummary, PeerLastApiVersionsSummaryKey,
+    PendingClientConfigKey, apply_migrations_core_client_dbtx, get_decoded_client_secret,
+    verify_client_db_integrity_dbtx,
 };
 use crate::meta::MetaService;
 use crate::module_init::{ClientModuleInitRegistry, DynClientModuleInit, IClientModuleInit};
@@ -151,8 +150,7 @@ pub struct Client {
     task_group: TaskGroup,
 
     /// Updates about client recovery progress
-    client_recovery_progress_receiver:
-        watch::Receiver<BTreeMap<ModuleInstanceId, RecoveryProgress>>,
+    client_recovery_progress_receiver: watch::Receiver<BTreeMap<ModuleInstanceId, f64>>,
 
     /// Internal client sender to wake up log ordering task every time a
     /// (unuordered) log event is added.
@@ -1395,11 +1393,10 @@ impl Client {
     }
 
     pub fn has_pending_recoveries(&self) -> bool {
-        !self
-            .client_recovery_progress_receiver
+        self.client_recovery_progress_receiver
             .borrow()
-            .iter()
-            .all(|(_id, progress)| progress.is_done())
+            .values()
+            .any(|&progress| progress < 1.0)
     }
 
     /// Wait for all module recoveries to finish
@@ -1410,28 +1407,29 @@ impl Client {
     ///
     /// A bit of a heavy approach.
     pub async fn wait_for_all_recoveries(&self) -> anyhow::Result<()> {
-        let mut recovery_receiver = self.client_recovery_progress_receiver.clone();
-        recovery_receiver
-            .wait_for(|in_progress| {
-                in_progress
-                    .iter()
-                    .all(|(_id, progress)| progress.is_done())
-            })
+        self.subscribe_to_recovery_progress()
+            .filter(|&progress| futures::future::ready(progress >= 1.0))
+            .next()
             .await
-            .context("Recovery task completed and update receiver disconnected, but some modules failed to recover")?;
-
-        Ok(())
+            .map(|_|())
+            .context("Recovery task completed and update receiver disconnected, but some modules failed to recover")
     }
 
-    /// Subscribe to recover progress for all the modules.
+    /// Subscribe to recovery progress across all modules.
     ///
-    /// This stream can contain duplicate progress for a module.
+    /// Returns a stream of `f64` values in the range `[0.0, 1.0]`
+    /// representing the minimum progress across all recovering modules
+    /// (i.e. the slowest module's progress).
+    ///
     /// Don't use this stream for detecting completion of recovery.
-    pub fn subscribe_to_recovery_progress(
-        &self,
-    ) -> impl Stream<Item = (ModuleInstanceId, RecoveryProgress)> + use<> {
-        WatchStream::new(self.client_recovery_progress_receiver.clone())
-            .flat_map(futures::stream::iter)
+    pub fn subscribe_to_recovery_progress(&self) -> impl Stream<Item = f64> + use<> {
+        WatchStream::new(self.client_recovery_progress_receiver.clone()).map(|progress_map| {
+            progress_map
+                .values()
+                .copied()
+                .reduce(f64::min)
+                .unwrap_or(0.0)
+        })
     }
 
     pub async fn wait_for_module_kind_recovery(
@@ -1442,12 +1440,9 @@ impl Client {
         let config = self.config().await;
         recovery_receiver
             .wait_for(|in_progress| {
-                !in_progress
-                    .iter()
-                    .filter(|(module_instance_id, _progress)| {
-                        config.modules[module_instance_id].kind == module_kind
-                    })
-                    .any(|(_id, progress)| !progress.is_done())
+                in_progress.iter().all(|(id, &progress)| {
+                    config.modules[id].kind != module_kind || progress >= 1.0
+                })
             })
             .await
             .context("Recovery task completed and update receiver disconnected, but the desired modules are still unavailable or failed to recover")?;
@@ -1472,132 +1467,68 @@ impl Client {
 
     fn spawn_module_recoveries_task(
         &self,
-        recovery_sender: watch::Sender<BTreeMap<ModuleInstanceId, RecoveryProgress>>,
         module_recoveries: BTreeMap<
             ModuleInstanceId,
             Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
-        >,
-        module_recovery_progress_receivers: BTreeMap<
-            ModuleInstanceId,
-            watch::Receiver<RecoveryProgress>,
         >,
     ) {
         let db = self.db.clone();
         let log_ordering_wakeup_tx = self.log_ordering_wakeup_tx.clone();
         self.task_group
             .spawn("module recoveries", |_task_handle| async {
-                Self::run_module_recoveries_task(
-                    db,
-                    log_ordering_wakeup_tx,
-                    recovery_sender,
-                    module_recoveries,
-                    module_recovery_progress_receivers,
-                )
-                .await;
+                Self::run_module_recoveries_task(db, log_ordering_wakeup_tx, module_recoveries)
+                    .await;
             });
     }
 
     async fn run_module_recoveries_task(
         db: Database,
         log_ordering_wakeup_tx: watch::Sender<()>,
-        recovery_sender: watch::Sender<BTreeMap<ModuleInstanceId, RecoveryProgress>>,
         module_recoveries: BTreeMap<
             ModuleInstanceId,
             Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
         >,
-        module_recovery_progress_receivers: BTreeMap<
-            ModuleInstanceId,
-            watch::Receiver<RecoveryProgress>,
-        >,
     ) {
-        debug!(target: LOG_CLIENT_RECOVERY, num_modules=%module_recovery_progress_receivers.len(), "Staring module recoveries");
-        let mut completed_stream = Vec::new();
-        let progress_stream = futures::stream::FuturesUnordered::new();
+        debug!(target: LOG_CLIENT_RECOVERY, num_modules=%module_recoveries.len(), "Starting module recoveries");
 
-        for (module_instance_id, f) in module_recoveries {
-            completed_stream.push(futures::stream::once(Box::pin(async move {
-                match f.await {
-                    Ok(()) => (module_instance_id, None),
-                    Err(err) => {
-                        warn!(
-                            target: LOG_CLIENT,
-                            err = %err.fmt_compact_anyhow(), module_instance_id, "Module recovery failed"
-                        );
-                        // a module recovery that failed reports and error and
-                        // just never finishes, so we don't need a separate state
-                        // for it
-                        futures::future::pending::<()>().await;
-                        unreachable!()
-                    }
+        let mut recoveries = module_recoveries
+            .into_iter()
+            .map(|(id, f)| async move { (id, f.await) })
+            .collect::<FuturesUnordered<_>>();
+
+        while let Some((module_instance_id, result)) = recoveries.next().await {
+            match result {
+                Ok(()) => {
+                    info!(
+                        target: LOG_CLIENT,
+                        module_instance_id,
+                        "Recovery complete"
+                    );
+
+                    let mut dbtx = db.begin_transaction().await;
+
+                    dbtx.log_event(
+                        log_ordering_wakeup_tx.clone(),
+                        None,
+                        ModuleRecoveryCompleted {
+                            module_id: module_instance_id,
+                        },
+                    )
+                    .await;
+
+                    dbtx.commit_tx().await;
                 }
-            })));
-        }
-
-        for (module_instance_id, rx) in module_recovery_progress_receivers {
-            progress_stream.push(
-                tokio_stream::wrappers::WatchStream::new(rx)
-                    .fuse()
-                    .map(move |progress| (module_instance_id, Some(progress))),
-            );
-        }
-
-        let mut futures = futures::stream::select(
-            futures::stream::select_all(progress_stream),
-            futures::stream::select_all(completed_stream),
-        );
-
-        while let Some((module_instance_id, progress)) = futures.next().await {
-            let mut dbtx = db.begin_transaction().await;
-
-            let prev_progress = *recovery_sender
-                .borrow()
-                .get(&module_instance_id)
-                .expect("existing progress must be present");
-
-            let progress = if prev_progress.is_done() {
-                // since updates might be out of order, once done, stick with it
-                prev_progress
-            } else if let Some(progress) = progress {
-                progress
-            } else {
-                prev_progress.to_complete()
-            };
-
-            if !prev_progress.is_done() && progress.is_done() {
-                info!(
-                    target: LOG_CLIENT,
-                    module_instance_id,
-                    progress = format!("{}/{}", progress.complete, progress.total),
-                    "Recovery complete"
-                );
-                dbtx.log_event(
-                    log_ordering_wakeup_tx.clone(),
-                    None,
-                    ModuleRecoveryCompleted {
-                        module_id: module_instance_id,
-                    },
-                )
-                .await;
-            } else {
-                info!(
-                    target: LOG_CLIENT,
-                    module_instance_id,
-                    progress = format!("{}/{}", progress.complete, progress.total),
-                    "Recovery progress"
-                );
+                Err(err) => {
+                    warn!(
+                        target: LOG_CLIENT,
+                        err = %err.fmt_compact_anyhow(),
+                        module_instance_id,
+                        "Module recovery failed"
+                    );
+                }
             }
-
-            dbtx.insert_entry(
-                &ClientModuleRecovery { module_instance_id },
-                &ClientModuleRecoveryState { progress },
-            )
-            .await;
-            dbtx.commit_tx().await;
-
-            recovery_sender.send_modify(|v| {
-                v.insert(module_instance_id, progress);
-            });
         }
+
         debug!(target: LOG_CLIENT_RECOVERY, "Recovery executor stopped");
     }
 
@@ -1816,11 +1747,8 @@ impl Client {
                 }
                 "subscribe_to_recovery_progress" => {
                     let mut stream = self.subscribe_to_recovery_progress();
-                    while let Some((module_id, progress)) = stream.next().await {
-                        yield serde_json::json!({
-                            "module_id": module_id,
-                            "progress": progress
-                        });
+                    while let Some(progress) = stream.next().await {
+                        yield serde_json::json!(progress);
                     }
                 }
                 #[allow(deprecated)]

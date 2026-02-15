@@ -38,7 +38,6 @@ use fedimint_bitcoind::{BitcoindTracked, DynBitcoindRpc, IBitcoindRpc, create_es
 use fedimint_client_module::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
-use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule, OutPointRange};
 use fedimint_client_module::oplog::UpdateStreamOrOutcome;
 use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
@@ -165,6 +164,21 @@ impl WalletClientInit {
         &self,
         args: &ClientModuleRecoverArgs<Self>,
     ) -> anyhow::Result<()> {
+        if args
+            .db()
+            .begin_transaction()
+            .await
+            .get_value(&NextPegInTweakIndexKey)
+            .await
+            .is_some()
+        {
+            args.update_recovery_progress(1, 1);
+
+            return Ok(());
+        }
+
+        args.update_recovery_progress(0, 1);
+
         let data = WalletClientModuleData {
             cfg: args.cfg().clone(),
             module_root_secret: args.module_root_secret().clone(),
@@ -189,10 +203,10 @@ impl WalletClientInit {
                 }
             }
 
-            args.update_recovery_progress(RecoveryProgress {
-                complete: end.try_into().unwrap_or(u32::MAX),
-                total: total_items.try_into().unwrap_or(u32::MAX),
-            });
+            args.update_recovery_progress(
+                end.try_into().unwrap_or(u32::MAX),
+                total_items.try_into().unwrap_or(u32::MAX),
+            );
         }
 
         let mut dbtx = args.db().begin_transaction().await;

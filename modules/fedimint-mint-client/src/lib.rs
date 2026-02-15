@@ -52,7 +52,6 @@ use fedimint_client_module::db::{ClientModuleMigrationFn, migrate_state};
 use fedimint_client_module::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
-use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
     ClientContext, ClientModule, IClientModule, OutPointRange, PrimaryModulePriority,
     PrimaryModuleSupport,
@@ -584,6 +583,11 @@ impl MintClientInit {
             )
         };
 
+        args.update_recovery_progress(
+            state.next_index.try_into().unwrap_or(u32::MAX),
+            state.total_items.try_into().unwrap_or(u32::MAX),
+        );
+
         if state.next_index == state.total_items {
             return Ok(());
         }
@@ -699,10 +703,10 @@ impl MintClientInit {
 
             dbtx.commit_tx().await;
 
-            args.update_recovery_progress(RecoveryProgress {
-                complete: state.next_index.try_into().unwrap_or(u32::MAX),
-                total: state.total_items.try_into().unwrap_or(u32::MAX),
-            });
+            args.update_recovery_progress(
+                state.next_index.try_into().unwrap_or(u32::MAX),
+                state.total_items.try_into().unwrap_or(u32::MAX),
+            );
         }
     }
 }
