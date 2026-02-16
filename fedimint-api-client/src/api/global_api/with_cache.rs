@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, format_err};
 use bitcoin::secp256k1;
-use fedimint_connectors::ServerResult;
+use fedimint_connectors::{DynGuaridianConnection, ServerResult};
 use fedimint_core::admin_client::{GuardianConfigBackup, SetLocalParamsRequest, SetupStatus};
 use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
 use fedimint_core::core::backup::SignedBackupRequest;
@@ -247,6 +247,10 @@ where
 
     async fn wait_for_initialized_connections(&self) {
         self.inner.wait_for_initialized_connections().await;
+    }
+
+    async fn get_peer_connection(&self, peer_id: PeerId) -> ServerResult<DynGuaridianConnection> {
+        self.inner.get_peer_connection(peer_id).await
     }
 }
 

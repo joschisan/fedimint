@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::string::ToString;
 
 use fedimint_api_client::api::{DynModuleApi, IRawFederationApi, ServerResult};
+use fedimint_connectors::DynGuaridianConnection;
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{Database, DatabaseTransaction};
 use fedimint_core::module::ApiRequestErased;
@@ -171,5 +172,9 @@ where
 
     async fn wait_for_initialized_connections(&self) {
         self.inner.wait_for_initialized_connections().await;
+    }
+
+    async fn get_peer_connection(&self, peer_id: PeerId) -> ServerResult<DynGuaridianConnection> {
+        self.inner.get_peer_connection(peer_id).await
     }
 }

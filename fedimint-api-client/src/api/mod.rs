@@ -110,6 +110,13 @@ pub trait IRawFederationApi: Debug + MaybeSend + MaybeSync {
     /// This is useful to avoid initializing networking by
     /// tasks that are not high priority.
     async fn wait_for_initialized_connections(&self);
+
+    /// Get or create a connection to a specific peer, returning the connection
+    /// object.
+    ///
+    /// This can be used to monitor connection status and await disconnection
+    /// for proactive reconnection strategies.
+    async fn get_peer_connection(&self, peer_id: PeerId) -> ServerResult<DynGuaridianConnection>;
 }
 
 /// An extension trait allowing to making federation-wide API call on top
@@ -778,6 +785,15 @@ impl IRawFederationApi for FederationApi {
         self.connection_pool
             .wait_for_initialized_connections()
             .await;
+    }
+
+    async fn get_peer_connection(&self, peer_id: PeerId) -> ServerResult<DynGuaridianConnection> {
+        let url = self
+            .peers
+            .get(&peer_id)
+            .ok_or_else(|| ServerError::InvalidPeerId { peer_id })?;
+        self.get_or_create_connection(url, self.api_secret.as_deref())
+            .await
     }
 }
 
