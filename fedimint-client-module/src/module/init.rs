@@ -259,11 +259,13 @@ where
     }
 
     pub fn update_recovery_progress(&self, complete: u32, total: u32) {
+        let progress = if total == 0 {
+            1.0 // Nothing to do is considered complete
+        } else {
+            f64::from(complete) / f64::from(total)
+        };
         self.recovery_progress_sender.send_modify(|map| {
-            map.insert(
-                self.module_instance_id,
-                f64::from(complete) / f64::from(total),
-            );
+            map.insert(self.module_instance_id, progress);
         });
     }
 

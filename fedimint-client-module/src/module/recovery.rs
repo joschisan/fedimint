@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::fmt::{self, Debug};
+use std::fmt::Debug;
 
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::{Decodable, DynEncodable, Encodable};
@@ -121,24 +121,4 @@ impl IntoDynInstance for NoModuleBackup {
 pub struct RecoveryProgress {
     pub complete: u32,
     pub total: u32,
-}
-
-impl RecoveryProgress {
-    pub fn new(complete: u32, total: u32) -> Self {
-        Self { complete, total }
-    }
-
-    pub fn is_done(self) -> bool {
-        self.total <= self.complete
-    }
-
-    pub fn to_fraction(self) -> f64 {
-        f64::from(self.complete) / f64::from(self.total)
-    }
-}
-
-impl fmt::Display for RecoveryProgress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{}/{}", self.complete, self.total))
-    }
 }

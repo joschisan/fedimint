@@ -104,13 +104,23 @@ impl GatewayClientBuilder {
         let root_secret = RootSecret::StandardDoubleDerive(
             Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic),
         );
-        let client = client_builder
-            .preview(self.connectors.clone(), &config.invite_code)
-            .await?
-            .recover(db, root_secret, None)
-            .await
-            .map(Arc::new)
-            .map_err(AdminGatewayError::ClientCreationError)?;
+
+        // If the DB is already initialized from a previous failed attempt,
+        // open the existing client which will re-run pending recoveries.
+        let client = if Client::is_initialized(&db).await {
+            client_builder
+                .open(self.connectors.clone(), db, root_secret)
+                .await
+        } else {
+            client_builder
+                .preview(self.connectors.clone(), &config.invite_code)
+                .await?
+                .recover(db, root_secret, None)
+                .await
+        }
+        .map(Arc::new)
+        .map_err(AdminGatewayError::ClientCreationError)?;
+
         client
             .wait_for_all_recoveries()
             .await

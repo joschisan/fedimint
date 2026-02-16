@@ -82,10 +82,10 @@ use crate::backup::Metadata;
 use crate::client::event_log::DefaultApplicationEventLogKey;
 use crate::db::{
     ApiSecretKey, CachedApiVersionSet, CachedApiVersionSetKey, ChainIdKey,
-    ChronologicalOperationLogKey, ClientConfigKey, ClientMetadataKey, EncodedClientSecretKey,
-    OperationLogKey, PeerLastApiVersionsSummary, PeerLastApiVersionsSummaryKey,
-    PendingClientConfigKey, apply_migrations_core_client_dbtx, get_decoded_client_secret,
-    verify_client_db_integrity_dbtx,
+    ChronologicalOperationLogKey, ClientConfigKey, ClientInitStateKey, ClientMetadataKey,
+    EncodedClientSecretKey, OperationLogKey, PeerLastApiVersionsSummary,
+    PeerLastApiVersionsSummaryKey, PendingClientConfigKey, apply_migrations_core_client_dbtx,
+    get_decoded_client_secret, verify_client_db_integrity_dbtx,
 };
 use crate::meta::MetaService;
 use crate::module_init::{ClientModuleInitRegistry, DynClientModuleInit, IClientModuleInit};
@@ -1407,12 +1407,12 @@ impl Client {
     ///
     /// A bit of a heavy approach.
     pub async fn wait_for_all_recoveries(&self) -> anyhow::Result<()> {
-        self.subscribe_to_recovery_progress()
-            .filter(|&progress| futures::future::ready(progress >= 1.0))
-            .next()
+        let mut recovery_receiver = self.client_recovery_progress_receiver.clone();
+        recovery_receiver
+            .wait_for(|progress_map| progress_map.values().all(|&progress| progress >= 1.0))
             .await
-            .map(|_|())
-            .context("Recovery task completed and update receiver disconnected, but some modules failed to recover")
+            .context("Recovery task completed and update receiver disconnected, but some modules failed to recover")?;
+        Ok(())
     }
 
     /// Subscribe to recovery progress across all modules.
@@ -1496,6 +1496,8 @@ impl Client {
             .map(|(id, f)| async move { (id, f.await) })
             .collect::<FuturesUnordered<_>>();
 
+        let mut all_succeeded = true;
+
         while let Some((module_instance_id, result)) = recoveries.next().await {
             match result {
                 Ok(()) => {
@@ -1519,6 +1521,7 @@ impl Client {
                     dbtx.commit_tx().await;
                 }
                 Err(err) => {
+                    all_succeeded = false;
                     warn!(
                         target: LOG_CLIENT,
                         err = %err.fmt_compact_anyhow(),
@@ -1527,6 +1530,17 @@ impl Client {
                     );
                 }
             }
+        }
+
+        if all_succeeded {
+            let mut dbtx = db.begin_transaction().await;
+            let init_state = dbtx
+                .get_value(&ClientInitStateKey)
+                .await
+                .expect("init state must be present");
+            dbtx.insert_entry(&ClientInitStateKey, &init_state.into_complete())
+                .await;
+            dbtx.commit_tx().await;
         }
 
         debug!(target: LOG_CLIENT_RECOVERY, "Recovery executor stopped");
