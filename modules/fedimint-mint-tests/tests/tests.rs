@@ -1143,3 +1143,21 @@ mod fedimint_migration_tests {
         .await
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_send_oob_notes() -> anyhow::Result<()> {
+    let fed = fixtures().new_fed_degraded().await;
+
+    let client = fed.new_client().await;
+
+    issue_ecash(&client, sats(10000)).await?;
+
+    for _ in 0..21 {
+        client
+            .get_first_module::<MintClientModule>()?
+            .send_oob_notes(Amount::from_sats(100), ())
+            .await?;
+    }
+
+    Ok(())
+}
