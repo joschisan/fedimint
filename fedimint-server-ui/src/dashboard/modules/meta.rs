@@ -924,6 +924,7 @@ pub fn render_meta_edit_form(
                     title="Reset to current consensus"
                     hx-post=(META_RESET_ROUTE)
                     hx-swap="none"
+                    hx-confirm="This will clear all the changes in your proposal. Are you sure?"
                 { "Reset" }
                 button type="button" class="btn btn-success btn-min-width"
                     hx-post=(META_SUBMIT_ROUTE)
