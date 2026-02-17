@@ -355,7 +355,8 @@ pub fn router(api: DynDashboardApi) -> Router {
             .route(meta::META_SUBMIT_ROUTE, post(meta::post_submit))
             .route(meta::META_SET_ROUTE, post(meta::post_set))
             .route(meta::META_RESET_ROUTE, post(meta::post_reset))
-            .route(meta::META_DELETE_ROUTE, post(meta::post_delete));
+            .route(meta::META_DELETE_ROUTE, post(meta::post_delete))
+            .route(meta::META_VALUE_INPUT_ROUTE, get(meta::get_value_input));
     }
 
     // Finalize the router with state

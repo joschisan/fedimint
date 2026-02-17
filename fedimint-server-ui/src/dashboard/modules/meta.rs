@@ -1,8 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::LazyLock;
 
-use axum::extract::{Form, FromRequest, State};
+use axum::extract::{Form, FromRequest, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
+use chrono::NaiveDateTime;
 use fedimint_core::PeerId;
 use fedimint_core::module::serde_json::{self, Value};
 use fedimint_meta_server::Meta;
@@ -21,6 +23,169 @@ pub const META_SUBMIT_ROUTE: &str = "/meta/submit";
 pub const META_SET_ROUTE: &str = "/meta/set";
 pub const META_RESET_ROUTE: &str = "/meta/reset";
 pub const META_DELETE_ROUTE: &str = "/meta/delete";
+pub const META_VALUE_INPUT_ROUTE: &str = "/meta/value-input";
+
+/// The type of value expected for a well-known meta key.
+enum KeyType {
+    String,
+    Url,
+    Amount,
+    DateTime,
+    Json,
+}
+
+/// Schema describing a well-known meta key.
+struct KeySchema {
+    description: &'static str,
+    value_type: KeyType,
+}
+
+// <https://fedibtc.github.io/fedi-docs/docs/fedi/meta_fields/federation-metadata-configurations>
+// NOTE: If you're updating this, please update `docs/meta_fields/README.md`
+static WELL_KNOWN_KEYS: LazyLock<BTreeMap<&'static str, KeySchema>> = LazyLock::new(|| {
+    BTreeMap::from([
+        (
+            "welcome_message",
+            KeySchema {
+                description: "A welcome message for new users joining the federation",
+                value_type: KeyType::String,
+            },
+        ),
+        (
+            "federation_expiry_timestamp",
+            KeySchema {
+                description: "The date and time after which the federation will shut down",
+                value_type: KeyType::DateTime,
+            },
+        ),
+        (
+            "federation_name",
+            KeySchema {
+                description: "The human-readable name of the federation",
+                value_type: KeyType::String,
+            },
+        ),
+        (
+            "federation_successor",
+            KeySchema {
+                description: "An invite code to a successor federation for user migration",
+                value_type: KeyType::String,
+            },
+        ),
+        (
+            "meta_override_url",
+            KeySchema {
+                description: "A URL to a file containing overrides for meta fields",
+                value_type: KeyType::Url,
+            },
+        ),
+        (
+            "vetted_gateways",
+            KeySchema {
+                description: "A list of gateway identifiers vetted by the federation",
+                value_type: KeyType::Json,
+            },
+        ),
+        (
+            "recurringd_api",
+            KeySchema {
+                description: "The API URL of a recurringd instance for creating LNURLs",
+                value_type: KeyType::Url,
+            },
+        ),
+        (
+            "lnaddress_api",
+            KeySchema {
+                description: "The API URL of a Lightning Address Server for serving LNURLs",
+                value_type: KeyType::Url,
+            },
+        ),
+        (
+            "fedi:pinned_message",
+            KeySchema {
+                description: "",
+                value_type: KeyType::String,
+            },
+        ),
+        (
+            "fedi:federation_icon_url",
+            KeySchema {
+                description: "",
+                value_type: KeyType::Url,
+            },
+        ),
+        (
+            "fedi:tos_url",
+            KeySchema {
+                description: "",
+                value_type: KeyType::Url,
+            },
+        ),
+        (
+            "fedi:default_currency",
+            KeySchema {
+                description: "",
+                value_type: KeyType::String,
+            },
+        ),
+        (
+            "fedi:invite_codes_disabled",
+            KeySchema {
+                description: "",
+                value_type: KeyType::String,
+            },
+        ),
+        (
+            "fedi:new_members_disabled",
+            KeySchema {
+                description: "",
+                value_type: KeyType::String,
+            },
+        ),
+        (
+            "fedi:max_invoice_msats",
+            KeySchema {
+                description: "",
+                value_type: KeyType::Amount,
+            },
+        ),
+        (
+            "fedi:max_balance_msats",
+            KeySchema {
+                description: "",
+                value_type: KeyType::Amount,
+            },
+        ),
+        (
+            "fedi:max_stable_balance_msats",
+            KeySchema {
+                description: "",
+                value_type: KeyType::Amount,
+            },
+        ),
+        (
+            "fedi:fedimods",
+            KeySchema {
+                description: "",
+                value_type: KeyType::Json,
+            },
+        ),
+        (
+            "fedi:default_group_chats",
+            KeySchema {
+                description: "",
+                value_type: KeyType::Json,
+            },
+        ),
+        (
+            "fedi:offline_wallet_disabled",
+            KeySchema {
+                description: "",
+                value_type: KeyType::String,
+            },
+        ),
+    ])
+});
 
 // Function to render the Meta module UI section
 pub async fn render(meta: &Meta) -> Markup {
@@ -253,9 +418,12 @@ pub async fn post_set(
     let mut top_level_object = form.top_level_keys()?;
 
     let key = form.add_key.trim();
-    let value = form.add_value.trim();
-    let value = serde_json::from_str(value)
-        .unwrap_or_else(|_| serde_json::Value::String(value.to_string()));
+    let raw_value = form.add_value.trim();
+    let key_type = WELL_KNOWN_KEYS
+        .get(key)
+        .map(|s| &s.value_type)
+        .unwrap_or(&KeyType::String);
+    let value = convert_input_value(raw_value, key_type)?;
 
     top_level_object.insert(key.to_string(), value);
 
@@ -280,30 +448,121 @@ pub async fn post_delete(
     Ok(Html(content.into_string()).into_response())
 }
 
-// <https://fedibtc.github.io/fedi-docs/docs/fedi/meta_fields/federation-metadata-configurations>
-// NOTE: If you're updating this, please update `docs/meta_fields/README.md`
-const WELL_KNOWN_KEYS: &[&str] = &[
-    "welcome_message",
-    "federation_expiry_timestamp",
-    "federation_name",
-    "meta_override_url",
-    "welcome_message",
-    "vetted_gateways",
-    "recurringd_api",
-    "lnaddress_api",
-    "fedi:pinned_message",
-    "fedi:federation_icon_url",
-    "fedi:tos_url",
-    "fedi:default_currency",
-    "fedi:invite_codes_disabled",
-    "fedi:new_members_disabled",
-    "fedi:max_invoice_msats",
-    "fedi:max_balance_msats",
-    "fedi:max_stable_balance_msats",
-    "fedi:fedimods",
-    "fedi:default_group_chats",
-    "fedi:offline_wallet_disabled",
-];
+/// Renders the appropriate HTML input element for the given key type.
+fn render_value_input(key_type: &KeyType, current_value: &str) -> Markup {
+    match key_type {
+        KeyType::Url => html! {
+            input #add-value type="url" name="add_value" class="form-control"
+                placeholder="https://..." aria-label="Value"
+                value=(current_value) {}
+        },
+        KeyType::Amount => html! {
+            div class="input-group" {
+                input #add-value type="number" name="add_value" class="form-control"
+                    placeholder="0" aria-label="Value"
+                    value=(current_value) {}
+                span class="input-group-text" { "msats" }
+            }
+        },
+        KeyType::DateTime => {
+            // Pre-fill with today at 00:00 so the time portion isn't blank
+            let val = if current_value.is_empty() {
+                chrono::Utc::now().format("%Y-%m-%dT00:00").to_string()
+            } else {
+                current_value.to_string()
+            };
+            html! {
+                div class="input-group" {
+                    input #add-value type="datetime-local" name="add_value" class="form-control"
+                        aria-label="Value"
+                        value=(val) {}
+                    span class="input-group-text" { "UTC" }
+                }
+            }
+        }
+        KeyType::Json => html! {
+            textarea #add-value name="add_value" class="form-control" rows="3"
+                placeholder="{}" aria-label="Value"
+            { (current_value) }
+        },
+        KeyType::String => html! {
+            input #add-value type="text" name="add_value" class="form-control"
+                placeholder="Value" aria-label="Value"
+                value=(current_value) {}
+        },
+    }
+}
+
+/// Renders the description hint for a well-known key (if any).
+fn render_value_description(key: &str) -> Markup {
+    let description = WELL_KNOWN_KEYS
+        .get(key)
+        .map(|s| s.description)
+        .unwrap_or("");
+
+    html! {
+        @if !description.is_empty() {
+            small class="form-text text-muted" { (description) }
+        }
+    }
+}
+
+/// Query params for the value-input HTMX endpoint.
+#[derive(serde::Deserialize)]
+pub struct ValueInputQuery {
+    #[serde(default)]
+    pub add_key: String,
+}
+
+/// HTMX endpoint: returns a type-appropriate input fragment for the given key,
+/// plus an OOB swap for the description hint below.
+pub async fn get_value_input(
+    _auth: UserAuth,
+    Query(query): Query<ValueInputQuery>,
+) -> impl IntoResponse {
+    let key = query.add_key.trim();
+    let key_type = WELL_KNOWN_KEYS
+        .get(key)
+        .map(|s| &s.value_type)
+        .unwrap_or(&KeyType::String);
+
+    let content = html! {
+        (render_value_input(key_type, ""))
+        div #value-description-container hx-swap-oob="innerHTML" {
+            (render_value_description(key))
+        }
+    };
+    Html(content.into_string())
+}
+
+/// Converts raw form input to a [`serde_json::Value`] appropriate for the
+/// given key type.
+fn convert_input_value(raw: &str, key_type: &KeyType) -> RequestResult<Value> {
+    match key_type {
+        KeyType::DateTime => {
+            // Browsers may send with or without seconds
+            let dt = NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S")
+                .or_else(|_| NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M"))
+                .map_err(|e| RequestError::BadRequest {
+                    source: anyhow::anyhow!("Invalid datetime: {e}"),
+                })?;
+            Ok(Value::String(dt.and_utc().timestamp().to_string()))
+        }
+        KeyType::Amount => {
+            let _: u64 = raw.parse().map_err(|e| RequestError::BadRequest {
+                source: anyhow::anyhow!("Invalid amount: {e}"),
+            })?;
+            Ok(Value::String(raw.to_string()))
+        }
+        KeyType::Json => serde_json::from_str(raw).map_err(|e| RequestError::BadRequest {
+            source: anyhow::anyhow!("Invalid JSON: {e}"),
+        }),
+        KeyType::Url | KeyType::String => {
+            // Try JSON parse first (backward compat), fall back to plain string
+            Ok(serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string())))
+        }
+    }
+}
 
 pub fn render_meta_edit_form(
     mut top_level_json: serde_json::Map<String, Value>,
@@ -313,11 +572,14 @@ pub fn render_meta_edit_form(
 ) -> Markup {
     top_level_json.sort_keys();
 
-    let known_keys: HashSet<String> = top_level_json
+    let known_keys: BTreeSet<String> = top_level_json
         .keys()
         .cloned()
-        .chain(WELL_KNOWN_KEYS.iter().map(ToString::to_string))
+        .chain(WELL_KNOWN_KEYS.keys().map(|k| (*k).to_string()))
         .collect();
+
+    let default_input = render_value_input(&KeyType::String, &form.add_value);
+
     html! {
         form #meta-edit-form hx-swap-oob=(true) {
             h5 {
@@ -333,24 +595,28 @@ pub fn render_meta_edit_form(
                     (serde_json::to_string_pretty(&top_level_json).expect("Can't fail"))
                 }
             }
-            div class="input-group mb-2" {
-                input #add-key  type="text" class="form-control" placeholder="Key" aria-label="Key" list="keyOptions"
+            div class="input-group mb-1" {
+                input #add-key type="text" class="form-control" placeholder="Key" aria-label="Key" list="keyOptions"
                     // keys are usually shorter than values, so keep it small
                     style="max-width: 250px;"
                     name="add_key"
                     value=(form.add_key)
+                    hx-get=(META_VALUE_INPUT_ROUTE)
+                    hx-trigger="change, input changed delay:300ms"
+                    hx-target="#value-input-container"
+                    hx-swap="innerHTML"
                 {}
                 span class="input-group-text" { ":" }
-                input #add-value type="text" name="add_value" class="form-control" placeholder="Value" aria-label="Value"
-                    value=(form.add_value)
-                {}
 
                 datalist id="keyOptions" {
-                    @for key in known_keys {
+                    @for key in &known_keys {
                         option value=(key) {}
                     }
                 }
 
+                div #value-input-container class="flex-grow-1" {
+                    (default_input)
+                }
                 button class="btn btn-primary btn-min-width"
                     type="button" id="button-set"
                     title="Set a value in a meta proposal"
@@ -359,6 +625,7 @@ pub fn render_meta_edit_form(
                     hx-trigger="click, keypress[key=='Enter'] from:#add-value, keypress[key=='Enter'] from:#add-key"
                 { "Set" }
             }
+            div #value-description-container class="mb-2" {}
             div class="input-group mb-2" {
                 select class="form-select"
                     id="delete-key"
