@@ -24,6 +24,7 @@ pub const META_SET_ROUTE: &str = "/meta/set";
 pub const META_RESET_ROUTE: &str = "/meta/reset";
 pub const META_DELETE_ROUTE: &str = "/meta/delete";
 pub const META_VALUE_INPUT_ROUTE: &str = "/meta/value-input";
+pub const META_MERGE_ROUTE: &str = "/meta/merge";
 
 /// The type of value expected for a well-known meta key.
 enum KeyType {
@@ -204,6 +205,11 @@ pub async fn render(meta: &Meta) -> Markup {
         .ok()
         .unwrap_or_default();
 
+    let consensus_map = consensus_value
+        .as_ref()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+
     let current_meta_keys = if let Some(o) = submissions
         .get(&meta.our_peer_id)
         .cloned()
@@ -221,80 +227,216 @@ pub async fn render(meta: &Meta) -> Markup {
             div class="card-body" {
                 div class="mb-4" {
                     h5 { "Current Consensus (Revision: " (revision) ")" }
-                    @if let Some(value) = &consensus_value {
-                        pre class="bg-light p-3 user-select-all" {
-                            code {
-                                (serde_json::to_string_pretty(value).unwrap_or_else(|_| "Invalid JSON".to_string()))
+                    @if consensus_value.is_some() {
+                        div class="row mb-2" {
+                            div class="col-md-6" {
+                                strong { "Full document" }
+                                pre class="m-0 p-2 bg-light" style="max-height: 40vh; overflow-y: auto;" {
+                                    code {
+                                        (serde_json::to_string_pretty(&consensus_map).unwrap_or_else(|_| "Invalid JSON".to_string()))
+                                    }
+                                }
+                            }
+                            div class="col-md-6" {
+                                (render_consensus_summary(&consensus_map))
                             }
                         }
                     } @else {
                         div class="alert alert-secondary" { "No consensus value has been established yet." }
                     }
                     div class="mb-4" {
-                        (render_meta_edit_form(current_meta_keys, false, MetaEditForm::default()))
+                        (render_meta_edit_form(&consensus_map, current_meta_keys, false, MetaEditForm::default()))
                     }
 
-                    (render_submissions_form(meta.our_peer_id, &submissions))
+                    (render_submissions_form(meta.our_peer_id, &consensus_map, &submissions))
                 }
             }
         }
     }
 }
 
-fn render_submissions_form(our_id: PeerId, submissions: &BTreeMap<PeerId, Value>) -> Markup {
-    let mut submissions_by_value: HashMap<String, BTreeSet<PeerId>> = HashMap::new();
+/// A single change between the consensus and a proposal.
+enum MetaChange {
+    Set { key: String, value: String },
+    Deleted { key: String },
+}
+
+/// Computes an itemized list of changes between `consensus` and `proposal`.
+fn compute_changes(
+    consensus: &serde_json::Map<String, Value>,
+    proposal: &serde_json::Map<String, Value>,
+) -> Vec<MetaChange> {
+    let mut changes = Vec::new();
+
+    // Keys set or modified in the proposal
+    for (key, new_val) in proposal {
+        let changed = consensus.get(key) != Some(new_val);
+        if changed {
+            changes.push(MetaChange::Set {
+                key: key.clone(),
+                value: format_value_for_display(key, new_val),
+            });
+        }
+    }
+
+    // Keys deleted from consensus
+    for key in consensus.keys() {
+        if !proposal.contains_key(key) {
+            changes.push(MetaChange::Deleted { key: key.clone() });
+        }
+    }
+
+    changes
+}
+
+/// Formats a meta value for human-readable display, using the key schema when
+/// available (e.g. UNIX timestamps become formatted dates).
+fn format_value_for_display(key: &str, value: &Value) -> String {
+    if let Some(schema) = WELL_KNOWN_KEYS.get(key) {
+        match schema.value_type {
+            KeyType::DateTime => {
+                if let Some(ts) = value
+                    .as_str()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                {
+                    return ts.format("%Y-%m-%d %H:%M UTC").to_string();
+                }
+            }
+            KeyType::Amount => {
+                if let Some(s) = value.as_str() {
+                    return format!("{s} msats");
+                }
+            }
+            KeyType::Json => {
+                return serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+            }
+            KeyType::Url | KeyType::String => {}
+        }
+    }
+
+    match value {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Renders the "Proposed changes" summary from a list of [`MetaChange`]s.
+fn render_changes_summary(changes: &[MetaChange]) -> Markup {
+    html! {
+        strong { "Proposed changes" }
+        @if changes.is_empty() {
+            p class="text-muted" { "No changes" }
+        } @else {
+            ul class="mb-0 ps-3" {
+                @for change in changes {
+                    li {
+                        @match change {
+                            MetaChange::Set { key, value } => {
+                                strong { (key) }
+                                " set to "
+                                em { (value) }
+                            },
+                            MetaChange::Deleted { key } => {
+                                strong { (key) }
+                                " deleted"
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Renders an itemized summary of all key-value pairs in a meta map,
+/// formatting values using their schema when available.
+fn render_consensus_summary(map: &serde_json::Map<String, Value>) -> Markup {
+    html! {
+        @if map.is_empty() {
+            span class="text-muted" { "No fields set" }
+        } @else {
+            strong { "Summary" }
+            ul class="mb-0 ps-3" {
+                @for (key, value) in map {
+                    li {
+                        strong { (key) }
+                        " = "
+                        em { (format_value_for_display(key, value)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn render_submissions_form(
+    our_id: PeerId,
+    consensus: &serde_json::Map<String, Value>,
+    submissions: &BTreeMap<PeerId, Value>,
+) -> Markup {
+    let mut submissions_by_value: HashMap<
+        String,
+        (BTreeSet<PeerId>, serde_json::Map<String, Value>),
+    > = HashMap::new();
 
     for (peer_id, value) in submissions {
         let value_str =
             serde_json::to_string_pretty(value).unwrap_or_else(|_| "Invalid JSON".to_string());
-        submissions_by_value
+        let proposal_map = value.as_object().cloned().unwrap_or_default();
+        let entry = submissions_by_value
             .entry(value_str)
-            .or_default()
-            .insert(*peer_id);
+            .or_insert_with(|| (BTreeSet::new(), proposal_map));
+        entry.0.insert(*peer_id);
     }
 
     html! {
         div #meta-submissions hx-swap-oob=(true) {
             @if !submissions.is_empty() {
-                h5 { "Current Peer Submissions" }
-                div class="table-responsive" {
-                    table class="table table-sm" {
-                        thead {
-                            tr {
-                                th { "Peer IDs" }
-                                th { "Submission" }
-                                th { "Actions" }
+                h5 { "Current Proposals" }
+                @for (value_str, (peer_ids, proposal_map)) in &submissions_by_value {
+                    div class="card mb-3" {
+                        div class="card-header py-2" {
+                            strong { "Peers: " }
+                            (peer_ids.iter()
+                                .map(|n| n.to_string())
+                                .collect::<Vec<String>>()
+                                .join(", "))
+                        }
+                        div class="card-body py-2" {
+                            div class="row" {
+                                div class="col-md-6" {
+                                    strong { "Full proposal" }
+                                    pre class="m-0 p-2 bg-light" style="max-height: 40vh; overflow-y: auto;" {
+                                        code { (value_str) }
+                                    }
+                                }
+                                div class="col-md-6" {
+                                    (render_changes_summary(&compute_changes(consensus, proposal_map)))
+                                }
                             }
                         }
-                        tbody {
-                            @for (value_str, peer_ids) in submissions_by_value {
-                                tr {
-                                    td { (
-                                        peer_ids.iter()
-                                        .map(|n| n.to_string())
-                                        .collect::<Vec<String>>()
-                                        .join(", "))
+                        @if !peer_ids.contains(&our_id) {
+                            div class="card-footer py-2 d-flex gap-2 justify-content-end" {
+                                form method="post"
+                                    hx-post=(META_SUBMIT_ROUTE)
+                                    hx-swap="none"
+                                {
+                                    input type="hidden" name="json_content"
+                                        value=(value_str);
+                                    button type="submit" class="btn btn-sm btn-success" {
+                                        "Accept As-Is"
                                     }
-                                    td {
-                                        pre class="m-0 p-2 bg-light" style="max-height: 150px; overflow-y: auto;" {
-                                            code {
-                                                (value_str)
-                                            }
-                                        }
-                                    }
-                                    @if !peer_ids.contains(&our_id) {
-                                        td {
-                                            form method="post"
-                                                hx-post=(META_SUBMIT_ROUTE)
-                                                hx-swap="none"
-                                            {
-                                                input type="hidden" name="json_content"
-                                                    value=(value_str);
-                                                button type="submit" class="btn btn-sm btn-success" {
-                                                    "Accept This Submission"
-                                                }
-                                            }
-                                        }
+                                }
+                                form method="post"
+                                    hx-post=(META_MERGE_ROUTE)
+                                    hx-swap="none"
+                                    hx-include="#meta-edit-form [name='json_content']"
+                                {
+                                    input type="hidden" name="proposal_json"
+                                        value=(value_str);
+                                    button type="submit" class="btn btn-sm btn-primary" {
+                                        "Add Changes To My Proposal"
                                     }
                                 }
                             }
@@ -333,6 +475,16 @@ impl MetaEditForm {
     }
 }
 
+/// Helper to fetch the current consensus as a JSON object map.
+async fn get_consensus_map(meta: &Meta) -> serde_json::Map<String, Value> {
+    meta.handle_get_consensus_request_ui()
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
 pub async fn post_submit(
     State(state): State<UiState<DynDashboardApi>>,
     _auth: UserAuth,
@@ -349,6 +501,8 @@ pub async fn post_submit(
         .inspect_err(|msg| warn!(target: LOG_UI, msg= %msg.message, "Request error"))
         .map_err(|_err| RequestError::InternalError)?;
 
+    let consensus_map = get_consensus_map(meta_module).await;
+
     let mut submissions = meta_module
         .handle_get_submissions_request_ui()
         .await
@@ -358,11 +512,11 @@ pub async fn post_submit(
     submissions.insert(meta_module.our_peer_id, top_level_object);
 
     let content = html! {
-        (render_meta_edit_form(top_level_keys, false, MetaEditForm::default()))
+        (render_meta_edit_form(&consensus_map, top_level_keys, false, MetaEditForm::default()))
 
         // Re-render submission with our submission added, as it will take couple of milliseconds
-        // for it to get processed and it's confusing if it doesn't immediatel show up.
-        (render_submissions_form(meta_module.our_peer_id, &submissions))
+        // for it to get processed and it's confusing if it doesn't immediately show up.
+        (render_submissions_form(meta_module.our_peer_id, &consensus_map, &submissions))
     };
     Ok(Html(content.into_string()).into_response())
 }
@@ -374,17 +528,8 @@ pub async fn post_reset(
 ) -> RequestResult<Response> {
     let meta_module = state.api.get_module::<Meta>().unwrap();
 
-    let consensus_value = meta_module
-        .handle_get_consensus_request_ui()
-        .await
-        .ok()
-        .flatten();
-
-    let top_level_keys = if let Some(serde_json::Value::Object(o)) = consensus_value {
-        o
-    } else {
-        serde_json::Map::new()
-    };
+    let consensus_map = get_consensus_map(meta_module).await;
+    let top_level_keys = consensus_map.clone();
     let top_level_object = Value::Object(top_level_keys.clone());
 
     meta_module
@@ -402,19 +547,23 @@ pub async fn post_reset(
     submissions.remove(&meta_module.our_peer_id);
 
     let content = html! {
-        (render_meta_edit_form(top_level_keys, false, MetaEditForm::default()))
+        (render_meta_edit_form(&consensus_map, top_level_keys, false, MetaEditForm::default()))
 
-        // Re-render submission with our submission added, as it will take couple of milliseconds
-        // for it to get processed and it's confusing if it doesn't immediatel show up.
-        (render_submissions_form(meta_module.our_peer_id, &submissions))
+        // Re-render submission with our submission removed, as it will take couple of milliseconds
+        // for it to get processed and it's confusing if it doesn't immediately show up.
+        (render_submissions_form(meta_module.our_peer_id, &consensus_map, &submissions))
     };
     Ok(Html(content.into_string()).into_response())
 }
 
 pub async fn post_set(
+    State(state): State<UiState<DynDashboardApi>>,
     _auth: UserAuth,
     Form(mut form): Form<MetaEditForm>,
 ) -> RequestResult<Response> {
+    let meta_module = state.api.get_module::<Meta>().unwrap();
+    let consensus_map = get_consensus_map(meta_module).await;
+
     let mut top_level_object = form.top_level_keys()?;
 
     let key = form.add_key.trim();
@@ -429,14 +578,23 @@ pub async fn post_set(
 
     form.add_key = "".into();
     form.add_value = "".into();
-    let content = render_meta_edit_form(top_level_object, true, MetaEditForm::default());
+    let content = render_meta_edit_form(
+        &consensus_map,
+        top_level_object,
+        true,
+        MetaEditForm::default(),
+    );
     Ok(Html(content.into_string()).into_response())
 }
 
 pub async fn post_delete(
+    State(state): State<UiState<DynDashboardApi>>,
     _auth: UserAuth,
     Form(mut form): Form<MetaEditForm>,
 ) -> RequestResult<Response> {
+    let meta_module = state.api.get_module::<Meta>().unwrap();
+    let consensus_map = get_consensus_map(meta_module).await;
+
     let mut top_level_json = form.top_level_keys()?;
 
     let key = form.delete_key.trim();
@@ -444,11 +602,61 @@ pub async fn post_delete(
     top_level_json.remove(key);
     form.delete_key = "".into();
 
-    let content = render_meta_edit_form(top_level_json, true, form);
+    let content = render_meta_edit_form(&consensus_map, top_level_json, true, form);
+    Ok(Html(content.into_string()).into_response())
+}
+
+#[derive(serde::Deserialize)]
+pub struct MetaMergeForm {
+    pub json_content: String,
+    pub proposal_json: String,
+}
+
+pub async fn post_merge(
+    State(state): State<UiState<DynDashboardApi>>,
+    _auth: UserAuth,
+    Form(form): Form<MetaMergeForm>,
+) -> RequestResult<Response> {
+    let meta_module = state.api.get_module::<Meta>().unwrap();
+    let consensus_map = get_consensus_map(meta_module).await;
+
+    let mut current: serde_json::Map<String, Value> =
+        if let Ok(Value::Object(o)) = serde_json::from_str(&form.json_content) {
+            o
+        } else {
+            serde_json::Map::new()
+        };
+
+    let proposal: serde_json::Map<String, Value> =
+        if let Ok(Value::Object(o)) = serde_json::from_str(&form.proposal_json) {
+            o
+        } else {
+            serde_json::Map::new()
+        };
+
+    // Compute changes from consensus -> proposal and apply to current
+    for change in &compute_changes(&consensus_map, &proposal) {
+        match change {
+            MetaChange::Set { key, .. } => {
+                if let Some(val) = proposal.get(key) {
+                    current.insert(key.clone(), val.clone());
+                }
+            }
+            MetaChange::Deleted { key } => {
+                current.remove(key);
+            }
+        }
+    }
+
+    let content = render_meta_edit_form(&consensus_map, current, true, MetaEditForm::default());
     Ok(Html(content.into_string()).into_response())
 }
 
 /// Renders the appropriate HTML input element for the given key type.
+///
+/// Always returns a single element (no nested input-groups) so it can be a
+/// direct child of the main `.input-group` without breaking Bootstrap's
+/// `:first-child`/`:last-child` border-radius selectors.
 fn render_value_input(key_type: &KeyType, current_value: &str) -> Markup {
     match key_type {
         KeyType::Url => html! {
@@ -457,12 +665,9 @@ fn render_value_input(key_type: &KeyType, current_value: &str) -> Markup {
                 value=(current_value) {}
         },
         KeyType::Amount => html! {
-            div class="input-group" {
-                input #add-value type="number" name="add_value" class="form-control"
-                    placeholder="0" aria-label="Value"
-                    value=(current_value) {}
-                span class="input-group-text" { "msats" }
-            }
+            input #add-value type="number" name="add_value" class="form-control"
+                placeholder="Amount (msats)" aria-label="Value"
+                value=(current_value) {}
         },
         KeyType::DateTime => {
             // Pre-fill with today at 00:00 so the time portion isn't blank
@@ -472,18 +677,14 @@ fn render_value_input(key_type: &KeyType, current_value: &str) -> Markup {
                 current_value.to_string()
             };
             html! {
-                div class="input-group" {
-                    input #add-value type="datetime-local" name="add_value" class="form-control"
-                        aria-label="Value"
-                        value=(val) {}
-                    span class="input-group-text" { "UTC" }
-                }
+                input #add-value type="datetime-local" name="add_value" class="form-control"
+                    aria-label="Value" value=(val) {}
             }
         }
         KeyType::Json => html! {
-            textarea #add-value name="add_value" class="form-control" rows="3"
+            input #add-value type="text" name="add_value" class="form-control"
                 placeholder="{}" aria-label="Value"
-            { (current_value) }
+                value=(current_value) {}
         },
         KeyType::String => html! {
             input #add-value type="text" name="add_value" class="form-control"
@@ -493,18 +694,97 @@ fn render_value_input(key_type: &KeyType, current_value: &str) -> Markup {
     }
 }
 
-/// Renders the description hint for a well-known key (if any).
+/// Renders the description hint for a well-known key (if any), including a
+/// type hint for Amount and DateTime fields whose unit labels are no longer
+/// shown inline in the input-group.
 fn render_value_description(key: &str) -> Markup {
-    let description = WELL_KNOWN_KEYS
-        .get(key)
-        .map(|s| s.description)
-        .unwrap_or("");
+    let schema = WELL_KNOWN_KEYS.get(key);
+    let description = schema.map(|s| s.description).unwrap_or("");
+    let type_hint = match schema.map(|s| &s.value_type) {
+        Some(KeyType::DateTime) => " (UTC)",
+        Some(KeyType::Amount) => " (msats)",
+        _ => "",
+    };
 
     html! {
-        @if !description.is_empty() {
-            small class="form-text text-muted" { (description) }
+        @if !description.is_empty() || !type_hint.is_empty() {
+            small class="form-text text-muted" { (description) (type_hint) }
         }
     }
+}
+
+/// Renders a dropdown picker for well-known keys (plus any extra keys from
+/// the current proposal). Picking a key copies it into the `#add-key` text
+/// input and triggers its HTMX `change` event, then resets itself to "▾".
+fn render_key_picker(extra_keys: &BTreeSet<String>) -> Markup {
+    let all_keys: BTreeSet<&str> = WELL_KNOWN_KEYS
+        .keys()
+        .copied()
+        .chain(extra_keys.iter().map(|s| s.as_str()))
+        .collect();
+
+    html! {
+        select class="form-select"
+            style="flex: 0 0 auto; width: 2em; padding-left: 0.2em;"
+            aria-label="Pick a well-known key"
+            onchange="if(this.value){var k=document.getElementById('add-key');k.value=this.value;this.value='';htmx.trigger(k,'change')}"
+        {
+            option value="" selected {}
+            @for key in &all_keys {
+                option value=(key) { (key) }
+            }
+        }
+    }
+}
+
+/// Renders the Set button. When there is no Delete button next to it,
+/// `rounded-end` is added so Bootstrap applies right border-radius despite
+/// the hidden placeholder that follows.
+fn render_set_button(key_in_proposal: bool, oob: bool) -> Markup {
+    let class = if key_in_proposal {
+        "btn btn-primary btn-min-width"
+    } else {
+        "btn btn-primary btn-min-width rounded-end"
+    };
+    html! {
+        button #button-set class=(class) type="button"
+            hx-swap-oob=[oob.then_some("outerHTML")]
+            title="Set a value in a meta proposal"
+            hx-post=(META_SET_ROUTE)
+            hx-swap="none"
+            hx-trigger="click, keypress[key=='Enter'] from:#add-value, keypress[key=='Enter'] from:#add-key"
+        { "Set" }
+    }
+}
+
+/// Renders the Delete button (visible) or a hidden placeholder (invisible).
+/// Uses `outerHTML` OOB swap when returned from the HTMX endpoint.
+fn render_delete_button(key: &str, visible: bool, oob: bool) -> Markup {
+    if visible {
+        html! {
+            button #button-delete class="btn btn-danger btn-min-width" type="button"
+                hx-swap-oob=[oob.then_some("outerHTML")]
+                title="Delete this key from the proposal"
+                hx-post=(META_DELETE_ROUTE)
+                hx-swap="none"
+                hx-vals=(format!(r#"{{"delete_key":"{}"}}"#, key))
+            { "Delete" }
+        }
+    } else {
+        html! {
+            span #button-delete style="display:none"
+                hx-swap-oob=[oob.then_some("outerHTML")]
+            {}
+        }
+    }
+}
+
+/// Parses json_content into a JSON object map, returning empty map on failure.
+fn parse_proposal(json_content: &str) -> serde_json::Map<String, Value> {
+    serde_json::from_str(json_content)
+        .ok()
+        .and_then(|v: Value| v.as_object().cloned())
+        .unwrap_or_default()
 }
 
 /// Query params for the value-input HTMX endpoint.
@@ -512,25 +792,35 @@ fn render_value_description(key: &str) -> Markup {
 pub struct ValueInputQuery {
     #[serde(default)]
     pub add_key: String,
+    #[serde(default)]
+    pub json_content: String,
 }
 
-/// HTMX endpoint: returns a type-appropriate input fragment for the given key,
-/// plus an OOB swap for the description hint below.
+/// HTMX endpoint: returns a type-appropriate value input for the selected key
+/// (primary `outerHTML` swap on `#add-value`), plus OOB swaps for the
+/// description hint and the Set/Delete buttons.
 pub async fn get_value_input(
     _auth: UserAuth,
     Query(query): Query<ValueInputQuery>,
 ) -> impl IntoResponse {
     let key = query.add_key.trim();
+    let proposal = parse_proposal(&query.json_content);
+    let key_in_proposal = !key.is_empty() && proposal.contains_key(key);
+
     let key_type = WELL_KNOWN_KEYS
         .get(key)
         .map(|s| &s.value_type)
         .unwrap_or(&KeyType::String);
 
     let content = html! {
+        // Primary swap target: replaces #add-value via outerHTML
         (render_value_input(key_type, ""))
+        // OOB swaps for description, Set button, and Delete button
         div #value-description-container hx-swap-oob="innerHTML" {
             (render_value_description(key))
         }
+        (render_set_button(key_in_proposal, true))
+        (render_delete_button(key, key_in_proposal, true))
     };
     Html(content.into_string())
 }
@@ -565,6 +855,7 @@ fn convert_input_value(raw: &str, key_type: &KeyType) -> RequestResult<Value> {
 }
 
 pub fn render_meta_edit_form(
+    consensus: &serde_json::Map<String, Value>,
     mut top_level_json: serde_json::Map<String, Value>,
     // was the value edited via set/delete
     pending: bool,
@@ -572,84 +863,69 @@ pub fn render_meta_edit_form(
 ) -> Markup {
     top_level_json.sort_keys();
 
-    let known_keys: BTreeSet<String> = top_level_json
+    let changes = compute_changes(consensus, &top_level_json);
+    let extra_keys: BTreeSet<String> = top_level_json.keys().cloned().collect();
+    let all_keys: BTreeSet<&str> = WELL_KNOWN_KEYS
         .keys()
-        .cloned()
-        .chain(WELL_KNOWN_KEYS.keys().map(|k| (*k).to_string()))
+        .copied()
+        .chain(extra_keys.iter().map(|s| s.as_str()))
         .collect();
-
     let default_input = render_value_input(&KeyType::String, &form.add_value);
 
     html! {
         form #meta-edit-form hx-swap-oob=(true) {
             h5 {
-                "Proposal"
+                "Propose Changes"
                 @if pending {
-                    " (Pending)"
+                    " (Pending - click Submit to Propose)"
                 }
             }
-            div class="input-group mb-2" {
-                textarea class="form-control" rows="15" readonly
-                    name="json_content"
-                {
-                    (serde_json::to_string_pretty(&top_level_json).expect("Can't fail"))
+            input type="hidden" name="json_content"
+                value=(serde_json::to_string_pretty(&top_level_json).expect("Can't fail")) {}
+            div class="row mb-2" {
+                div class="col-md-6" {
+                    strong { "Full proposal" }
+                    pre class="m-0 p-2 bg-light" style="min-height: 120px; max-height: 40vh; overflow-y: auto;" {
+                        code {
+                            (serde_json::to_string_pretty(&top_level_json).expect("Can't fail"))
+                        }
+                    }
+                }
+                div class="col-md-6" {
+                    (render_changes_summary(&changes))
                 }
             }
+            // Datalist for autocomplete on the key text input
+            datalist #keyOptions {
+                @for key in &all_keys {
+                    option value=(key) {}
+                }
+            }
+            // All children are direct elements — no wrapper divs — so
+            // Bootstrap's input-group :first-child/:last-child CSS works.
             div class="input-group mb-1" {
-                input #add-key type="text" class="form-control" placeholder="Key" aria-label="Key" list="keyOptions"
-                    // keys are usually shorter than values, so keep it small
-                    style="max-width: 250px;"
-                    name="add_key"
-                    value=(form.add_key)
+                (render_key_picker(&extra_keys))
+                input #add-key type="text" list="keyOptions" name="add_key" class="form-control"
+                    style="max-width: 250px;" placeholder="Key"
                     hx-get=(META_VALUE_INPUT_ROUTE)
                     hx-trigger="change, input changed delay:300ms"
-                    hx-target="#value-input-container"
-                    hx-swap="innerHTML"
+                    hx-target="#add-value"
+                    hx-swap="outerHTML"
+                    hx-include="#meta-edit-form [name='json_content']"
                 {}
                 span class="input-group-text" { ":" }
-
-                datalist id="keyOptions" {
-                    @for key in &known_keys {
-                        option value=(key) {}
-                    }
-                }
-
-                div #value-input-container class="flex-grow-1" {
-                    (default_input)
-                }
-                button class="btn btn-primary btn-min-width"
-                    type="button" id="button-set"
-                    title="Set a value in a meta proposal"
-                    hx-post=(META_SET_ROUTE)
-                    hx-swap="none"
-                    hx-trigger="click, keypress[key=='Enter'] from:#add-value, keypress[key=='Enter'] from:#add-key"
-                { "Set" }
+                (default_input)
+                (render_set_button(false, false))
+                (render_delete_button("", false, false))
             }
-            div #value-description-container class="mb-2" {}
-            div class="input-group mb-2" {
-                select class="form-select"
-                    id="delete-key"
-                    name="delete_key"
-                {
-                    option value="" {}
-                    @for key in top_level_json.keys() {
-                        option value=(key) selected[key == &form.delete_key]{ (key) }
-                    }
-                }
-                button class="btn btn-primary btn-min-width"
-                    hx-post=(META_DELETE_ROUTE)
-                    hx-swap="none"
-                    hx-trigger="click, keypress[key=='Enter'] from:#delete-key"
-                    title="Delete a value in a meta proposal"
-                { "Delete" }
-            }
+            div #value-description-container {}
             div class="d-flex justify-content-between btn-min-width" {
-                button class="btn btn-outline-warning me-5"
+                button type="button" class="btn btn-outline-warning me-5"
                     title="Reset to current consensus"
                     hx-post=(META_RESET_ROUTE)
                     hx-swap="none"
                 { "Reset" }
-                button class="btn btn-success btn-min-width"
+                button type="button" class="btn btn-success btn-min-width"
                     hx-post=(META_SUBMIT_ROUTE)
                     hx-swap="none"
                     title="Submit new meta document for approval of other peers"
