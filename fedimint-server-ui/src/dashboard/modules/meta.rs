@@ -281,13 +281,20 @@ pub async fn post_delete(
 }
 
 // <https://fedibtc.github.io/fedi-docs/docs/fedi/meta_fields/federation-metadata-configurations>
+// NOTE: If you're updating this, please update `docs/meta_fields/README.md`
 const WELL_KNOWN_KEYS: &[&str] = &[
     "welcome_message",
+    "federation_expiry_timestamp",
+    "federation_name",
+    "meta_override_url",
+    "welcome_message",
+    "vetted_gateways",
+    "recurringd_api",
+    "lnaddress_api",
     "fedi:pinned_message",
     "fedi:federation_icon_url",
     "fedi:tos_url",
     "fedi:default_currency",
-    "fedi:popup_end_timestamp",
     "fedi:invite_codes_disabled",
     "fedi:new_members_disabled",
     "fedi:max_invoice_msats",
