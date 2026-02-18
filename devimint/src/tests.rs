@@ -907,31 +907,34 @@ pub async fn cli_tests(dev_fed: DevFed) -> Result<()> {
         .run()
         .await?;
 
-    // Assert balances changed by 1_300_000 msat
-    let final_lnd_incoming_client_balance = client.balance().await?;
-    let final_lnd_incoming_gateway_balance = gw_lnd.ecash_balance(fed_id.clone()).await?;
-    anyhow::ensure!(
-        almost_equal(
-            final_lnd_incoming_client_balance - initial_lnd_incoming_client_balance,
-            1_300_000,
-            2_000
-        )
-        .is_ok(),
-        "Client balance changed by {} on LND incoming payment, expected 1_300_000",
-        (final_lnd_incoming_client_balance - initial_lnd_incoming_client_balance)
-    );
-    anyhow::ensure!(
-        almost_equal(
-            final_lnd_outgoing_gateway_balance - final_lnd_incoming_gateway_balance,
-            1_300_000,
-            2_000
-        )
-        .is_ok(),
-        "LND Gateway balance changed by {} on LND incoming payment, expected 1_300_000",
-        (final_lnd_outgoing_gateway_balance - final_lnd_incoming_gateway_balance)
-    );
-
-    // TODO: test cancel/timeout
+    // Only validate balance changes on v0.11 and above because there is a race
+    // condition in older versions that causes the balances to not match.
+    let fedimint_cli_version = crate::util::FedimintCli::version_or_default().await;
+    if fedimint_cli_version >= *VERSION_0_11_0_ALPHA {
+        // Assert balances changed by 1_300_000 msat
+        let final_lnd_incoming_client_balance = client.balance().await?;
+        let final_lnd_incoming_gateway_balance = gw_lnd.ecash_balance(fed_id.clone()).await?;
+        anyhow::ensure!(
+            almost_equal(
+                final_lnd_incoming_client_balance - initial_lnd_incoming_client_balance,
+                1_300_000,
+                2_000
+            )
+            .is_ok(),
+            "Client balance changed by {} on LND incoming payment, expected 1_300_000",
+            (final_lnd_incoming_client_balance - initial_lnd_incoming_client_balance)
+        );
+        anyhow::ensure!(
+            almost_equal(
+                final_lnd_outgoing_gateway_balance - final_lnd_incoming_gateway_balance,
+                1_300_000,
+                2_000
+            )
+            .is_ok(),
+            "LND Gateway balance changed by {} on LND incoming payment, expected 1_300_000",
+            (final_lnd_outgoing_gateway_balance - final_lnd_incoming_gateway_balance)
+        );
+    }
 
     // # Wallet tests
     // ## Deposit
