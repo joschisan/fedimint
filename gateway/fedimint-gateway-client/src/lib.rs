@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, Txid};
 use fedimint_connectors::ServerResult;
+use fedimint_core::PeerId;
 use fedimint_core::config::FederationId;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::SafeUrl;
@@ -355,9 +356,9 @@ pub async fn set_mnemonic(
 pub async fn get_invite_codes(
     client: &GatewayApi,
     base_url: &SafeUrl,
-) -> ServerResult<BTreeMap<FederationId, Vec<InviteCode>>> {
+) -> ServerResult<BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>> {
     client
-        .request::<(), BTreeMap<FederationId, Vec<InviteCode>>>(
+        .request::<(), BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>>(
             base_url,
             Method::GET,
             INVITE_CODES_ENDPOINT,

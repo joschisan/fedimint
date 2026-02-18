@@ -9,11 +9,13 @@ use fedimint_core::config::{FederationId, FederationIdPrefix, JsonClientConfig};
 use fedimint_core::db::{Committable, DatabaseTransaction, NonCommittable};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::{FmtCompactAnyhow as _, Spanned};
+use fedimint_core::{PeerId, TieredCounts};
 use fedimint_gateway_common::FederationInfo;
 use fedimint_gateway_server_db::GatewayDbtxNcExt as _;
 use fedimint_gw_client::GatewayClientModule;
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::LOG_GATEWAY;
+use fedimint_mint_client::MintClientModule;
 use tracing::{info, warn};
 
 use crate::error::{AdminGatewayError, FederationNotConnected};
@@ -332,26 +334,40 @@ impl FederationManager {
         }
     }
 
-    pub async fn all_invite_codes(&self) -> BTreeMap<FederationId, Vec<InviteCode>> {
+    pub async fn all_invite_codes(
+        &self,
+    ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>> {
         let mut invite_codes = BTreeMap::new();
 
         for (federation_id, client) in &self.clients {
-            let peer_urls = client.value().get_peer_urls().await;
+            let config = client.value().config().await;
+            let api_endpoints = &config.global.api_endpoints;
 
-            let fed_invite_codes = futures::future::join_all(
-                peer_urls
-                    .keys()
-                    .map(|peer_id| async move { client.value().invite_code(*peer_id).await }),
-            )
-            .await
-            .into_iter()
-            .flatten()
-            .collect();
+            let mut fed_invite_codes = BTreeMap::new();
+            for (peer_id, peer_url) in api_endpoints {
+                if let Some(code) = client.value().invite_code(*peer_id).await {
+                    fed_invite_codes.insert(*peer_id, (peer_url.name.clone(), code));
+                }
+            }
 
             invite_codes.insert(*federation_id, fed_invite_codes);
         }
 
         invite_codes
+    }
+
+    pub async fn get_note_summary(
+        &self,
+        federation_id: &FederationId,
+    ) -> AdminResult<TieredCounts> {
+        let client = self.client(federation_id).ok_or(FederationNotConnected {
+            federation_id_prefix: federation_id.to_prefix(),
+        })?;
+        let mint = client.value().get_first_module::<MintClientModule>()?;
+        let mut dbtx = mint.client_ctx.module_db().begin_transaction_nc().await;
+        let counts = mint.get_note_counts_by_denomination(&mut dbtx).await;
+        info!(target: LOG_GATEWAY, ?counts, "Note counts");
+        Ok(counts)
     }
 
     // TODO(tvolk131): Set this value in the constructor.

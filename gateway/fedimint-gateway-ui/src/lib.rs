@@ -26,6 +26,7 @@ use fedimint_core::config::FederationId;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::secp256k1::serde::Deserialize;
 use fedimint_core::task::TaskGroup;
+use fedimint_core::{PeerId, TieredCounts};
 use fedimint_gateway_common::{
     ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConnectFedPayload,
     CreateInvoiceForOperatorPayload, CreateOfferPayload, CreateOfferResponse,
@@ -224,7 +225,9 @@ pub trait IAdminGateway {
         payload: PaymentLogPayload,
     ) -> Result<PaymentLogResponse, Self::Error>;
 
-    async fn handle_export_invite_codes(&self) -> BTreeMap<FederationId, Vec<InviteCode>>;
+    async fn handle_export_invite_codes(
+        &self,
+    ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>;
 
     fn get_password_hash(&self) -> String;
 
@@ -248,6 +251,11 @@ pub trait IAdminGateway {
         &self,
         payload: PayOfferPayload,
     ) -> Result<PayOfferResponse, Self::Error>;
+
+    async fn handle_get_note_summary_msg(
+        &self,
+        federation_id: &FederationId,
+    ) -> Result<TieredCounts, Self::Error>;
 }
 
 async fn login_form<E>(State(_state): State<UiState<DynGatewayApi<E>>>) -> impl IntoResponse {
@@ -391,8 +399,13 @@ where
             }
         }
 
-        @for fed in gateway_info.federations {
-            (federation::render(&fed))
+        @let invite_codes = state.api.handle_export_invite_codes().await;
+        @let empty_map = BTreeMap::new();
+
+        @for fed in &gateway_info.federations {
+            @let fed_codes = invite_codes.get(&fed.federation_id).unwrap_or(&empty_map);
+            @let note_summary = state.api.handle_get_note_summary_msg(&fed.federation_id).await;
+            (federation::render(fed, fed_codes, &note_summary))
         }
     };
 
@@ -424,7 +437,16 @@ async fn export_invite_codes_handler<E>(
 where
     E: std::fmt::Display,
 {
-    let invite_codes = state.api.handle_export_invite_codes().await;
+    let invite_codes: BTreeMap<FederationId, Vec<InviteCode>> = state
+        .api
+        .handle_export_invite_codes()
+        .await
+        .into_iter()
+        .map(|(fed_id, peers)| {
+            let codes = peers.into_values().map(|(_, code)| code).collect();
+            (fed_id, codes)
+        })
+        .collect();
     let json = match serde_json::to_string_pretty(&invite_codes) {
         Ok(json) => json,
         Err(err) => {
