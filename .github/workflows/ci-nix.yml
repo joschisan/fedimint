@@ -684,10 +684,25 @@ jobs:
             echo "SUCCESS: NixOS system is $age_days days old (within $MAX_AGE_DAYS day limit)"
           fi
 
-  status:
-    name: Status
+  status-pr:
+    name: Status (PR)
+    needs: [lint, shell, build]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - name: Check status of all jobs
+        if: >-
+          ${{
+            contains(needs.*.result, 'failure') ||
+            contains(needs.*.result, 'cancelled') ||
+            contains(needs.*.result, 'skipped')
+          }}
+        run: exit 1
+
+  status-mq:
+    name: Status (MQ)
     needs: [lint, shell, build, cross, containers, pkgs, check-packages-features]
-    if: ${{ always() }}
+    if: ${{ always() && github.event_name == 'merge_group' }}
     runs-on: [self-hosted, linux, x64]
     steps:
       - name: Check status of all jobs
@@ -706,7 +721,7 @@ jobs:
     runs-on: [self-hosted, linux, x64]
     # note: we don't depend on `audit` because it will
     # be often broken, and we can't fix it immediately
-    needs: [ lint, build, shell, cross, containers, pkgs, check-packages-features]
+    needs: [lint, build, shell, cross, containers, pkgs, check-packages-features]
 
     steps:
     - name: Discord notifications on failure
