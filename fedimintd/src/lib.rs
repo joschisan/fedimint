@@ -19,8 +19,9 @@ use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use fedimint_core::db::Database;
 use fedimint_core::envs::{
-    FM_ENABLE_MODULE_LNV1_ENV, FM_ENABLE_MODULE_LNV2_ENV, FM_IROH_DNS_ENV, FM_IROH_RELAY_ENV,
-    FM_USE_UNKNOWN_MODULE_ENV, is_env_var_set, is_env_var_set_opt,
+    FM_ENABLE_MODULE_LNV1_ENV, FM_ENABLE_MODULE_LNV2_ENV, FM_ENABLE_MODULE_MINTV2_ENV,
+    FM_IROH_DNS_ENV, FM_IROH_RELAY_ENV, FM_USE_UNKNOWN_MODULE_ENV, is_env_var_set,
+    is_env_var_set_opt,
 };
 use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::rustls::install_crypto_provider;
@@ -410,7 +411,12 @@ pub async fn run(
 pub fn default_modules() -> ServerModuleInitRegistry {
     let mut server_gens = ServerModuleInitRegistry::new();
 
-    server_gens.attach(MintInit);
+    if is_env_var_set(FM_ENABLE_MODULE_MINTV2_ENV) {
+        server_gens.attach(fedimint_mintv2_server::MintInit);
+    } else {
+        server_gens.attach(MintInit);
+    }
+
     server_gens.attach(WalletInit);
 
     if is_env_var_set_opt(FM_ENABLE_MODULE_LNV1_ENV).unwrap_or(true) {

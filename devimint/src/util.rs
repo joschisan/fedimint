@@ -11,7 +11,10 @@ use std::{env, unreachable};
 use anyhow::{Context, Result, anyhow, bail, format_err};
 use fedimint_core::PeerId;
 use fedimint_core::admin_client::SetupStatus;
-use fedimint_core::envs::{FM_ENABLE_MODULE_LNV1_ENV, FM_ENABLE_MODULE_LNV2_ENV, is_env_var_set};
+use fedimint_core::envs::{
+    FM_ENABLE_MODULE_LNV1_ENV, FM_ENABLE_MODULE_LNV2_ENV, FM_ENABLE_MODULE_MINTV2_ENV,
+    is_env_var_set,
+};
 use fedimint_core::module::ApiAuth;
 use fedimint_core::task::{self, block_in_place, block_on};
 use fedimint_core::time::now;
@@ -1040,6 +1043,10 @@ pub fn supports_lnv1() -> bool {
 pub fn supports_lnv2() -> bool {
     std::env::var_os(FM_ENABLE_MODULE_LNV2_ENV).is_none()
         || is_env_var_set(FM_ENABLE_MODULE_LNV2_ENV)
+}
+
+pub fn supports_mint_v2() -> bool {
+    is_env_var_set(FM_ENABLE_MODULE_MINTV2_ENV)
 }
 
 /// Returns true if running backwards-compatibility tests

@@ -91,6 +91,14 @@ function gw_liquidity_test() {
 }
 export -f gw_liquidity_test
 
+function gw_liquidity_test_mintv2() {
+  # mintv2 is not supported by older versions, so we skip for backwards-compatibility tests
+  if [ -z "${FM_BACKWARDS_COMPATIBILITY_TEST:-}" ]; then
+    fm-run-test "${FUNCNAME[0]}" env FM_ENABLE_MODULE_MINTV2=true ./scripts/tests/gateway-module-test.sh liquidity-test
+  fi
+}
+export -f gw_liquidity_test_mintv2
+
 function gw_esplora_test() {
   fm-run-test "${FUNCNAME[0]}" ./scripts/tests/gateway-module-test.sh esplora-test
 }
@@ -145,6 +153,14 @@ function lnv1_lnv2_swap() {
   fm-run-test "${FUNCNAME[0]}" env FM_OFFLINE_NODES=0 ./scripts/tests/lnv1-lnv2-swap-test.sh
 }
 export -f lnv1_lnv2_swap
+
+function mintv2_module_test() {
+  # mintv2 tests don't support different versions, so we skip for backwards-compatibility tests
+  if [ -z "${FM_BACKWARDS_COMPATIBILITY_TEST:-}" ]; then
+    fm-run-test "${FUNCNAME[0]}" env FM_OFFLINE_NODES=0 ./scripts/tests/mintv2-module-test.sh
+  fi
+}
+export -f mintv2_module_test
 
 function mint_client_sanity() {
   fm-run-test "${FUNCNAME[0]}" env FM_OFFLINE_NODES=0 ./scripts/tests/mint-client-sanity.sh
@@ -385,10 +401,12 @@ tests_to_run_in_parallel+=(
   "gw_config_test_lnd"
   "gw_restore_test"
   "gw_liquidity_test"
+  "gw_liquidity_test_mintv2"
   "lnv2_module_gateway_registration"
   "lnv2_module_payments"
   "lnv2_module_lnurl_pay"
   "lnv1_lnv2_swap"
+  "mintv2_module_test"
   "devimint_cli_test"
   "devimint_cli_test_single"
   "guardian_metadata_test"

@@ -805,7 +805,11 @@ impl Federation {
             crate::util::almost_equal(
                 after_fed_ecash_balance.msats,
                 prev_balance - amount - total_fee,
-                2000,
+                if crate::util::supports_mint_v2() {
+                    4000
+                } else {
+                    2000
+                },
             )
             .map_err(|e| {
                 anyhow::anyhow!(

@@ -45,6 +45,11 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    // Enable MintV2 module for lnv2 tests when not in backwards compatibility test
+    if !devimint::util::is_backwards_compatibility_test() {
+        unsafe { std::env::set_var("FM_ENABLE_MODULE_MINTV2", "1") };
+    }
+
     devimint::run_devfed_test()
         .call(|dev_fed, _process_mgr| async move {
             if !devimint::util::supports_lnv2() {
