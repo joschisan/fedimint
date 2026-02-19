@@ -937,17 +937,15 @@ impl LightningClientModule {
         Ok((client_output, client_output_sm, contract_id))
     }
 
-    /// Returns a bool indicating if it was an external receive
     async fn await_receive_success(
         &self,
         operation_id: OperationId,
-    ) -> Result<bool, LightningReceiveError> {
+    ) -> Result<(), LightningReceiveError> {
         let mut stream = self.notifier.subscribe(operation_id).await;
         loop {
             if let Some(LightningClientStateMachines::Receive(state)) = stream.next().await {
                 match state.state {
-                    LightningReceiveStates::Funded(_) => return Ok(false),
-                    LightningReceiveStates::Success(outpoints) => return Ok(outpoints.is_empty()), /* if the outpoints are empty, it was an external receive */
+                    LightningReceiveStates::Success(_) => return Ok(()),
                     LightningReceiveStates::Canceled(e) => {
                         return Err(e);
                     }
@@ -1923,7 +1921,7 @@ impl LightningClientModule {
                 yield LnReceiveState::WaitingForPayment { invoice: invoice.to_string(), timeout: invoice.expiry_time() };
 
                 match self_ref.await_receive_success(operation_id).await {
-                    Ok(_) => {
+                    Ok(()) => {
 
                         yield LnReceiveState::Funded;
 
