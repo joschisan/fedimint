@@ -703,7 +703,7 @@ jobs:
 
   status-mq:
     name: Status (MQ)
-    needs: [lint, shell, build, cross, containers, pkgs, check-packages-features]
+    needs: [lint, shell, build, cross, pkgs, check-packages-features]
     if: ${{ always() }}
     runs-on: [self-hosted, linux, x64]
     steps:
