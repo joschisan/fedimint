@@ -64,6 +64,7 @@ use crate::fedimint_core::net::peers::IP2PConnections;
 use crate::metrics::initialize_gauge_metrics;
 use crate::net::api::announcement::start_api_announcement_service;
 use crate::net::api::guardian_metadata::start_guardian_metadata_service;
+use crate::net::api::pkarr_publish::start_pkarr_publish_service;
 use crate::net::p2p::{ReconnectP2PConnections, p2p_status_channels};
 use crate::net::p2p_connector::{IP2PConnector, TlsTcpConnector};
 
@@ -166,6 +167,7 @@ pub async fn run(
 
     start_api_announcement_service(&db, &task_group, &cfg, force_api_secrets.get_active()).await?;
     start_guardian_metadata_service(&db, &task_group, &cfg, force_api_secrets.get_active()).await?;
+    start_pkarr_publish_service(&db, &task_group, &cfg).await?;
 
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 

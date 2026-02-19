@@ -33,6 +33,7 @@ fedimint-aead = { workspace = true }
 fedimint-api-client = { workspace = true }
 fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
+fedimint-derive-secret = { workspace = true }
 fedimint-logging = { workspace = true }
 fedimint-metrics = { workspace = true }
 fedimint-server-core = { workspace = true }
@@ -51,6 +52,7 @@ itertools = { workspace = true }
 jsonrpsee = { workspace = true, features = ["server"] }
 parity-scale-codec = { workspace = true }
 pin-project = { workspace = true }
+pkarr = { workspace = true, features = ["dht", "relays"] }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 rayon = { workspace = true }

@@ -160,8 +160,7 @@ async fn insert_signed_guardian_metadata_if_not_present(db: &Database, cfg: &Ser
             .get(&cfg.local.identity)
             .map(|endpoint| vec![endpoint.url.clone()])
             .unwrap_or_default(),
-        // TODO: Get the actual pkarr_id_z32 from config or generate it
-        String::new(),
+        super::pkarr_publish::pkarr_id_z32(&cfg.private.broadcast_secret_key),
         timestamp_secs,
     );
     let ctx = secp256k1::Secp256k1::new();
