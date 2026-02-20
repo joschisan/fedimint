@@ -20,6 +20,9 @@ pub struct PeerSetupCode {
     /// Modules enabled by the leader (if None, all available modules are
     /// enabled)
     pub enabled_modules: Option<BTreeSet<ModuleKind>>,
+    /// Total number of guardians (including the one who sets this), set by the
+    /// leader
+    pub federation_size: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]

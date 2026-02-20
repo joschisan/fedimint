@@ -60,6 +60,7 @@ pub fn local_config_gen_params(
                 federation_name: None,
                 disable_base_fees: Some(!enable_mint_fees),
                 enabled_modules: None,
+                federation_size: None,
             };
             (*peer, params)
         })

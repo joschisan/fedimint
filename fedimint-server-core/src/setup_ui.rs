@@ -34,6 +34,7 @@ pub trait ISetupApi {
         federation_name: Option<String>,
         disable_base_fees: Option<bool>,
         enabled_modules: Option<BTreeSet<ModuleKind>>,
+        federation_size: Option<u32>,
     ) -> Result<String>;
 
     /// Add peer connection info
@@ -41,6 +42,10 @@ pub trait ISetupApi {
 
     /// Start the distributed key generation process
     async fn start_dkg(&self) -> Result<()>;
+
+    /// Returns the expected federation size if any setup code (ours or a
+    /// peer's) has set it
+    async fn federation_size(&self) -> Option<u32>;
 
     /// Create a trait object
     fn into_dyn(self) -> DynSetupApi
