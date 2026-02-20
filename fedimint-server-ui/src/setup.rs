@@ -11,7 +11,10 @@ use fedimint_core::module::ApiAuth;
 use fedimint_server_core::setup_ui::DynSetupApi;
 use fedimint_ui_common::assets::WithStaticRoutesExt;
 use fedimint_ui_common::auth::UserAuth;
-use fedimint_ui_common::{LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState, login_form_response};
+use fedimint_ui_common::{
+    CONNECTIVITY_CHECK_ROUTE, LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState,
+    connectivity_check_handler, connectivity_widget, login_form_response,
+};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use qrcode::QrCode;
 use serde::Deserialize;
@@ -65,6 +68,7 @@ pub fn setup_layout(title: &str, content: Markup) -> Markup {
                         }
                     }
                 }
+                (connectivity_widget())
                 script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous" {}
                 script src="/assets/html5-qrcode.min.js" {}
             }
@@ -582,6 +586,10 @@ pub fn router(api: DynSetupApi) -> Router {
         .route(ADD_SETUP_CODE_ROUTE, post(post_add_setup_code))
         .route(RESET_SETUP_CODES_ROUTE, post(post_reset_setup_codes))
         .route(START_DKG_ROUTE, post(post_start_dkg))
+        .route(
+            CONNECTIVITY_CHECK_ROUTE,
+            get(connectivity_check_handler::<DynSetupApi>),
+        )
         .with_static_routes()
         .with_state(UiState::new(api))
 }
