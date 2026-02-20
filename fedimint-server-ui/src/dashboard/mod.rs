@@ -18,7 +18,10 @@ use fedimint_metrics::{Encoder, REGISTRY, TextEncoder};
 use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi};
 use fedimint_ui_common::assets::WithStaticRoutesExt;
 use fedimint_ui_common::auth::UserAuth;
-use fedimint_ui_common::{LOGIN_ROUTE, ROOT_ROUTE, UiState, dashboard_layout, login_form_response};
+use fedimint_ui_common::{
+    CONNECTIVITY_CHECK_ROUTE, LOGIN_ROUTE, ROOT_ROUTE, UiState, connectivity_check_handler,
+    dashboard_layout, login_form_response,
+};
 use maud::html;
 use {fedimint_lnv2_server, fedimint_meta_server, fedimint_wallet_server};
 
@@ -337,6 +340,10 @@ pub fn router(api: DynDashboardApi) -> Router {
         .route(DOWNLOAD_BACKUP_ROUTE, get(download_backup))
         .route(CHANGE_PASSWORD_ROUTE, post(change_password))
         .route(METRICS_ROUTE, get(metrics_handler))
+        .route(
+            CONNECTIVITY_CHECK_ROUTE,
+            get(connectivity_check_handler::<DynDashboardApi>),
+        )
         .with_static_routes();
 
     // routeradd LNv2 gateway routes if the module exists

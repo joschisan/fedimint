@@ -4470,6 +4470,7 @@ dependencies = [
  "fedimint-core",
  "maud",
  "serde",
+ "tokio",
 ]
 
 [[package]]
