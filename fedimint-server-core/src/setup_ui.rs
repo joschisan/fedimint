@@ -14,6 +14,9 @@ pub trait ISetupApi {
     /// Get our connection info encoded as base32 string
     async fn setup_code(&self) -> Option<String>;
 
+    /// Get our guardian name
+    async fn guardian_name(&self) -> Option<String>;
+
     /// Get the auth token for API calls
     async fn auth(&self) -> Option<ApiAuth>;
 

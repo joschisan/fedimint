@@ -342,6 +342,7 @@ async fn federation_setup(
         .expect("Successful authentication ensures that the local parameters have been set");
 
     let connected_peers = state.api.connected_peers().await;
+    let guardian_name = state.api.guardian_name().await;
     let federation_size = state.api.federation_size().await;
     let total_guardians = connected_peers.len() + 1;
     let can_start_dkg = federation_size
@@ -349,6 +350,15 @@ async fn federation_setup(
         .unwrap_or(false);
 
     let content = html! {
+        @if let Some(ref name) = guardian_name {
+            section class="mb-4" {
+                h4 { "Your name" }
+                p { (name) }
+            }
+
+            hr class="my-4" {}
+        }
+
         section class="mb-4" {
             h4 { "Your setup code" }
 
@@ -580,6 +590,8 @@ async fn post_start_dkg(
     State(state): State<UiState<DynSetupApi>>,
     _auth: UserAuth,
 ) -> impl IntoResponse {
+    let our_connection_info = state.api.setup_code().await;
+
     match state.api.start_dkg().await {
         Ok(()) => {
             // Show DKG progress page with htmx polling
@@ -590,6 +602,23 @@ async fn post_start_dkg(
 
                 p class="text-center" {
                     "All guardians need to confirm their settings. Once completed you will be redirected to the Dashboard."
+                }
+
+                @if let Some(ref info) = our_connection_info {
+                    hr class="my-4" {}
+                    section class="mb-4" {
+                        h4 { "Your setup code" }
+                        p { "Share with guardians who still need it." }
+                        div class="alert alert-info mb-3" {
+                            (info)
+                        }
+                        div class="text-center" {
+                            button type="button" class="btn btn-outline-primary setup-btn"
+                                onclick=(format!("navigator.clipboard.writeText('{info}')")) {
+                                "Copy to Clipboard"
+                            }
+                        }
+                    }
                 }
 
                 // Hidden div that will poll and redirect when the normal UI is ready

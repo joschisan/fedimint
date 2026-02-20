@@ -127,6 +127,15 @@ impl ISetupApi for SetupApi {
             .map(|lp| base32::encode_prefixed(FEDIMINT_PREFIX, &lp.setup_code()))
     }
 
+    async fn guardian_name(&self) -> Option<String> {
+        self.state
+            .lock()
+            .await
+            .local_params
+            .as_ref()
+            .map(|lp| lp.name.clone())
+    }
+
     async fn auth(&self) -> Option<ApiAuth> {
         self.state
             .lock()
@@ -189,6 +198,13 @@ impl ISetupApi for SetupApi {
 
         if let Some(federation_name) = federation_name.as_ref() {
             ensure!(!federation_name.is_empty(), "The federation name is empty");
+        }
+
+        if federation_name.is_some() {
+            ensure!(
+                federation_size.is_some(),
+                "The leader must set the federation size"
+            );
         }
 
         if let Some(size) = federation_size {
