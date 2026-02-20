@@ -1,10 +1,9 @@
 use std::net::SocketAddr;
 
-use anyhow::{anyhow, bail, ensure};
-use axum::body::Body;
+use anyhow::{bail, ensure};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::HeaderMap;
+use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use bitcoin::hashes::sha256;
@@ -18,7 +17,7 @@ use fedimint_core::secp256k1::Scalar;
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, BitcoinHash};
-use fedimint_lnurl::{PayResponse, pay_request_tag};
+use fedimint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::{
     GatewayConnection, PaymentFee, RealGatewayConnection, RoutingInfo,
@@ -34,7 +33,7 @@ use tokio::net::TcpListener;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
 use tpe::AggregatePublicKey;
-use tracing::{info, warn};
+use tracing::info;
 
 const MAX_SENDABLE_MSAT: u64 = 100_000_000_000;
 const MIN_SENDABLE_MSAT: u64 = 100_000;
@@ -111,19 +110,14 @@ fn base_url(headers: &HeaderMap) -> String {
     format!("{scheme}://{host}/")
 }
 
-async fn pay(
-    headers: HeaderMap,
-    Path(payload): Path<String>,
-) -> Result<Json<PayResponse>, LnurlError> {
-    let response = PayResponse {
+async fn pay(headers: HeaderMap, Path(payload): Path<String>) -> Json<LnurlResponse<PayResponse>> {
+    Json(LnurlResponse::Ok(PayResponse {
         callback: format!("{}invoice/{payload}", base_url(&headers)),
         max_sendable: MAX_SENDABLE_MSAT,
         min_sendable: MIN_SENDABLE_MSAT,
         tag: pay_request_tag(),
-        metadata: "LNv2 Payment".to_string(),
-    };
-
-    Ok(Json(response))
+        metadata: "[[\"text/plain\", \"Pay to Recurringd\"]]".to_string(),
+    }))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -131,29 +125,23 @@ struct GetInvoiceParams {
     amount: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct LnUrlPayInvoiceResponse {
-    pr: Bolt11Invoice,
-    verify: String,
-}
-
 async fn invoice(
     Path(payload): Path<String>,
     Query(params): Query<GetInvoiceParams>,
     State(state): State<AppState>,
-) -> Result<Json<LnUrlPayInvoiceResponse>, LnurlError> {
-    let request: LnurlRequest = decode_prefixed(FEDIMINT_PREFIX, &payload)
-        .map_err(|_| LnurlError::bad_request(anyhow!("Failed to decode payload")))?;
+) -> Json<LnurlResponse<InvoiceResponse>> {
+    let Ok(request) = decode_prefixed::<LnurlRequest>(FEDIMINT_PREFIX, &payload) else {
+        return Json(LnurlResponse::error("Failed to decode payload"));
+    };
 
     if params.amount < MIN_SENDABLE_MSAT || params.amount > MAX_SENDABLE_MSAT {
-        return Err(LnurlError::bad_request(anyhow!(
+        return Json(LnurlResponse::error(format!(
             "Amount must be between {} and {}",
-            MIN_SENDABLE_MSAT,
-            MAX_SENDABLE_MSAT
+            MIN_SENDABLE_MSAT, MAX_SENDABLE_MSAT
         )));
     }
 
-    let (gateway, invoice) = create_contract_and_fetch_invoice(
+    let (gateway, invoice) = match create_contract_and_fetch_invoice(
         request.federation_id,
         request.recipient_pk,
         request.aggregate_pk,
@@ -163,13 +151,18 @@ async fn invoice(
         &state.gateway_conn,
     )
     .await
-    .map_err(LnurlError::internal)?;
+    {
+        Ok(result) => result,
+        Err(e) => {
+            return Json(LnurlResponse::error(e.to_string()));
+        }
+    };
 
     info!(%params.amount, %gateway, "Created invoice");
 
-    Ok(Json(LnUrlPayInvoiceResponse {
+    Json(LnurlResponse::Ok(InvoiceResponse {
         pr: invoice.clone(),
-        verify: format!("{}/verify/{}", gateway, invoice.payment_hash()),
+        verify: Some(format!("{}/verify/{}", gateway, invoice.payment_hash())),
     }))
 }
 
@@ -268,38 +261,4 @@ async fn select_gateway(
     }
 
     bail!("All gateways are offline or do not support this federation")
-}
-
-struct LnurlError {
-    code: StatusCode,
-    reason: anyhow::Error,
-}
-
-impl LnurlError {
-    fn bad_request(reason: anyhow::Error) -> Self {
-        Self {
-            code: StatusCode::BAD_REQUEST,
-            reason,
-        }
-    }
-
-    fn internal(reason: anyhow::Error) -> Self {
-        Self {
-            code: StatusCode::INTERNAL_SERVER_ERROR,
-            reason,
-        }
-    }
-}
-
-impl IntoResponse for LnurlError {
-    fn into_response(self) -> Response<Body> {
-        warn!(reason = %self.reason, "Request failed");
-
-        let json = Json(serde_json::json!({
-            "status": "ERROR",
-            "reason": self.reason.to_string(),
-        }));
-
-        (self.code, json).into_response()
-    }
 }
