@@ -752,6 +752,7 @@ impl FedimintCli {
         peer: &PeerId,
         auth: &ApiAuth,
         endpoint: &str,
+        federation_size: usize,
     ) -> Result<String> {
         let json = cmd!(
             self,
@@ -763,7 +764,9 @@ impl FedimintCli {
             "set-local-params",
             format!("Devimint Guardian {peer}"),
             "--federation-name",
-            "Devimint Federation"
+            "Devimint Federation",
+            "--federation-size",
+            federation_size.to_string()
         )
         .out_json()
         .await?;

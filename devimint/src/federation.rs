@@ -1032,13 +1032,14 @@ pub async fn run_cli_dkg_v2(endpoints: BTreeMap<PeerId, String>) -> Result<()> {
     debug!(target: LOG_DEVIMINT, "Setting local parameters...");
 
     // Parallelize setting local parameters
+    let federation_size = endpoints.len();
     let local_params_futures = endpoints.iter().map(|(peer, endpoint)| {
         let peer = *peer;
         let endpoint = endpoint.clone();
         async move {
             let info = if peer.to_usize() == 0 {
                 crate::util::FedimintCli
-                    .set_local_params_leader(&peer, &API_AUTH, &endpoint)
+                    .set_local_params_leader(&peer, &API_AUTH, &endpoint, federation_size)
                     .await
             } else {
                 crate::util::FedimintCli
