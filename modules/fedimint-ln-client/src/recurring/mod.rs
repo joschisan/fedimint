@@ -376,7 +376,7 @@ impl LightningClientModule {
                 yield LnReceiveState::WaitingForPayment { invoice: invoice.to_string(), timeout: invoice.expiry_time() };
 
                 match self_ref.await_receive_success(operation_id).await {
-                    Ok(_) => {
+                    Ok(()) => {
                         yield LnReceiveState::Funded;
 
                         if let Ok(out_points) = self_ref.await_claim_acceptance(operation_id).await {
