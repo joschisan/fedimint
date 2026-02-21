@@ -453,6 +453,36 @@ impl ISetupApi for SetupApi {
             .chain(local_setup_code.iter())
             .find_map(|info| info.federation_size)
     }
+
+    async fn cfg_federation_name(&self) -> Option<String> {
+        let state = self.state.lock().await;
+        let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
+        state
+            .setup_codes
+            .iter()
+            .chain(local_setup_code.iter())
+            .find_map(|info| info.federation_name.clone())
+    }
+
+    async fn cfg_base_fees_disabled(&self) -> Option<bool> {
+        let state = self.state.lock().await;
+        let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
+        state
+            .setup_codes
+            .iter()
+            .chain(local_setup_code.iter())
+            .find_map(|info| info.disable_base_fees)
+    }
+
+    async fn cfg_enabled_modules(&self) -> Option<BTreeSet<ModuleKind>> {
+        let state = self.state.lock().await;
+        let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
+        state
+            .setup_codes
+            .iter()
+            .chain(local_setup_code.iter())
+            .find_map(|info| info.enabled_modules.clone())
+    }
 }
 
 #[async_trait]

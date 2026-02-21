@@ -344,6 +344,9 @@ async fn federation_setup(
     let connected_peers = state.api.connected_peers().await;
     let guardian_name = state.api.guardian_name().await;
     let federation_size = state.api.federation_size().await;
+    let cfg_federation_name = state.api.cfg_federation_name().await;
+    let cfg_base_fees_disabled = state.api.cfg_base_fees_disabled().await;
+    let cfg_enabled_modules = state.api.cfg_enabled_modules().await;
     let total_guardians = connected_peers.len() + 1;
     let can_start_dkg = federation_size
         .map(|expected| total_guardians == expected as usize)
@@ -355,9 +358,43 @@ async fn federation_setup(
                 h4 { "Your name" }
                 p { (name) }
             }
-
-            hr class="my-4" {}
         }
+
+        section class="mb-4" {
+            h4 { "Federation settings" }
+            @if cfg_federation_name.is_some() || federation_size.is_some() || cfg_base_fees_disabled.is_some() || cfg_enabled_modules.is_some() {
+                ul class="list-group" {
+                    @if let Some(ref name) = cfg_federation_name {
+                        li class="list-group-item" {
+                            strong { "Federation name: " }
+                            (name)
+                        }
+                    }
+                    @if let Some(size) = federation_size {
+                        li class="list-group-item" {
+                            strong { "Federation size: " }
+                            (size)
+                        }
+                    }
+                    @if let Some(disabled) = cfg_base_fees_disabled {
+                        li class="list-group-item" {
+                            strong { "Base fees: " }
+                            @if disabled { "disabled" } @else { "enabled" }
+                        }
+                    }
+                    @if let Some(ref modules) = cfg_enabled_modules {
+                        li class="list-group-item" {
+                            strong { "Enabled modules: " }
+                            (modules.iter().map(|m| m.as_str().to_owned()).collect::<Vec<_>>().join(", "))
+                        }
+                    }
+                }
+            } @else {
+                p class="text-muted" { "Leader's setup code not provided yet." }
+            }
+        }
+
+        hr class="my-4" {}
 
         section class="mb-4" {
             h4 { "Your setup code" }
