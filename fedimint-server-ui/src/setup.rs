@@ -363,7 +363,7 @@ async fn federation_setup(
         section class="mb-4" {
             h4 { "Federation settings" }
             @if cfg_federation_name.is_some() || federation_size.is_some() || cfg_base_fees_disabled.is_some() || cfg_enabled_modules.is_some() {
-                ul class="list-group" {
+                ul class="list-group list-group-flush" {
                     @if let Some(ref name) = cfg_federation_name {
                         li class="list-group-item" {
                             strong { "Federation name: " }
@@ -490,11 +490,11 @@ async fn federation_setup(
                 @if !can_start_dkg {
                     @if let Some(expected) = federation_size {
                         p class="text-muted mt-2" style="font-size: 0.875rem;" {
-                            (format!("Waiting for all {expected} guardians to be connected."))
+                            (format!("Need to collect all {expected} setup codes."))
                         }
                     } @else {
                         p class="text-muted mt-2" style="font-size: 0.875rem;" {
-                            "The leader must set the federation size before DKG can start."
+                            "Need to collect the setup code from the leader and other guardians."
                         }
                     }
                 }
