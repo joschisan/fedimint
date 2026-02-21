@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use fedimint_connectors::ServerResult;
+use fedimint_connectors::{DynGuaridianConnection, ServerResult};
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::module::ApiRequestErased;
 use fedimint_core::task::{MaybeSend, MaybeSync};
@@ -93,5 +93,9 @@ impl IRawFederationApi for RawFederationApiWithRequestHook {
 
     async fn wait_for_initialized_connections(&self) {
         self.inner.wait_for_initialized_connections().await;
+    }
+
+    async fn get_peer_connection(&self, peer_id: PeerId) -> ServerResult<DynGuaridianConnection> {
+        self.inner.get_peer_connection(peer_id).await
     }
 }
