@@ -220,16 +220,6 @@ async fn gateway_pay_valid_invoice(
 async fn test_gateway_client_pay_valid_invoice() -> anyhow::Result<()> {
     single_federation_test(
         |gateway, other_lightning_client, fed, user_client, _| async move {
-            gateway
-                .handle_set_fees_msg(SetFeesPayload {
-                    federation_id: Some(fed.id()),
-                    lightning_base: Some(Amount::ZERO),
-                    lightning_parts_per_million: Some(0),
-                    transaction_base: None,
-                    transaction_parts_per_million: None,
-                })
-                .await?;
-
             let gateway_client = gateway.select_client(fed.id()).await?.into_value();
             // Give user_client initial balance
             let dummy_module = user_client.get_first_module::<DummyClientModule>()?;
@@ -240,6 +230,15 @@ async fn test_gateway_client_pay_valid_invoice() -> anyhow::Result<()> {
 
             // Create test invoice
             let invoice = other_lightning_client.invoice(sats(250), None)?;
+            let gw_fee = gateway
+                .handle_get_info()
+                .await?
+                .federations
+                .first()
+                .expect("Only one federation")
+                .config
+                .lightning_fee;
+            let outgoing_fee = gw_fee.fee(250000);
 
             gateway_pay_valid_invoice(
                 invoice,
@@ -249,8 +248,18 @@ async fn test_gateway_client_pay_valid_invoice() -> anyhow::Result<()> {
             )
             .await?;
 
-            assert_eq!(user_client.get_balance_for_btc().await?, sats(1000 - 250));
-            assert_eq!(gateway_client.get_balance_for_btc().await?, sats(250));
+            assert_eq!(
+                user_client.get_balance_for_btc().await?,
+                sats(1000 - 250)
+                    .checked_sub(outgoing_fee)
+                    .expect("Should not be negative")
+            );
+            assert_eq!(
+                gateway_client.get_balance_for_btc().await?,
+                sats(250)
+                    .checked_add(outgoing_fee)
+                    .expect("Should not wrap around")
+            );
 
             Ok(())
         },
