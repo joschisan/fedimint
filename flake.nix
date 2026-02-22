@@ -23,7 +23,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     cargo-deluxe = {
-      url = "github:rustshop/cargo-deluxe?rev=4acc6488d02f032434a5a1341f21f20d328bba40";
+      url = "github:rustshop/cargo-deluxe?rev=3e9bb6051a6461dd841d5e415de9c3f315c3be81";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     bundlers = {
