@@ -1811,7 +1811,7 @@ impl Wallet {
         if let Err(e) = self
             .task_group
             .clone()
-            .shutdown_join_all(Some(Duration::from_secs(60)))
+            .shutdown_join_all(Some(Duration::from_mins(1)))
             .await
         {
             panic!("Error while shutting down fedimintd task group: {e}");
@@ -1942,7 +1942,7 @@ impl Wallet {
                     // Even in tests we don't want to spam the federation with requests about it
                     sleep(Duration::from_secs(5)).await;
                 } else {
-                    sleep(Duration::from_secs(600)).await;
+                    sleep(Duration::from_mins(10)).await;
                 }
             }
         });
@@ -1958,7 +1958,7 @@ pub async fn run_broadcast_pending_tx(
 ) {
     loop {
         // Unless something new happened, we broadcast once a minute
-        let _ = tokio::time::timeout(Duration::from_secs(60), broadcast.notified()).await;
+        let _ = tokio::time::timeout(Duration::from_mins(1), broadcast.notified()).await;
         broadcast_pending_tx(db.begin_transaction_nc().await, &rpc).await;
     }
 }

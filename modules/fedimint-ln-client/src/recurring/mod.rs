@@ -149,7 +149,7 @@ impl LightningClientModule {
         client: ClientContext<Self>,
         new_code_registered: Arc<Notify>,
     ) {
-        const QUERY_RETRY_DELAY: Duration = Duration::from_secs(60);
+        const QUERY_RETRY_DELAY: Duration = Duration::from_mins(1);
 
         loop {
             // We have to register the waiter before querying the DB for recurring payment

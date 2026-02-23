@@ -93,7 +93,7 @@ where
                 .into_iter()
                 .chain(inactive_states)
                 .collect::<Vec<(S, _)>>();
-            all_states_timed.sort_by(|(_, t1), (_, t2)| t1.cmp(t2));
+            all_states_timed.sort_by_key(|(_, t1)| *t1);
             debug!(
                 operation_id = %operation_id.fmt_short(),
                 num = all_states_timed.len(),

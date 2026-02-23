@@ -126,7 +126,7 @@ where
         block_index: u64,
         decoders: &ModuleDecoderRegistry,
     ) -> anyhow::Result<SessionOutcome> {
-        if block_index % 100 == 0 {
+        if block_index.is_multiple_of(100) {
             debug!(target: LOG_CLIENT_NET_API, block_index, "Awaiting block's outcome from Federation");
         } else {
             trace!(target: LOG_CLIENT_NET_API, block_index, "Awaiting block's outcome from Federation");
@@ -152,7 +152,7 @@ where
         broadcast_public_keys: &BTreeMap<PeerId, secp256k1::PublicKey>,
         decoders: &ModuleDecoderRegistry,
     ) -> anyhow::Result<SessionStatus> {
-        if block_index % 100 == 0 {
+        if block_index.is_multiple_of(100) {
             debug!(target: LOG_CLIENT_NET_API, block_index, "Get session status raw v2");
         } else {
             trace!(target: LOG_CLIENT_NET_API, block_index, "Get session status raw v2");
@@ -199,7 +199,7 @@ where
         block_index: u64,
         decoders: &ModuleDecoderRegistry,
     ) -> anyhow::Result<SessionStatus> {
-        if block_index % 100 == 0 {
+        if block_index.is_multiple_of(100) {
             debug!(target: LOG_CLIENT_NET_API, block_index, "Get session status raw v1");
         } else {
             trace!(target: LOG_CLIENT_NET_API, block_index, "Get session status raw v1");

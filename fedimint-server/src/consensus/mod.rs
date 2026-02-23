@@ -113,7 +113,7 @@ pub async fn run(
         if is_running_in_test_env() {
             Duration::from_millis(100)
         } else {
-            Duration::from_secs(60)
+            Duration::from_mins(1)
         },
         task_group,
     );

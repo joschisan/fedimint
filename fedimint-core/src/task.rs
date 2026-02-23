@@ -19,7 +19,7 @@ use inner::TaskGroupInner;
 use scopeguard::defer;
 use thiserror::Error;
 use tokio::sync::{oneshot, watch};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
 
 use crate::runtime;
 // TODO: stop using `task::*`, and use `runtime::*` in the code

@@ -164,7 +164,7 @@ impl TxSubmissionStates {
     ) -> String {
         retry(
             "tx-submit-sm",
-            custom_backoff(Duration::from_secs(2), Duration::from_secs(600), None),
+            custom_backoff(Duration::from_secs(2), Duration::from_mins(10), None),
             || async {
                 if let TransactionSubmissionOutcome(Err(transaction_error)) = context
                     .api()

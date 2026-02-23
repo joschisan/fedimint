@@ -19,7 +19,7 @@ use tokio::sync::OnceCell;
 
 use crate::consensus::api::backup_statistics_static;
 
-const BACKUP_STATS_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+const BACKUP_STATS_REFRESH_INTERVAL: Duration = Duration::from_mins(1);
 
 pub static TX_ELEMS_BUCKETS: LazyLock<Vec<f64>> = LazyLock::new(|| {
     vec![

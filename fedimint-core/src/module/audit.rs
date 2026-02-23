@@ -130,7 +130,7 @@ fn generate_module_summaries<'a>(
             let kind = module_instance_id_to_kind
                 .get(module_instance_id)
                 .expect("module instance id should have a kind")
-                .to_string();
+                .clone();
             (
                 *module_instance_id,
                 ModuleSummary {

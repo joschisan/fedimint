@@ -456,7 +456,7 @@ pub fn get_median(vals: &[u64]) -> Option<u64> {
     let len = vals.len();
     let mid = len / 2;
 
-    if len % 2 == 0 {
+    if len.is_multiple_of(2) {
         Some(u64::midpoint(vals[mid - 1], vals[mid]))
     } else {
         Some(vals[mid])

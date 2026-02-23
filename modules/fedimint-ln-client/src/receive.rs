@@ -20,7 +20,7 @@ use fedimint_logging::LOG_CLIENT_MODULE_LN;
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::api::LnFederationApi;
 use crate::{LightningClientContext, ReceivingKey};
@@ -225,7 +225,7 @@ impl LightningReceiveConfirmedInvoice {
                 Ok(None) => {
                     // only when we are sure that the invoice is still pending that we can
                     // check for a timeout
-                    const CLOCK_SKEW_TOLERANCE: Duration = Duration::from_secs(60);
+                    const CLOCK_SKEW_TOLERANCE: Duration = Duration::from_mins(1);
                     if has_invoice_expired(&invoice, now_epoch, CLOCK_SKEW_TOLERANCE) {
                         return Err(LightningReceiveError::Timeout);
                     }
@@ -314,7 +314,7 @@ fn has_invoice_expired(
 ) -> bool {
     assert!(now_epoch >= clock_skew_tolerance);
     // tolerate some clock skew
-    invoice.would_expire(now_epoch - clock_skew_tolerance)
+    invoice.would_expire(now_epoch.checked_sub(clock_skew_tolerance).unwrap())
 }
 
 pub async fn get_incoming_contract(

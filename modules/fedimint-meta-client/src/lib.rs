@@ -212,7 +212,7 @@ impl<S> MetaModuleMetaSourceWithFallback<S> {
 #[apply(async_trait_maybe_send!)]
 impl<S: MetaSource> MetaSource for MetaModuleMetaSourceWithFallback<S> {
     async fn wait_for_update(&self) {
-        fedimint_core::runtime::sleep(Duration::from_secs(10 * 60)).await;
+        fedimint_core::runtime::sleep(Duration::from_mins(10)).await;
     }
 
     async fn fetch(

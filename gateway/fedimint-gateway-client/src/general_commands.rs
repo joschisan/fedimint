@@ -160,7 +160,7 @@ impl GeneralCommands {
                     .as_millis()
                     .try_into()?;
                 let one_day_ago = now
-                    .checked_sub(Duration::from_secs(60 * 60 * 24))
+                    .checked_sub(Duration::from_hours(24))
                     .expect("Before unix epoch");
                 let one_day_ago_millis = one_day_ago
                     .duration_since(UNIX_EPOCH)

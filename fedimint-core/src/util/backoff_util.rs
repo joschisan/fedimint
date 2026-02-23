@@ -7,7 +7,7 @@ use backon::{BackoffBuilder, FibonacciBuilder};
 ///
 /// Starts at 1s and increases to 60s, never giving up.
 pub fn background_backoff() -> FibonacciBackoff {
-    custom_backoff(Duration::from_secs(1), Duration::from_secs(60), None)
+    custom_backoff(Duration::from_secs(1), Duration::from_mins(1), None)
 }
 
 /// A backoff strategy for relatively quick foreground operations.
