@@ -703,7 +703,7 @@ impl ILnRpcClient for GatewayLndClient {
             .channels;
 
         // Take the channels with the largest incoming capacity
-        channels.sort_by(|a, b| b.remote_balance.cmp(&a.remote_balance));
+        channels.sort_by_key(|b| std::cmp::Reverse(b.remote_balance));
         channels.truncate(num_route_hints);
 
         let mut route_hints: Vec<RouteHint> = vec![];
@@ -1034,37 +1034,8 @@ impl ILnRpcClient for GatewayLndClient {
             .description
             .unwrap_or(InvoiceDescription::Direct(String::new()));
 
-        if create_invoice_request.payment_hash.is_none() {
-            let invoice = match description {
-                InvoiceDescription::Direct(description) => Invoice {
-                    memo: description,
-                    value_msat: create_invoice_request.amount_msat as i64,
-                    expiry: i64::from(create_invoice_request.expiry_secs),
-                    ..Default::default()
-                },
-                InvoiceDescription::Hash(desc_hash) => Invoice {
-                    description_hash: desc_hash.to_byte_array().to_vec(),
-                    value_msat: create_invoice_request.amount_msat as i64,
-                    expiry: i64::from(create_invoice_request.expiry_secs),
-                    ..Default::default()
-                },
-            };
-
-            let add_invoice_response =
-                client.lightning().add_invoice(invoice).await.map_err(|e| {
-                    LightningRpcError::FailedToGetInvoice {
-                        failure_reason: e.to_string(),
-                    }
-                })?;
-
-            let invoice = add_invoice_response.into_inner().payment_request;
-            Ok(CreateInvoiceResponse { invoice })
-        } else {
-            let payment_hash = create_invoice_request
-                .payment_hash
-                .expect("Already checked payment hash")
-                .to_byte_array()
-                .to_vec();
+        if let Some(payment_hash_value) = create_invoice_request.payment_hash {
+            let payment_hash = payment_hash_value.to_byte_array().to_vec();
             let hold_invoice_request = match description {
                 InvoiceDescription::Direct(description) => AddHoldInvoiceRequest {
                     memo: description,
@@ -1091,6 +1062,31 @@ impl ILnRpcClient for GatewayLndClient {
                 })?;
 
             let invoice = hold_invoice_response.into_inner().payment_request;
+            Ok(CreateInvoiceResponse { invoice })
+        } else {
+            let invoice = match description {
+                InvoiceDescription::Direct(description) => Invoice {
+                    memo: description,
+                    value_msat: create_invoice_request.amount_msat as i64,
+                    expiry: i64::from(create_invoice_request.expiry_secs),
+                    ..Default::default()
+                },
+                InvoiceDescription::Hash(desc_hash) => Invoice {
+                    description_hash: desc_hash.to_byte_array().to_vec(),
+                    value_msat: create_invoice_request.amount_msat as i64,
+                    expiry: i64::from(create_invoice_request.expiry_secs),
+                    ..Default::default()
+                },
+            };
+
+            let add_invoice_response =
+                client.lightning().add_invoice(invoice).await.map_err(|e| {
+                    LightningRpcError::FailedToGetInvoice {
+                        failure_reason: e.to_string(),
+                    }
+                })?;
+
+            let invoice = add_invoice_response.into_inner().payment_request;
             Ok(CreateInvoiceResponse { invoice })
         }
     }

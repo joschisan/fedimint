@@ -409,15 +409,21 @@ mod tests {
     fn test_invoice_expiration() -> anyhow::Result<()> {
         let now = fedimint_core::time::duration_since_epoch();
         let one_second = Duration::from_secs(1);
-        for expiration in [one_second, Duration::from_secs(3600)] {
-            for tolerance in [one_second, Duration::from_secs(60)] {
+        for expiration in [one_second, Duration::from_hours(1)] {
+            for tolerance in [one_second, Duration::from_mins(1)] {
                 let invoice = invoice(now, expiration)?;
-                assert!(!has_invoice_expired(&invoice, now - one_second, tolerance));
+                assert!(!has_invoice_expired(
+                    &invoice,
+                    now.checked_sub(one_second).unwrap(),
+                    tolerance
+                ));
                 assert!(!has_invoice_expired(&invoice, now, tolerance));
                 assert!(!has_invoice_expired(&invoice, now + expiration, tolerance));
                 assert!(!has_invoice_expired(
                     &invoice,
-                    now + expiration + tolerance - one_second,
+                    (now + expiration + tolerance)
+                        .checked_sub(one_second)
+                        .unwrap(),
                     tolerance
                 ));
                 assert!(has_invoice_expired(

@@ -91,7 +91,7 @@ mod tests {
 
             if let Some(data) = decoder.add_fragment(&fragment) {
                 assert_eq!(data, original);
-                if n % 100 == 0 {
+                if n.is_multiple_of(100) {
                     println!("Decoded {} bytes within {} fragments", n, k + 1);
                 }
                 return;
