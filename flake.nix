@@ -114,6 +114,8 @@
               "rust-analyzer"
               "rust-src"
               "llvm-tools"
+            ]
+            ++ lib.optionals (system == "x86_64-linux") [
               "rustc-codegen-cranelift-preview"
             ];
 
@@ -359,6 +361,9 @@
                   export CARGO_BUILD_TARGET_DIR="''${CARGO_BUILD_TARGET_DIR:-''${REPO_ROOT}/target-nix}"
                   export FM_DISCOVER_API_VERSION_TIMEOUT=10
 
+                  ${lib.optionalString (system == "x86_64-linux") ''
+                    export CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift
+                  ''}
                   export FLAKEBOX_GIT_LS_IGNORE=fedimint-ui-common/assets/
                   export FLAKEBOX_GIT_LS_TEXT_IGNORE=fedimint-ui-common/assets/
                   [ -f "$REPO_ROOT/.shrc.local" ] && source "$REPO_ROOT/.shrc.local"

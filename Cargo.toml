@@ -348,7 +348,9 @@ dbg_macro = "deny"
 literal_string_with_formatting_args = "deny"
 
 [profile.dev]
-codegen-backend = "cranelift"
+# Note: cranelift backend is enabled via CARGO_PROFILE_DEV_CODEGEN_BACKEND
+# env var in flake.nix shellHook, only on x86_64-linux where it's supported.
+# codegen-backend = "cranelift"
 debug = "line-tables-only"
 # Workaround: https://github.com/rust-lang/cargo/issues/12457 which causes
 #             https://github.com/ipetkov/crane/issues/370
