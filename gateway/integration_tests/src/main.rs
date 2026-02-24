@@ -424,8 +424,8 @@ async fn liquidity_test() -> anyhow::Result<()> {
                 gw_send.pay_invoice(invoice).await?;
             }
 
-            let start = now() - Duration::from_secs(5 * 60);
-            let end = now() + Duration::from_secs(5 * 60);
+            let start = now() - Duration::from_mins(5);
+            let end = now() + Duration::from_mins(5);
             info!(target: LOG_TEST, "Verifying list of transactions");
             let lnd_transactions = gw_lnd.list_transactions(start, end).await?;
             // One inbound and one outbound transaction
@@ -435,8 +435,8 @@ async fn liquidity_test() -> anyhow::Result<()> {
             assert_eq!(ldk_transactions.len(), 2);
 
             // Verify that transactions are filtered by time
-            let start = now() - Duration::from_secs(10 * 60);
-            let end = now() - Duration::from_secs(5 * 60);
+            let start = now() - Duration::from_mins(10);
+            let end = now() - Duration::from_mins(5);
             let lnd_transactions = gw_lnd.list_transactions(start, end).await?;
             assert_eq!(lnd_transactions.len(), 0);
 
@@ -558,8 +558,8 @@ async fn get_transaction(
 ) -> Option<PaymentDetails> {
     let transactions = gateway
         .list_transactions(
-            now() - Duration::from_secs(5 * 60),
-            now() + Duration::from_secs(5 * 60),
+            now() - Duration::from_mins(5),
+            now() + Duration::from_mins(5),
         )
         .await
         .ok()?;

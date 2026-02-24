@@ -26,7 +26,7 @@ use fedimint_ln_common::contracts::{ContractId, Preimage};
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::api::LnFederationApi;
 use crate::{LightningClientContext, PayType, set_payment_result};

@@ -716,13 +716,6 @@ Examples:
     ChainId,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-struct PayRequest {
-    notes: TieredMulti<SpendableNote>,
-    invoice: lightning_invoice::Bolt11Invoice,
-}
-
 pub struct FedimintCli {
     module_inits: ClientModuleInitRegistry,
     cli_args: Opts,

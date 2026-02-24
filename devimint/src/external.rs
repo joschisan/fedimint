@@ -642,7 +642,7 @@ impl Lnd {
             .await?
             .into_inner();
         loop {
-            const WAIT_FOR_INVOICE_TIMEOUT: Duration = Duration::from_secs(60);
+            const WAIT_FOR_INVOICE_TIMEOUT: Duration = Duration::from_mins(1);
             match timeout(
                 WAIT_FOR_INVOICE_TIMEOUT,
                 futures::StreamExt::next(&mut hold_invoice_subscription),

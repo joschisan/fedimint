@@ -755,7 +755,7 @@ impl ServerConfig {
                 .local
                 .p2p_endpoints
                 .iter()
-                .map(|(id, endpoint)| (*id, endpoint.name.to_string()))
+                .map(|(id, endpoint)| (*id, endpoint.name.clone()))
                 .collect(),
         }
     }

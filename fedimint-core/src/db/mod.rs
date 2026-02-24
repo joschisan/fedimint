@@ -123,7 +123,7 @@ use rand::Rng;
 use serde::Serialize;
 use strum_macros::EnumIter;
 use thiserror::Error;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 use crate::core::{ModuleInstanceId, ModuleKind};
 use crate::encoding::{Decodable, Encodable};
@@ -2553,10 +2553,7 @@ async fn remove_current_db_version_if_exists(
 /// return 0xff for the global namespace.
 fn module_instance_id_or_global(module_instance_id: Option<ModuleInstanceId>) -> ModuleInstanceId {
     // Use 0xff for fedimint-server and the `module_instance_id` for each module
-    module_instance_id.map_or_else(
-        || MODULE_GLOBAL_PREFIX.into(),
-        |module_instance_id| module_instance_id,
-    )
+    module_instance_id.unwrap_or_else(|| MODULE_GLOBAL_PREFIX.into())
 }
 #[allow(unused_imports)]
 mod test_utils {

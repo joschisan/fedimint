@@ -131,7 +131,7 @@ use crate::rpc_server::run_webserver;
 use crate::types::PrettyInterceptPaymentRequest;
 
 /// How long a gateway announcement stays valid
-const GW_ANNOUNCEMENT_TTL: Duration = Duration::from_secs(600);
+const GW_ANNOUNCEMENT_TTL: Duration = Duration::from_mins(10);
 
 /// The default number of route hints that the legacy gateway provides for
 /// invoice creation.
@@ -668,7 +668,7 @@ impl Gateway {
         let self_copy = self.clone();
         self.task_group
             .spawn_cancellable_silent("backup ecash", async move {
-                const BACKUP_UPDATE_INTERVAL: Duration = Duration::from_secs(60 * 60);
+                const BACKUP_UPDATE_INTERVAL: Duration = Duration::from_hours(1);
                 let mut interval = tokio::time::interval(BACKUP_UPDATE_INTERVAL);
                 interval.tick().await;
                 loop {
@@ -688,7 +688,7 @@ impl Gateway {
     pub async fn backup_all_federations(&self, dbtx: &mut DatabaseTransaction<'_, Committable>) {
         /// How long the federation manager should wait to backup the ecash for
         /// each federation
-        const BACKUP_THRESHOLD_DURATION: Duration = Duration::from_secs(24 * 60 * 60);
+        const BACKUP_THRESHOLD_DURATION: Duration = Duration::from_hours(24);
 
         let now = fedimint_core::time::now();
         let threshold = now
@@ -1303,7 +1303,7 @@ impl Gateway {
             while let Some(update) = updates.next().await {
                 if let fedimint_mint_client::ReissueExternalNotesState::Failed(e) = update {
                     return Err(PublicGatewayError::ReceiveEcashError {
-                        failure_reason: e.to_string(),
+                        failure_reason: e.clone(),
                     });
                 }
             }
@@ -2246,7 +2246,7 @@ impl IAdminGateway for Gateway {
 
         let tg = task_group.clone();
         tg.spawn("Kill Gateway", |_task_handle| async {
-            if let Err(err) = task_group.shutdown_join_all(Duration::from_secs(180)).await {
+            if let Err(err) = task_group.shutdown_join_all(Duration::from_mins(3)).await {
                 warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Error shutting down gateway");
             }
         });

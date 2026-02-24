@@ -107,7 +107,7 @@ pub async fn consensus_explorer_view(
                                                 td { (item_idx) }
                                                 td { (format_item_type(&item.item)) }
                                                 td { (item.peer) }
-                                                td { (format_item_details(&item)) }
+                                                td { (format_item_details(item)) }
                                             }
                                         }
                                     }

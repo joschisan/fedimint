@@ -168,7 +168,7 @@ impl TracingSetup {
             #[cfg(feature = "telemetry")]
             if let Some(l) = self.tokio_console_bind {
                 let tracer = console_subscriber::ConsoleLayer::builder()
-                    .retention(std::time::Duration::from_secs(60))
+                    .retention(std::time::Duration::from_mins(1))
                     .server_addr(l)
                     .spawn()
                     // tokio-console cares only about these layers, so we filter separately for it

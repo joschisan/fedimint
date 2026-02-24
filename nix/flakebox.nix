@@ -459,7 +459,7 @@ in
     commonArgsBase = commonArgs;
 
     workspaceDeps = craneLib.buildWorkspaceDepsOnly {
-      buildPhaseCargoCommand = "runLowPrio cargo doc --profile $CARGO_PROFILE --locked ; runLowPrio cargo check --profile $CARGO_PROFILE --all-targets --locked ; runLowPrio cargo build --profile $CARGO_PROFILE --locked --all-targets";
+      buildPhaseCargoCommand = "runLowPrio cargo check --profile $CARGO_PROFILE --all-targets --locked ; runLowPrio cargo doc --profile $CARGO_PROFILE --locked --no-deps; runLowPrio cargo build --profile $CARGO_PROFILE --locked --all-targets";
     };
 
     # like `workspaceDeps` but don't run `cargo doc`
@@ -469,7 +469,7 @@ in
 
     workspaceBuild = craneLib.buildWorkspace {
       cargoArtifacts = workspaceDeps;
-      buildPhaseCargoCommand = "runLowPrio cargo doc --profile $CARGO_PROFILE --locked ; runLowPrio cargo check --profile $CARGO_PROFILE --all-targets --locked ; runLowPrio cargo build --profile $CARGO_PROFILE --locked --all-targets";
+      buildPhaseCargoCommand = "runLowPrio cargo check --profile $CARGO_PROFILE --all-targets --locked ; runLowPrio cargo doc --profile $CARGO_PROFILE --locked --no-deps; runLowPrio cargo build --profile $CARGO_PROFILE --locked --all-targets";
     };
 
     workspaceAllBins = craneLib.buildPackage {

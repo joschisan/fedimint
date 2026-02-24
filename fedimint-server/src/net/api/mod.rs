@@ -78,7 +78,7 @@ impl ApiSecrets {
 }
 
 /// How long to wait before timing out client connections
-const API_ENDPOINT_TIMEOUT: Duration = Duration::from_secs(60);
+const API_ENDPOINT_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// Has the context necessary for serving API endpoints
 ///

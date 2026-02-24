@@ -177,7 +177,7 @@ impl ToEnvVar for GatewaydNetOverrides {
             FM_GW_IROH_CONNECT_OVERRIDES_ENV.to_string(),
             self.gateway_iroh_endpoints
                 .iter()
-                .map(|gw| gw.to_override().to_string())
+                .map(|gw| gw.to_override().clone())
                 .collect::<Vec<String>>()
                 .join(","),
         )]

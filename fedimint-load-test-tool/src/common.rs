@@ -97,7 +97,7 @@ pub async fn do_spend_notes(
         .spend_notes_with_selector(
             &SelectNotesWithAtleastAmount,
             amount,
-            Duration::from_secs(600),
+            Duration::from_mins(10),
             false,
             (),
         )

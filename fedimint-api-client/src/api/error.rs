@@ -9,7 +9,7 @@ use fedimint_core::util::FmtCompactAnyhow as _;
 use fedimint_logging::LOG_CLIENT_NET_API;
 use serde::Serialize;
 use thiserror::Error;
-use tracing::{error, trace, warn};
+use tracing::{trace, warn};
 
 /// An API request error when calling an entire federation
 ///

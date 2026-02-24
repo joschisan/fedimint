@@ -538,7 +538,7 @@ where
     unreachable!();
 }
 
-const DEFAULT_POLL_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULT_POLL_TIMEOUT: Duration = Duration::from_mins(1);
 const EXTRA_LONG_POLL_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Retry until `f` succeeds or default timeout is reached
@@ -684,8 +684,9 @@ impl FedimintdCmd {
             Err(_) => cmd!(FedimintdCmd, "version-hash")
                 .out_string()
                 .await
-                .map(|v| version_hash_to_version(&v).unwrap_or(DEFAULT_VERSION))
-                .unwrap_or(DEFAULT_VERSION),
+                .map_or(DEFAULT_VERSION, |v| {
+                    version_hash_to_version(&v).unwrap_or(DEFAULT_VERSION)
+                }),
         }
     }
 }
@@ -706,8 +707,9 @@ impl Gatewayd {
             Err(_) => cmd!(Gatewayd, "version-hash")
                 .out_string()
                 .await
-                .map(|v| version_hash_to_version(&v).unwrap_or(DEFAULT_VERSION))
-                .unwrap_or(DEFAULT_VERSION),
+                .map_or(DEFAULT_VERSION, |v| {
+                    version_hash_to_version(&v).unwrap_or(DEFAULT_VERSION)
+                }),
         }
     }
 }

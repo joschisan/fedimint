@@ -119,7 +119,7 @@ async fn await_created_btc_transaction_submitted(
     for attempt in 0u32.. {
         sleep(cmp::min(
             TRANSACTION_STATUS_FETCH_INTERVAL * attempt,
-            Duration::from_secs(60 * 15),
+            Duration::from_mins(15),
         ))
         .await;
 

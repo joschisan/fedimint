@@ -300,7 +300,7 @@ where
                                         break block
                                     },
                                     Err(err) => {
-                                        const MAX_SLEEP: Duration = Duration::from_secs(120);
+                                        const MAX_SLEEP: Duration = Duration::from_mins(2);
 
                                         warn!(target: LOG_CLIENT_RECOVERY, err = %err.fmt_compact_anyhow(), session_idx, "Error trying to fetch signed block");
                                         // We don't want PARALLELISM_LEVEL tasks hammering Federation

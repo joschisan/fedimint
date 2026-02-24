@@ -117,7 +117,7 @@ impl ConsensusEngine {
                 }
 
                 // we rely on the module consensus items to notice the timeout
-                if session_start_time.elapsed() > Duration::from_secs(60) {
+                if session_start_time.elapsed() > Duration::from_mins(1) {
                     break;
                 }
             }
@@ -186,7 +186,7 @@ impl ConsensusEngine {
             if Some(session_index) == self.shutdown_receiver.borrow().to_owned() {
                 info!(target: LOG_CONSENSUS, "Initiating shutdown, waiting for peers to complete the session...");
 
-                sleep(Duration::from_secs(60)).await;
+                sleep(Duration::from_mins(1)).await;
 
                 break;
             }
@@ -249,7 +249,7 @@ impl ConsensusEngine {
                 .checked_add(EXP_SLOWDOWN_ROUNDS)
                 .expect("Rounds per session exceed maximum of u16::Max - EXP_SLOWDOWN_ROUNDS"),
             delay_config,
-            Duration::from_secs(10 * 365 * 24 * 60 * 60),
+            Duration::from_hours(87600),
         )
         .expect("The exponential slowdown exceeds 10 years");
 

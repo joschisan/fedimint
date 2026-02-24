@@ -1588,7 +1588,7 @@ async fn poll_supports_safe_deposit_version(db: Database, module_api: DynModuleA
             // Even in tests we don't want to spam the federation with requests about it
             sleep(Duration::from_secs(10)).await;
         } else {
-            sleep(Duration::from_secs(3600)).await;
+            sleep(Duration::from_hours(1)).await;
         }
     }
 }

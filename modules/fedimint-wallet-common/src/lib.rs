@@ -21,7 +21,6 @@ use impl_tools::autoimpl;
 use miniscript::Descriptor;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::error;
 
 use crate::keys::CompressedPublicKey;
 use crate::txoproof::{PegInProof, PegInProofError};

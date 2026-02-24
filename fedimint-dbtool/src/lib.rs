@@ -222,7 +222,7 @@ impl FedimintDBTool {
                 let mut dbdump = DatabaseDump::new(
                     cfg_dir.clone(),
                     options.database_dir.clone(),
-                    password.to_string(),
+                    password.clone(),
                     module_inits,
                     client_module_inits,
                     modules,

@@ -23,7 +23,7 @@ use lightning_invoice::Bolt11Invoice;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 pub use self::lightningpay::LightningPayStates;
 use crate::api::LnFederationApi;
@@ -315,7 +315,7 @@ impl LightningPayFunded {
         start: SystemTime,
     ) -> Result<String, GatewayPayError> {
         const GATEWAY_INTERNAL_ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(10);
-        const TIMEOUT_DURATION: Duration = Duration::from_secs(180);
+        const TIMEOUT_DURATION: Duration = Duration::from_mins(3);
 
         loop {
             // We do not want to retry until the block timeout, since it will be unintuitive

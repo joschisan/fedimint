@@ -43,7 +43,6 @@ use secp256k1::schnorr::Signature;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use threshold_crypto::PublicKey;
-use tracing::error;
 pub use {bitcoin, lightning_invoice};
 
 use crate::contracts::incoming::OfferId;

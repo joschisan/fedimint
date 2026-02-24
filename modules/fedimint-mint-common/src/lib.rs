@@ -21,7 +21,6 @@ use fedimint_core::{
 use serde::{Deserialize, Serialize};
 use tbs::BlindedSignatureShare;
 use thiserror::Error;
-use tracing::error;
 
 pub mod common;
 pub mod config;

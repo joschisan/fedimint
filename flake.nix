@@ -14,7 +14,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flakebox = {
-      url = "github:dpc/flakebox?rev=62af969ab344229d2a0d585a482293b3f186b221";
+      url = "github:dpc/flakebox?rev=09d74b0ecac2214a57887f80f2730f2399418067";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.fenix.follows = "fenix";
     };
@@ -105,6 +105,8 @@
             };
             linker.wild.enable = false;
 
+            toolchain.channel = "latest";
+
             toolchain.components = [
               "rustc"
               "cargo"
@@ -112,6 +114,9 @@
               "rust-analyzer"
               "rust-src"
               "llvm-tools"
+            ]
+            ++ lib.optionals (system == "x86_64-linux") [
+              "rustc-codegen-cranelift-preview"
             ];
 
             just.rules.clippy = {
@@ -351,11 +356,14 @@
                   fi
 
                   # librocksdb-sys 0.17+ no longer links stdc++ when using a prebuilt library via ROCKSDB_LIB_DIR
-                  export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS -C link-arg=-lstdc++"
+                  export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS -C link-arg=-lstdc++ -Zthreads=0"
 
                   export CARGO_BUILD_TARGET_DIR="''${CARGO_BUILD_TARGET_DIR:-''${REPO_ROOT}/target-nix}"
                   export FM_DISCOVER_API_VERSION_TIMEOUT=10
 
+                  ${lib.optionalString (system == "x86_64-linux") ''
+                    export CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift
+                  ''}
                   export FLAKEBOX_GIT_LS_IGNORE=fedimint-ui-common/assets/
                   export FLAKEBOX_GIT_LS_TEXT_IGNORE=fedimint-ui-common/assets/
                   [ -f "$REPO_ROOT/.shrc.local" ] && source "$REPO_ROOT/.shrc.local"
