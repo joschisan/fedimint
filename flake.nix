@@ -105,7 +105,7 @@
             };
             linker.wild.enable = false;
 
-            toolchain.channel = "latest";
+            toolchain.channel = "stable";
 
             toolchain.components = [
               "rustc"
@@ -114,9 +114,6 @@
               "rust-analyzer"
               "rust-src"
               "llvm-tools"
-            ]
-            ++ lib.optionals (system == "x86_64-linux") [
-              "rustc-codegen-cranelift-preview"
             ];
 
             just.rules.clippy = {
@@ -356,14 +353,11 @@
                   fi
 
                   # librocksdb-sys 0.17+ no longer links stdc++ when using a prebuilt library via ROCKSDB_LIB_DIR
-                  export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS -C link-arg=-lstdc++ -Zthreads=0"
+                  export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS -C link-arg=-lstdc++"
 
                   export CARGO_BUILD_TARGET_DIR="''${CARGO_BUILD_TARGET_DIR:-''${REPO_ROOT}/target-nix}"
                   export FM_DISCOVER_API_VERSION_TIMEOUT=10
 
-                  ${lib.optionalString (system == "x86_64-linux") ''
-                    export CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift
-                  ''}
                   export FLAKEBOX_GIT_LS_IGNORE=fedimint-ui-common/assets/
                   export FLAKEBOX_GIT_LS_TEXT_IGNORE=fedimint-ui-common/assets/
                   [ -f "$REPO_ROOT/.shrc.local" ] && source "$REPO_ROOT/.shrc.local"
