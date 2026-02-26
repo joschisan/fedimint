@@ -137,3 +137,13 @@ body {
 .btn-min-width {
   min-width: 100px;
 }
+
+/* Abbreviated text with copy-on-click tooltip */
+.text-abbrev-copy {
+  cursor: pointer;
+  border-bottom: 1px dotted #6c757d;
+}
+.text-abbrev-copy:hover {
+  color: #0d6efd;
+  border-bottom-color: #0d6efd;
+}
