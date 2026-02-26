@@ -1083,6 +1083,7 @@ where
                     @if channels.is_empty() {
                         div class="alert alert-info" { "No channels found." }
                     } @else {
+                        div class="table-responsive" {
                         table class="table table-sm align-middle" {
                             thead {
                                 tr {
@@ -1107,9 +1108,26 @@ where
                                     } else {
                                         "".to_string()
                                     };
+                                    // Abbreviated versions for display (8 chars each side)
+                                    @let pubkey_str = ch.remote_pubkey.to_string();
+                                    @let pubkey_abbrev = format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len()-8..]);
+                                    @let funding_abbrev = if funding_outpoint.len() > 20 {
+                                        format!("{}...{}", &funding_outpoint[..8], &funding_outpoint[funding_outpoint.len()-8..])
+                                    } else {
+                                        funding_outpoint.clone()
+                                    };
 
                                     tr {
-                                        td { (ch.remote_pubkey.to_string()) }
+                                        td {
+                                            span
+                                                class="text-abbrev-copy"
+                                                title=(format!("{} (click to copy)", pubkey_str))
+                                                data-original=(pubkey_abbrev)
+                                                onclick=(format!("navigator.clipboard.writeText('{}').then(() => {{ const el = this; el.textContent = 'Copied!'; setTimeout(() => el.textContent = el.dataset.original, 1000); }});", pubkey_str))
+                                            {
+                                                (pubkey_abbrev)
+                                            }
+                                        }
                                         td {
                                             @if let Some(alias) = &ch.remote_node_alias {
                                                 (alias)
@@ -1117,7 +1135,18 @@ where
                                                 span class="text-muted" { "-" }
                                             }
                                         }
-                                        td { (funding_outpoint) }
+                                        td {
+                                            @if !funding_outpoint.is_empty() {
+                                                span
+                                                    class="text-abbrev-copy"
+                                                    title=(format!("{} (click to copy)", funding_outpoint))
+                                                    data-original=(funding_abbrev)
+                                                    onclick=(format!("navigator.clipboard.writeText('{}').then(() => {{ const el = this; el.textContent = 'Copied!'; setTimeout(() => el.textContent = el.dataset.original, 1000); }});", funding_outpoint))
+                                                {
+                                                    (funding_abbrev)
+                                                }
+                                            }
+                                        }
                                         td { (ch.channel_size_sats) }
                                         td {
                                             @if ch.is_active {
@@ -1238,6 +1267,7 @@ where
                                     }
                                 }
                             }
+                        }
                         }
                     }
 
