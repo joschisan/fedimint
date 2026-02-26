@@ -114,9 +114,7 @@ use fedimint_lnv2_common::gateway_api::{
     CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
 use fedimint_logging::LOG_GATEWAY;
-use fedimint_mint_client::{
-    MintClientInit, MintClientModule, SelectNotesWithAtleastAmount, SelectNotesWithExactAmount,
-};
+use fedimint_mint_client::{MintClientInit, MintClientModule, SelectNotesWithAtleastAmount};
 use fedimint_wallet_client::{PegOutFees, WalletClientInit, WalletClientModule, WithdrawState};
 use futures::stream::StreamExt;
 use lightning_invoice::{Bolt11Invoice, RoutingFees};
@@ -2208,17 +2206,10 @@ impl IAdminGateway for Gateway {
                 );
             }
 
-            (operation_id, notes)
+            (Some(operation_id), notes)
         } else {
-            mint_module
-                .spend_notes_with_selector(
-                    &SelectNotesWithExactAmount,
-                    payload.amount,
-                    timeout,
-                    payload.include_invite,
-                    (),
-                )
-                .await?
+            let notes = mint_module.send_oob_notes(payload.amount, ()).await?;
+            (None, notes)
         };
 
         debug!(target: LOG_GATEWAY, ?operation_id, ?notes, "Spend ecash notes");

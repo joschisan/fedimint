@@ -227,7 +227,7 @@ fn default_timeout() -> u64 {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SpendEcashResponse {
-    pub operation_id: OperationId,
+    pub operation_id: Option<OperationId>,
     pub notes: OOBNotes,
 }
 

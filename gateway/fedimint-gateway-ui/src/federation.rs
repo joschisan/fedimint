@@ -415,7 +415,7 @@ pub fn render<E: Display>(
                                             name="allow_overpay"
                                             value="true";
                                         label class="form-check-label" for={(format!("spend-overpay-{}", fed.federation_id))} {
-                                            "Allow overpay (if exact amount unavailable)"
+                                            "Allow overpay (don't get change from mint)"
                                         }
                                     }
 
