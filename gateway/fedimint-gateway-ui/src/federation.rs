@@ -407,18 +407,6 @@ pub fn render<E: Display>(
                                             required;
                                     }
 
-                                    // Optional: allow_overpay checkbox
-                                    div class="form-check mb-2" {
-                                        input type="checkbox"
-                                            class="form-check-input"
-                                            id={(format!("spend-overpay-{}", fed.federation_id))}
-                                            name="allow_overpay"
-                                            value="true";
-                                        label class="form-check-label" for={(format!("spend-overpay-{}", fed.federation_id))} {
-                                            "Allow overpay (don't get change from mint)"
-                                        }
-                                    }
-
                                     button type="submit" class="btn btn-primary" { "Generate Ecash" }
                                 }
 
@@ -908,10 +896,6 @@ pub async fn spend_ecash_handler<E: Display>(
 ) -> impl IntoResponse {
     let federation_id = payload.federation_id;
     let requested_amount = payload.amount;
-
-    // Always include the federation invite in the ecash notes
-    let mut payload = payload;
-    payload.include_invite = true;
 
     let markup = match state.api.handle_spend_ecash_msg(payload).await {
         Ok(response) => {

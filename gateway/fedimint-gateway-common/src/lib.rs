@@ -11,7 +11,6 @@ use envs::{
     FM_LDK_ALIAS_ENV, FM_LND_MACAROON_ENV, FM_LND_RPC_ADDR_ENV, FM_LND_TLS_CERT_ENV, FM_PORT_LDK,
 };
 use fedimint_core::config::{FederationId, JsonClientConfig};
-use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::{SafeUrl, get_average, get_median};
@@ -206,28 +205,10 @@ pub struct SpendEcashPayload {
     pub federation_id: FederationId,
     /// The amount of e-cash to spend
     pub amount: Amount,
-    /// If the exact amount cannot be represented, return e-cash of a higher
-    /// value instead of failing
-    #[serde(default)]
-    pub allow_overpay: bool,
-    /// After how many seconds we will try to reclaim the e-cash if it
-    /// hasn't been redeemed by the recipient. Defaults to one week.
-    #[serde(default = "default_timeout")]
-    pub timeout: u64,
-    /// If the necessary information to join the federation the e-cash
-    /// belongs to should be included in the serialized notes
-    #[serde(default)]
-    pub include_invite: bool,
-}
-
-/// Default timeout for e-cash redemption of one week in seconds
-fn default_timeout() -> u64 {
-    604_800
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SpendEcashResponse {
-    pub operation_id: Option<OperationId>,
     pub notes: OOBNotes,
 }
 

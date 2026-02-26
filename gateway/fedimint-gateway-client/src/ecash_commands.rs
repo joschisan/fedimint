@@ -52,12 +52,6 @@ pub enum EcashCommands {
         #[clap(long)]
         federation_id: FederationId,
         amount: Amount,
-        #[clap(long)]
-        allow_overpay: bool,
-        #[clap(long, default_value_t = 60 * 60 * 24 * 7)]
-        timeout: u64,
-        #[clap(long)]
-        include_invite: bool,
     },
     /// Receive e-cash out of band
     Receive {
@@ -118,9 +112,6 @@ impl EcashCommands {
             Self::Send {
                 federation_id,
                 amount,
-                allow_overpay,
-                timeout,
-                include_invite,
             } => {
                 let response = spend_ecash(
                     client,
@@ -128,9 +119,6 @@ impl EcashCommands {
                     SpendEcashPayload {
                         federation_id,
                         amount,
-                        allow_overpay,
-                        timeout,
-                        include_invite,
                     },
                 )
                 .await?;
