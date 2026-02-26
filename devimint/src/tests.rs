@@ -861,6 +861,10 @@ pub async fn cli_tests(dev_fed: DevFed) -> Result<()> {
         gw_ldk
             .pay_invoice(Bolt11Invoice::from_str(&recv.invoice).expect("Could not parse invoice"))
             .await?;
+        let operation_id = recv.operation_id;
+        cmd!(client, "await-invoice", operation_id.fmt_full())
+            .run()
+            .await?;
     }
 
     info!("Testing outgoing payment from client to LDK via LND gateway");
