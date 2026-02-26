@@ -114,9 +114,7 @@ use fedimint_lnv2_common::gateway_api::{
     CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
 use fedimint_logging::LOG_GATEWAY;
-use fedimint_mint_client::{
-    MintClientInit, MintClientModule, SelectNotesWithAtleastAmount, SelectNotesWithExactAmount,
-};
+use fedimint_mint_client::{MintClientInit, MintClientModule};
 use fedimint_wallet_client::{PegOutFees, WalletClientInit, WalletClientModule, WithdrawState};
 use futures::stream::StreamExt;
 use lightning_invoice::{Bolt11Invoice, RoutingFees};
@@ -2187,46 +2185,9 @@ impl IAdminGateway for Gateway {
             .await?
             .into_value();
         let mint_module = client.get_first_module::<MintClientModule>()?;
-        let timeout = Duration::from_secs(payload.timeout);
-        let (operation_id, notes) = if payload.allow_overpay {
-            let (operation_id, notes) = mint_module
-                .spend_notes_with_selector(
-                    &SelectNotesWithAtleastAmount,
-                    payload.amount,
-                    timeout,
-                    payload.include_invite,
-                    (),
-                )
-                .await?;
-
-            let overspend_amount = notes.total_amount().saturating_sub(payload.amount);
-            if overspend_amount != Amount::ZERO {
-                warn!(
-                    target: LOG_GATEWAY,
-                    overspend_amount = %overspend_amount,
-                    "Selected notes worth more than requested",
-                );
-            }
-
-            (operation_id, notes)
-        } else {
-            mint_module
-                .spend_notes_with_selector(
-                    &SelectNotesWithExactAmount,
-                    payload.amount,
-                    timeout,
-                    payload.include_invite,
-                    (),
-                )
-                .await?
-        };
-
-        debug!(target: LOG_GATEWAY, ?operation_id, ?notes, "Spend ecash notes");
-
-        Ok(SpendEcashResponse {
-            operation_id,
-            notes,
-        })
+        let notes = mint_module.send_oob_notes(payload.amount, ()).await?;
+        debug!(target: LOG_GATEWAY, ?notes, "Spend ecash notes");
+        Ok(SpendEcashResponse { notes })
     }
 
     /// Instructs the gateway to shutdown, but only after all incoming payments
