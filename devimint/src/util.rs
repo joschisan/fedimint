@@ -754,8 +754,9 @@ impl FedimintCli {
         peer: &PeerId,
         auth: &ApiAuth,
         endpoint: &str,
+        federation_size: Option<usize>,
     ) -> Result<String> {
-        let json = cmd!(
+        let mut command = cmd!(
             self,
             "--password",
             &auth.0,
@@ -765,10 +766,14 @@ impl FedimintCli {
             "set-local-params",
             format!("Devimint Guardian {peer}"),
             "--federation-name",
-            "Devimint Federation"
-        )
-        .out_json()
-        .await?;
+            "Devimint Federation",
+        );
+
+        if let Some(size) = federation_size {
+            command = command.args(["--federation-size", &size.to_string()]);
+        }
+
+        let json = command.out_json().await?;
 
         Ok(serde_json::from_value(json)?)
     }

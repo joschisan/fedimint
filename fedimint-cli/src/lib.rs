@@ -515,6 +515,8 @@ enum SetupAdminCmd {
         name: String,
         #[clap(long)]
         federation_name: Option<String>,
+        #[clap(long)]
+        federation_size: Option<u32>,
     },
     AddPeer {
         info: String,
@@ -1674,6 +1676,7 @@ impl FedimintCli {
             SetupAdminCmd::SetLocalParams {
                 name,
                 federation_name,
+                federation_size,
             } => {
                 let info = client
                     .set_local_params(
@@ -1681,6 +1684,7 @@ impl FedimintCli {
                         federation_name.clone(),
                         None,
                         None,
+                        *federation_size,
                         cli.auth()?,
                     )
                     .await?;

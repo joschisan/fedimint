@@ -38,7 +38,7 @@ use super::util::{Command, ProcessHandle, ProcessManager, cmd};
 use super::vars::utf8;
 use crate::envs::{FM_CLIENT_DIR_ENV, FM_DATA_DIR_ENV};
 use crate::util::{FedimintdCmd, poll, poll_simple, poll_with_timeout};
-use crate::version_constants::VERSION_0_10_0_ALPHA;
+use crate::version_constants::{VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA};
 use crate::{poll_almost_equal, poll_eq, vars};
 
 // TODO: Are we still using the 3rd port for anything?
@@ -1032,13 +1032,20 @@ pub async fn run_cli_dkg_v2(endpoints: BTreeMap<PeerId, String>) -> Result<()> {
     debug!(target: LOG_DEVIMINT, "Setting local parameters...");
 
     // Parallelize setting local parameters
+    // --federation-size is only supported by fedimint-cli >= 0.11.0-alpha
+    let federation_size =
+        if crate::util::FedimintCli::version_or_default().await >= *VERSION_0_11_0_ALPHA {
+            Some(endpoints.len())
+        } else {
+            None
+        };
     let local_params_futures = endpoints.iter().map(|(peer, endpoint)| {
         let peer = *peer;
         let endpoint = endpoint.clone();
         async move {
             let info = if peer.to_usize() == 0 {
                 crate::util::FedimintCli
-                    .set_local_params_leader(&peer, &API_AUTH, &endpoint)
+                    .set_local_params_leader(&peer, &API_AUTH, &endpoint, federation_size)
                     .await
             } else {
                 crate::util::FedimintCli
