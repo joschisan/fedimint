@@ -10,7 +10,8 @@
     };
     flake-utils.url = "github:numtide/flake-utils";
     fenix = {
-      url = "github:nix-community/fenix";
+      # pined due to https://github.com/nix-community/fenix/issues/235
+      url = "github:nix-community/fenix?rev=6b5325a017a9a9fe7e6252ccac3680cc7181cd63";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flakebox = {
