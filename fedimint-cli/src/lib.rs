@@ -14,6 +14,7 @@ mod client;
 mod db;
 pub mod envs;
 mod utils;
+mod visualize;
 
 use core::fmt;
 use std::collections::BTreeMap;
@@ -30,7 +31,7 @@ use anyhow::{Context, format_err};
 use clap::{CommandFactory, Parser};
 use cli::{
     AdminCmd, Command, DatabaseBackend, DecodeType, DevCmd, EncodeType, OOBNotesJson, Opts,
-    SetupAdminArgs, SetupAdminCmd,
+    SetupAdminArgs, SetupAdminCmd, VisualizeCmd,
 };
 use envs::SALT_FILE;
 use fedimint_aead::{encrypted_read, encrypted_write, get_encryption_key};
@@ -1339,6 +1340,28 @@ impl FedimintCli {
                 Ok(CliOutput::Raw(serde_json::json!({
                     "chain_id": chain_id.to_string()
                 })))
+            }
+            Command::Dev(DevCmd::Visualize { visualize_type }) => {
+                let client = self.client_open(&cli).await?;
+
+                match visualize_type {
+                    VisualizeCmd::Notes { limit } => {
+                        visualize::cmd_notes(&client, limit).await?;
+                    }
+                    VisualizeCmd::Transactions {
+                        operation_id,
+                        limit,
+                    } => {
+                        visualize::cmd_transactions(&client, operation_id, limit).await?;
+                    }
+                    VisualizeCmd::Operations {
+                        operation_id,
+                        limit,
+                    } => {
+                        visualize::cmd_operations(&client, operation_id, limit).await?;
+                    }
+                }
+                Ok(CliOutput::Raw(json!({})))
             }
             Command::Completion { shell } => {
                 let bin_path = PathBuf::from(

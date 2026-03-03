@@ -393,4 +393,36 @@ Examples:
     /// Show the chain ID (bitcoin block hash at height 1) cached in the client
     /// database
     ChainId,
+    /// Visualize client internals for debugging
+    Visualize {
+        #[clap(subcommand)]
+        visualize_type: VisualizeCmd,
+    },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub(crate) enum VisualizeCmd {
+    /// Show every e-cash note with creation/spending provenance
+    Notes {
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Show transactions with inputs and outputs
+    Transactions {
+        /// Show a specific operation (by full ID)
+        operation_id: Option<OperationId>,
+        /// How many most-recent operations to show (ignored if operation_id is
+        /// given)
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Show operations with their state machines
+    Operations {
+        /// Show a specific operation (by full ID)
+        operation_id: Option<OperationId>,
+        /// How many most-recent operations to show (ignored if operation_id is
+        /// given)
+        #[arg(long)]
+        limit: Option<usize>,
+    },
 }
