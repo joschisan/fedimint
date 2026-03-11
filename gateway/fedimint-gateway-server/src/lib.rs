@@ -255,6 +255,10 @@ pub struct Gateway {
     /// This is an `Arc` because `bcrypt::HashParts` does not implement `Clone`.
     bcrypt_password_hash: Arc<bcrypt::HashParts>,
 
+    /// The bcrypt password hash used to authenticate the gateway user.
+    /// This is an `Arc` because `bcrypt::HashParts` does not implement `Clone`.
+    bcrypt_password_user_hash: Arc<Option<bcrypt::HashParts>>,
+
     /// The number of route hints to include in LNv1 invoices.
     num_route_hints: u32,
 
@@ -444,6 +448,7 @@ impl Gateway {
         listen: SocketAddr,
         api_addr: SafeUrl,
         bcrypt_password_hash: bcrypt::HashParts,
+        bcrypt_password_user_hash: Option<bcrypt::HashParts>,
         network: Network,
         num_route_hints: u32,
         gateway_db: Database,
@@ -465,6 +470,7 @@ impl Gateway {
                 listen,
                 versioned_api: Some(versioned_api),
                 bcrypt_password_hash,
+                bcrypt_password_user_hash,
                 network,
                 num_route_hints,
                 default_routing_fees: PaymentFee::TRANSACTION_FEE_DEFAULT,
@@ -679,6 +685,7 @@ impl Gateway {
             metrics_listen: gateway_parameters.metrics_listen,
             task_group,
             bcrypt_password_hash: Arc::new(gateway_parameters.bcrypt_password_hash),
+            bcrypt_password_user_hash: Arc::new(gateway_parameters.bcrypt_password_user_hash),
             num_route_hints,
             network,
             chain_source,
