@@ -56,7 +56,7 @@ iroh = { workspace = true, default-features = false, features = [
     "discovery-pkarr-dht",
 ] }
 iroh-next = { workspace = true, default-features = false, features = [
-    "discovery-pkarr-dht",
+    "address-lookup-pkarr-dht",
 ] }
 jsonrpsee-ws-client = { workspace = true, features = ["tls"] }
 rustls-pki-types = { workspace = true }
