@@ -178,7 +178,7 @@ impl ISetupApi for SetupApi {
         federation_size: Option<u32>,
     ) -> anyhow::Result<String> {
         if let Some(existing_local_parameters) = self.state.lock().await.local_params.clone()
-            && existing_local_parameters.auth == auth
+            && existing_local_parameters.auth.as_str() == auth.as_str()
             && existing_local_parameters.name == name
             && existing_local_parameters.federation_name == federation_name
             && existing_local_parameters.disable_base_fees == disable_base_fees
@@ -193,10 +193,10 @@ impl ISetupApi for SetupApi {
 
         ensure!(!name.is_empty(), "The guardian name is empty");
 
-        ensure!(!auth.0.is_empty(), "The password is empty");
+        ensure!(!auth.as_str().is_empty(), "The password is empty");
 
         ensure!(
-            auth.0.trim() == auth.0,
+            auth.as_str().trim() == auth.as_str(),
             "The password contains leading/trailing whitespace",
         );
 
@@ -503,7 +503,7 @@ impl HasApiContext<SetupApi> for SetupApi {
         let is_authenticated = match self.state.lock().await.local_params {
             None => false,
             Some(ref params) => match request.auth.as_ref() {
-                Some(auth) => *auth == params.auth,
+                Some(auth) => params.auth.verify(auth.as_str()),
                 None => false,
             },
         };

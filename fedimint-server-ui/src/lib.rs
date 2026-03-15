@@ -31,7 +31,7 @@ pub(crate) fn login_submit_response(
     jar: CookieJar,
     input: LoginInput,
 ) -> impl IntoResponse {
-    if auth.0 == input.password {
+    if auth.verify(&input.password) {
         let mut cookie = Cookie::new(auth_cookie_name, auth_cookie_value);
 
         cookie.set_http_only(true);

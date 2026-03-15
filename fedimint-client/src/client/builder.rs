@@ -630,7 +630,7 @@ impl ClientBuilder {
                 connectors.clone(),
                 peer_urls,
                 Some(admin_creds.peer_id),
-                Some(&admin_creds.auth.0),
+                Some(admin_creds.auth.as_str()),
             )
             .with_client_ext(db.clone(), log_ordering_wakeup_tx.clone())
             .with_request_hook(&request_hook)

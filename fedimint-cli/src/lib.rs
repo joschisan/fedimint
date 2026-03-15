@@ -366,7 +366,7 @@ impl Opts {
             .password
             .clone()
             .ok_or_cli_msg("CLI needs password set")?;
-        Ok(ApiAuth(password))
+        Ok(ApiAuth::new(password))
     }
 
     async fn load_database(&self) -> CliResult<Database> {
@@ -860,7 +860,7 @@ impl FedimintCli {
             debug!(target: LOG_CLIENT, "Using stored admin credentials");
             client_builder.set_admin_creds(AdminCreds {
                 peer_id: stored_creds.peer_id,
-                auth: ApiAuth(stored_creds.auth),
+                auth: ApiAuth::new(stored_creds.auth),
             });
         }
 
@@ -1051,7 +1051,7 @@ impl FedimintCli {
             }) => {
                 let db = cli.load_database().await?;
                 let peer_id = PeerId::from(peer_id);
-                let auth = ApiAuth(password);
+                let auth = ApiAuth::new(password);
 
                 // Check if credentials already exist
                 if !force {
@@ -1133,7 +1133,7 @@ impl FedimintCli {
                     &db,
                     &StoredAdminCreds {
                         peer_id,
-                        auth: auth.0.clone(),
+                        auth: auth.as_str().to_string(),
                     },
                 )
                 .await;
@@ -1314,7 +1314,7 @@ impl FedimintCli {
 
                 let mut params = ApiRequestErased::new(params);
                 if let Some(auth) = auth {
-                    params = params.with_auth(ApiAuth(auth));
+                    params = params.with_auth(ApiAuth::new(auth));
                 }
                 let client = self.client_open(&cli).await?;
 

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::ensure;
 use fedimint_aead::{LessSafeKey, encrypted_read, encrypted_write, get_encryption_key};
+use fedimint_core::module::ApiAuth;
 use fedimint_core::util::write_new;
 use fedimint_logging::LOG_CORE;
 use fedimint_server_core::ServerModuleInitRegistry;
@@ -198,7 +199,7 @@ pub fn reencrypt_private_config(
     // Create new private config with updated password
     let new_private_config = {
         let mut new_private_config = private_config.clone();
-        trimmed_password.clone_into(&mut new_private_config.api_auth.0);
+        new_private_config.api_auth = ApiAuth::new(trimmed_password.to_string());
         new_private_config
     };
 
