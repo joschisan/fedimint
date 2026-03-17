@@ -982,14 +982,13 @@ impl Wallet {
                 dbtx.remove_entry(&UnconfirmedTxKey(tx.compute_txid()))
                     .await;
 
-                // We maintain an append-only log of valid P2WSH transaction outputs created
-                // since the federation was established. This is downloaded by clients to
-                // detect pegins and claim them by index.
+                // We maintain an append-only log of transaction outputs that pass
+                // the probabilistic receive filter created since the federation was
+                // established. This is downloaded by clients to detect pegins and
+                // claim them by index.
 
                 for (vout, tx_out) in tx.output.iter().enumerate() {
-                    if is_potential_receive(&tx_out.script_pubkey, &pks_hash)
-                        && tx_out.script_pubkey.is_p2wsh()
-                    {
+                    if is_potential_receive(&tx_out.script_pubkey, &pks_hash) {
                         let outpoint = bitcoin::OutPoint {
                             txid: tx.compute_txid(),
                             vout: u32::try_from(vout)
