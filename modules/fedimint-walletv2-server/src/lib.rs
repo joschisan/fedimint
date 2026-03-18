@@ -424,21 +424,25 @@ impl ServerModule for Wallet {
         if let Some(status) = self.btc_rpc.status() {
             assert_eq!(status.network, self.cfg.consensus.network);
 
+            let block_count_vote = status
+                .block_count
+                .saturating_sub(CONFIRMATION_FINALITY_DELAY);
+
             let consensus_block_count = self.consensus_block_count(dbtx).await;
 
-            items.push(WalletConsensusItem::BlockCount(
-                status
-                    .block_count
-                    .saturating_sub(CONFIRMATION_FINALITY_DELAY)
-                    .min(consensus_block_count + MAX_BLOCK_COUNT_INCREMENT),
-            ));
+            let block_count_vote = match consensus_block_count {
+                0 => block_count_vote,
+                _ => block_count_vote.min(consensus_block_count + MAX_BLOCK_COUNT_INCREMENT),
+            };
 
-            items.push(WalletConsensusItem::Feerate(Some(
-                status
-                    .fee_rate
-                    .sats_per_kvb
-                    .max(MIN_FEERATE_VOTE_SATS_PER_KVB),
-            )));
+            items.push(WalletConsensusItem::BlockCount(block_count_vote));
+
+            let feerate_vote = status
+                .fee_rate
+                .sats_per_kvb
+                .max(MIN_FEERATE_VOTE_SATS_PER_KVB);
+
+            items.push(WalletConsensusItem::Feerate(Some(feerate_vote)));
         } else {
             // Bitcoin backend not connected, retract fee rate vote
             items.push(WalletConsensusItem::Feerate(None));
