@@ -4,6 +4,16 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::module_name_repetitions)]
 
+pub use fedimint_walletv2_common as common;
+
+mod api;
+#[cfg(feature = "cli")]
+mod cli;
+mod db;
+pub mod events;
+mod receive_sm;
+mod send_sm;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -12,6 +22,7 @@ use api::WalletFederationApi;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
 use db::{NextDepositIndexKey, ValidAddressIndexKey, ValidAddressIndexPrefix};
+use events::{ReceivePaymentEvent, SendPaymentEvent};
 use fedimint_api_client::api::{DynModuleApi, FederationResult};
 use fedimint_client::DynGlobalClientContext;
 use fedimint_client::transaction::{
@@ -33,7 +44,7 @@ use fedimint_core::module::{
     AmountUnit, Amounts, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
 };
 use fedimint_core::task::{TaskGroup, sleep};
-use fedimint_core::{Amount, TransactionId, apply, async_trait_maybe_send};
+use fedimint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_logging::LOG_CLIENT_MODULE_WALLETV2;
 use fedimint_walletv2_common::config::WalletClientConfig;
@@ -42,23 +53,13 @@ use fedimint_walletv2_common::{
     WalletOutput, WalletOutputV0, descriptor, is_potential_receive,
 };
 use futures::StreamExt;
+use receive_sm::{ReceiveSMCommon, ReceiveSMState, ReceiveStateMachine};
 use secp256k1::Keypair;
+use send_sm::{SendSMCommon, SendSMState, SendStateMachine};
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator as _;
 use thiserror::Error;
 use tracing::{info, warn};
-
-mod api;
-#[cfg(feature = "cli")]
-mod cli;
-mod db;
-pub mod events;
-mod receive_sm;
-mod send_sm;
-
-use events::{ReceivePaymentEvent, SendPaymentEvent};
-use receive_sm::{ReceiveSMCommon, ReceiveSMState, ReceiveStateMachine};
-use send_sm::{SendSMCommon, SendSMState, SendStateMachine};
 
 /// Number of deposit log entries to scan per batch.
 const DEPOSIT_RANGE_SIZE: u64 = 1000;
@@ -290,7 +291,10 @@ impl WalletClientModule {
                 vec![WalletClientStateMachines::Send(SendStateMachine {
                     common: SendSMCommon {
                         operation_id,
-                        outpoint: range.into_iter().next().expect("must have one output"),
+                        outpoint: OutPoint {
+                            txid: range.txid(),
+                            out_idx: 0,
+                        },
                         amount,
                         fee,
                     },
