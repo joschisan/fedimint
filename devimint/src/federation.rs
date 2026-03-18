@@ -819,20 +819,10 @@ impl Federation {
                 .ecash_balance_msats;
 
             let pegout_address = self.bitcoind.get_new_address().await?;
-            let value = cmd!(
-                gw,
-                "ecash",
-                "pegout",
-                "--federation-id",
-                fed_id,
-                "--amount",
-                amount,
-                "--address",
-                pegout_address
-            )
-            .out_json()
-            .await?;
-            let response: WithdrawResponse = serde_json::from_value(value)?;
+            let response = gw
+                .client()
+                .pegout(fed_id.clone(), amount, pegout_address)
+                .await?;
             peg_outs.insert(gw.ln.ln_type(), (prev_fed_ecash_balance, response));
         }
         self.bitcoind.mine_blocks(21).await?;

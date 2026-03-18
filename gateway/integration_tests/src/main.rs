@@ -15,13 +15,11 @@ use devimint::external::{Bitcoind, Esplora};
 use devimint::federation::Federation;
 use devimint::util::{ProcessManager, almost_equal, poll, poll_with_timeout};
 use devimint::version_constants::{VERSION_0_8_2, VERSION_0_10_0_ALPHA};
-use devimint::{Gatewayd, LightningNode, cli, cmd, util};
+use devimint::{Gatewayd, LightningNode, cli, util};
 use fedimint_core::config::FederationId;
 use fedimint_core::time::now;
 use fedimint_core::{Amount, BitcoinAmountOrAll, bitcoin, default_esplora_server};
-use fedimint_gateway_common::{
-    FederationInfo, GatewayBalances, GatewayFedConfig, PaymentDetails, PaymentKind, PaymentStatus,
-};
+use fedimint_gateway_common::{FederationInfo, PaymentDetails, PaymentKind, PaymentStatus};
 use fedimint_logging::LOG_TEST;
 use fedimint_testing_core::node_type::LightningNodeType;
 use itertools::Itertools;
@@ -102,8 +100,7 @@ async fn stop_and_recover_gateway(
     new_ln: LightningNode,
     fed: &Federation,
 ) -> anyhow::Result<Gatewayd> {
-    let gateway_balances =
-        serde_json::from_value::<GatewayBalances>(cmd!(old_gw, "get-balances").out_json().await?)?;
+    let gateway_balances = old_gw.client().get_balances().await?;
     let before_onchain_balance = gateway_balances.onchain_balance_sats;
 
     // Stop the Gateway
@@ -150,8 +147,7 @@ async fn stop_and_recover_gateway(
 
     new_gw.client().recover_fed(fed).await?;
 
-    let gateway_balances =
-        serde_json::from_value::<GatewayBalances>(cmd!(new_gw, "get-balances").out_json().await?)?;
+    let gateway_balances = new_gw.client().get_balances().await?;
     let ecash_balance = gateway_balances
         .ecash_balances
         .first()
@@ -183,13 +179,7 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
 
                 // Try to connect to already connected federation
                 let invite_code = dev_fed.fed().await?.invite_code()?;
-                let output = cmd!(gw, "connect-fed", invite_code.clone())
-                    .out_json()
-                    .await;
-                assert!(
-                    output.is_err(),
-                    "Connecting to the same federation succeeded"
-                );
+                gw.client().connect_fed(invite_code).await.expect_err("Connecting to the same federation succeeded");
                 info!(target: LOG_TEST, "Verified that gateway couldn't connect to already connected federation");
 
                 let gatewayd_version = util::Gatewayd::version_or_default().await;
@@ -210,7 +200,7 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                 );
                 info!(target: LOG_TEST, "Verified per-federation routing fees changed");
 
-                let info_value = cmd!(gw, "info").out_json().await?;
+                let info_value = gw.client().get_info().await?;
                 let federations = info_value["federations"]
                     .as_array()
                     .expect("federations is an array");
@@ -221,11 +211,7 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                 );
 
                 // Get the federation's config and verify it parses correctly
-                let config_val = cmd!(gw, "cfg", "client-config", "--federation-id", fed_id)
-                    .out_json()
-                    .await?;
-
-                serde_json::from_value::<GatewayFedConfig>(config_val)?;
+                gw.client().client_config(fed_id.clone()).await?;
 
                 // Spawn new federation
                 let bitcoind = dev_fed.bitcoind().await?;
@@ -242,9 +228,7 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                 info!(target: LOG_TEST, "Successfully spawned new federation");
 
                 let new_invite_code = new_fed.invite_code()?;
-                cmd!(gw, "connect-fed", new_invite_code.clone())
-                    .out_json()
-                    .await?;
+                gw.client().connect_fed(new_invite_code.clone()).await?;
 
                 let (default_base, default_ppm) = if gatewayd_version >= *VERSION_0_8_2 {
                     (0, 0)
@@ -272,7 +256,7 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                     .await?;
 
                 // Verify `info` returns multiple federations
-                let info_value = cmd!(gw, "info").out_json().await?;
+                let info_value = gw.client().get_info().await?;
                 let federations = info_value["federations"]
                     .as_array()
                     .expect("federations is an array");
@@ -332,19 +316,20 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                 assert_eq!(first_fed_balance_msat, Amount::ZERO);
                 almost_equal(second_fed_balance_msat.msats, pegin_amount.msats, 10_000).unwrap();
 
-                leave_federation(gw, fed_id.clone(), 1).await?;
-                gw.leave_federation(FederationId::from_str(&fed_id).expect("invalid federation id")).await.expect_err("Successfully left a federation twice");
-                leave_federation(gw, new_fed_id, 2).await?;
+                let fed_id = FederationId::from_str(&fed_id).expect("invalid Federation ID");
+                let fed_info = gw.client().leave_federation(fed_id).await?;
+                assert_eq!(fed_info.federation_id, fed_id);
+                assert_eq!(fed_info.config.federation_index, 1);
+                gw.client().leave_federation(fed_id).await.expect_err("Successfully left a federation twice");
+
+                let new_fed_id = FederationId::from_str(&new_fed_id).expect("invalid Federation ID");
+                let fed_info = gw.client().leave_federation(new_fed_id).await?;
+                assert_eq!(fed_info.federation_id, new_fed_id);
+                assert_eq!(fed_info.config.federation_index, 2);
 
                 // Rejoin new federation, verify that the balance is the same
-                let output = cmd!(gw, "connect-fed", new_invite_code.clone())
-                    .out_json()
-                    .await?;
-                let rejoined_federation_balance_msat =
-                    serde_json::from_value::<Amount>(output["balance_msat"].clone())
-                        .expect("fed has balance");
-
-                assert_eq!(second_fed_balance_msat, rejoined_federation_balance_msat);
+                let fed_info = gw.client().connect_fed(new_invite_code).await?;
+                assert_eq!(second_fed_balance_msat, Amount::from_msats(fed_info["balance_msat"].as_u64().expect("Balance should be present")));
 
                 if gw.gatewayd_version >= *VERSION_0_10_0_ALPHA {
                     // Try to get the info over iroh
@@ -587,23 +572,4 @@ async fn get_transaction(
     transactions.into_iter().find(|details| {
         details.payment_kind == kind && details.amount == amount && details.status == status
     })
-}
-
-/// Leaves the specified federation by issuing a `leave-fed` POST request to the
-/// gateway.
-async fn leave_federation(gw: &Gatewayd, fed_id: String, expected_scid: u64) -> anyhow::Result<()> {
-    let leave_fed = cmd!(gw, "leave-fed", "--federation-id", fed_id.clone())
-        .out_json()
-        .await
-        .expect("Leaving the federation failed");
-
-    let federation_id: FederationId = serde_json::from_value(leave_fed["federation_id"].clone())?;
-    assert_eq!(federation_id.to_string(), fed_id);
-
-    let scid = serde_json::from_value::<u64>(leave_fed["config"]["federation_index"].clone())?;
-
-    assert_eq!(scid, expected_scid);
-
-    info!(target: LOG_TEST, federation_id = %fed_id, "Verified gateway left federation");
-    Ok(())
 }

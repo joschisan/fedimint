@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow};
+use bitcoin::Address;
 use bitcoin::hashes::sha256;
 use chrono::{DateTime, Utc};
 use esplora_client::Txid;
@@ -14,9 +15,9 @@ use fedimint_core::util::{backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, BitcoinHash};
 use fedimint_gateway_common::envs::FM_GATEWAY_IROH_SECRET_KEY_OVERRIDE_ENV;
 use fedimint_gateway_common::{
-    ChannelInfo, CreateOfferResponse, GatewayBalances, GetInvoiceResponse,
-    ListTransactionsResponse, MnemonicResponse, PaymentDetails, PaymentStatus,
-    PaymentSummaryResponse, V1_API_ENDPOINT,
+    ChannelInfo, CreateOfferResponse, FederationInfo, GatewayBalances, GatewayFedConfig,
+    GetInvoiceResponse, ListTransactionsResponse, MnemonicResponse, PaymentDetails, PaymentStatus,
+    PaymentSummaryResponse, V1_API_ENDPOINT, WithdrawResponse,
 };
 use fedimint_ln_server::common::lightning_invoice::Bolt11Invoice;
 use fedimint_lnv2_common::gateway_api::PaymentFee;
@@ -89,6 +90,13 @@ impl<'a> GatewayClient {
         }
     }
 
+    pub async fn client_config(&self, fed_id: String) -> Result<GatewayFedConfig> {
+        let client_config = cmd!(self, "cfg", "client-config", "--federation-id", fed_id)
+            .out_json()
+            .await?;
+        Ok(serde_json::from_value(client_config)?)
+    }
+
     pub async fn gateway_id(&self) -> Result<String> {
         let info = self.get_info().await?;
         let gateway_id = info["gateway_id"]
@@ -126,17 +134,16 @@ impl<'a> GatewayClient {
         Ok(lightning_pub_key.parse()?)
     }
 
-    pub async fn connect_fed(&self, fed: &Federation) -> Result<()> {
-        let invite_code = fed.invite_code()?;
-        poll("gateway connect-fed", || async {
-            cmd!(self, "connect-fed", invite_code.clone())
-                .run()
+    pub async fn connect_fed(&self, invite_code: String) -> Result<serde_json::Value> {
+        let fed_info = poll("gateway connect-fed", || async {
+            let value = cmd!(self, "connect-fed", invite_code.clone())
+                .out_json()
                 .await
                 .map_err(ControlFlow::Continue)?;
-            Ok(())
+            Ok(value)
         })
         .await?;
-        Ok(())
+        Ok(fed_info)
     }
 
     pub async fn recover_fed(&self, fed: &Federation) -> Result<()> {
@@ -211,11 +218,11 @@ impl<'a> GatewayClient {
         Ok(serde_json::from_value(value)?)
     }
 
-    pub async fn leave_federation(&self, federation_id: FederationId) -> Result<()> {
-        cmd!(self, "leave-fed", "--federation-id", federation_id)
-            .run()
+    pub async fn leave_federation(&self, federation_id: FederationId) -> Result<FederationInfo> {
+        let fed_info = cmd!(self, "leave-fed", "--federation-id", federation_id)
+            .out_json()
             .await?;
-        Ok(())
+        Ok(serde_json::from_value(fed_info)?)
     }
 
     pub async fn create_invoice(&self, amount_msats: u64) -> Result<Bolt11Invoice> {
@@ -673,6 +680,28 @@ impl<'a> GatewayClient {
         };
         Ok(txid)
     }
+
+    pub async fn pegout(
+        &self,
+        fed_id: String,
+        amount: u64,
+        address: Address,
+    ) -> Result<WithdrawResponse> {
+        let value = cmd!(
+            self,
+            "ecash",
+            "pegout",
+            "--federation-id",
+            fed_id,
+            "--amount",
+            amount,
+            "--address",
+            address
+        )
+        .out_json()
+        .await?;
+        Ok(serde_json::from_value(value)?)
+    }
 }
 
 #[derive(Clone)]
@@ -919,15 +948,5 @@ impl Gatewayd {
 
     pub fn client(&self) -> GatewayClient {
         GatewayClient::new(self)
-    }
-
-    // TODO: Remove
-    pub fn cmd(&self) -> Command {
-        cmd!(
-            crate::util::get_gateway_cli_path(),
-            "--rpcpassword=theresnosecondbest",
-            "-a",
-            &self.addr
-        )
     }
 }

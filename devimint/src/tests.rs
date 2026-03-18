@@ -1407,14 +1407,13 @@ pub async fn lightning_gw_reconnect_test(
 
     tracing::info!("Stopping LND");
     // Verify that the gateway can query the lightning node for the pubkey and alias
-    let mut info_cmd = cmd!(gw_lnd, "info");
-    assert!(info_cmd.run().await.is_ok());
+    assert!(gw_lnd.client().get_info().await.is_ok());
 
     // Verify that after stopping the lightning node, info no longer returns the
     // node public key since the lightning node is unreachable.
     let ln_type = gw_lnd.ln.ln_type().to_string();
     gw_lnd.stop_lightning_node().await?;
-    let lightning_info = info_cmd.out_json().await?;
+    let lightning_info = gw_lnd.client().get_info().await?;
     if gw_lnd.gatewayd_version < *VERSION_0_10_0_ALPHA {
         let lightning_pub_key: Option<String> =
             serde_json::from_value(lightning_info["lightning_pub_key"].clone())?;
@@ -1525,8 +1524,7 @@ pub async fn gw_reboot_test(dev_fed: DevFed, process_mgr: &ProcessManager) -> Re
     poll(
         "Waiting for LND Gateway Running state after reboot",
         || async {
-            let mut new_lnd_cmd = cmd!(new_gw_lnd, "info");
-            let lnd_value = new_lnd_cmd.out_json().await.map_err(ControlFlow::Continue)?;
+            let lnd_value = new_gw_lnd.client().get_info().await.map_err(ControlFlow::Continue)?;
             let reboot_gateway_state: String = serde_json::from_value(lnd_value["gateway_state"].clone()).context("invalid gateway state").map_err(ControlFlow::Break)?;
             let reboot_gateway_id = fedimint_core::secp256k1::PublicKey::from_str(&new_gw_lnd.gateway_id).expect("Could not convert public key");
 
@@ -1545,8 +1543,7 @@ pub async fn gw_reboot_test(dev_fed: DevFed, process_mgr: &ProcessManager) -> Re
     poll(
         "Waiting for LDK Gateway Running state after reboot",
         || async {
-            let mut new_ldk_cmd = cmd!(new_gw_ldk, "info");
-            let ldk_value = new_ldk_cmd.out_json().await.map_err(ControlFlow::Continue)?;
+            let ldk_value = new_gw_ldk.client().get_info().await.map_err(ControlFlow::Continue)?;
             let reboot_gateway_state: String = serde_json::from_value(ldk_value["gateway_state"].clone()).context("invalid gateway state").map_err(ControlFlow::Break)?;
             let reboot_gateway_id = fedimint_core::secp256k1::PublicKey::from_str(&new_gw_ldk.gateway_id).expect("Could not convert public key");
 
