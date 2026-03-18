@@ -401,14 +401,24 @@ async fn liquidity_test() -> anyhow::Result<()> {
                 let ecash = gw_send.send_ecash(fed_id.clone(), 500_000).await?;
                 gw_receive.receive_ecash(ecash).await?;
                 let after_send_ecash_balance = gw_send.ecash_balance(fed_id.clone()).await?;
-                let after_receive_ecash_balance = gw_receive.ecash_balance(fed_id.clone()).await?;
-                almost_equal(prev_send_ecash_balance - 500_000, after_send_ecash_balance, 512).expect("Balances were not almost equal");
                 almost_equal(
-                    prev_receive_ecash_balance + 500_000,
-                    after_receive_ecash_balance,
-                    2_000,
+                    prev_send_ecash_balance - 500_000,
+                    after_send_ecash_balance,
+                    if util::supports_mint_v2() { 2_000 } else { 512 },
                 )
-                .unwrap();
+                .expect("Balances were not almost equal");
+
+                poll_with_timeout(
+                    "receive ecash balance",
+                    Duration::from_secs(30),
+                    || async {
+                        let balance = gw_receive.ecash_balance(fed_id.clone()).await
+                            .map_err(ControlFlow::Break)?;
+                        almost_equal(prev_receive_ecash_balance + 500_000, balance, 2_000)
+                            .map_err(|e| ControlFlow::Continue(anyhow::anyhow!(e)))
+                    },
+                )
+                .await?;
             }
 
             info!(target: LOG_TEST, "Testing payments between gateways...");
