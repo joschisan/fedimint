@@ -94,7 +94,14 @@ impl<'a> GatewayClient<'a> {
         .out_json()
         .await?;
 
-        let txid: bitcoin::Txid = serde_json::from_value(value)?;
+        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
+        let txid: bitcoin::Txid = if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
+            // New format: JSON object with "txid" field
+            serde_json::from_value(value["txid"].clone())?
+        } else {
+            // Old format: raw txid string
+            serde_json::from_value(value)?
+        };
         Ok(txid)
     }
 }
@@ -565,38 +572,6 @@ impl Gatewayd {
             .ecash_balance_msats
             .msats;
         Ok(ecash_balance)
-    }
-
-    pub async fn send_onchain(
-        &self,
-        bitcoind: &Bitcoind,
-        amount: BitcoinAmountOrAll,
-        fee_rate: u64,
-    ) -> Result<bitcoin::Txid> {
-        let withdraw_address = bitcoind.get_new_address().await?;
-        let value = cmd!(
-            self,
-            "onchain",
-            "send",
-            "--address",
-            withdraw_address,
-            "--amount",
-            amount,
-            "--fee-rate-sats-per-vbyte",
-            fee_rate
-        )
-        .out_json()
-        .await?;
-
-        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
-        let txid: bitcoin::Txid = if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
-            // New format: JSON object with "txid" field
-            serde_json::from_value(value["txid"].clone())?
-        } else {
-            // Old format: raw txid string
-            serde_json::from_value(value)?
-        };
-        Ok(txid)
     }
 
     pub async fn close_channel(&self, remote_pubkey: PublicKey, force: bool) -> Result<()> {
