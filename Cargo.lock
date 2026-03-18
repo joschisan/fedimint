@@ -3055,6 +3055,7 @@ dependencies = [
  "slotmap",
  "strum 0.27.1",
  "strum_macros 0.27.1",
+ "subtle",
  "test-log",
  "thiserror 2.0.18",
  "tokio",

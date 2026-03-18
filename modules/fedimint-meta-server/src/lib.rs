@@ -551,7 +551,7 @@ impl Meta {
 
         self.handle_submit_request(
             &mut dbtx.to_ref_nc(),
-            &ApiAuth(String::new()),
+            &ApiAuth::new(String::new()),
             &SubmitRequest {
                 key: DEFAULT_META_KEY,
                 value: MetaValue::from(serde_json::to_vec(&value).unwrap().as_slice()),
@@ -599,7 +599,7 @@ impl Meta {
         for (peer_id, value) in self
             .handle_get_submissions_request(
                 &mut dbtx.to_ref_nc(),
-                &ApiAuth(String::new()),
+                &ApiAuth::new(String::new()),
                 &GetSubmissionsRequest(DEFAULT_META_KEY),
             )
             .await?

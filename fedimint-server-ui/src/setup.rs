@@ -283,7 +283,7 @@ async fn setup_submit(
     match state
         .api
         .set_local_parameters(
-            ApiAuth(input.password),
+            ApiAuth::new(input.password),
             input.name,
             federation_name,
             disable_base_fees,

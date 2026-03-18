@@ -10,7 +10,7 @@ use fedimint_server::core::ServerModuleInitRegistry;
 use fedimint_server::net::p2p_connector::gen_cert_and_key;
 use tokio_rustls::rustls;
 
-pub static API_AUTH: LazyLock<ApiAuth> = LazyLock::new(|| ApiAuth("pass".to_string()));
+pub static API_AUTH: LazyLock<ApiAuth> = LazyLock::new(|| ApiAuth::new("pass".to_string()));
 
 /// Creates the config gen params for each peer
 ///

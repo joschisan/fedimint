@@ -741,7 +741,7 @@ impl FedimintCli {
         cmd!(
             self,
             "--password",
-            &auth.0,
+            auth.as_str(),
             "admin",
             "dkg",
             "--ws",
@@ -762,7 +762,7 @@ impl FedimintCli {
         let mut command = cmd!(
             self,
             "--password",
-            &auth.0,
+            auth.as_str(),
             "admin",
             "setup",
             endpoint,
@@ -790,7 +790,7 @@ impl FedimintCli {
         let json = cmd!(
             self,
             "--password",
-            &auth.0,
+            auth.as_str(),
             "admin",
             "setup",
             endpoint,
@@ -807,7 +807,7 @@ impl FedimintCli {
         cmd!(
             self,
             "--password",
-            &auth.0,
+            auth.as_str(),
             "admin",
             "setup",
             endpoint,
@@ -822,7 +822,7 @@ impl FedimintCli {
         let json = cmd!(
             self,
             "--password",
-            &auth.0,
+            auth.as_str(),
             "admin",
             "setup",
             endpoint,
@@ -838,7 +838,7 @@ impl FedimintCli {
         cmd!(
             self,
             "--password",
-            &auth.0,
+            auth.as_str(),
             "admin",
             "setup",
             endpoint,
@@ -852,7 +852,7 @@ impl FedimintCli {
         cmd!(
             self,
             "--password",
-            &auth.0,
+            auth.as_str(),
             "--our-id",
             our_id,
             "admin",
@@ -867,7 +867,7 @@ impl FedimintCli {
         cmd!(
             self,
             "--password",
-            &auth.0,
+            auth.as_str(),
             "--our-id",
             our_id,
             "admin",

@@ -356,12 +356,15 @@ pub async fn run_config_gen(
     );
 
     // TODO: Make writing password optional
-    write_new(data_dir.join(PLAINTEXT_PASSWORD), &cfg.private.api_auth.0)?;
+    write_new(
+        data_dir.join(PLAINTEXT_PASSWORD),
+        cfg.private.api_auth.as_str(),
+    )?;
     write_new(data_dir.join(SALT_FILE), random_salt())?;
     write_server_config(
         &cfg,
         &data_dir,
-        &cfg.private.api_auth.0,
+        cfg.private.api_auth.as_str(),
         &module_init_registry,
         api_secrets.get_active(),
     )?;

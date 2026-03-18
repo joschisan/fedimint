@@ -250,7 +250,7 @@ impl TransactionItemAmounts {
 /// All requests from client to server contain these fields
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiRequest<T> {
-    /// Hashed user password if the API requires authentication
+    /// Authentication secret for this API request, if required
     pub auth: Option<ApiAuth>,
     /// Parameters required by the API
     pub params: T,
@@ -341,9 +341,29 @@ pub const FEDIMINT_GATEWAY_ALPN: &[u8] = b"FEDIMINT_GATEWAY_ALPN";
 
 // TODO: either nuke or turn all `api_secret: Option<String>` into `api_secret:
 // Option<ApiAuth>`
-/// Authentication uses the hashed user password in PHC format
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ApiAuth(pub String);
+/// Authentication secret used to verify guardian admin API requests.
+///
+/// The inner value is private to prevent timing leaks via direct comparison.
+/// Use [`Self::verify`] for authentication checks. [`Self::as_str`] is a
+/// temporary escape hatch for I/O that still needs the plaintext value and
+/// should be removed once passwords are hashed at rest.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ApiAuth(String);
+
+impl ApiAuth {
+    pub fn new(s: String) -> Self {
+        Self(s)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn verify(&self, password: &str) -> bool {
+        use subtle::ConstantTimeEq as _;
+        bool::from(self.0.as_bytes().ct_eq(password.as_bytes()))
+    }
+}
 
 impl Debug for ApiAuth {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
