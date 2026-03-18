@@ -36,40 +36,51 @@ use crate::util::{Command, ProcessHandle, ProcessManager, poll, supports_lnv2};
 use crate::vars::utf8;
 use crate::version_constants::{VERSION_0_9_0_ALPHA, VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA};
 
-pub struct GatewayClient<'a> {
-    gw: &'a Gatewayd,
+pub struct GatewayClient {
+    http_address: String,
+    iroh_node_id: iroh_base::NodeId,
     password: Option<String>,
+    use_iroh: bool,
 }
 
-impl<'a> GatewayClient<'a> {
+impl<'a> GatewayClient {
     pub fn new(gw: &'a Gatewayd) -> Self {
-        Self { gw, password: None }
+        Self {
+            http_address: gw.addr.clone(),
+            iroh_node_id: gw.node_id,
+            password: None,
+            use_iroh: false,
+        }
     }
 
     pub fn cmd(&self) -> Command {
-        match &self.password {
-            Some(pass) => {
-                cmd!(
-                    crate::util::get_gateway_cli_path(),
-                    "--rpcpassword",
-                    pass,
-                    "-a",
-                    &self.gw.addr
-                )
-            }
-            None => {
-                cmd!(
-                    crate::util::get_gateway_cli_path(),
-                    "--rpcpassword=theresnosecondbest",
-                    "-a",
-                    &self.gw.addr
-                )
-            }
-        }
+        let password = match &self.password {
+            Some(pass) => pass,
+            None => "theresnosecondbest",
+        };
+
+        let address = if self.use_iroh {
+            self.iroh_node_id.to_string()
+        } else {
+            self.http_address.clone()
+        };
+
+        cmd!(
+            crate::util::get_gateway_cli_path(),
+            "--rpcpassword",
+            password,
+            "-a",
+            address
+        )
     }
 
     pub fn with_password(mut self, password: &str) -> Self {
         self.password = Some(password.to_string());
+        self
+    }
+
+    pub fn with_iroh(mut self) -> Self {
+        self.use_iroh = true;
         self
     }
 
@@ -348,7 +359,7 @@ impl Gatewayd {
         Ok(())
     }
 
-    pub fn client(&self) -> GatewayClient<'_> {
+    pub fn client(&self) -> GatewayClient {
         GatewayClient::new(self)
     }
 
