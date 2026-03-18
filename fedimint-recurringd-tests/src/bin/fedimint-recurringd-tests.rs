@@ -80,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
             let invoice_response = fedimint_lnurl::get_invoice(&pay_response, 1_000_000)
                 .await
                 .expect("invoice request");
-            gw_ldk_second.pay_invoice(invoice_response.pr.clone()).await?;
+            gw_ldk_second.client().pay_invoice(invoice_response.pr.clone()).await?;
 
             let invoice_op_id = poll("lnurl_receive", || async {
                 cmd!(client, "dev", "wait", "2")

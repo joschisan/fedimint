@@ -192,7 +192,7 @@ impl DevJitFed {
                 debug!(target: LOG_DEVIMINT, "Registering lnd gateway...");
                 let start_time = fedimint_core::time::now();
                 if !skip_setup && !pre_dkg {
-                    gw_lnd.connect_fed(fed).await?;
+                    gw_lnd.client().connect_fed(fed).await?;
                 }
                 info!(target: LOG_DEVIMINT, elapsed_ms = %start_time.elapsed()?.as_millis(), "Registered lnd gateway");
                 Ok(Arc::new(()))
@@ -253,7 +253,7 @@ impl DevJitFed {
                     let start_time = fedimint_core::time::now();
                     if !skip_setup && !pre_dkg {
                         debug!(target: LOG_DEVIMINT, "Registering ldk gateway...");
-                        gw_ldk.connect_fed(fed).await?;
+                        gw_ldk.client().connect_fed(fed).await?;
                     } else {
                         debug!(target: LOG_DEVIMINT, "Skipping registering ldk gateway");
                     }
@@ -272,7 +272,7 @@ impl DevJitFed {
                     debug!(target: LOG_DEVIMINT, "Registering ldk gateway 2...");
                     let start_time = fedimint_core::time::now();
                     if !skip_setup && !pre_dkg {
-                        gw_ldk2.connect_fed(fed).await?;
+                        gw_ldk2.client().connect_fed(fed).await?;
                     }
                     info!(target: LOG_DEVIMINT, elapsed_ms = %start_time.elapsed()?.as_millis(), "Connected ldk gateway 2");
                 }

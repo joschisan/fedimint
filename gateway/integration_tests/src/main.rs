@@ -68,7 +68,7 @@ async fn backup_restore_test() -> anyhow::Result<()> {
             let fed = dev_fed.fed().await?;
             fed.pegin_gateways(10_000_000, vec![gw]).await?;
 
-            let mnemonic = gw.get_mnemonic().await?.mnemonic;
+            let mnemonic = gw.client().get_mnemonic().await?.mnemonic;
 
             // Recover without a backup
             info!(target: LOG_TEST, "Wiping gateway and recovering without a backup...");
@@ -85,7 +85,7 @@ async fn backup_restore_test() -> anyhow::Result<()> {
             // Recover with a backup
             info!(target: LOG_TEST, "Wiping gateway and recovering with a backup...");
             info!(target: LOG_TEST, "Creating backup...");
-            new_gw.backup_to_fed(fed).await?;
+            new_gw.client().backup_to_fed(fed).await?;
             stop_and_recover_gateway(process_mgr, mnemonic, new_gw, ln, fed).await?;
 
             info!(target: LOG_TEST, "backup_restore_test successful");
@@ -138,17 +138,17 @@ async fn stop_and_recover_gateway(
     // TODO: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("FM_GATEWAY_MNEMONIC", seed) };
     let new_gw = Gatewayd::new(&process_mgr, new_ln, old_gw_index).await?;
-    let new_mnemonic = new_gw.get_mnemonic().await?.mnemonic;
+    let new_mnemonic = new_gw.client().get_mnemonic().await?.mnemonic;
     assert_eq!(mnemonic, new_mnemonic);
     info!(target: LOG_TEST, "Verified mnemonic is the same after creating new Gateway");
 
     let federations = serde_json::from_value::<Vec<FederationInfo>>(
-        new_gw.get_info().await?["federations"].clone(),
+        new_gw.client().get_info().await?["federations"].clone(),
     )?;
     assert_eq!(0, federations.len());
     info!(target: LOG_TEST, "Verified new Gateway has no federations");
 
-    new_gw.recover_fed(fed).await?;
+    new_gw.client().recover_fed(fed).await?;
 
     let gateway_balances =
         serde_json::from_value::<GatewayBalances>(cmd!(new_gw, "get-balances").out_json().await?)?;
@@ -196,10 +196,10 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
 
                 // Change the routing fees for a specific federation
                 let fed_id = dev_fed.fed().await?.calculate_federation_id();
-                gw.set_federation_routing_fee(fed_id.clone(), 20, 20000)
+                gw.client().set_federation_routing_fee(fed_id.clone(), 20, 20000)
                     .await?;
 
-                let lightning_fee = gw.get_lightning_fee(fed_id.clone()).await?;
+                let lightning_fee = gw.client().get_lightning_fee(fed_id.clone()).await?;
                 assert_eq!(
                     lightning_fee.base.msats, 20,
                     "Federation base msat is not 20"
@@ -253,7 +253,7 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                     (2000, 3000)
                 };
 
-                let lightning_fee = gw.get_lightning_fee(new_fed_id.clone()).await?;
+                let lightning_fee = gw.client().get_lightning_fee(new_fed_id.clone()).await?;
                 assert_eq!(
                     lightning_fee.base.msats, default_base,
                     "Default Base msat for new federation was not correct"
@@ -349,7 +349,7 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                 if gw.gatewayd_version >= *VERSION_0_10_0_ALPHA {
                     // Try to get the info over iroh
                     info!(target: LOG_TEST, gatewayd_version = %gw.gatewayd_version, "Getting info over iroh");
-                    gw.get_info_iroh().await?;
+                    gw.client().with_iroh().get_info().await?;
                 }
 
                 info!(target: LOG_TEST, "Gateway configuration test successful");
@@ -397,11 +397,11 @@ async fn liquidity_test() -> anyhow::Result<()> {
                 );
 
                 let fed_id = federation.calculate_federation_id();
-                let prev_send_ecash_balance = gw_send.ecash_balance(fed_id.clone()).await?;
-                let prev_receive_ecash_balance = gw_receive.ecash_balance(fed_id.clone()).await?;
-                let ecash = gw_send.send_ecash(fed_id.clone(), 500_000).await?;
-                gw_receive.receive_ecash(ecash).await?;
-                let after_send_ecash_balance = gw_send.ecash_balance(fed_id.clone()).await?;
+                let prev_send_ecash_balance = gw_send.client().ecash_balance(fed_id.clone()).await?;
+                let prev_receive_ecash_balance = gw_receive.client().ecash_balance(fed_id.clone()).await?;
+                let ecash = gw_send.client().send_ecash(fed_id.clone(), 500_000).await?;
+                gw_receive.client().receive_ecash(ecash).await?;
+                let after_send_ecash_balance = gw_send.client().ecash_balance(fed_id.clone()).await?;
                 almost_equal(
                     prev_send_ecash_balance - 500_000,
                     after_send_ecash_balance,
@@ -413,7 +413,7 @@ async fn liquidity_test() -> anyhow::Result<()> {
                     "receive ecash balance",
                     Duration::from_secs(30),
                     || async {
-                        let balance = gw_receive.ecash_balance(fed_id.clone()).await
+                        let balance = gw_receive.client().ecash_balance(fed_id.clone()).await
                             .map_err(ControlFlow::Break)?;
                         almost_equal(prev_receive_ecash_balance + 500_000, balance, 2_000)
                             .map_err(|e| ControlFlow::Continue(anyhow::anyhow!(e)))
@@ -431,44 +431,44 @@ async fn liquidity_test() -> anyhow::Result<()> {
                     "Testing lightning payment",
                 );
 
-                let invoice = gw_receive.create_invoice(1_000_000).await?;
-                gw_send.pay_invoice(invoice).await?;
+                let invoice = gw_receive.client().create_invoice(1_000_000).await?;
+                gw_send.client().pay_invoice(invoice).await?;
             }
 
             let start = now() - Duration::from_mins(5);
             let end = now() + Duration::from_mins(5);
             info!(target: LOG_TEST, "Verifying list of transactions");
-            let lnd_transactions = gw_lnd.list_transactions(start, end).await?;
+            let lnd_transactions = gw_lnd.client().list_transactions(start, end).await?;
             // One inbound and one outbound transaction
             assert_eq!(lnd_transactions.len(), 2);
 
-            let ldk_transactions = gw_ldk.list_transactions(start, end).await?;
+            let ldk_transactions = gw_ldk.client().list_transactions(start, end).await?;
             assert_eq!(ldk_transactions.len(), 2);
 
             // Verify that transactions are filtered by time
             let start = now() - Duration::from_mins(10);
             let end = now() - Duration::from_mins(5);
-            let lnd_transactions = gw_lnd.list_transactions(start, end).await?;
+            let lnd_transactions = gw_lnd.client().list_transactions(start, end).await?;
             assert_eq!(lnd_transactions.len(), 0);
 
             info!(target: LOG_TEST, "Testing paying Bolt12 Offers...");
             // TODO: investigate why the first BOLT12 payment attempt is expiring consistently
             poll_with_timeout("First BOLT12 payment", Duration::from_secs(30), || async {
-                let offer_with_amount = gw_ldk_second.create_offer(Some(Amount::from_msats(10_000_000))).await.map_err(ControlFlow::Continue)?;
-                gw_ldk.pay_offer(offer_with_amount, None).await.map_err(ControlFlow::Continue)?;
+                let offer_with_amount = gw_ldk_second.client().create_offer(Some(Amount::from_msats(10_000_000))).await.map_err(ControlFlow::Continue)?;
+                gw_ldk.client().pay_offer(offer_with_amount, None).await.map_err(ControlFlow::Continue)?;
                 assert!(get_transaction(gw_ldk_second, PaymentKind::Bolt12Offer, Amount::from_msats(10_000_000), PaymentStatus::Succeeded).await.is_some());
                 Ok(())
             }).await?;
 
-            let offer_without_amount = gw_ldk.create_offer(None).await?;
-            gw_ldk_second.pay_offer(offer_without_amount.clone(), Some(Amount::from_msats(5_000_000))).await?;
+            let offer_without_amount = gw_ldk.client().create_offer(None).await?;
+            gw_ldk_second.client().pay_offer(offer_without_amount.clone(), Some(Amount::from_msats(5_000_000))).await?;
             assert!(get_transaction(gw_ldk, PaymentKind::Bolt12Offer, Amount::from_msats(5_000_000), PaymentStatus::Succeeded).await.is_some());
 
             // Cannot pay an offer without an amount without specifying an amount
-            gw_ldk_second.pay_offer(offer_without_amount.clone(), None).await.expect_err("Cannot pay amountless offer without specifying an amount");
+            gw_ldk_second.client().pay_offer(offer_without_amount.clone(), None).await.expect_err("Cannot pay amountless offer without specifying an amount");
 
             // Verify we can pay the offer again
-            gw_ldk_second.pay_offer(offer_without_amount, Some(Amount::from_msats(3_000_000))).await?;
+            gw_ldk_second.client().pay_offer(offer_without_amount, Some(Amount::from_msats(3_000_000))).await?;
             assert!(get_transaction(gw_ldk, PaymentKind::Bolt12Offer, Amount::from_msats(3_000_000), PaymentStatus::Succeeded).await.is_some());
 
             info!(target: LOG_TEST, "Pegging-out gateways...");
@@ -493,15 +493,15 @@ async fn liquidity_test() -> anyhow::Result<()> {
             info!(target: LOG_TEST, "Testing closing all channels...");
 
             // Gracefully close one of LND's channel's
-            let gw_ldk_pubkey = gw_ldk.lightning_pubkey().await?;
-            gw_lnd.close_channel(gw_ldk_pubkey, false).await?;
+            let gw_ldk_pubkey = gw_ldk.client().lightning_pubkey().await?;
+            gw_lnd.client().close_channel(gw_ldk_pubkey, false).await?;
 
             // Force close LDK's channels
-            gw_ldk_second.close_all_channels(true).await?;
+            gw_ldk_second.client().close_all_channels(true).await?;
 
             // Verify none of the channels are active
             for gw in gateways {
-                let channels = gw.list_channels().await?;
+                let channels = gw.client().list_channels().await?;
                 let active_channel = channels.into_iter().any(|chan| chan.is_active);
                 assert!(!active_channel);
             }
@@ -543,7 +543,11 @@ async fn esplora_test() -> anyhow::Result<()> {
 
             info!("Waiting for ldk gatewy to be ready...");
             poll("Waiting for LDK to be ready", || async {
-                let info = ldk.get_info().await.map_err(ControlFlow::Continue)?;
+                let info = ldk
+                    .client()
+                    .get_info()
+                    .await
+                    .map_err(ControlFlow::Continue)?;
                 let state: String = serde_json::from_value(info["gateway_state"].clone())
                     .expect("Could not get gateway state");
                 if state == "Running" {
@@ -556,7 +560,7 @@ async fn esplora_test() -> anyhow::Result<()> {
             })
             .await?;
 
-            ldk.get_ln_onchain_address().await?;
+            ldk.client().get_ln_onchain_address().await?;
             info!(target:LOG_TEST, "ldk gateway successfully spawned and connected to esplora");
             Ok(())
         },
@@ -573,6 +577,7 @@ async fn get_transaction(
     status: PaymentStatus,
 ) -> Option<PaymentDetails> {
     let transactions = gateway
+        .client()
         .list_transactions(
             now() - Duration::from_mins(5),
             now() + Duration::from_mins(5),
