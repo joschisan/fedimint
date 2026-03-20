@@ -332,7 +332,8 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                 assert_eq!(first_fed_balance_msat, Amount::ZERO);
                 almost_equal(second_fed_balance_msat.msats, pegin_amount.msats, 10_000).unwrap();
 
-                leave_federation(gw, fed_id, 1).await?;
+                leave_federation(gw, fed_id.clone(), 1).await?;
+                gw.leave_federation(FederationId::from_str(&fed_id).expect("invalid federation id")).await.expect_err("Successfully left a federation twice");
                 leave_federation(gw, new_fed_id, 2).await?;
 
                 // Rejoin new federation, verify that the balance is the same

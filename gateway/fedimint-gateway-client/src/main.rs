@@ -189,9 +189,6 @@ impl CliError {
     /// Classify a `ServerError` into an appropriate `ErrorCode`.
     const fn classify_server_error(err: &ServerError) -> ErrorCode {
         match err {
-            // Authentication/authorization errors
-            ServerError::InvalidRequest(_) => ErrorCode::AuthFailed,
-
             // Connection and transport errors
             ServerError::Connection(_) | ServerError::Transport(_) => ErrorCode::ConnectionFailed,
 
@@ -202,7 +199,8 @@ impl CliError {
             | ServerError::InvalidRpcId(_) => ErrorCode::InvalidInput,
 
             // Internal errors (response parsing, server errors, client errors)
-            ServerError::ResponseDeserialization(_)
+            ServerError::InvalidRequest(_)
+            | ServerError::ResponseDeserialization(_)
             | ServerError::InvalidResponse(_)
             | ServerError::ServerError(_)
             | ServerError::InternalClientError(_) => ErrorCode::Internal,
