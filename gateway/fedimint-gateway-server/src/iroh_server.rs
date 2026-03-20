@@ -292,7 +292,7 @@ fn iroh_verify_password(
     request: &IrohGatewayRequest,
 ) -> anyhow::Result<()> {
     if let Some(password) = request.password.as_ref()
-        && bcrypt::verify(password, &gateway.bcrypt_password_hash.to_string())?
+        && bcrypt::verify(password, &gateway.bcrypt_password_hash)?
     {
         return Ok(());
     }

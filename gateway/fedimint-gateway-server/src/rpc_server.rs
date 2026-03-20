@@ -174,15 +174,15 @@ async fn auth_middleware(
     next: Next,
 ) -> Result<impl IntoResponse, StatusCode> {
     let token = extract_bearer_token(&request)?;
-    if bcrypt::verify(token.clone(), &gateway.bcrypt_password_hash.to_string())
+    if bcrypt::verify(token.clone(), &gateway.bcrypt_password_hash)
         .expect("Bcrypt hash is valid since we just stringified it")
     {
         return Ok(next.run(request).await);
     }
 
     // Check the liquidity manager
-    if let Some(liquidity_manager_password) = &*gateway.bcrypt_password_liquidity_manager_hash
-        && bcrypt::verify(token, &liquidity_manager_password.to_string())
+    if let Some(liquidity_manager_password_hash) = &gateway.bcrypt_liquidity_manager_password_hash
+        && bcrypt::verify(token, liquidity_manager_password_hash)
             .expect("Bcrypt hash is valid since we just stringified it")
     {
         let path = request.uri().path().to_string();

@@ -252,13 +252,11 @@ pub struct Gateway {
     task_group: TaskGroup,
 
     /// The bcrypt password hash used to authenticate the gateway.
-    /// This is an `Arc` because `bcrypt::HashParts` does not implement `Clone`.
-    bcrypt_password_hash: Arc<bcrypt::HashParts>,
+    bcrypt_password_hash: String,
 
     /// The bcrypt password hash used to authenticate the gateway liquidity
-    /// manager. This is an `Arc` because `bcrypt::HashParts` does not
-    /// implement `Clone`.
-    bcrypt_password_liquidity_manager_hash: Arc<Option<bcrypt::HashParts>>,
+    /// manager.
+    bcrypt_liquidity_manager_password_hash: Option<String>,
 
     /// The number of route hints to include in LNv1 invoices.
     num_route_hints: u32,
@@ -449,7 +447,7 @@ impl Gateway {
         listen: SocketAddr,
         api_addr: SafeUrl,
         bcrypt_password_hash: bcrypt::HashParts,
-        bcrypt_password_liquidity_manager_hash: Option<bcrypt::HashParts>,
+        bcrypt_liquidity_manager_password_hash: Option<bcrypt::HashParts>,
         network: Network,
         num_route_hints: u32,
         gateway_db: Database,
@@ -471,7 +469,7 @@ impl Gateway {
                 listen,
                 versioned_api: Some(versioned_api),
                 bcrypt_password_hash,
-                bcrypt_password_liquidity_manager_hash,
+                bcrypt_liquidity_manager_password_hash,
                 network,
                 num_route_hints,
                 default_routing_fees: PaymentFee::TRANSACTION_FEE_DEFAULT,
@@ -685,10 +683,10 @@ impl Gateway {
             listen: gateway_parameters.listen,
             metrics_listen: gateway_parameters.metrics_listen,
             task_group,
-            bcrypt_password_hash: Arc::new(gateway_parameters.bcrypt_password_hash),
-            bcrypt_password_liquidity_manager_hash: Arc::new(
-                gateway_parameters.bcrypt_password_liquidity_manager_hash,
-            ),
+            bcrypt_password_hash: gateway_parameters.bcrypt_password_hash.to_string(),
+            bcrypt_liquidity_manager_password_hash: gateway_parameters
+                .bcrypt_liquidity_manager_password_hash
+                .map(|h| h.to_string()),
             num_route_hints,
             network,
             chain_source,
@@ -2775,7 +2773,7 @@ impl IAdminGateway for Gateway {
     }
 
     fn get_password_hash(&self) -> String {
-        self.bcrypt_password_hash.to_string()
+        self.bcrypt_password_hash.clone()
     }
 
     fn gatewayd_version(&self) -> String {
