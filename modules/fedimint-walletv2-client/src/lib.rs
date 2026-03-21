@@ -16,6 +16,7 @@ mod send_sm;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use api::WalletFederationApi;
@@ -364,20 +365,23 @@ impl WalletClientModule {
         }
     }
 
-    /// Returns the next unused address.
+    /// Returns the next unused deposit address, polling until the initial
+    /// address derivation has completed.
     pub async fn receive(&self) -> Address {
-        if let Some(entry) = self
-            .db
-            .begin_transaction_nc()
-            .await
-            .find_by_prefix_sorted_descending(&ValidAddressIndexPrefix)
-            .await
-            .next()
-            .await
-        {
-            self.derive_address(entry.0.0)
-        } else {
-            self.derive_address(self.next_valid_index(0))
+        loop {
+            if let Some(entry) = self
+                .db
+                .begin_transaction_nc()
+                .await
+                .find_by_prefix_sorted_descending(&ValidAddressIndexPrefix)
+                .await
+                .next()
+                .await
+            {
+                return self.derive_address(entry.0.0);
+            }
+
+            sleep(Duration::from_secs(1)).await;
         }
     }
 
