@@ -544,12 +544,6 @@ impl WalletClientModule {
 
         for (deposit_index, tx_out) in (next_deposit_index..).zip(deposit_range.deposits.clone()) {
             if let Some(&address_index) = address_map.get(&tx_out.script_pubkey) {
-                let receive_fee = self
-                    .module_api
-                    .receive_fee()
-                    .await?
-                    .ok_or(anyhow!("No consensus feerate is available"))?;
-
                 let next_address_index = valid_indices
                     .last()
                     .copied()
@@ -570,23 +564,36 @@ impl WalletClientModule {
                     address_map.insert(self.derive_address(index).script_pubkey(), index);
                 }
 
-                if tx_out.value > receive_fee && !deposit_range.spent.contains(&deposit_index) {
-                    // In order to not overpay on fees we choose to wait, the congestion will clear
-                    // up within a few blocks.
+                if !deposit_range.spent.contains(&deposit_index) {
+                    // In order to not overpay on fees we choose to wait,
+                    // the congestion will clear up within a few blocks.
                     if self.module_api.pending_tx_chain().await?.len() >= 3 {
                         return Ok(false);
                     }
 
-                    let (operation_id, txid) = self
-                        .receive_deposit(deposit_index, tx_out.value, address_index, receive_fee)
-                        .await;
+                    let receive_fee = self
+                        .module_api
+                        .receive_fee()
+                        .await?
+                        .ok_or(anyhow!("No consensus feerate is available"))?;
 
-                    self.client_ctx
-                        .transaction_updates(operation_id)
-                        .await
-                        .await_tx_accepted(txid)
-                        .await
-                        .map_err(|e| anyhow!("Claim transaction for deposit was rejected: {e}"))?;
+                    if tx_out.value > receive_fee {
+                        let (operation_id, txid) = self
+                            .receive_deposit(
+                                deposit_index,
+                                tx_out.value,
+                                address_index,
+                                receive_fee,
+                            )
+                            .await;
+
+                        self.client_ctx
+                            .transaction_updates(operation_id)
+                            .await
+                            .await_tx_accepted(txid)
+                            .await
+                            .map_err(|e| anyhow!("Claim transaction was rejected: {e}"))?;
+                    }
                 }
             }
 
