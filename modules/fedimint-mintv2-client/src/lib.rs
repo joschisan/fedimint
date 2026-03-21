@@ -479,6 +479,9 @@ impl ClientModule for MintClientModule {
 
         let output_bundle = self.create_output_bundle(operation_id, denominations).await;
 
+        let sender = self.balance_update_sender.clone();
+        dbtx.on_commit(move || sender.send_replace(()));
+
         Ok((input_bundle, output_bundle))
     }
 
@@ -868,6 +871,9 @@ impl MintClientModule {
                 },
             )
             .await;
+
+        let sender = self.balance_update_sender.clone();
+        dbtx.on_commit(move || sender.send_replace(()));
 
         Ok(Some(ecash))
     }
