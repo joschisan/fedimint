@@ -43,7 +43,7 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{
     AmountUnit, Amounts, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
 };
-use fedimint_core::task::{TaskGroup, sleep};
+use fedimint_core::task::{TaskGroup, block_in_place, sleep};
 use fedimint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_logging::LOG_CLIENT_MODULE_WALLETV2;
@@ -400,9 +400,11 @@ impl WalletClientModule {
     fn next_valid_index(&self, start_index: u64) -> u64 {
         let pks_hash = self.cfg.bitcoin_pks.consensus_hash();
 
-        (start_index..)
-            .find(|i| is_potential_receive(&self.derive_address(*i).script_pubkey(), &pks_hash))
-            .expect("Will always find a valid index")
+        block_in_place(|| {
+            (start_index..)
+                .find(|i| is_potential_receive(&self.derive_address(*i).script_pubkey(), &pks_hash))
+                .expect("Will always find a valid index")
+        })
     }
 
     /// Issue ecash for an unspent deposit with a given fee.
