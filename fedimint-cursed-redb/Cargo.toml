@@ -23,7 +23,8 @@ fedimint-logging = { workspace = true }
 
 futures = { workspace = true }
 imbl = { workspace = true }
-redb = "2.2.0"
+redb = "3"
+redb2 = { package = "redb", version = "2.6" }
 tracing = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
