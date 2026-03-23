@@ -16,6 +16,7 @@ mod send_sm;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use api::WalletFederationApi;
@@ -43,7 +44,7 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{
     AmountUnit, Amounts, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
 };
-use fedimint_core::task::{TaskGroup, sleep};
+use fedimint_core::task::{TaskGroup, block_in_place, sleep};
 use fedimint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_logging::LOG_CLIENT_MODULE_WALLETV2;
@@ -364,20 +365,23 @@ impl WalletClientModule {
         }
     }
 
-    /// Returns the next unused address.
+    /// Returns the next unused deposit address, polling until the initial
+    /// address derivation has completed.
     pub async fn receive(&self) -> Address {
-        if let Some(entry) = self
-            .db
-            .begin_transaction_nc()
-            .await
-            .find_by_prefix_sorted_descending(&ValidAddressIndexPrefix)
-            .await
-            .next()
-            .await
-        {
-            self.derive_address(entry.0.0)
-        } else {
-            self.derive_address(self.next_valid_index(0))
+        loop {
+            if let Some(entry) = self
+                .db
+                .begin_transaction_nc()
+                .await
+                .find_by_prefix_sorted_descending(&ValidAddressIndexPrefix)
+                .await
+                .next()
+                .await
+            {
+                return self.derive_address(entry.0.0);
+            }
+
+            sleep(Duration::from_secs(1)).await;
         }
     }
 
@@ -400,9 +404,11 @@ impl WalletClientModule {
     fn next_valid_index(&self, start_index: u64) -> u64 {
         let pks_hash = self.cfg.bitcoin_pks.consensus_hash();
 
-        (start_index..)
-            .find(|i| is_potential_receive(&self.derive_address(*i).script_pubkey(), &pks_hash))
-            .expect("Will always find a valid index")
+        block_in_place(|| {
+            (start_index..)
+                .find(|i| is_potential_receive(&self.derive_address(*i).script_pubkey(), &pks_hash))
+                .expect("Will always find a valid index")
+        })
     }
 
     /// Issue ecash for an unspent deposit with a given fee.
@@ -544,12 +550,6 @@ impl WalletClientModule {
 
         for (deposit_index, tx_out) in (next_deposit_index..).zip(deposit_range.deposits.clone()) {
             if let Some(&address_index) = address_map.get(&tx_out.script_pubkey) {
-                let receive_fee = self
-                    .module_api
-                    .receive_fee()
-                    .await?
-                    .ok_or(anyhow!("No consensus feerate is available"))?;
-
                 let next_address_index = valid_indices
                     .last()
                     .copied()
@@ -570,23 +570,36 @@ impl WalletClientModule {
                     address_map.insert(self.derive_address(index).script_pubkey(), index);
                 }
 
-                if tx_out.value > receive_fee && !deposit_range.spent.contains(&deposit_index) {
-                    // In order to not overpay on fees we choose to wait, the congestion will clear
-                    // up within a few blocks.
+                if !deposit_range.spent.contains(&deposit_index) {
+                    // In order to not overpay on fees we choose to wait,
+                    // the congestion will clear up within a few blocks.
                     if self.module_api.pending_tx_chain().await?.len() >= 3 {
                         return Ok(false);
                     }
 
-                    let (operation_id, txid) = self
-                        .receive_deposit(deposit_index, tx_out.value, address_index, receive_fee)
-                        .await;
+                    let receive_fee = self
+                        .module_api
+                        .receive_fee()
+                        .await?
+                        .ok_or(anyhow!("No consensus feerate is available"))?;
 
-                    self.client_ctx
-                        .transaction_updates(operation_id)
-                        .await
-                        .await_tx_accepted(txid)
-                        .await
-                        .map_err(|e| anyhow!("Claim transaction for deposit was rejected: {e}"))?;
+                    if tx_out.value > receive_fee {
+                        let (operation_id, txid) = self
+                            .receive_deposit(
+                                deposit_index,
+                                tx_out.value,
+                                address_index,
+                                receive_fee,
+                            )
+                            .await;
+
+                        self.client_ctx
+                            .transaction_updates(operation_id)
+                            .await
+                            .await_tx_accepted(txid)
+                            .await
+                            .map_err(|e| anyhow!("Claim transaction was rejected: {e}"))?;
+                    }
                 }
             }
 

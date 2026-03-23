@@ -189,14 +189,10 @@ pub async fn render(wallet: &fedimint_walletv2_server::Wallet) -> Markup {
                                     }
                                     div id="shutdownCollapse" class="accordion-collapse collapse" data-bs-parent="#shutdownAccordion" {
                                         div class="accordion-body" {
-                                            div class="alert alert-info mb-3" {
+                                            div class="alert alert-warning mb-3" {
                                                 "To recover your remaining funds after decommissioning the federation, please go to the "
                                                 a href="https://recovery.fedimint.org" target="_blank" { "recovery tool" }
-                                                " and follow the instructions."
-                                            }
-
-                                            div class="alert alert-warning mb-3" {
-                                                "The recovery keys change with every transaction. All guardians must be fully synced before extracting keys, otherwise the keys will not match the current federation UTXO."
+                                                " and follow the instructions. The recovery keys change with every transaction. All guardians must be fully synced before extracting keys, otherwise the keys will not match the current federation UTXO."
                                             }
 
                                             div class="mb-3" {
