@@ -318,14 +318,14 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
 
                 let fed_id = FederationId::from_str(&fed_id).expect("invalid Federation ID");
                 let fed_info = gw.client().leave_federation(fed_id).await?;
-                assert_eq!(fed_info.federation_id, fed_id);
-                assert_eq!(fed_info.config.federation_index, 1);
+                assert_eq!(serde_json::from_value::<FederationId>(fed_info["federation_id"].clone())?, fed_id);
+                assert_eq!(fed_info["config"]["federation_index"].as_u64().expect("Was not u64"), 1);
                 gw.client().leave_federation(fed_id).await.expect_err("Successfully left a federation twice");
 
                 let new_fed_id = FederationId::from_str(&new_fed_id).expect("invalid Federation ID");
                 let fed_info = gw.client().leave_federation(new_fed_id).await?;
-                assert_eq!(fed_info.federation_id, new_fed_id);
-                assert_eq!(fed_info.config.federation_index, 2);
+                assert_eq!(serde_json::from_value::<FederationId>(fed_info["federation_id"].clone())?, new_fed_id);
+                assert_eq!(fed_info["config"]["federation_index"].as_u64().expect("Was not u64"), 2);
 
                 // Rejoin new federation, verify that the balance is the same
                 let fed_info = gw.client().connect_fed(new_invite_code).await?;

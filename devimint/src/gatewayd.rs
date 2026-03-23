@@ -15,8 +15,8 @@ use fedimint_core::util::{backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, BitcoinHash};
 use fedimint_gateway_common::envs::FM_GATEWAY_IROH_SECRET_KEY_OVERRIDE_ENV;
 use fedimint_gateway_common::{
-    ChannelInfo, CreateOfferResponse, FederationInfo, GatewayBalances, GatewayFedConfig,
-    GetInvoiceResponse, ListTransactionsResponse, MnemonicResponse, PaymentDetails, PaymentStatus,
+    ChannelInfo, CreateOfferResponse, GatewayBalances, GatewayFedConfig, GetInvoiceResponse,
+    ListTransactionsResponse, MnemonicResponse, PaymentDetails, PaymentStatus,
     PaymentSummaryResponse, V1_API_ENDPOINT, WithdrawResponse,
 };
 use fedimint_ln_server::common::lightning_invoice::Bolt11Invoice;
@@ -218,11 +218,11 @@ impl<'a> GatewayClient {
         Ok(serde_json::from_value(value)?)
     }
 
-    pub async fn leave_federation(&self, federation_id: FederationId) -> Result<FederationInfo> {
+    pub async fn leave_federation(&self, federation_id: FederationId) -> Result<serde_json::Value> {
         let fed_info = cmd!(self, "leave-fed", "--federation-id", federation_id)
             .out_json()
             .await?;
-        Ok(serde_json::from_value(fed_info)?)
+        Ok(fed_info)
     }
 
     pub async fn create_invoice(&self, amount_msats: u64) -> Result<Bolt11Invoice> {
