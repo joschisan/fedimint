@@ -118,7 +118,7 @@ impl State for LightningPayStateMachine {
             }
             #[allow(deprecated)]
             LightningPayStates::Refundable(refundable) => {
-                refundable.transitions(self.common.clone(), global_context.clone())
+                refundable.transitions(self.common.clone(), context.clone(), global_context.clone())
             }
             #[allow(deprecated)]
             LightningPayStates::Success(_)
@@ -265,12 +265,16 @@ impl LightningPayFunded {
         let timelock = self.timelock;
         let payment_hash = *common.invoice.payment_hash();
         let success_common = common.clone();
+        let success_context = context.clone();
         let timeout_common = common.clone();
         let timeout_global_context = global_context.clone();
+        let cancel_context = context.clone();
+        let timeout_context = context.clone();
         vec![
             StateTransition::new(
                 Self::gateway_pay_invoice(gateway, payload, context, self.funding_time),
                 move |dbtx, result, old_state| {
+                    let success_context = success_context.clone();
                     Box::pin(Self::transition_outgoing_contract_execution(
                         result,
                         old_state,
@@ -278,30 +282,35 @@ impl LightningPayFunded {
                         dbtx,
                         payment_hash,
                         success_common.clone(),
+                        success_context,
                     ))
                 },
             ),
             StateTransition::new(
                 await_contract_cancelled(contract_id, global_context.clone()),
                 move |dbtx, (), old_state| {
+                    let cancel_context = cancel_context.clone();
                     Box::pin(try_refund_outgoing_contract(
                         old_state,
                         common.clone(),
                         dbtx,
                         global_context.clone(),
                         format!("Gateway cancelled contract: {contract_id}"),
+                        cancel_context,
                     ))
                 },
             ),
             StateTransition::new(
                 await_contract_timeout(timeout_global_context.clone(), timelock),
                 move |dbtx, (), old_state| {
+                    let timeout_context = timeout_context.clone();
                     Box::pin(try_refund_outgoing_contract(
                         old_state,
                         timeout_common.clone(),
                         dbtx,
                         timeout_global_context.clone(),
                         format!("Outgoing contract timed out, BlockHeight: {timelock}"),
+                        timeout_context,
                     ))
                 },
             ),
@@ -383,6 +392,7 @@ impl LightningPayFunded {
         dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
         payment_hash: sha256::Hash,
         common: LightningPayCommon,
+        context: LightningClientContext,
     ) -> LightningPayStateMachine {
         match result {
             Ok(preimage) => {
@@ -394,6 +404,24 @@ impl LightningPayFunded {
                     common.gateway_fee,
                 )
                 .await;
+
+                // client_ctx is None for the gateway since it does not emit the client events
+                if let Some(ref client_ctx) = context.client_ctx
+                    && let Some(preimage_bytes) = fedimint_core::hex::decode(&preimage)
+                        .ok()
+                        .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+                {
+                    client_ctx
+                        .log_event(
+                            &mut dbtx.module_tx(),
+                            crate::events::SendPaymentUpdateEvent {
+                                operation_id: old_state.common.operation_id,
+                                status: crate::events::SendPaymentStatus::Success(preimage_bytes),
+                            },
+                        )
+                        .await;
+                }
+
                 LightningPayStateMachine {
                     common: old_state.common,
                     state: LightningPayStates::Success(preimage),
@@ -420,28 +448,34 @@ impl LightningPayRefundable {
     fn transitions(
         &self,
         common: LightningPayCommon,
+        context: LightningClientContext,
         global_context: DynGlobalClientContext,
     ) -> Vec<StateTransition<LightningPayStateMachine>> {
         let contract_id = self.contract_id;
         let timeout_global_context = global_context.clone();
         let timeout_common = common.clone();
         let timelock = self.block_timelock;
+        let cancel_context = context.clone();
+        let timeout_context = context;
         vec![
             StateTransition::new(
                 await_contract_cancelled(contract_id, global_context.clone()),
                 move |dbtx, (), old_state| {
+                    let cancel_context = cancel_context.clone();
                     Box::pin(try_refund_outgoing_contract(
                         old_state,
                         common.clone(),
                         dbtx,
                         global_context.clone(),
                         format!("Refundable: Gateway cancelled contract: {contract_id}"),
+                        cancel_context,
                     ))
                 },
             ),
             StateTransition::new(
                 await_contract_timeout(timeout_global_context.clone(), timelock),
                 move |dbtx, (), old_state| {
+                    let timeout_context = timeout_context.clone();
                     Box::pin(try_refund_outgoing_contract(
                         old_state,
                         timeout_common.clone(),
@@ -450,6 +484,7 @@ impl LightningPayRefundable {
                         format!(
                             "Refundable: Outgoing contract timed out. ContractId: {contract_id} BlockHeight: {timelock}"
                         ),
+                        timeout_context,
                     ))
                 },
             ),
@@ -497,6 +532,7 @@ async fn try_refund_outgoing_contract(
     dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
     global_context: DynGlobalClientContext,
     error_reason: String,
+    context: LightningClientContext,
 ) -> LightningPayStateMachine {
     let contract_data = common.contract;
     let (refund_key, refund_input) = (
@@ -519,6 +555,19 @@ async fn try_refund_outgoing_contract(
         )
         .await
         .expect("Cannot claim input, additional funding needed");
+
+    // client_ctx is None for the gateway since it does not emit the client events
+    if let Some(ref client_ctx) = context.client_ctx {
+        client_ctx
+            .log_event(
+                &mut dbtx.module_tx(),
+                crate::events::SendPaymentUpdateEvent {
+                    operation_id: old_state.common.operation_id,
+                    status: crate::events::SendPaymentStatus::Refunded,
+                },
+            )
+            .await;
+    }
 
     LightningPayStateMachine {
         common: old_state.common,

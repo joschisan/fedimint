@@ -654,7 +654,7 @@ impl LightningClientModule {
                 SendPaymentEvent {
                     operation_id,
                     amount: send_fee.add_to(amount),
-                    fee: Some(send_fee.fee(amount)),
+                    fee: send_fee.fee(amount),
                 },
             )
             .await;

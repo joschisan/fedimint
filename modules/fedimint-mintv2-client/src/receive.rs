@@ -5,7 +5,7 @@ use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 
-use crate::event::{ReceivePaymentStatus, ReceivePaymentUpdateEvent};
+use crate::events::{ReceivePaymentStatus, ReceivePaymentUpdateEvent};
 use crate::{MintClientContext, MintClientModule};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]

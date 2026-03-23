@@ -20,7 +20,7 @@ mod oob;
 /// State machines for mint outputs
 pub mod output;
 
-pub mod event;
+pub mod events;
 
 /// API client impl for mint-specific requests
 pub mod api;
@@ -46,7 +46,7 @@ use client_db::{
     DbKeyPrefix, NoteKeyPrefix, RecoveryFinalizedKey, RecoveryStateKey, RecoveryStateV2Key,
     ReusedNoteIndices, migrate_state_to_v2, migrate_to_v1,
 };
-use event::{NoteSpent, OOBNotesReissued, OOBNotesSpent, ReceivePaymentEvent, SendPaymentEvent};
+use events::{NoteSpent, OOBNotesReissued, OOBNotesSpent, ReceivePaymentEvent, SendPaymentEvent};
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client_module::db::{ClientModuleMigrationFn, migrate_state};
 use fedimint_client_module::module::init::{

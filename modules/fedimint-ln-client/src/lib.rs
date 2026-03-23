@@ -12,6 +12,7 @@ pub mod api;
 #[cfg(feature = "cli")]
 pub mod cli;
 pub mod db;
+pub mod events;
 pub mod incoming;
 pub mod pay;
 pub mod receive;
@@ -467,6 +468,7 @@ impl ClientModule for LightningClientModule {
             ln_decoder: self.decoder(),
             redeem_key: self.redeem_key,
             gateway_conn: self.gateway_conn.clone(),
+            client_ctx: Some(self.client_ctx.clone()),
         }
     }
 
@@ -1375,6 +1377,10 @@ impl LightningClientModule {
             bail!(PayBolt11InvoiceError::FundedContractAlreadyExists { contract_id });
         }
 
+        let amount_msat = invoice
+            .amount_milli_satoshis()
+            .ok_or(anyhow!("MissingInvoiceAmount"))?;
+
         // TODO: return fee from create_outgoing_output or even let user supply
         // it/bounds for it
         let fee = match &client_output.output {
@@ -1382,11 +1388,7 @@ impl LightningClientModule {
                 let fee_msat = contract
                     .amount
                     .msats
-                    .checked_sub(
-                        invoice
-                            .amount_milli_satoshis()
-                            .ok_or(anyhow!("MissingInvoiceAmount"))?,
-                    )
+                    .checked_sub(amount_msat)
                     .expect("Contract amount should be greater or equal than invoice amount");
                 Amount::from_msats(fee_msat)
             }
@@ -1432,6 +1434,21 @@ impl LightningClientModule {
                 tx,
             )
             .await?;
+
+        let mut event_dbtx = self.client_ctx.module_db().begin_transaction().await;
+
+        self.client_ctx
+            .log_event(
+                &mut event_dbtx,
+                events::SendPaymentEvent {
+                    operation_id,
+                    amount: Amount::from_msats(amount_msat),
+                    fee,
+                },
+            )
+            .await;
+
+        event_dbtx.commit_tx().await;
 
         Ok(OutgoingLightningPayment {
             payment_type: pay_type,
@@ -2320,6 +2337,8 @@ pub struct LightningClientContext {
     pub ln_decoder: Decoder,
     pub redeem_key: Keypair,
     pub gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
+    /// Set to `None` for the gateway since it does not emit the client events.
+    pub client_ctx: Option<ClientContext<LightningClientModule>>,
 }
 
 impl fedimint_client_module::sm::Context for LightningClientContext {

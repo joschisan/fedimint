@@ -29,7 +29,7 @@ use crate::backup::EcashBackupV0;
 use crate::client_db::{
     NextECashNoteIndexKey, NoteKey, RecoveryFinalizedKey, RecoveryStateKey, ReusedNoteIndices,
 };
-use crate::event::NoteCreated;
+use crate::events::NoteCreated;
 use crate::output::{
     MintOutputCommon, MintOutputStateMachine, MintOutputStatesCreated, NoteIssuanceRequest,
 };

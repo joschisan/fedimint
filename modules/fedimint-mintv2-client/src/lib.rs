@@ -14,7 +14,7 @@ mod api;
 mod cli;
 mod client_db;
 mod ecash;
-mod event;
+mod events;
 mod input;
 pub mod issuance;
 mod output;
@@ -28,7 +28,7 @@ use std::time::Duration;
 use anyhow::{Context as _, anyhow};
 use bitcoin_hashes::sha256;
 use client_db::{RecoveryState, RecoveryStateKey, SpendableNoteAmountPrefix, SpendableNotePrefix};
-pub use event::*;
+pub use events::*;
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client::module::ClientModule;
 use fedimint_client::transaction::{
