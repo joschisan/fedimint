@@ -1316,6 +1316,28 @@ impl ILnRpcClient for GatewayLndClient {
     async fn list_channels(&self) -> Result<ListChannelsResponse, LightningRpcError> {
         let mut client = self.connect().await?;
 
+        // Fetch peer addresses so we can populate remote_address on each channel
+        let peer_addresses: std::collections::HashMap<String, String> = client
+            .lightning()
+            .list_peers(ListPeersRequest {
+                latest_error: false,
+            })
+            .await
+            .map(|resp| {
+                resp.into_inner()
+                    .peers
+                    .into_iter()
+                    .filter_map(|peer| {
+                        if peer.address.is_empty() {
+                            None
+                        } else {
+                            Some((peer.pub_key, peer.address))
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         match client
             .lightning()
             .list_channels(ListChannelsRequest {
@@ -1358,6 +1380,8 @@ impl ILnRpcClient for GatewayLndClient {
 
                         let funding_outpoint = OutPoint::from_str(&channel.channel_point).ok();
 
+                        let remote_address = peer_addresses.get(&channel.remote_pubkey).cloned();
+
                         ChannelInfo {
                             remote_pubkey: PublicKey::from_str(&channel.remote_pubkey)
                                 .expect("Lightning node returned invalid remote channel pubkey"),
@@ -1371,6 +1395,7 @@ impl ILnRpcClient for GatewayLndClient {
                             } else {
                                 Some(channel.peer_alias.clone())
                             },
+                            remote_address,
                         }
                     })
                     .collect(),
