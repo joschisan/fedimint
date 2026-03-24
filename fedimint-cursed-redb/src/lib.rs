@@ -12,7 +12,7 @@ use fedimint_core::db::{
 use fedimint_core::{apply, async_trait_maybe_send};
 use futures::stream;
 use imbl::OrdMap;
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 
 const KV_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("fedimint_kv");
 
@@ -334,5 +334,50 @@ mod tests {
     async fn test_dbtx_remove_by_prefix() {
         let (db, _dir) = open_temp_db("fcb-redb-test-remove-by-prefix").await;
         fedimint_core::db::verify_remove_by_prefix(db).await;
+    }
+
+    /// Create a v2 database with redb2, close it, then open with our
+    /// MemAndRedb (redb3) and verify the data survived the migration.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_v2_to_v3_migration() {
+        let temp_dir = tempfile::Builder::new()
+            .prefix("fcb-redb-test-v2-migration")
+            .tempdir()
+            .unwrap();
+        let db_path = temp_dir.path().join("test.redb");
+
+        let table_def: redb2::TableDefinition<&[u8], &[u8]> =
+            redb2::TableDefinition::new("fedimint_kv");
+
+        // Write some data using redb2 (v2 format)
+        {
+            let db = redb2::Database::create(&db_path).unwrap();
+            let tx = db.begin_write().unwrap();
+            {
+                let mut table = tx.open_table(table_def).unwrap();
+                table
+                    .insert(b"key1".as_slice(), b"value1".as_slice())
+                    .unwrap();
+                table
+                    .insert(b"key2".as_slice(), b"value2".as_slice())
+                    .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+
+        // Open with MemAndRedb — should trigger v2->v3 migration
+        let locked_db = MemAndRedb::new(&db_path).await.unwrap();
+        let db = Database::new(locked_db, ModuleDecoderRegistry::default());
+
+        // Verify data survived
+        let mut dbtx = db.begin_transaction_nc().await;
+        assert_eq!(
+            dbtx.raw_get_bytes(b"key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            dbtx.raw_get_bytes(b"key2").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 }
