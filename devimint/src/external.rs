@@ -690,13 +690,13 @@ pub async fn open_channels_between_gateways(
     futures::future::try_join_all(
         gateways
             .iter()
-            .map(|(gw, _gw_name)| gw.wait_for_block_height(block_height)),
+            .map(|(gw, _gw_name)| async { gw.client().wait_for_block_height(block_height).await }),
     )
     .await?;
 
     info!(target: LOG_DEVIMINT, "Funding all gateway lightning nodes...");
     for (gw, _gw_name) in gateways {
-        let funding_addr = gw.get_ln_onchain_address().await?;
+        let funding_addr = gw.client().get_ln_onchain_address().await?;
         bitcoind.send_to(funding_addr, 100_000_000).await?;
     }
 
@@ -709,7 +709,7 @@ pub async fn open_channels_between_gateways(
     futures::future::try_join_all(
         gateways
             .iter()
-            .map(|(gw, _gw_name)| gw.wait_for_block_height(block_height)),
+            .map(|(gw, _gw_name)| async { gw.client().wait_for_block_height(block_height).await }),
     )
     .await?;
 
@@ -726,6 +726,7 @@ pub async fn open_channels_between_gateways(
     for ((gw_a, gw_a_name), (gw_b, gw_b_name)) in &gateway_pairs {
         info!(target: LOG_DEVIMINT, from=%gw_a_name, to=%gw_b_name, "Opening channel with {sats_per_side} sats on each side...");
         let txid = gw_a
+            .client()
             .open_channel(gw_b, sats_per_side * 2, Some(sats_per_side))
             .await?;
 
@@ -739,13 +740,13 @@ pub async fn open_channels_between_gateways(
     futures::future::try_join_all(
         gateways
             .iter()
-            .map(|(gw, _gw_name)| gw.wait_for_block_height(block_height)),
+            .map(|(gw, _gw_name)| async { gw.client().wait_for_block_height(block_height).await }),
     )
     .await?;
 
     for ((gw_a, _gw_a_name), (gw_b, _gw_b_name)) in &gateway_pairs {
-        let gw_a_node_pubkey = gw_a.lightning_pubkey().await?;
-        let gw_b_node_pubkey = gw_b.lightning_pubkey().await?;
+        let gw_a_node_pubkey = gw_a.client().lightning_pubkey().await?;
+        let gw_b_node_pubkey = gw_b.client().lightning_pubkey().await?;
 
         wait_for_ready_channel_on_gateway_with_counterparty(gw_b, gw_a_node_pubkey).await?;
         wait_for_ready_channel_on_gateway_with_counterparty(gw_a, gw_b_node_pubkey).await?;
@@ -764,6 +765,7 @@ async fn wait_for_ready_channel_on_gateway_with_counterparty(
         &format!("Wait for {} channel update", gw.gw_name),
         || async {
             let channels = gw
+                .client()
                 .list_channels()
                 .await
                 .context("list channels")

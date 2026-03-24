@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow};
+use bitcoin::Address;
 use bitcoin::hashes::sha256;
 use chrono::{DateTime, Utc};
 use esplora_client::Txid;
@@ -14,9 +15,9 @@ use fedimint_core::util::{backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, BitcoinHash};
 use fedimint_gateway_common::envs::FM_GATEWAY_IROH_SECRET_KEY_OVERRIDE_ENV;
 use fedimint_gateway_common::{
-    ChannelInfo, CreateOfferResponse, GatewayBalances, GetInvoiceResponse,
+    ChannelInfo, CreateOfferResponse, GatewayBalances, GatewayFedConfig, GetInvoiceResponse,
     ListTransactionsResponse, MnemonicResponse, PaymentDetails, PaymentStatus,
-    PaymentSummaryResponse, V1_API_ENDPOINT,
+    PaymentSummaryResponse, V1_API_ENDPOINT, WithdrawResponse,
 };
 use fedimint_ln_server::common::lightning_invoice::Bolt11Invoice;
 use fedimint_lnv2_common::gateway_api::PaymentFee;
@@ -36,41 +37,616 @@ use crate::util::{Command, ProcessHandle, ProcessManager, poll, supports_lnv2};
 use crate::vars::utf8;
 use crate::version_constants::{VERSION_0_9_0_ALPHA, VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA};
 
-pub struct GatewayClient<'a> {
-    gw: &'a Gatewayd,
+#[derive(Debug, Clone)]
+pub struct GatewayClient {
+    http_address: String,
+    iroh_node_id: iroh_base::NodeId,
     password: Option<String>,
+    use_iroh: bool,
 }
 
-impl<'a> GatewayClient<'a> {
+impl<'a> GatewayClient {
     pub fn new(gw: &'a Gatewayd) -> Self {
-        Self { gw, password: None }
+        Self {
+            http_address: gw.addr.clone(),
+            iroh_node_id: gw.node_id,
+            password: None,
+            use_iroh: false,
+        }
     }
 
     pub fn cmd(&self) -> Command {
-        match &self.password {
-            Some(pass) => {
-                cmd!(
-                    crate::util::get_gateway_cli_path(),
-                    "--rpcpassword",
-                    pass,
-                    "-a",
-                    &self.gw.addr
-                )
-            }
-            None => {
-                cmd!(
-                    crate::util::get_gateway_cli_path(),
-                    "--rpcpassword=theresnosecondbest",
-                    "-a",
-                    &self.gw.addr
-                )
-            }
-        }
+        let password = match &self.password {
+            Some(pass) => pass,
+            None => "theresnosecondbest",
+        };
+
+        let address = self.address();
+
+        cmd!(
+            crate::util::get_gateway_cli_path(),
+            "--rpcpassword",
+            password,
+            "-a",
+            address
+        )
     }
 
     pub fn with_password(mut self, password: &str) -> Self {
         self.password = Some(password.to_string());
         self
+    }
+
+    pub fn with_iroh(mut self) -> Self {
+        self.use_iroh = true;
+        self
+    }
+
+    pub fn address(&self) -> String {
+        if self.use_iroh {
+            format!("iroh://{}", self.iroh_node_id)
+        } else {
+            self.http_address.clone()
+        }
+    }
+
+    pub async fn client_config(&self, fed_id: String) -> Result<GatewayFedConfig> {
+        let client_config = cmd!(self, "cfg", "client-config", "--federation-id", fed_id)
+            .out_json()
+            .await?;
+        Ok(serde_json::from_value(client_config)?)
+    }
+
+    pub async fn gateway_id(&self) -> Result<String> {
+        let info = self.get_info().await?;
+        let gateway_id = info["gateway_id"]
+            .as_str()
+            .context("gateway_id must be a string")?
+            .to_owned();
+        Ok(gateway_id)
+    }
+
+    pub async fn get_info(&self) -> Result<serde_json::Value> {
+        retry(
+            "Getting gateway info via gateway-cli info",
+            backoff_util::aggressive_backoff(),
+            || async { cmd!(self, "info").out_json().await },
+        )
+        .await
+        .context("Getting gateway info via gateway-cli info")
+    }
+
+    pub async fn lightning_pubkey(&self) -> Result<PublicKey> {
+        let info = self.get_info().await?;
+        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
+        let lightning_pub_key = if gateway_cli_version < *VERSION_0_10_0_ALPHA {
+            info["lightning_pub_key"]
+                .as_str()
+                .context("lightning_pub_key must be a string")?
+                .to_owned()
+        } else {
+            info["lightning_info"]["connected"]["public_key"]
+                .as_str()
+                .context("lightning_pub_key must be a string")?
+                .to_owned()
+        };
+
+        Ok(lightning_pub_key.parse()?)
+    }
+
+    pub async fn connect_fed(&self, invite_code: String) -> Result<serde_json::Value> {
+        let fed_info = poll("gateway connect-fed", || async {
+            let value = cmd!(self, "connect-fed", invite_code.clone())
+                .out_json()
+                .await
+                .map_err(ControlFlow::Continue)?;
+            Ok(value)
+        })
+        .await?;
+        Ok(fed_info)
+    }
+
+    pub async fn recover_fed(&self, fed: &Federation) -> Result<()> {
+        let federation_id = fed.calculate_federation_id();
+        let invite_code = fed.invite_code()?;
+        info!(target: LOG_DEVIMINT, federation_id = %federation_id, "Recovering...");
+        poll("gateway connect-fed --recover=true", || async {
+            cmd!(self, "connect-fed", invite_code.clone(), "--recover=true")
+                .run()
+                .await
+                .map_err(ControlFlow::Continue)?;
+            Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub async fn backup_to_fed(&self, fed: &Federation) -> Result<()> {
+        let federation_id = fed.calculate_federation_id();
+        cmd!(self, "ecash", "backup", "--federation-id", federation_id)
+            .run()
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_pegin_addr(&self, fed_id: &str) -> Result<String> {
+        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
+        if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
+            // New format: JSON object with "address" field
+            let value = cmd!(self, "ecash", "pegin", "--federation-id={fed_id}")
+                .out_json()
+                .await?;
+            Ok(value["address"]
+                .as_str()
+                .context("address must be a string")?
+                .to_owned())
+        } else {
+            // Old format: raw address string
+            Ok(cmd!(self, "ecash", "pegin", "--federation-id={fed_id}")
+                .out_json()
+                .await?
+                .as_str()
+                .context("address must be a string")?
+                .to_owned())
+        }
+    }
+
+    pub async fn get_ln_onchain_address(&self) -> Result<String> {
+        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
+        if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
+            // New format: JSON object with "address" field
+            let value = cmd!(self, "onchain", "address").out_json().await?;
+            Ok(value["address"]
+                .as_str()
+                .context("address must be a string")?
+                .to_owned())
+        } else {
+            // Old format: raw address string
+            cmd!(self, "onchain", "address").out_string().await
+        }
+    }
+
+    pub async fn get_mnemonic(&self) -> Result<MnemonicResponse> {
+        let value = retry(
+            "Getting gateway mnemonic",
+            backoff_util::aggressive_backoff(),
+            || async { cmd!(self, "seed").out_json().await },
+        )
+        .await
+        .context("Getting gateway mnemonic")?;
+
+        Ok(serde_json::from_value(value)?)
+    }
+
+    pub async fn leave_federation(&self, federation_id: FederationId) -> Result<serde_json::Value> {
+        let fed_info = cmd!(self, "leave-fed", "--federation-id", federation_id)
+            .out_json()
+            .await?;
+        Ok(fed_info)
+    }
+
+    pub async fn create_invoice(&self, amount_msats: u64) -> Result<Bolt11Invoice> {
+        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
+        let invoice_str = if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
+            // New format: JSON object with "invoice" field
+            let value = cmd!(self, "lightning", "create-invoice", amount_msats)
+                .out_json()
+                .await?;
+            value["invoice"]
+                .as_str()
+                .context("invoice must be a string")?
+                .to_owned()
+        } else {
+            // Old format: raw invoice string
+            cmd!(self, "lightning", "create-invoice", amount_msats)
+                .out_string()
+                .await?
+        };
+        Ok(Bolt11Invoice::from_str(&invoice_str)?)
+    }
+
+    pub async fn pay_invoice(&self, invoice: Bolt11Invoice) -> Result<()> {
+        cmd!(self, "lightning", "pay-invoice", invoice.to_string())
+            .run()
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn send_ecash(&self, federation_id: String, amount_msats: u64) -> Result<String> {
+        let value = cmd!(
+            self,
+            "ecash",
+            "send",
+            "--federation-id",
+            federation_id,
+            amount_msats
+        )
+        .out_json()
+        .await?;
+        let ecash: String = serde_json::from_value(
+            value
+                .get("notes")
+                .expect("notes key does not exist")
+                .clone(),
+        )?;
+        Ok(ecash)
+    }
+
+    pub async fn receive_ecash(&self, ecash: String) -> Result<()> {
+        cmd!(self, "ecash", "receive", "--notes", ecash)
+            .run()
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_balances(&self) -> Result<GatewayBalances> {
+        let value = cmd!(self, "get-balances").out_json().await?;
+        Ok(serde_json::from_value(value)?)
+    }
+
+    pub async fn ecash_balance(&self, federation_id: String) -> anyhow::Result<u64> {
+        let federation_id = FederationId::from_str(&federation_id)?;
+        let balances = self.get_balances().await?;
+        let ecash_balance = balances
+            .ecash_balances
+            .into_iter()
+            .find(|info| info.federation_id == federation_id)
+            .ok_or(anyhow::anyhow!("Gateway is not joined to federation"))?
+            .ecash_balance_msats
+            .msats;
+        Ok(ecash_balance)
+    }
+
+    pub async fn close_channel(&self, remote_pubkey: PublicKey, force: bool) -> Result<()> {
+        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
+        let mut close_channel = if force && gateway_cli_version >= *VERSION_0_9_0_ALPHA {
+            cmd!(
+                self,
+                "lightning",
+                "close-channels-with-peer",
+                "--pubkey",
+                remote_pubkey,
+                "--force",
+            )
+        } else if gateway_cli_version < *VERSION_0_10_0_ALPHA {
+            cmd!(
+                self,
+                "lightning",
+                "close-channels-with-peer",
+                "--pubkey",
+                remote_pubkey,
+            )
+        } else {
+            cmd!(
+                self,
+                "lightning",
+                "close-channels-with-peer",
+                "--pubkey",
+                remote_pubkey,
+                "--sats-per-vbyte",
+                "10",
+            )
+        };
+
+        close_channel.run().await?;
+
+        Ok(())
+    }
+
+    pub async fn close_all_channels(&self, force: bool) -> Result<()> {
+        let channels = self.list_channels().await?;
+
+        for chan in channels {
+            let remote_pubkey = chan.remote_pubkey;
+            self.close_channel(remote_pubkey, force).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Open a channel with the gateway's lightning node, returning the funding
+    /// transaction txid.
+    pub async fn open_channel(
+        &self,
+        gw: &Gatewayd,
+        channel_size_sats: u64,
+        push_amount_sats: Option<u64>,
+    ) -> Result<Txid> {
+        let pubkey = gw.client().lightning_pubkey().await?;
+        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
+
+        let txid_str = if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
+            // New format: JSON object with "funding_txid" field
+            let value = cmd!(
+                self,
+                "lightning",
+                "open-channel",
+                "--pubkey",
+                pubkey,
+                "--host",
+                gw.lightning_node_addr,
+                "--channel-size-sats",
+                channel_size_sats,
+                "--push-amount-sats",
+                push_amount_sats.unwrap_or(0)
+            )
+            .out_json()
+            .await?;
+
+            value["funding_txid"]
+                .as_str()
+                .context("funding_txid must be a string")?
+                .to_owned()
+        } else {
+            // Old format: raw txid string
+            cmd!(
+                self,
+                "lightning",
+                "open-channel",
+                "--pubkey",
+                pubkey,
+                "--host",
+                gw.lightning_node_addr,
+                "--channel-size-sats",
+                channel_size_sats,
+                "--push-amount-sats",
+                push_amount_sats.unwrap_or(0)
+            )
+            .out_string()
+            .await?
+        };
+
+        Ok(Txid::from_str(&txid_str)?)
+    }
+
+    pub async fn list_channels(&self) -> Result<Vec<ChannelInfo>> {
+        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
+        let channels = if gateway_cli_version >= *VERSION_0_9_0_ALPHA {
+            cmd!(self, "lightning", "list-channels").out_json().await?
+        } else {
+            cmd!(self, "lightning", "list-active-channels")
+                .out_json()
+                .await?
+        };
+
+        let channels = channels
+            .as_array()
+            .context("channels must be an array")?
+            .iter()
+            .map(|channel| {
+                let remote_pubkey = channel["remote_pubkey"]
+                    .as_str()
+                    .context("remote_pubkey must be a string")?
+                    .to_owned();
+                let channel_size_sats = channel["channel_size_sats"]
+                    .as_u64()
+                    .context("channel_size_sats must be a u64")?;
+                let outbound_liquidity_sats = channel["outbound_liquidity_sats"]
+                    .as_u64()
+                    .context("outbound_liquidity_sats must be a u64")?;
+                let inbound_liquidity_sats = channel["inbound_liquidity_sats"]
+                    .as_u64()
+                    .context("inbound_liquidity_sats must be a u64")?;
+                let is_active = channel["is_active"].as_bool().unwrap_or(true);
+                let funding_outpoint = channel.get("funding_outpoint").map(|v| {
+                    serde_json::from_value::<bitcoin::OutPoint>(v.clone())
+                        .expect("Could not deserialize outpoint")
+                });
+                let remote_node_alias = channel
+                    .get("remote_node_alias")
+                    .map(std::string::ToString::to_string);
+                Ok(ChannelInfo {
+                    remote_pubkey: remote_pubkey
+                        .parse()
+                        .expect("Lightning node returned invalid remote channel pubkey"),
+                    channel_size_sats,
+                    outbound_liquidity_sats,
+                    inbound_liquidity_sats,
+                    is_active,
+                    funding_outpoint,
+                    remote_node_alias,
+                })
+            })
+            .collect::<Result<Vec<ChannelInfo>>>()?;
+        Ok(channels)
+    }
+
+    pub async fn wait_for_block_height(&self, target_block_height: u64) -> Result<()> {
+        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
+        poll("waiting for block height", || async {
+            let info = self.get_info().await.map_err(ControlFlow::Continue)?;
+
+            let height_value = if gateway_cli_version < *VERSION_0_10_0_ALPHA {
+                info["block_height"].clone()
+            } else {
+                info["lightning_info"]["connected"]["block_height"].clone()
+            };
+
+            let block_height: Option<u32> = serde_json::from_value(height_value)
+                .context("Could not parse block height")
+                .map_err(ControlFlow::Continue)?;
+            let Some(block_height) = block_height else {
+                return Err(ControlFlow::Continue(anyhow!("Not synced any blocks yet")));
+            };
+
+            let synced_value = if gateway_cli_version < *VERSION_0_10_0_ALPHA {
+                info["synced_to_chain"].clone()
+            } else {
+                info["lightning_info"]["connected"]["synced_to_chain"].clone()
+            };
+            let synced = synced_value
+                .as_bool()
+                .expect("Could not get synced_to_chain");
+            if block_height >= target_block_height as u32 && synced {
+                return Ok(());
+            }
+
+            Err(ControlFlow::Continue(anyhow!("Not synced to block")))
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_lightning_fee(&self, fed_id: String) -> Result<PaymentFee> {
+        let info_value = self.get_info().await?;
+        let federations = info_value["federations"]
+            .as_array()
+            .expect("federations is an array");
+
+        let fed = federations
+            .iter()
+            .find(|fed| {
+                serde_json::from_value::<String>(fed["federation_id"].clone())
+                    .expect("could not deserialize federation_id")
+                    == fed_id
+            })
+            .ok_or_else(|| anyhow!("Federation not found"))?;
+
+        let lightning_fee = fed["config"]["lightning_fee"].clone();
+        let base: Amount = serde_json::from_value(lightning_fee["base"].clone())
+            .map_err(|e| anyhow!("Couldnt parse base: {}", e))?;
+        let parts_per_million: u64 =
+            serde_json::from_value(lightning_fee["parts_per_million"].clone())
+                .map_err(|e| anyhow!("Couldnt parse parts_per_million: {}", e))?;
+
+        Ok(PaymentFee {
+            base,
+            parts_per_million,
+        })
+    }
+
+    pub async fn set_federation_routing_fee(
+        &self,
+        fed_id: String,
+        base: u64,
+        ppm: u64,
+    ) -> Result<()> {
+        cmd!(
+            self,
+            "cfg",
+            "set-fees",
+            "--federation-id",
+            fed_id,
+            "--ln-base",
+            base,
+            "--ln-ppm",
+            ppm
+        )
+        .run()
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn set_federation_transaction_fee(
+        &self,
+        fed_id: String,
+        base: u64,
+        ppm: u64,
+    ) -> Result<()> {
+        cmd!(
+            self,
+            "cfg",
+            "set-fees",
+            "--federation-id",
+            fed_id,
+            "--tx-base",
+            base,
+            "--tx-ppm",
+            ppm
+        )
+        .run()
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn payment_summary(&self) -> Result<PaymentSummaryResponse> {
+        let out_json = cmd!(self, "payment-summary").out_json().await?;
+        Ok(serde_json::from_value(out_json).expect("Could not deserialize PaymentSummaryResponse"))
+    }
+
+    pub async fn wait_bolt11_invoice(&self, payment_hash: Vec<u8>) -> Result<()> {
+        let payment_hash =
+            sha256::Hash::from_slice(&payment_hash).expect("Could not parse payment hash");
+        let invoice_val = cmd!(
+            self,
+            "lightning",
+            "get-invoice",
+            "--payment-hash",
+            payment_hash
+        )
+        .out_json()
+        .await?;
+        let invoice: GetInvoiceResponse =
+            serde_json::from_value(invoice_val).expect("Could not parse GetInvoiceResponse");
+        anyhow::ensure!(invoice.status == PaymentStatus::Succeeded);
+
+        Ok(())
+    }
+
+    pub async fn list_transactions(
+        &self,
+        start: SystemTime,
+        end: SystemTime,
+    ) -> Result<Vec<PaymentDetails>> {
+        let start_datetime: DateTime<Utc> = start.into();
+        let end_datetime: DateTime<Utc> = end.into();
+        let response = cmd!(
+            self,
+            "lightning",
+            "list-transactions",
+            "--start-time",
+            start_datetime.to_rfc3339(),
+            "--end-time",
+            end_datetime.to_rfc3339()
+        )
+        .out_json()
+        .await?;
+        let transactions = serde_json::from_value::<ListTransactionsResponse>(response)?;
+        Ok(transactions.transactions)
+    }
+
+    pub async fn create_offer(&self, amount: Option<Amount>) -> Result<String> {
+        let offer_value = if let Some(amount) = amount {
+            cmd!(
+                self,
+                "lightning",
+                "create-offer",
+                "--amount-msat",
+                amount.msats
+            )
+            .out_json()
+            .await?
+        } else {
+            cmd!(self, "lightning", "create-offer").out_json().await?
+        };
+        let offer_response = serde_json::from_value::<CreateOfferResponse>(offer_value)
+            .expect("Could not parse offer response");
+        Ok(offer_response.offer)
+    }
+
+    pub async fn pay_offer(&self, offer: String, amount: Option<Amount>) -> Result<()> {
+        if let Some(amount) = amount {
+            cmd!(
+                self,
+                "lightning",
+                "pay-offer",
+                "--offer",
+                offer,
+                "--amount-msat",
+                amount.msats
+            )
+            .run()
+            .await?;
+        } else {
+            cmd!(self, "lightning", "pay-offer", "--offer", offer)
+                .run()
+                .await?;
+        }
+
+        Ok(())
     }
 
     pub async fn send_onchain(
@@ -103,6 +679,28 @@ impl<'a> GatewayClient<'a> {
             serde_json::from_value(value)?
         };
         Ok(txid)
+    }
+
+    pub async fn pegout(
+        &self,
+        fed_id: String,
+        amount: u64,
+        address: Address,
+    ) -> Result<WithdrawResponse> {
+        let value = cmd!(
+            self,
+            "ecash",
+            "pegout",
+            "--federation-id",
+            fed_id,
+            "--amount",
+            amount,
+            "--address",
+            address
+        )
+        .out_json()
+        .await?;
+        Ok(serde_json::from_value(value)?)
     }
 }
 
@@ -348,579 +946,7 @@ impl Gatewayd {
         Ok(())
     }
 
-    pub fn client(&self) -> GatewayClient<'_> {
+    pub fn client(&self) -> GatewayClient {
         GatewayClient::new(self)
-    }
-
-    pub fn cmd(&self) -> Command {
-        cmd!(
-            crate::util::get_gateway_cli_path(),
-            "--rpcpassword=theresnosecondbest",
-            "-a",
-            &self.addr
-        )
-    }
-
-    pub async fn gateway_id(&self) -> Result<String> {
-        let info = self.get_info().await?;
-        let gateway_id = info["gateway_id"]
-            .as_str()
-            .context("gateway_id must be a string")?
-            .to_owned();
-        Ok(gateway_id)
-    }
-
-    pub async fn get_info(&self) -> Result<serde_json::Value> {
-        retry(
-            "Getting gateway info via gateway-cli info",
-            backoff_util::aggressive_backoff(),
-            || async { cmd!(self, "info").out_json().await },
-        )
-        .await
-        .context("Getting gateway info via gateway-cli info")
-    }
-
-    pub async fn get_info_iroh(&self) -> Result<serde_json::Value> {
-        cmd!(
-            crate::util::get_gateway_cli_path(),
-            "--rpcpassword=theresnosecondbest",
-            "--address",
-            format!("iroh://{}", self.node_id),
-            "info",
-        )
-        .out_json()
-        .await
-    }
-
-    pub async fn lightning_pubkey(&self) -> Result<PublicKey> {
-        let info = self.get_info().await?;
-        let lightning_pub_key = if self.gatewayd_version < *VERSION_0_10_0_ALPHA {
-            info["lightning_pub_key"]
-                .as_str()
-                .context("lightning_pub_key must be a string")?
-                .to_owned()
-        } else {
-            info["lightning_info"]["connected"]["public_key"]
-                .as_str()
-                .context("lightning_pub_key must be a string")?
-                .to_owned()
-        };
-
-        Ok(lightning_pub_key.parse()?)
-    }
-
-    pub async fn connect_fed(&self, fed: &Federation) -> Result<()> {
-        let invite_code = fed.invite_code()?;
-        poll("gateway connect-fed", || async {
-            cmd!(self, "connect-fed", invite_code.clone())
-                .run()
-                .await
-                .map_err(ControlFlow::Continue)?;
-            Ok(())
-        })
-        .await?;
-        Ok(())
-    }
-
-    pub async fn recover_fed(&self, fed: &Federation) -> Result<()> {
-        let federation_id = fed.calculate_federation_id();
-        let invite_code = fed.invite_code()?;
-        info!(target: LOG_DEVIMINT, federation_id = %federation_id, "Recovering...");
-        poll("gateway connect-fed --recover=true", || async {
-            cmd!(self, "connect-fed", invite_code.clone(), "--recover=true")
-                .run()
-                .await
-                .map_err(ControlFlow::Continue)?;
-            Ok(())
-        })
-        .await?;
-        Ok(())
-    }
-
-    pub async fn backup_to_fed(&self, fed: &Federation) -> Result<()> {
-        let federation_id = fed.calculate_federation_id();
-        cmd!(self, "ecash", "backup", "--federation-id", federation_id)
-            .run()
-            .await?;
-        Ok(())
-    }
-
-    pub async fn get_pegin_addr(&self, fed_id: &str) -> Result<String> {
-        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
-        if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
-            // New format: JSON object with "address" field
-            let value = cmd!(self, "ecash", "pegin", "--federation-id={fed_id}")
-                .out_json()
-                .await?;
-            Ok(value["address"]
-                .as_str()
-                .context("address must be a string")?
-                .to_owned())
-        } else {
-            // Old format: raw address string
-            Ok(cmd!(self, "ecash", "pegin", "--federation-id={fed_id}")
-                .out_json()
-                .await?
-                .as_str()
-                .context("address must be a string")?
-                .to_owned())
-        }
-    }
-
-    pub async fn get_ln_onchain_address(&self) -> Result<String> {
-        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
-        if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
-            // New format: JSON object with "address" field
-            let value = cmd!(self, "onchain", "address").out_json().await?;
-            Ok(value["address"]
-                .as_str()
-                .context("address must be a string")?
-                .to_owned())
-        } else {
-            // Old format: raw address string
-            cmd!(self, "onchain", "address").out_string().await
-        }
-    }
-
-    pub async fn get_mnemonic(&self) -> Result<MnemonicResponse> {
-        let value = retry(
-            "Getting gateway mnemonic",
-            backoff_util::aggressive_backoff(),
-            || async { cmd!(self, "seed").out_json().await },
-        )
-        .await
-        .context("Getting gateway mnemonic")?;
-
-        Ok(serde_json::from_value(value)?)
-    }
-
-    pub async fn leave_federation(&self, federation_id: FederationId) -> Result<()> {
-        cmd!(self, "leave-fed", "--federation-id", federation_id)
-            .run()
-            .await?;
-        Ok(())
-    }
-
-    pub async fn create_invoice(&self, amount_msats: u64) -> Result<Bolt11Invoice> {
-        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
-        let invoice_str = if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
-            // New format: JSON object with "invoice" field
-            let value = cmd!(self, "lightning", "create-invoice", amount_msats)
-                .out_json()
-                .await?;
-            value["invoice"]
-                .as_str()
-                .context("invoice must be a string")?
-                .to_owned()
-        } else {
-            // Old format: raw invoice string
-            cmd!(self, "lightning", "create-invoice", amount_msats)
-                .out_string()
-                .await?
-        };
-        Ok(Bolt11Invoice::from_str(&invoice_str)?)
-    }
-
-    pub async fn pay_invoice(&self, invoice: Bolt11Invoice) -> Result<()> {
-        cmd!(self, "lightning", "pay-invoice", invoice.to_string())
-            .run()
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn send_ecash(&self, federation_id: String, amount_msats: u64) -> Result<String> {
-        let value = cmd!(
-            self,
-            "ecash",
-            "send",
-            "--federation-id",
-            federation_id,
-            amount_msats
-        )
-        .out_json()
-        .await?;
-        let ecash: String = serde_json::from_value(
-            value
-                .get("notes")
-                .expect("notes key does not exist")
-                .clone(),
-        )?;
-        Ok(ecash)
-    }
-
-    pub async fn receive_ecash(&self, ecash: String) -> Result<()> {
-        cmd!(self, "ecash", "receive", "--notes", ecash)
-            .run()
-            .await?;
-        Ok(())
-    }
-
-    pub async fn get_balances(&self) -> Result<GatewayBalances> {
-        let value = cmd!(self, "get-balances").out_json().await?;
-        Ok(serde_json::from_value(value)?)
-    }
-
-    pub async fn ecash_balance(&self, federation_id: String) -> anyhow::Result<u64> {
-        let federation_id = FederationId::from_str(&federation_id)?;
-        let balances = self.get_balances().await?;
-        let ecash_balance = balances
-            .ecash_balances
-            .into_iter()
-            .find(|info| info.federation_id == federation_id)
-            .ok_or(anyhow::anyhow!("Gateway is not joined to federation"))?
-            .ecash_balance_msats
-            .msats;
-        Ok(ecash_balance)
-    }
-
-    pub async fn close_channel(&self, remote_pubkey: PublicKey, force: bool) -> Result<()> {
-        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
-        let mut close_channel = if force && gateway_cli_version >= *VERSION_0_9_0_ALPHA {
-            cmd!(
-                self,
-                "lightning",
-                "close-channels-with-peer",
-                "--pubkey",
-                remote_pubkey,
-                "--force",
-            )
-        } else if gateway_cli_version < *VERSION_0_10_0_ALPHA {
-            cmd!(
-                self,
-                "lightning",
-                "close-channels-with-peer",
-                "--pubkey",
-                remote_pubkey,
-            )
-        } else {
-            cmd!(
-                self,
-                "lightning",
-                "close-channels-with-peer",
-                "--pubkey",
-                remote_pubkey,
-                "--sats-per-vbyte",
-                "10",
-            )
-        };
-
-        close_channel.run().await?;
-
-        Ok(())
-    }
-
-    pub async fn close_all_channels(&self, force: bool) -> Result<()> {
-        let channels = self.list_channels().await?;
-
-        for chan in channels {
-            let remote_pubkey = chan.remote_pubkey;
-            self.close_channel(remote_pubkey, force).await?;
-        }
-
-        Ok(())
-    }
-
-    /// Open a channel with the gateway's lightning node, returning the funding
-    /// transaction txid.
-    pub async fn open_channel(
-        &self,
-        gw: &Gatewayd,
-        channel_size_sats: u64,
-        push_amount_sats: Option<u64>,
-    ) -> Result<Txid> {
-        let pubkey = gw.lightning_pubkey().await?;
-        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
-
-        let txid_str = if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
-            // New format: JSON object with "funding_txid" field
-            let value = cmd!(
-                self,
-                "lightning",
-                "open-channel",
-                "--pubkey",
-                pubkey,
-                "--host",
-                gw.lightning_node_addr,
-                "--channel-size-sats",
-                channel_size_sats,
-                "--push-amount-sats",
-                push_amount_sats.unwrap_or(0)
-            )
-            .out_json()
-            .await?;
-
-            value["funding_txid"]
-                .as_str()
-                .context("funding_txid must be a string")?
-                .to_owned()
-        } else {
-            // Old format: raw txid string
-            cmd!(
-                self,
-                "lightning",
-                "open-channel",
-                "--pubkey",
-                pubkey,
-                "--host",
-                gw.lightning_node_addr,
-                "--channel-size-sats",
-                channel_size_sats,
-                "--push-amount-sats",
-                push_amount_sats.unwrap_or(0)
-            )
-            .out_string()
-            .await?
-        };
-
-        Ok(Txid::from_str(&txid_str)?)
-    }
-
-    pub async fn list_channels(&self) -> Result<Vec<ChannelInfo>> {
-        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
-        let channels = if gateway_cli_version >= *VERSION_0_9_0_ALPHA {
-            cmd!(self, "lightning", "list-channels").out_json().await?
-        } else {
-            cmd!(self, "lightning", "list-active-channels")
-                .out_json()
-                .await?
-        };
-
-        let channels = channels
-            .as_array()
-            .context("channels must be an array")?
-            .iter()
-            .map(|channel| {
-                let remote_pubkey = channel["remote_pubkey"]
-                    .as_str()
-                    .context("remote_pubkey must be a string")?
-                    .to_owned();
-                let channel_size_sats = channel["channel_size_sats"]
-                    .as_u64()
-                    .context("channel_size_sats must be a u64")?;
-                let outbound_liquidity_sats = channel["outbound_liquidity_sats"]
-                    .as_u64()
-                    .context("outbound_liquidity_sats must be a u64")?;
-                let inbound_liquidity_sats = channel["inbound_liquidity_sats"]
-                    .as_u64()
-                    .context("inbound_liquidity_sats must be a u64")?;
-                let is_active = channel["is_active"].as_bool().unwrap_or(true);
-                let funding_outpoint = channel.get("funding_outpoint").map(|v| {
-                    serde_json::from_value::<bitcoin::OutPoint>(v.clone())
-                        .expect("Could not deserialize outpoint")
-                });
-                let remote_node_alias = channel
-                    .get("remote_node_alias")
-                    .map(std::string::ToString::to_string);
-                Ok(ChannelInfo {
-                    remote_pubkey: remote_pubkey
-                        .parse()
-                        .expect("Lightning node returned invalid remote channel pubkey"),
-                    channel_size_sats,
-                    outbound_liquidity_sats,
-                    inbound_liquidity_sats,
-                    is_active,
-                    funding_outpoint,
-                    remote_node_alias,
-                })
-            })
-            .collect::<Result<Vec<ChannelInfo>>>()?;
-        Ok(channels)
-    }
-
-    pub async fn wait_for_block_height(&self, target_block_height: u64) -> Result<()> {
-        poll("waiting for block height", || async {
-            let info = self.get_info().await.map_err(ControlFlow::Continue)?;
-
-            let height_value = if self.gatewayd_version < *VERSION_0_10_0_ALPHA {
-                info["block_height"].clone()
-            } else {
-                info["lightning_info"]["connected"]["block_height"].clone()
-            };
-
-            let block_height: Option<u32> = serde_json::from_value(height_value)
-                .context("Could not parse block height")
-                .map_err(ControlFlow::Continue)?;
-            let Some(block_height) = block_height else {
-                return Err(ControlFlow::Continue(anyhow!("Not synced any blocks yet")));
-            };
-
-            let synced_value = if self.gatewayd_version < *VERSION_0_10_0_ALPHA {
-                info["synced_to_chain"].clone()
-            } else {
-                info["lightning_info"]["connected"]["synced_to_chain"].clone()
-            };
-            let synced = synced_value
-                .as_bool()
-                .expect("Could not get synced_to_chain");
-            if block_height >= target_block_height as u32 && synced {
-                return Ok(());
-            }
-
-            Err(ControlFlow::Continue(anyhow!("Not synced to block")))
-        })
-        .await?;
-        Ok(())
-    }
-
-    pub async fn get_lightning_fee(&self, fed_id: String) -> Result<PaymentFee> {
-        let info_value = self.get_info().await?;
-        let federations = info_value["federations"]
-            .as_array()
-            .expect("federations is an array");
-
-        let fed = federations
-            .iter()
-            .find(|fed| {
-                serde_json::from_value::<String>(fed["federation_id"].clone())
-                    .expect("could not deserialize federation_id")
-                    == fed_id
-            })
-            .ok_or_else(|| anyhow!("Federation not found"))?;
-
-        let lightning_fee = fed["config"]["lightning_fee"].clone();
-        let base: Amount = serde_json::from_value(lightning_fee["base"].clone())
-            .map_err(|e| anyhow!("Couldnt parse base: {}", e))?;
-        let parts_per_million: u64 =
-            serde_json::from_value(lightning_fee["parts_per_million"].clone())
-                .map_err(|e| anyhow!("Couldnt parse parts_per_million: {}", e))?;
-
-        Ok(PaymentFee {
-            base,
-            parts_per_million,
-        })
-    }
-
-    pub async fn set_federation_routing_fee(
-        &self,
-        fed_id: String,
-        base: u64,
-        ppm: u64,
-    ) -> Result<()> {
-        cmd!(
-            self,
-            "cfg",
-            "set-fees",
-            "--federation-id",
-            fed_id,
-            "--ln-base",
-            base,
-            "--ln-ppm",
-            ppm
-        )
-        .run()
-        .await?;
-
-        Ok(())
-    }
-
-    pub async fn set_federation_transaction_fee(
-        &self,
-        fed_id: String,
-        base: u64,
-        ppm: u64,
-    ) -> Result<()> {
-        cmd!(
-            self,
-            "cfg",
-            "set-fees",
-            "--federation-id",
-            fed_id,
-            "--tx-base",
-            base,
-            "--tx-ppm",
-            ppm
-        )
-        .run()
-        .await?;
-
-        Ok(())
-    }
-
-    pub async fn payment_summary(&self) -> Result<PaymentSummaryResponse> {
-        let out_json = cmd!(self, "payment-summary").out_json().await?;
-        Ok(serde_json::from_value(out_json).expect("Could not deserialize PaymentSummaryResponse"))
-    }
-
-    pub async fn wait_bolt11_invoice(&self, payment_hash: Vec<u8>) -> Result<()> {
-        let payment_hash =
-            sha256::Hash::from_slice(&payment_hash).expect("Could not parse payment hash");
-        let invoice_val = cmd!(
-            self,
-            "lightning",
-            "get-invoice",
-            "--payment-hash",
-            payment_hash
-        )
-        .out_json()
-        .await?;
-        let invoice: GetInvoiceResponse =
-            serde_json::from_value(invoice_val).expect("Could not parse GetInvoiceResponse");
-        anyhow::ensure!(invoice.status == PaymentStatus::Succeeded);
-
-        Ok(())
-    }
-
-    pub async fn list_transactions(
-        &self,
-        start: SystemTime,
-        end: SystemTime,
-    ) -> Result<Vec<PaymentDetails>> {
-        let start_datetime: DateTime<Utc> = start.into();
-        let end_datetime: DateTime<Utc> = end.into();
-        let response = cmd!(
-            self,
-            "lightning",
-            "list-transactions",
-            "--start-time",
-            start_datetime.to_rfc3339(),
-            "--end-time",
-            end_datetime.to_rfc3339()
-        )
-        .out_json()
-        .await?;
-        let transactions = serde_json::from_value::<ListTransactionsResponse>(response)?;
-        Ok(transactions.transactions)
-    }
-
-    pub async fn create_offer(&self, amount: Option<Amount>) -> Result<String> {
-        let offer_value = if let Some(amount) = amount {
-            cmd!(
-                self,
-                "lightning",
-                "create-offer",
-                "--amount-msat",
-                amount.msats
-            )
-            .out_json()
-            .await?
-        } else {
-            cmd!(self, "lightning", "create-offer").out_json().await?
-        };
-        let offer_response = serde_json::from_value::<CreateOfferResponse>(offer_value)
-            .expect("Could not parse offer response");
-        Ok(offer_response.offer)
-    }
-
-    pub async fn pay_offer(&self, offer: String, amount: Option<Amount>) -> Result<()> {
-        if let Some(amount) = amount {
-            cmd!(
-                self,
-                "lightning",
-                "pay-offer",
-                "--offer",
-                offer,
-                "--amount-msat",
-                amount.msats
-            )
-            .run()
-            .await?;
-        } else {
-            cmd!(self, "lightning", "pay-offer", "--offer", offer)
-                .run()
-                .await?;
-        }
-
-        Ok(())
     }
 }

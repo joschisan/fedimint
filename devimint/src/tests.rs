@@ -146,6 +146,9 @@ pub async fn latency_tests(
 
     let lnd_gw_id = gw_lnd.gateway_id.clone();
 
+    let gw_lnd = gw_lnd.client();
+    let gw_ldk = gw_ldk.client();
+
     match r#type {
         LatencyTest::Reissue => {
             info!("Testing latency of reissue");
@@ -194,7 +197,7 @@ pub async fn latency_tests(
 
                     let start_time = Instant::now();
 
-                    lnv2_send(&client, &gw_ldk.addr, &invoice.to_string()).await?;
+                    lnv2_send(&client, &gw_ldk.address(), &invoice.to_string()).await?;
 
                     ln_sends.push(start_time.elapsed());
                 }
@@ -238,7 +241,7 @@ pub async fn latency_tests(
                 ln_receives.push(start_time.elapsed());
 
                 if crate::util::supports_lnv2() {
-                    let invoice = lnv2_receive(&client, &gw_lnd.addr, 100_000).await?.0;
+                    let invoice = lnv2_receive(&client, &gw_lnd.address(), 100_000).await?.0;
 
                     let start_time = Instant::now();
 
@@ -642,6 +645,10 @@ pub async fn cli_tests(dev_fed: DevFed) -> Result<()> {
 
     fed.pegin_gateways(10_000_000, vec![&gw_lnd]).await?;
 
+    let iroh_lnd_id = gw_lnd.iroh_gateway_id.clone();
+    let gw_lnd = gw_lnd.client();
+    let gw_ldk = gw_ldk.client();
+
     let fed_id = fed.calculate_federation_id();
     let invite = fed.invite_code()?;
 
@@ -826,7 +833,7 @@ pub async fn cli_tests(dev_fed: DevFed) -> Result<()> {
     }
 
     // OUTGOING: fedimint-cli pays LDK via LND gateway
-    if let Some(iroh_gw_id) = &gw_lnd.iroh_gateway_id
+    if let Some(iroh_gw_id) = &iroh_lnd_id
         && crate::util::FedimintCli::version_or_default().await >= *VERSION_0_10_0_ALPHA
     {
         info!("Testing outgoing payment from client to LDK via IROH LND Gateway");
@@ -1238,6 +1245,7 @@ pub async fn cli_load_test_tool_test(dev_fed: DevFed) -> Result<()> {
     let invite_code = dev_fed.fed.invite_code()?;
     dev_fed
         .gw_lnd
+        .client()
         .set_federation_routing_fee(dev_fed.fed.calculate_federation_id(), 0, 0)
         .await?;
     run_standard_load_test(&load_test_temp, &invite_code).await?;
@@ -1399,14 +1407,13 @@ pub async fn lightning_gw_reconnect_test(
 
     tracing::info!("Stopping LND");
     // Verify that the gateway can query the lightning node for the pubkey and alias
-    let mut info_cmd = cmd!(gw_lnd, "info");
-    assert!(info_cmd.run().await.is_ok());
+    assert!(gw_lnd.client().get_info().await.is_ok());
 
     // Verify that after stopping the lightning node, info no longer returns the
     // node public key since the lightning node is unreachable.
     let ln_type = gw_lnd.ln.ln_type().to_string();
     gw_lnd.stop_lightning_node().await?;
-    let lightning_info = info_cmd.out_json().await?;
+    let lightning_info = gw_lnd.client().get_info().await?;
     if gw_lnd.gatewayd_version < *VERSION_0_10_0_ALPHA {
         let lightning_pub_key: Option<String> =
             serde_json::from_value(lightning_info["lightning_pub_key"].clone())?;
@@ -1471,8 +1478,8 @@ pub async fn gw_reboot_test(dev_fed: DevFed, process_mgr: &ProcessManager) -> Re
     // Wait for gateways to sync to chain
     let block_height = bitcoind.get_block_count().await? - 1;
     try_join!(
-        gw_lnd.wait_for_block_height(block_height),
-        gw_ldk.wait_for_block_height(block_height),
+        async { gw_lnd.client().wait_for_block_height(block_height).await },
+        async { gw_ldk.client().wait_for_block_height(block_height).await },
     )?;
 
     // Drop references to gateways so the test can kill them
@@ -1489,7 +1496,7 @@ pub async fn gw_reboot_test(dev_fed: DevFed, process_mgr: &ProcessManager) -> Re
     // funds being stuck
     info!("Making payment while gateway is down");
     let initial_client_balance = client.balance().await?;
-    let invoice = gw_ldk_second.create_invoice(3000).await?;
+    let invoice = gw_ldk_second.client().create_invoice(3000).await?;
     ln_pay(&client, invoice.to_string(), lnd_gateway_id.clone())
         .await
         .expect_err("Expected ln-pay to return error because the gateway is not online");
@@ -1517,8 +1524,7 @@ pub async fn gw_reboot_test(dev_fed: DevFed, process_mgr: &ProcessManager) -> Re
     poll(
         "Waiting for LND Gateway Running state after reboot",
         || async {
-            let mut new_lnd_cmd = cmd!(new_gw_lnd, "info");
-            let lnd_value = new_lnd_cmd.out_json().await.map_err(ControlFlow::Continue)?;
+            let lnd_value = new_gw_lnd.client().get_info().await.map_err(ControlFlow::Continue)?;
             let reboot_gateway_state: String = serde_json::from_value(lnd_value["gateway_state"].clone()).context("invalid gateway state").map_err(ControlFlow::Break)?;
             let reboot_gateway_id = fedimint_core::secp256k1::PublicKey::from_str(&new_gw_lnd.gateway_id).expect("Could not convert public key");
 
@@ -1537,8 +1543,7 @@ pub async fn gw_reboot_test(dev_fed: DevFed, process_mgr: &ProcessManager) -> Re
     poll(
         "Waiting for LDK Gateway Running state after reboot",
         || async {
-            let mut new_ldk_cmd = cmd!(new_gw_ldk, "info");
-            let ldk_value = new_ldk_cmd.out_json().await.map_err(ControlFlow::Continue)?;
+            let ldk_value = new_gw_ldk.client().get_info().await.map_err(ControlFlow::Continue)?;
             let reboot_gateway_state: String = serde_json::from_value(ldk_value["gateway_state"].clone()).context("invalid gateway state").map_err(ControlFlow::Break)?;
             let reboot_gateway_id = fedimint_core::secp256k1::PublicKey::from_str(&new_gw_ldk.gateway_id).expect("Could not convert public key");
 
@@ -1567,6 +1572,7 @@ pub async fn do_try_create_and_pay_invoice(
     // info again.
     poll("Waiting for info to succeed after restart", || async {
         gw_lnd
+            .client()
             .lightning_pubkey()
             .await
             .map_err(ControlFlow::Continue)?;
@@ -1588,6 +1594,7 @@ pub async fn do_try_create_and_pay_invoice(
         LightningNodeType::Lnd => {
             // Pay the invoice using LDK
             gw_ldk
+                .client()
                 .pay_invoice(Bolt11Invoice::from_str(&invoice).expect("Could not parse invoice"))
                 .await?;
         }
@@ -2698,6 +2705,7 @@ pub async fn handle_command(cmd: TestCmd, common_args: CommonArgs) -> Result<()>
                     let gw_lnd = dev_fed.gw_lnd.clone();
                     let fed = dev_fed.fed.clone();
                     gw_lnd
+                        .client()
                         .set_federation_routing_fee(dev_fed.fed.calculate_federation_id(), 0, 0)
                         .await?;
                     task_group.spawn_cancellable("faucet", async move {

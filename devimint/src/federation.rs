@@ -752,7 +752,7 @@ impl Federation {
         info!(amount, deposit_fees, "Pegging-in gateway funds");
         let fed_id = self.calculate_federation_id();
         for gw in gateways.clone() {
-            let pegin_addr = gw.get_pegin_addr(&fed_id).await?;
+            let pegin_addr = gw.client().get_pegin_addr(&fed_id).await?;
             self.bitcoind
                 .send_to(pegin_addr, amount + deposit_fees)
                 .await?;
@@ -762,7 +762,11 @@ impl Federation {
         let bitcoind_block_height: u64 = self.bitcoind.get_block_count().await? - 1;
         try_join_all(gateways.into_iter().map(|gw| {
             poll("gateway pegin", || async {
-                let gw_info = gw.get_info().await.map_err(ControlFlow::Continue)?;
+                let gw_info = gw
+                    .client()
+                    .get_info()
+                    .await
+                    .map_err(ControlFlow::Continue)?;
 
                 let block_height: u64 = if gw.gatewayd_version < *VERSION_0_10_0_ALPHA {
                     gw_info["block_height"]
@@ -781,6 +785,7 @@ impl Federation {
                 }
 
                 let gateway_balance = gw
+                    .client()
                     .ecash_balance(fed_id.clone())
                     .await
                     .map_err(ControlFlow::Continue)?;
@@ -804,6 +809,7 @@ impl Federation {
         let mut peg_outs: BTreeMap<LightningNodeType, (Amount, WithdrawResponse)> = BTreeMap::new();
         for gw in gateways.clone() {
             let prev_fed_ecash_balance = gw
+                .client()
                 .get_balances()
                 .await?
                 .ecash_balances
@@ -813,20 +819,10 @@ impl Federation {
                 .ecash_balance_msats;
 
             let pegout_address = self.bitcoind.get_new_address().await?;
-            let value = cmd!(
-                gw,
-                "ecash",
-                "pegout",
-                "--federation-id",
-                fed_id,
-                "--amount",
-                amount,
-                "--address",
-                pegout_address
-            )
-            .out_json()
-            .await?;
-            let response: WithdrawResponse = serde_json::from_value(value)?;
+            let response = gw
+                .client()
+                .pegout(fed_id.clone(), amount, pegout_address)
+                .await?;
             peg_outs.insert(gw.ln.ln_type(), (prev_fed_ecash_balance, response));
         }
         self.bitcoind.mine_blocks(21).await?;
@@ -840,6 +836,7 @@ impl Federation {
 
         for gw in gateways.clone() {
             let after_fed_ecash_balance = gw
+                .client()
                 .get_balances()
                 .await?
                 .ecash_balances

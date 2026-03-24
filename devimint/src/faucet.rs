@@ -27,13 +27,19 @@ impl Faucet {
 
     async fn pay_invoice(&self, invoice: String) -> anyhow::Result<()> {
         self.gw_ldk
+            .client()
             .pay_invoice(Bolt11Invoice::from_str(&invoice).expect("Could not parse invoice"))
             .await?;
         Ok(())
     }
 
     async fn generate_invoice(&self, amount: u64) -> anyhow::Result<String> {
-        Ok(self.gw_ldk.create_invoice(amount).await?.to_string())
+        Ok(self
+            .gw_ldk
+            .client()
+            .create_invoice(amount)
+            .await?
+            .to_string())
     }
 
     fn get_invite_code(&self) -> anyhow::Result<String> {

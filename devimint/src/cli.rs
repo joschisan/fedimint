@@ -299,6 +299,7 @@ pub async fn handle_command(cmd: Cmd, common_args: CommonArgs) -> Result<()> {
                                 let address = dev_fed
                                     .gw_lnd_registered()
                                     .await?
+                                    .client()
                                     .get_pegin_addr(&dev_fed.fed().await?.calculate_federation_id())
                                     .await?;
                                 debug!(
@@ -317,6 +318,7 @@ pub async fn handle_command(cmd: Cmd, common_args: CommonArgs) -> Result<()> {
                                 if crate::util::supports_lnv2() {
                                     let gw_ldk = dev_fed.gw_ldk_connected().await?;
                                     let address = gw_ldk
+                                        .client()
                                         .get_pegin_addr(
                                             &dev_fed.fed().await?.calculate_federation_id(),
                                         )
