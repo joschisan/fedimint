@@ -96,9 +96,11 @@ impl TxInfo {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct DepositRange {
-    pub deposits: Vec<bitcoin::TxOut>,
-    pub spent: Vec<u64>,
+pub struct OutputInfo {
+    pub index: u64,
+    pub script: ScriptBuf,
+    pub value: bitcoin::Amount,
+    pub spent: bool,
 }
 
 #[derive(Debug)]

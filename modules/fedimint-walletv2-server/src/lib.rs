@@ -23,7 +23,7 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, Sequence, Transaction, TxIn, TxOut, Txid};
 use common::config::WalletConfigConsensus;
 use common::{
-    DepositRange, WalletCommonInit, WalletConsensusItem, WalletInput, WalletModuleTypes,
+    OutputInfo, WalletCommonInit, WalletConsensusItem, WalletInput, WalletModuleTypes,
     WalletOutput, WalletOutputOutcome,
 };
 use db::{
@@ -65,8 +65,8 @@ use fedimint_walletv2_common::config::{
     FeeConsensus, WalletClientConfig, WalletConfig, WalletConfigPrivate,
 };
 use fedimint_walletv2_common::endpoint_constants::{
-    CONSENSUS_BLOCK_COUNT_ENDPOINT, CONSENSUS_FEERATE_ENDPOINT, DEPOSIT_RANGE_ENDPOINT,
-    FEDERATION_WALLET_ENDPOINT, PENDING_TRANSACTION_CHAIN_ENDPOINT, RECEIVE_FEE_ENDPOINT,
+    CONSENSUS_BLOCK_COUNT_ENDPOINT, CONSENSUS_FEERATE_ENDPOINT, FEDERATION_WALLET_ENDPOINT,
+    OUTPUT_INFO_SLICE_ENDPOINT, PENDING_TRANSACTION_CHAIN_ENDPOINT, RECEIVE_FEE_ENDPOINT,
     SEND_FEE_ENDPOINT, TRANSACTION_CHAIN_ENDPOINT, TRANSACTION_ID_ENDPOINT,
 };
 use fedimint_walletv2_common::{
@@ -841,9 +841,9 @@ impl ServerModule for Wallet {
                 }
             },
             api_endpoint! {
-                DEPOSIT_RANGE_ENDPOINT,
+                OUTPUT_INFO_SLICE_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, context, params: (u64, u64)| -> DepositRange {
+                async |module: &Wallet, context, params: (u64, u64)| -> Vec<OutputInfo> {
                     let db = context.db();
                     let mut dbtx = db.begin_transaction_nc().await;
                     Ok(module.get_deposits(&mut dbtx, params.0, params.1).await)
@@ -1288,22 +1288,26 @@ impl Wallet {
         dbtx: &mut DatabaseTransaction<'_>,
         start_index: u64,
         end_index: u64,
-    ) -> DepositRange {
-        let deposits = dbtx
-            .find_by_range(DepositKey(start_index)..DepositKey(end_index))
-            .await
-            .map(|entry| entry.1.1)
-            .collect()
-            .await;
-
-        let spent = dbtx
+    ) -> Vec<OutputInfo> {
+        let spent: BTreeSet<u64> = dbtx
             .find_by_range(SpentDepositKey(start_index)..SpentDepositKey(end_index))
             .await
             .map(|entry| entry.0.0)
             .collect()
             .await;
 
-        DepositRange { deposits, spent }
+        dbtx.find_by_range(DepositKey(start_index)..DepositKey(end_index))
+            .await
+            .filter_map(|entry| {
+                std::future::ready(entry.1.1.script_pubkey.is_p2wsh().then(|| OutputInfo {
+                    index: entry.0.0,
+                    script: entry.1.1.script_pubkey,
+                    value: entry.1.1.value,
+                    spent: spent.contains(&entry.0.0),
+                }))
+            })
+            .collect()
+            .await
     }
 
     async fn pending_tx_chain(&self, dbtx: &mut DatabaseTransaction<'_>) -> Vec<TxInfo> {

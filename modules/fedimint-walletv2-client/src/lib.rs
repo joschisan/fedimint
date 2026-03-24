@@ -62,8 +62,8 @@ use strum::IntoEnumIterator as _;
 use thiserror::Error;
 use tracing::{info, warn};
 
-/// Number of deposit log entries to scan per batch.
-const DEPOSIT_RANGE_SIZE: u64 = 1000;
+/// Number of output info entries to scan per batch.
+const SLICE_SIZE: u64 = 1000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WalletOperationMeta {
@@ -538,9 +538,9 @@ impl WalletClientModule {
             .map(|&i| (self.derive_address(i).script_pubkey(), i))
             .collect();
 
-        let deposit_range = self
+        let outputs = self
             .module_api
-            .deposit_range(next_deposit_index, next_deposit_index + DEPOSIT_RANGE_SIZE)
+            .output_info_slice(next_deposit_index, next_deposit_index + SLICE_SIZE)
             .await?;
 
         info!(
@@ -548,8 +548,8 @@ impl WalletClientModule {
             "Scanning for deposits..."
         );
 
-        for (deposit_index, tx_out) in (next_deposit_index..).zip(deposit_range.deposits.clone()) {
-            if let Some(&address_index) = address_map.get(&tx_out.script_pubkey) {
+        for output in &outputs {
+            if let Some(&address_index) = address_map.get(&output.script) {
                 let next_address_index = valid_indices
                     .last()
                     .copied()
@@ -570,7 +570,7 @@ impl WalletClientModule {
                     address_map.insert(self.derive_address(index).script_pubkey(), index);
                 }
 
-                if !deposit_range.spent.contains(&deposit_index) {
+                if !output.spent {
                     // In order to not overpay on fees we choose to wait,
                     // the congestion will clear up within a few blocks.
                     if self.module_api.pending_tx_chain().await?.len() >= 3 {
@@ -583,14 +583,9 @@ impl WalletClientModule {
                         .await?
                         .ok_or(anyhow!("No consensus feerate is available"))?;
 
-                    if tx_out.value > receive_fee {
+                    if output.value > receive_fee {
                         let (operation_id, txid) = self
-                            .receive_deposit(
-                                deposit_index,
-                                tx_out.value,
-                                address_index,
-                                receive_fee,
-                            )
+                            .receive_deposit(output.index, output.value, address_index, receive_fee)
                             .await;
 
                         self.client_ctx
@@ -605,13 +600,13 @@ impl WalletClientModule {
 
             let mut dbtx = self.db.begin_transaction().await;
 
-            dbtx.insert_entry(&NextDepositIndexKey, &(deposit_index + 1))
+            dbtx.insert_entry(&NextDepositIndexKey, &(output.index + 1))
                 .await;
 
             dbtx.commit_tx_result().await?;
         }
 
-        Ok(deposit_range.deposits.len() as u64 == DEPOSIT_RANGE_SIZE)
+        Ok(!outputs.is_empty())
     }
 }
 
