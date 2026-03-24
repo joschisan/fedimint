@@ -1089,6 +1089,7 @@ where
                                 tr {
                                     th { "Remote PubKey" }
                                     th { "Alias" }
+                                    th { "Host" }
                                     th { "Funding OutPoint" }
                                     th { "Size (sats)" }
                                     th { "Active" }
@@ -1136,6 +1137,13 @@ where
                                             }
                                         }
                                         td {
+                                            @if let Some(addr) = &ch.remote_address {
+                                                (addr)
+                                            } @else {
+                                                span class="text-muted" { "-" }
+                                            }
+                                        }
+                                        td {
                                             @if !funding_outpoint.is_empty() {
                                                 span
                                                     class="text-abbrev-copy"
@@ -1177,7 +1185,16 @@ where
                                             }
                                         }
 
-                                        td style="width: 70px" {
+                                        td style="width: 110px" {
+                                            @let open_row_id = format!("open-form-{}", ch.remote_pubkey);
+                                            // + button to open another channel with this peer
+                                            button class="btn btn-sm btn-outline-primary me-1"
+                                                type="button"
+                                                data-bs-toggle="collapse"
+                                                data-bs-target=(format!("#{open_row_id}"))
+                                                aria-expanded="false"
+                                                aria-controls=(open_row_id)
+                                            { "+" }
                                             // X button toggles a per-row collapse
                                             button class="btn btn-sm btn-outline-danger"
                                                 type="button"
@@ -1189,8 +1206,65 @@ where
                                         }
                                     }
 
+                                    // Collapsible open channel form for this peer
+                                    tr class="collapse" id=(format!("open-form-{}", ch.remote_pubkey)) {
+                                        td colspan="8" {
+                                            div class="card card-body" {
+                                                form
+                                                    hx-post=(OPEN_CHANNEL_ROUTE)
+                                                    hx-target="#channels-container"
+                                                    hx-swap="outerHTML"
+                                                {
+                                                    h6 class="card-title" {
+                                                        "Open New Channel with "
+                                                        @if let Some(alias) = &ch.remote_node_alias {
+                                                            (alias)
+                                                        } @else {
+                                                            (format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len()-8..]))
+                                                        }
+                                                    }
+
+                                                    input type="hidden"
+                                                        name="pubkey"
+                                                        value=(ch.remote_pubkey.to_string()) {}
+
+                                                    @if let Some(addr) = &ch.remote_address {
+                                                        input type="hidden"
+                                                            name="host"
+                                                            value=(addr) {}
+                                                    } @else {
+                                                        div class="mb-2" {
+                                                            label class="form-label" { "Host" }
+                                                            input type="text"
+                                                                name="host"
+                                                                class="form-control"
+                                                                placeholder="1.2.3.4:9735"
+                                                                required {}
+                                                        }
+                                                    }
+
+                                                    div class="mb-2" {
+                                                        label class="form-label" { "Channel Size (sats)" }
+                                                        input type="number"
+                                                            name="channel_size_sats"
+                                                            class="form-control"
+                                                            placeholder="1000000"
+                                                            required {}
+                                                    }
+
+                                                    input type="hidden" name="push_amount_sats" value="0" {}
+
+                                                    button type="submit"
+                                                        class="btn btn-success btn-sm" {
+                                                        "Confirm Open"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     tr class="collapse" id=(row_id) {
-                                        td colspan="7" {
+                                        td colspan="8" {
                                             div class="card card-body" {
                                                 form
                                                     hx-post=(CLOSE_CHANNEL_ROUTE)

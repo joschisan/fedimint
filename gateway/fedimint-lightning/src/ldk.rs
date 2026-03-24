@@ -652,20 +652,29 @@ impl ILnRpcClient for GatewayLdkClient {
         let mut channels = Vec::new();
         let network_graph = self.node.network_graph();
 
+        // Build a map of peer pubkey -> address from connected/known peers
+        let peer_addresses: std::collections::HashMap<_, _> = self
+            .node
+            .list_peers()
+            .into_iter()
+            .map(|peer| (peer.node_id, peer.address.to_string()))
+            .collect();
+
         for channel_details in self.node.list_channels().iter() {
+            let node_id = NodeId::from_pubkey(&channel_details.counterparty_node_id);
+            let node_info = network_graph.node(&node_id);
+
             // Look up peer alias from network graph
-            let remote_node_alias = {
-                let node_id = NodeId::from_pubkey(&channel_details.counterparty_node_id);
-                network_graph.node(&node_id).and_then(|node_info| {
-                    node_info
-                        .announcement_info
-                        .as_ref()
-                        .and_then(|announcement| {
-                            let alias = announcement.alias().to_string();
-                            if alias.is_empty() { None } else { Some(alias) }
-                        })
+            let remote_node_alias = node_info.as_ref().and_then(|info| {
+                info.announcement_info.as_ref().and_then(|announcement| {
+                    let alias = announcement.alias().to_string();
+                    if alias.is_empty() { None } else { Some(alias) }
                 })
-            };
+            });
+
+            let remote_address = peer_addresses
+                .get(&channel_details.counterparty_node_id)
+                .cloned();
 
             channels.push(ChannelInfo {
                 remote_pubkey: channel_details.counterparty_node_id,
@@ -675,6 +684,7 @@ impl ILnRpcClient for GatewayLdkClient {
                 is_active: channel_details.is_usable,
                 funding_outpoint: channel_details.funding_txo,
                 remote_node_alias,
+                remote_address,
             });
         }
 

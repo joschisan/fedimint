@@ -436,6 +436,9 @@ impl<'a> GatewayClient {
                 let remote_node_alias = channel
                     .get("remote_node_alias")
                     .map(std::string::ToString::to_string);
+                let remote_address = channel
+                    .get("remote_address")
+                    .map(std::string::ToString::to_string);
                 Ok(ChannelInfo {
                     remote_pubkey: remote_pubkey
                         .parse()
@@ -446,6 +449,7 @@ impl<'a> GatewayClient {
                     is_active,
                     funding_outpoint,
                     remote_node_alias,
+                    remote_address,
                 })
             })
             .collect::<Result<Vec<ChannelInfo>>>()?;

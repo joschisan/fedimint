@@ -324,6 +324,8 @@ pub struct ChannelInfo {
     pub is_active: bool,
     pub funding_outpoint: Option<OutPoint>,
     pub remote_node_alias: Option<String>,
+    #[serde(default)]
+    pub remote_address: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
