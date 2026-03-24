@@ -41,6 +41,7 @@ use fedimint_mintv2_common::endpoint_constants::{
 use fedimint_mintv2_common::{
     Denomination, MODULE_CONSENSUS_VERSION, MintCommonInit, MintConsensusItem, MintInput,
     MintInputError, MintModuleTypes, MintOutput, MintOutputError, MintOutputOutcome, RecoveryItem,
+    verify_note,
 };
 use fedimint_server_core::config::{PeerHandleOps, eval_poly_g2};
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
@@ -381,9 +382,9 @@ impl ServerModule for Mint {
             .consensus
             .tbs_agg_pks
             .get(&input.note.denomination)
-            .ok_or(MintInputError::InvalidAmountTier)?;
+            .ok_or(MintInputError::InvalidDenomination)?;
 
-        if !input.note.verify(*pk) {
+        if !verify_note(input.note, *pk) {
             return Err(MintInputError::InvalidSignature);
         }
 
@@ -416,6 +417,7 @@ impl ServerModule for Mint {
         .await;
 
         let amount = input.note.amount();
+
         Ok(InputMeta {
             amount: TransactionItemAmounts {
                 amounts: Amounts::new_bitcoin(amount),
@@ -439,7 +441,7 @@ impl ServerModule for Mint {
             .tbs_sks
             .get(&output.denomination)
             .map(|key| tbs::sign_message(output.nonce, *key))
-            .ok_or(MintOutputError::InvalidAmountTier)?;
+            .ok_or(MintOutputError::InvalidDenomination)?;
 
         // Store by outpoint for efficient range-based retrieval
         dbtx.insert_entry(&BlindedSignatureShareKey(outpoint), &signature)
@@ -472,6 +474,7 @@ impl ServerModule for Mint {
         .await;
 
         let amount = output.amount();
+
         Ok(TransactionItemAmounts {
             amounts: Amounts::new_bitcoin(amount),
             fees: Amounts::new_bitcoin(self.cfg.consensus.fee_consensus.fee(amount)),
@@ -505,17 +508,9 @@ impl ServerModule for Mint {
                 SIGNATURE_SHARES_ENDPOINT,
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, range: fedimint_core::OutPointRange| -> Vec<BlindedSignatureShare> {
-                    let start_key = BlindedSignatureShareKey(range.start_out_point());
-                    let end_key = BlindedSignatureShareKey(range.end_out_point());
-
                     let db = context.db();
                     let mut dbtx = db.begin_transaction_nc().await;
-                    Ok(dbtx
-                        .find_by_range(start_key..end_key)
-                        .await
-                        .map(|entry| entry.1)
-                        .collect()
-                        .await)
+                    Ok(get_signature_shares(&mut dbtx, range).await)
                 }
             },
             api_endpoint! {
@@ -524,17 +519,7 @@ impl ServerModule for Mint {
                 async |_module: &Mint, context, messages: Vec<tbs::BlindedMessage>| -> Vec<BlindedSignatureShare> {
                     let db = context.db();
                     let mut dbtx = db.begin_transaction_nc().await;
-                    let mut shares = Vec::new();
-
-                    for message in messages {
-                        let share = dbtx.get_value(&BlindedSignatureShareRecoveryKey(message))
-                            .await
-                            .ok_or(ApiError::bad_request("No blinded signature share found".to_string()))?;
-
-                        shares.push(share);
-                    }
-
-                    Ok(shares)
+                    get_signature_shares_recovery(&mut dbtx, messages).await
                 }
             },
             api_endpoint! {
@@ -566,6 +551,40 @@ impl ServerModule for Mint {
             },
         ]
     }
+}
+
+async fn get_signature_shares(
+    dbtx: &mut DatabaseTransaction<'_>,
+    range: fedimint_core::OutPointRange,
+) -> Vec<BlindedSignatureShare> {
+    let start_key = BlindedSignatureShareKey(range.start_out_point());
+    let end_key = BlindedSignatureShareKey(range.end_out_point());
+
+    dbtx.find_by_range(start_key..end_key)
+        .await
+        .map(|entry| entry.1)
+        .collect()
+        .await
+}
+
+async fn get_signature_shares_recovery(
+    dbtx: &mut DatabaseTransaction<'_>,
+    messages: Vec<tbs::BlindedMessage>,
+) -> Result<Vec<BlindedSignatureShare>, ApiError> {
+    let mut shares = Vec::new();
+
+    for message in messages {
+        let share = dbtx
+            .get_value(&BlindedSignatureShareRecoveryKey(message))
+            .await
+            .ok_or(ApiError::bad_request(
+                "No blinded signature share found".to_string(),
+            ))?;
+
+        shares.push(share);
+    }
+
+    Ok(shares)
 }
 
 async fn get_recovery_count(dbtx: &mut DatabaseTransaction<'_>) -> u64 {
