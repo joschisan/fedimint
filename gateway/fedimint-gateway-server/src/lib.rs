@@ -218,6 +218,79 @@ impl Registration {
     }
 }
 
+#[bon::bon]
+impl Gateway {
+    /// Construct a [`Gateway`] using a fluent builder API.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let gateway = Gateway::builder(lightning_mode, client_builder, gateway_db)
+    ///     .listen(addr)
+    ///     .api_addr(url)
+    ///     .bcrypt_password_hash(hash)
+    ///     .network(Network::Regtest)
+    ///     .gateway_state(state)
+    ///     .chain_source(chain_source)
+    ///     .build()
+    ///     .await?;
+    /// ```
+    #[builder(start_fn = builder, finish_fn = build)]
+    pub async fn new_with_builder(
+        #[builder(start_fn)] lightning_mode: LightningMode,
+        #[builder(start_fn)] client_builder: GatewayClientBuilder,
+        #[builder(start_fn)] gateway_db: Database,
+        bcrypt_password_hash: bcrypt::HashParts,
+        gateway_state: GatewayState,
+        chain_source: ChainSource,
+        #[builder(default = ([127, 0, 0, 1], 8175).into())] listen: SocketAddr,
+        api_addr: Option<SafeUrl>,
+        #[builder(default = DEFAULT_NETWORK)] network: Network,
+        #[builder(default = DEFAULT_NUM_ROUTE_HINTS)] num_route_hints: u32,
+        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] default_routing_fees: PaymentFee,
+        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)]
+        default_transaction_fees: PaymentFee,
+        iroh_listen: Option<SocketAddr>,
+        iroh_dns: Option<SafeUrl>,
+        #[builder(default)] iroh_relays: Vec<SafeUrl>,
+        metrics_listen: Option<SocketAddr>,
+    ) -> anyhow::Result<Gateway> {
+        let versioned_api = api_addr.map(|addr| {
+            addr.join(V1_API_ENDPOINT)
+                .expect("Failed to version gateway API address")
+        });
+
+        let metrics_listen = metrics_listen.unwrap_or_else(|| {
+            SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                listen.port() + 1,
+            )
+        });
+
+        Gateway::new(
+            lightning_mode,
+            GatewayParameters {
+                listen,
+                versioned_api,
+                bcrypt_password_hash,
+                network,
+                num_route_hints,
+                default_routing_fees,
+                default_transaction_fees,
+                iroh_listen,
+                iroh_dns,
+                iroh_relays,
+                skip_setup: true,
+                metrics_listen,
+            },
+            gateway_db,
+            client_builder,
+            gateway_state,
+            chain_source,
+        )
+        .await
+    }
+}
+
 /// The action to take after handling a payment stream.
 enum ReceivePaymentStreamAction {
     RetryAfterDelay,
@@ -438,56 +511,6 @@ async fn calculate_max_withdrawable(
 }
 
 impl Gateway {
-    /// Creates a new gateway but with a custom module registry provided inside
-    /// `client_builder`. Currently only used for testing.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn new_with_custom_registry(
-        lightning_mode: LightningMode,
-        client_builder: GatewayClientBuilder,
-        listen: SocketAddr,
-        api_addr: SafeUrl,
-        bcrypt_password_hash: bcrypt::HashParts,
-        bcrypt_liquidity_manager_password_hash: Option<bcrypt::HashParts>,
-        network: Network,
-        num_route_hints: u32,
-        gateway_db: Database,
-        gateway_state: GatewayState,
-        chain_source: ChainSource,
-        iroh_listen: Option<SocketAddr>,
-    ) -> anyhow::Result<Gateway> {
-        let versioned_api = api_addr
-            .join(V1_API_ENDPOINT)
-            .expect("Failed to version gateway API address");
-        // Default metrics listen to localhost on UI port + 1
-        let metrics_listen = SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-            listen.port() + 1,
-        );
-        Gateway::new(
-            lightning_mode,
-            GatewayParameters {
-                listen,
-                versioned_api: Some(versioned_api),
-                bcrypt_password_hash,
-                bcrypt_liquidity_manager_password_hash,
-                network,
-                num_route_hints,
-                default_routing_fees: PaymentFee::TRANSACTION_FEE_DEFAULT,
-                default_transaction_fees: PaymentFee::TRANSACTION_FEE_DEFAULT,
-                iroh_listen,
-                iroh_dns: None,
-                iroh_relays: vec![],
-                skip_setup: true,
-                metrics_listen,
-            },
-            gateway_db,
-            client_builder,
-            gateway_state,
-            chain_source,
-        )
-        .await
-    }
-
     /// Returns a bitcoind client using the credentials that were passed in from
     /// the environment variables.
     fn get_bitcoind_client(
@@ -642,7 +665,7 @@ impl Gateway {
     }
 
     /// Helper function for creating a gateway from either
-    /// `new_with_default_modules` or `new_with_custom_registry`.
+    /// `new_with_default_modules` or `Gateway::builder`.
     async fn new(
         lightning_mode: LightningMode,
         gateway_parameters: GatewayParameters,

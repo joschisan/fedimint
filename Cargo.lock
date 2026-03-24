@@ -3348,6 +3348,7 @@ dependencies = [
  "axum 0.8.8",
  "bcrypt",
  "bitcoin",
+ "bon",
  "clap",
  "erased-serde",
  "esplora-client 0.12.3",

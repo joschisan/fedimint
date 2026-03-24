@@ -263,11 +263,8 @@ impl Fixtures {
             env::var(FM_PORT_ESPLORA_ENV).unwrap_or(String::from("50002"))
         ))
         .expect("Failed to parse default esplora server");
-        let esplora_chain_source = ChainSource::Esplora {
-            server_url: esplora_server_url,
-        };
 
-        Gateway::new_with_custom_registry(
+        Gateway::builder(
             // Fixtures does not use real lightning connection, so just fake the connection
             // parameters
             LightningMode::Lnd {
@@ -276,23 +273,26 @@ impl Fixtures {
                 lnd_macaroon: "FakeMacaroon".to_string(),
             },
             client_builder,
-            listen,
-            address.clone(),
+            gateway_db,
+        )
+        .listen(listen)
+        .api_addr(address)
+        .bcrypt_password_hash(
             bcrypt::HashParts::from_str(
                 &bcrypt::hash(DEFAULT_GATEWAY_PASSWORD, bcrypt::DEFAULT_COST).unwrap(),
             )
             .unwrap(),
-            None,
-            bitcoin::Network::Regtest,
-            0,
-            gateway_db,
-            // Manually set the gateway's state to `Running`. In tests, we do don't run the
-            // webserver or intercept HTLCs, so this is necessary for instructing the
-            // gateway that it is connected to the mock Lightning node.
-            fedimint_gateway_server::GatewayState::Running { lightning_context },
-            esplora_chain_source,
-            None,
         )
+        .network(bitcoin::Network::Regtest)
+        .num_route_hints(0)
+        // Manually set the gateway's state to `Running`. In tests, we don't run the
+        // webserver or intercept HTLCs, so this is necessary for instructing the
+        // gateway that it is connected to the mock Lightning node.
+        .gateway_state(fedimint_gateway_server::GatewayState::Running { lightning_context })
+        .chain_source(ChainSource::Esplora {
+            server_url: esplora_server_url,
+        })
+        .build()
         .await
         .expect("Failed to create gateway")
     }
