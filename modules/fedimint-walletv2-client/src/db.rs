@@ -6,7 +6,7 @@ use strum_macros::EnumIter;
 #[repr(u8)]
 #[derive(Clone, Debug, EnumIter)]
 pub enum DbKeyPrefix {
-    NextDepositIndex = 0x31,
+    NextOutputIndex = 0x31,
     ValidAddressIndex = 0x32,
 }
 
@@ -17,12 +17,12 @@ impl std::fmt::Display for DbKeyPrefix {
 }
 
 #[derive(Clone, Debug, Encodable, Decodable, Serialize)]
-pub struct NextDepositIndexKey;
+pub struct NextOutputIndexKey;
 
 impl_db_record!(
-    key = NextDepositIndexKey,
+    key = NextOutputIndexKey,
     value = u64,
-    db_prefix = DbKeyPrefix::NextDepositIndex
+    db_prefix = DbKeyPrefix::NextOutputIndex
 );
 
 #[derive(Clone, Debug, Encodable, Decodable, Serialize)]

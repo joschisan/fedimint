@@ -166,14 +166,14 @@ extensible_associated_module_type!(WalletInput, WalletInputV0, UnknownWalletInpu
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct WalletInputV0 {
-    pub deposit_index: u64,
+    pub output_index: u64,
     pub tweak: PublicKey,
     pub fee: bitcoin::Amount,
 }
 
 impl std::fmt::Display for WalletInputV0 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Wallet PegIn for deposit index {}", self.deposit_index)
+        write!(f, "Wallet PegIn for output index {}", self.output_index)
     }
 }
 
@@ -209,11 +209,11 @@ impl std::fmt::Display for WalletOutputOutcome {
 pub enum WalletInputError {
     #[error("The wallet input version is not supported by this federation")]
     UnknownInputVariant(#[from] UnknownWalletInputVariantError),
-    #[error("The deposit has already been claimed")]
-    DepositAlreadySpent,
-    #[error("Unknown deposit index")]
-    UnknownDepositIndex,
-    #[error("The tweak does not match the deposit script")]
+    #[error("The output has already been claimed")]
+    OutputAlreadySpent,
+    #[error("Unknown output index")]
+    UnknownOutputIndex,
+    #[error("The tweak does not match the output script")]
     WrongTweak,
     #[error("No up to date feerate is available at the moment. Please try again later.")]
     NoConsensusFeerateAvailable,

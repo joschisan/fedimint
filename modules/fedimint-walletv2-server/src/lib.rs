@@ -27,8 +27,8 @@ use common::{
     WalletOutput, WalletOutputOutcome,
 };
 use db::{
-    DbKeyPrefix, Deposit, DepositKey, DepositPrefix, FederationWalletKey, FederationWalletPrefix,
-    SignaturesKey, SignaturesPrefix, SignaturesTxidPrefix, SpentDepositKey, SpentDepositPrefix,
+    DbKeyPrefix, FederationWalletKey, FederationWalletPrefix, Output, OutputKey, OutputPrefix,
+    SignaturesKey, SignaturesPrefix, SignaturesTxidPrefix, SpentOutputKey, SpentOutputPrefix,
     TxInfoIndexKey, TxInfoIndexPrefix,
 };
 use fedimint_core::config::{
@@ -151,24 +151,24 @@ impl ModuleInit for WalletInit {
 
         for table in filtered_prefixes {
             match table {
-                DbKeyPrefix::Deposit => {
+                DbKeyPrefix::Output => {
                     push_db_pair_items!(
                         dbtx,
-                        DepositPrefix,
-                        DepositKey,
-                        Deposit,
+                        OutputPrefix,
+                        OutputKey,
+                        Output,
                         wallet,
-                        "Wallet Deposits"
+                        "Wallet Outputs"
                     );
                 }
-                DbKeyPrefix::SpentDeposit => {
+                DbKeyPrefix::SpentOutput => {
                     push_db_pair_items!(
                         dbtx,
-                        SpentDepositPrefix,
-                        SpentDepositKey,
+                        SpentOutputPrefix,
+                        SpentOutputKey,
                         (),
                         wallet,
-                        "Wallet Spent Deposits"
+                        "Wallet Spent Outputs"
                     );
                 }
                 DbKeyPrefix::BlockCountVote => {
@@ -483,23 +483,23 @@ impl ServerModule for Wallet {
         let input = input.ensure_v0_ref()?;
 
         if dbtx
-            .insert_entry(&SpentDepositKey(input.deposit_index), &())
+            .insert_entry(&SpentOutputKey(input.output_index), &())
             .await
             .is_some()
         {
-            return Err(WalletInputError::DepositAlreadySpent);
+            return Err(WalletInputError::OutputAlreadySpent);
         }
 
-        let Deposit(tracked_outpoint, tracked_out) = dbtx
-            .get_value(&DepositKey(input.deposit_index))
+        let Output(tracked_outpoint, tracked_output) = dbtx
+            .get_value(&OutputKey(input.output_index))
             .await
-            .ok_or(WalletInputError::UnknownDepositIndex)?;
+            .ok_or(WalletInputError::UnknownOutputIndex)?;
 
         let tweaked_pubkey = self
             .descriptor(&input.tweak.consensus_hash())
             .script_pubkey();
 
-        if tracked_out.script_pubkey != tweaked_pubkey {
+        if tracked_output.script_pubkey != tweaked_pubkey {
             return Err(WalletInputError::WrongTweak);
         }
 
@@ -516,7 +516,7 @@ impl ServerModule for Wallet {
             return Err(WalletInputError::InsufficientTotalFee);
         }
 
-        let deposit_value = tracked_out
+        let output_value = tracked_output
             .value
             .checked_sub(input.fee)
             .ok_or(WalletInputError::ArithmeticOverflow)?;
@@ -527,7 +527,7 @@ impl ServerModule for Wallet {
             // limit. By induction so is this change value.
             let change_value = wallet
                 .value
-                .checked_add(deposit_value)
+                .checked_add(output_value)
                 .ok_or(WalletInputError::ArithmeticOverflow)?;
 
             let tx = Transaction {
@@ -594,7 +594,7 @@ impl ServerModule for Wallet {
                             tweak: wallet.tweak,
                         },
                         SpentTxOut {
-                            value: tracked_out.value,
+                            value: tracked_output.value,
                             tweak: input.tweak.consensus_hash(),
                         },
                     ],
@@ -607,7 +607,7 @@ impl ServerModule for Wallet {
             dbtx.insert_new_entry(
                 &FederationWalletKey,
                 &FederationWallet {
-                    value: tracked_out.value,
+                    value: tracked_output.value,
                     outpoint: tracked_outpoint,
                     tweak: input.tweak.consensus_hash(),
                 },
@@ -615,7 +615,7 @@ impl ServerModule for Wallet {
             .await;
         }
 
-        let amount = deposit_value
+        let amount = output_value
             .to_sat()
             .checked_mul(1000)
             .map(fedimint_core::Amount::from_msats)
@@ -846,7 +846,7 @@ impl ServerModule for Wallet {
                 async |module: &Wallet, context, params: (u64, u64)| -> Vec<OutputInfo> {
                     let db = context.db();
                     let mut dbtx = db.begin_transaction_nc().await;
-                    Ok(module.get_deposits(&mut dbtx, params.0, params.1).await)
+                    Ok(module.get_outputs(&mut dbtx, params.0, params.1).await)
                 }
             },
             api_endpoint! {
@@ -997,17 +997,14 @@ impl Wallet {
                         };
 
                         let index = dbtx
-                            .find_by_prefix_sorted_descending(&DepositPrefix)
+                            .find_by_prefix_sorted_descending(&OutputPrefix)
                             .await
                             .next()
                             .await
                             .map_or(0, |entry| entry.0.0 + 1);
 
-                        dbtx.insert_new_entry(
-                            &DepositKey(index),
-                            &Deposit(outpoint, tx_out.clone()),
-                        )
-                        .await;
+                        dbtx.insert_new_entry(&OutputKey(index), &Output(outpoint, tx_out.clone()))
+                            .await;
                     }
                 }
             }
@@ -1283,20 +1280,20 @@ impl Wallet {
             .map(|entry| entry.txid)
     }
 
-    async fn get_deposits(
+    async fn get_outputs(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         start_index: u64,
         end_index: u64,
     ) -> Vec<OutputInfo> {
         let spent: BTreeSet<u64> = dbtx
-            .find_by_range(SpentDepositKey(start_index)..SpentDepositKey(end_index))
+            .find_by_range(SpentOutputKey(start_index)..SpentOutputKey(end_index))
             .await
             .map(|entry| entry.0.0)
             .collect()
             .await;
 
-        dbtx.find_by_range(DepositKey(start_index)..DepositKey(end_index))
+        dbtx.find_by_range(OutputKey(start_index)..OutputKey(end_index))
             .await
             .filter_map(|entry| {
                 std::future::ready(entry.1.1.script_pubkey.is_p2wsh().then(|| OutputInfo {

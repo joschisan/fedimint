@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use api::WalletFederationApi;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
-use db::{NextDepositIndexKey, ValidAddressIndexKey, ValidAddressIndexPrefix};
+use db::{NextOutputIndexKey, ValidAddressIndexKey, ValidAddressIndexPrefix};
 use events::{ReceivePaymentEvent, SendPaymentEvent};
 use fedimint_api_client::api::{DynModuleApi, FederationResult};
 use fedimint_client::DynGlobalClientContext;
@@ -193,7 +193,7 @@ impl ClientModuleInit for WalletClientInit {
             module_api: args.module_api().clone(),
         };
 
-        module.spawn_deposit_scanner(args.task_group());
+        module.spawn_output_scanner(args.task_group());
 
         Ok(module)
     }
@@ -365,7 +365,7 @@ impl WalletClientModule {
         }
     }
 
-    /// Returns the next unused deposit address, polling until the initial
+    /// Returns the next unused receive address, polling until the initial
     /// address derivation has completed.
     pub async fn receive(&self) -> Address {
         loop {
@@ -411,10 +411,10 @@ impl WalletClientModule {
         })
     }
 
-    /// Issue ecash for an unspent deposit with a given fee.
-    async fn receive_deposit(
+    /// Issue ecash for an unspent output with a given fee.
+    async fn receive_output(
         &self,
-        deposit_index: u64,
+        output_index: u64,
         amount: bitcoin::Amount,
         address_index: u64,
         fee: bitcoin::Amount,
@@ -423,7 +423,7 @@ impl WalletClientModule {
 
         let client_input = ClientInput::<WalletInput> {
             input: WalletInput::V0(WalletInputV0 {
-                deposit_index,
+                output_index,
                 fee,
                 tweak: self.derive_tweak(address_index).public_key(),
             }),
@@ -485,10 +485,10 @@ impl WalletClientModule {
         (operation_id, range.txid())
     }
 
-    fn spawn_deposit_scanner(&self, task_group: &TaskGroup) {
+    fn spawn_output_scanner(&self, task_group: &TaskGroup) {
         let module = self.clone();
 
-        task_group.spawn_cancellable("deposit-scanner", async move {
+        task_group.spawn_cancellable("output-scanner", async move {
             let mut dbtx = module.db.begin_transaction().await;
 
             if dbtx
@@ -505,14 +505,14 @@ impl WalletClientModule {
             dbtx.commit_tx().await;
 
             loop {
-                match module.check_deposits().await {
+                match module.check_outputs().await {
                     Ok(skip_wait) => {
                         if skip_wait {
                             continue;
                         }
                     }
                     Err(e) => {
-                        warn!(target: LOG_CLIENT_MODULE_WALLETV2, "Failed to fetch deposits: {e}");
+                        warn!(target: LOG_CLIENT_MODULE_WALLETV2, "Failed to fetch outputs: {e}");
                     }
                 }
 
@@ -521,10 +521,10 @@ impl WalletClientModule {
         });
     }
 
-    async fn check_deposits(&self) -> anyhow::Result<bool> {
+    async fn check_outputs(&self) -> anyhow::Result<bool> {
         let mut dbtx = self.db.begin_transaction_nc().await;
 
-        let next_deposit_index = dbtx.get_value(&NextDepositIndexKey).await.unwrap_or(0);
+        let next_output_index = dbtx.get_value(&NextOutputIndexKey).await.unwrap_or(0);
 
         let mut valid_indices: Vec<u64> = dbtx
             .find_by_prefix(&ValidAddressIndexPrefix)
@@ -540,12 +540,12 @@ impl WalletClientModule {
 
         let outputs = self
             .module_api
-            .output_info_slice(next_deposit_index, next_deposit_index + SLICE_SIZE)
+            .output_info_slice(next_output_index, next_output_index + SLICE_SIZE)
             .await?;
 
         info!(
             target: LOG_CLIENT_MODULE_WALLETV2,
-            "Scanning for deposits..."
+            "Scanning for outputs..."
         );
 
         for output in &outputs {
@@ -585,7 +585,7 @@ impl WalletClientModule {
 
                     if output.value > receive_fee {
                         let (operation_id, txid) = self
-                            .receive_deposit(output.index, output.value, address_index, receive_fee)
+                            .receive_output(output.index, output.value, address_index, receive_fee)
                             .await;
 
                         self.client_ctx
@@ -600,7 +600,7 @@ impl WalletClientModule {
 
             let mut dbtx = self.db.begin_transaction().await;
 
-            dbtx.insert_entry(&NextDepositIndexKey, &(output.index + 1))
+            dbtx.insert_entry(&NextOutputIndexKey, &(output.index + 1))
                 .await;
 
             dbtx.commit_tx_result().await?;
