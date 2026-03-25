@@ -224,6 +224,10 @@ pub async fn handle_command(
     match command {
         ClientCmd::Info => get_note_summary(&client).await,
         ClientCmd::Reissue { oob_notes, wait } => {
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli module mint reissue` instead."
+            );
             let amount = oob_notes.total_amount();
 
             let mint = client.get_first_module::<MintClientModule>()?;
@@ -253,6 +257,10 @@ pub async fn handle_command(
             timeout,
             include_invite,
         } => {
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli module mint spend` instead."
+            );
             warn!(
                 target: LOG_CLIENT,
                 "The client will try to double-spend these notes after the duration specified by the --timeout option to recover any unclaimed e-cash."
@@ -299,6 +307,10 @@ pub async fn handle_command(
             }))
         }
         ClientCmd::Split { oob_notes } => {
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli module mint split` instead."
+            );
             let federation = oob_notes.federation_id_prefix();
             let notes = oob_notes
                 .notes()
@@ -322,6 +334,10 @@ pub async fn handle_command(
             }))
         }
         ClientCmd::Combine { oob_notes } => {
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli module mint combine` instead."
+            );
             let federation_id_prefix = match oob_notes
                 .iter()
                 .map(OOBNotes::federation_id_prefix)
@@ -379,6 +395,10 @@ pub async fn handle_command(
             .unwrap())
         }
         ClientCmd::AwaitInvoice { operation_id } => {
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli module ln await-invoice` instead."
+            );
             let lightning_module = &client.get_first_module::<LightningClientModule>()?;
             let mut updates = lightning_module
                 .subscribe_ln_receive(operation_id)
@@ -440,6 +460,10 @@ pub async fn handle_command(
             Ok(serde_json::to_value(outcome).expect("Cant fail"))
         }
         ClientCmd::AwaitLnPay { operation_id } => {
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli module ln await-pay` instead."
+            );
             let lightning_module = client.get_first_module::<LightningClientModule>()?;
             let outcome = lightning_module
                 .await_outgoing_payment(operation_id)
@@ -447,6 +471,10 @@ pub async fn handle_command(
             Ok(serde_json::to_value(outcome).expect("Cant fail"))
         }
         ClientCmd::ListGateways { no_update } => {
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli module ln list-gateways` instead."
+            );
             let lightning_module = client.get_first_module::<LightningClientModule>()?;
             if !no_update {
                 lightning_module.update_gateway_cache().await?;
@@ -459,8 +487,9 @@ pub async fn handle_command(
             Ok(json!(&gateways))
         }
         ClientCmd::DepositAddress => {
-            eprintln!(
-                "`deposit-address` command is deprecated. Use `module wallet new-deposit-address` instead."
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli module wallet new-deposit-address` instead."
             );
             let (operation_id, address, tweak_idx) = client
                 .get_first_module::<WalletClientModule>()?
@@ -475,7 +504,10 @@ pub async fn handle_command(
             })
         }
         ClientCmd::AwaitDeposit { operation_id } => {
-            eprintln!("`await-deposit` is deprecated. Use `module wallet await-deposit` instead.");
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli module wallet await-deposit` instead."
+            );
             client
                 .get_first_module::<WalletClientModule>()?
                 .await_num_deposits_by_operation_id(operation_id, 1)
@@ -539,6 +571,10 @@ pub async fn handle_command(
             }))
         }
         ClientCmd::Withdraw { amount, address } => {
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli module wallet withdraw` instead."
+            );
             let wallet_module = client.get_first_module::<WalletClientModule>()?;
             let address = address.require_network(wallet_module.get_network())?;
             let (amount, fees) = match amount {
@@ -626,10 +662,18 @@ pub async fn handle_command(
             }
         }
         ClientCmd::Config => {
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli dev config` instead."
+            );
             let config = client.get_config_json().await;
             Ok(serde_json::to_value(config).expect("Client config is serializable"))
         }
         ClientCmd::SessionCount => {
+            warn!(
+                target: LOG_CLIENT,
+                "Command deprecated. Use `fedimint-cli dev session-count` instead."
+            );
             let count = client.api().session_count().await?;
             Ok(json!({ "count": count }))
         }
