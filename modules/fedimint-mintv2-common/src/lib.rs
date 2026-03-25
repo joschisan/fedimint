@@ -185,10 +185,8 @@ impl std::fmt::Display for MintOutputOutcome {
 
 pub struct MintModuleTypes;
 
-impl Note {
-    pub fn verify(&self, pk: tbs::AggregatePublicKey) -> bool {
-        tbs::verify(nonce_message(self.nonce), self.signature, pk)
-    }
+pub fn verify_note(note: Note, pk: tbs::AggregatePublicKey) -> bool {
+    tbs::verify(nonce_message(note.nonce), note.signature, pk)
 }
 
 pub fn nonce_message(nonce: PublicKey) -> Message {
@@ -214,7 +212,7 @@ pub enum MintInputError {
     #[error("The note is already spent")]
     SpentCoin,
     #[error("The note has an invalid amount not issued by the mint")]
-    InvalidAmountTier,
+    InvalidDenomination,
     #[error("The note has an invalid signature")]
     InvalidSignature,
 }
@@ -224,5 +222,5 @@ pub enum MintOutputError {
     #[error("The mint output version is not supported by this federation")]
     UnknownOutputVariant(#[from] UnknownMintOutputVariantError),
     #[error("The note has an invalid amount not issued by the mint")]
-    InvalidAmountTier,
+    InvalidDenomination,
 }

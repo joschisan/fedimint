@@ -8,7 +8,7 @@ use fedimint_core::PeerId;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_mintv2_common::Denomination;
+use fedimint_mintv2_common::{Denomination, verify_note};
 use tbs::{AggregatePublicKey, BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use crate::api::MintV2ModuleApi;
@@ -138,11 +138,11 @@ impl MintOutputStateMachine {
 
             let spendable_note = request.finalize(agg_blind_signature);
 
-            if !spendable_note.note().verify(
-                *tbs_pks
-                    .get(&request.denomination)
-                    .expect("No aggregated pk found for denomination"),
-            ) {
+            let pk = *tbs_pks
+                .get(&request.denomination)
+                .expect("No aggregated pk found for denomination");
+
+            if !verify_note(spendable_note.note(), pk) {
                 return MintOutputStateMachine {
                     common: old_state.common,
                     state: OutputSMState::Failure,
