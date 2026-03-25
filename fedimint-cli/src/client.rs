@@ -237,7 +237,7 @@ pub async fn handle_command(
                 let mut updates = mint
                     .subscribe_reissue_external_notes(operation_id)
                     .await
-                    .unwrap()
+                    .expect("just created operation can't already be deleted")
                     .into_stream();
 
                 while let Some(update) = updates.next().await {
@@ -249,7 +249,7 @@ pub async fn handle_command(
                 }
             }
 
-            Ok(serde_json::to_value(amount).unwrap())
+            Ok(serde_json::to_value(amount).expect("Amount is serializable"))
         }
         ClientCmd::Spend {
             amount,
@@ -392,7 +392,7 @@ pub async fn handle_command(
                 operation_id,
                 invoice: invoice.to_string(),
             })
-            .unwrap())
+            .expect("LnInvoiceResponse is serializable"))
         }
         ClientCmd::AwaitInvoice { operation_id } => {
             warn!(
@@ -481,7 +481,9 @@ pub async fn handle_command(
             }
             let gateways = lightning_module.list_gateways().await;
             if gateways.is_empty() {
-                return Ok(serde_json::to_value(Vec::<String>::new()).unwrap());
+                return Ok(
+                    serde_json::to_value(Vec::<String>::new()).expect("empty vec is serializable")
+                );
             }
 
             Ok(json!(&gateways))
@@ -513,7 +515,7 @@ pub async fn handle_command(
                 .await_num_deposits_by_operation_id(operation_id, 1)
                 .await?;
 
-            Ok(serde_json::to_value(()).unwrap())
+            Ok(serde_json::to_value(()).expect("unit type is serializable"))
         }
 
         ClientCmd::Backup { metadata } => {
@@ -523,7 +525,7 @@ pub async fn handle_command(
             client
                 .backup_to_federation(Metadata::from_json_serialized(metadata))
                 .await?;
-            Ok(serde_json::to_value(()).unwrap())
+            Ok(serde_json::to_value(()).expect("unit type is serializable"))
         }
         ClientCmd::Restore { .. } => {
             panic!("Has to be handled before initializing client")
@@ -584,11 +586,10 @@ pub async fn handle_command(
                     let balance =
                         bitcoin::Amount::from_sat(client.get_balance_for_btc().await?.msats / 1000);
                     let fees = wallet_module.get_withdraw_fees(&address, balance).await?;
-                    let amount = balance.checked_sub(fees.amount());
-                    if amount.is_none() {
+                    let Some(amount) = balance.checked_sub(fees.amount()) else {
                         bail!("Not enough funds to pay fees");
-                    }
-                    (amount.unwrap(), fees)
+                    };
+                    (amount, fees)
                 }
                 BitcoinAmountOrAll::Amount(amount) => (
                     amount,
@@ -728,7 +729,7 @@ async fn get_note_summary(client: &ClientHandleArc) -> anyhow::Result<serde_json
         total_num_notes: summary.count_items(),
         denominations_msat: summary,
     })
-    .unwrap())
+    .expect("InfoResponse is serializable"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
