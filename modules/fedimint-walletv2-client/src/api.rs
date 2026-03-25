@@ -23,7 +23,7 @@ pub trait WalletFederationApi {
 
     async fn pending_tx_chain(&self) -> FederationResult<Vec<TxInfo>>;
 
-    async fn tx_chain(&self, n: usize) -> FederationResult<Vec<TxInfo>>;
+    async fn tx_chain(&self) -> FederationResult<Vec<TxInfo>>;
 
     async fn deposit_range(
         &self,
@@ -81,10 +81,10 @@ where
         .await
     }
 
-    async fn tx_chain(&self, n: usize) -> FederationResult<Vec<TxInfo>> {
+    async fn tx_chain(&self) -> FederationResult<Vec<TxInfo>> {
         self.request_current_consensus(
             TRANSACTION_CHAIN_ENDPOINT.to_string(),
-            ApiRequestErased::new(n),
+            ApiRequestErased::new(()),
         )
         .await
     }

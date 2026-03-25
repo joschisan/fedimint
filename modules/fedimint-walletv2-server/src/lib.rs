@@ -861,10 +861,10 @@ impl ServerModule for Wallet {
             api_endpoint! {
                 TRANSACTION_CHAIN_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, context, params: usize| -> Vec<TxInfo> {
+                async |module: &Wallet, context, _params: ()| -> Vec<TxInfo> {
                     let db = context.db();
                     let mut dbtx = db.begin_transaction_nc().await;
-                    Ok(module.tx_chain(&mut dbtx, params).await)
+                    Ok(module.tx_chain(&mut dbtx).await)
                 }
             },
         ]
@@ -1317,10 +1317,9 @@ impl Wallet {
             .await
     }
 
-    async fn tx_chain(&self, dbtx: &mut DatabaseTransaction<'_>, n: usize) -> Vec<TxInfo> {
-        dbtx.find_by_prefix_sorted_descending(&TxInfoPrefix)
+    async fn tx_chain(&self, dbtx: &mut DatabaseTransaction<'_>) -> Vec<TxInfo> {
+        dbtx.find_by_prefix(&TxInfoPrefix)
             .await
-            .take(n)
             .map(|entry| entry.1)
             .collect()
             .await
@@ -1380,8 +1379,8 @@ impl Wallet {
     }
 
     /// Get the current transaction log for UI display
-    pub async fn tx_chain_ui(&self, n: usize) -> Vec<TxInfo> {
-        self.tx_chain(&mut self.db.begin_transaction_nc().await, n)
+    pub async fn tx_chain_ui(&self) -> Vec<TxInfo> {
+        self.tx_chain(&mut self.db.begin_transaction_nc().await)
             .await
     }
 

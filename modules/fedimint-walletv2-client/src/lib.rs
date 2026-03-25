@@ -237,8 +237,8 @@ impl WalletClientModule {
     }
 
     /// Display log of bitcoin transactions.
-    async fn tx_chain(&self, n: usize) -> FederationResult<Vec<TxInfo>> {
-        self.module_api.tx_chain(n).await
+    async fn tx_chain(&self) -> FederationResult<Vec<TxInfo>> {
+        self.module_api.tx_chain().await
     }
 
     /// Fetch the current fee required to send an on-chain payment.
