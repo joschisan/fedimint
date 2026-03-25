@@ -232,6 +232,11 @@ async fn dashboard_view(
             }
         }
 
+        // Conditionally add Wallet V2 UI if the module is available
+        @if let Some(walletv2_module) = state.api.get_module::<fedimint_walletv2_server::Wallet>() {
+            (walletv2::render(walletv2_module).await)
+        }
+
         // Conditionally add Mint V2 UI if the module is available
         @if let Some(mint_module) = state.api.get_module::<fedimint_mintv2_server::Mint>() {
             div class="row gy-4 mt-2" {
@@ -257,11 +262,6 @@ async fn dashboard_view(
                     (meta::render(meta_module).await)
                 }
             }
-        }
-
-        // Conditionally add Wallet V2 UI if the module is available
-        @if let Some(walletv2_module) = state.api.get_module::<fedimint_walletv2_server::Wallet>() {
-            (walletv2::render(walletv2_module).await)
         }
 
         // Guardian Configuration Backup section

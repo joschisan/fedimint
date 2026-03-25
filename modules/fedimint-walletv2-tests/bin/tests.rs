@@ -115,16 +115,9 @@ async fn await_no_pending_txs(client: &Client) -> anyhow::Result<()> {
 }
 
 async fn ensure_tx_chain_length(client: &Client, expected: usize) -> anyhow::Result<()> {
-    let value = cmd!(
-        client,
-        "module",
-        "walletv2",
-        "info",
-        "tx-chain",
-        expected.to_string()
-    )
-    .out_json()
-    .await?;
+    let value = cmd!(client, "module", "walletv2", "info", "tx-chain")
+        .out_json()
+        .await?;
 
     let chain: Vec<serde_json::Value> = serde_json::from_value(value)?;
 

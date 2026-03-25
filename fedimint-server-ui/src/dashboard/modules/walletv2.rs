@@ -1,4 +1,4 @@
-use maud::{Markup, html};
+use maud::{Markup, PreEscaped, html};
 
 // Function to render the Wallet v2 module UI section
 pub async fn render(wallet: &fedimint_walletv2_server::Wallet) -> Markup {
@@ -9,7 +9,7 @@ pub async fn render(wallet: &fedimint_walletv2_server::Wallet) -> Markup {
     let send_fee = wallet.send_fee_ui().await;
     let receive_fee = wallet.receive_fee_ui().await;
     let pending_tx_chain = wallet.pending_tx_chain_ui().await;
-    let tx_chain = wallet.tx_chain_ui(20).await;
+    let tx_chain = wallet.tx_chain_ui().await;
     let recovery_keys = wallet.recovery_keys_ui().await;
 
     let total_pending_vbytes = pending_tx_chain.iter().map(|info| info.vbytes).sum::<u64>();
@@ -18,6 +18,16 @@ pub async fn render(wallet: &fedimint_walletv2_server::Wallet) -> Markup {
         .iter()
         .map(|info| info.fee.to_sat())
         .sum::<u64>();
+
+    let custody_chart_data = if let Some(last) = tx_chain.last() {
+        let mut heights: Vec<u64> = tx_chain.iter().map(|tx| tx.created).collect();
+        let mut values: Vec<f64> = tx_chain.iter().map(|tx| tx.output.to_btc()).collect();
+        heights.push(consensus_block_count);
+        values.push(last.output.to_btc());
+        Some((heights, values))
+    } else {
+        None
+    };
 
     html! {
         div class="row gy-4 mt-2" {
@@ -136,45 +146,58 @@ pub async fn render(wallet: &fedimint_walletv2_server::Wallet) -> Markup {
                         }
 
 
-                        @if !tx_chain.is_empty() {
+                        @if let Some((heights, values)) = &custody_chart_data {
                             div class="mb-4" {
-                                h5 { "Total Transaction Chain" }
-                                table class="table" {
-                                    thead {
-                                        tr {
-                                            th { "Index" }
-                                            th { "Value in Custody" }
-                                            th { "Fee" }
-                                            th { "vBytes" }
-                                            th { "Feerate" }
-                                            th { "Age" }
-                                            th { "Transaction" }
-                                        }
-                                    }
-                                    tbody {
-                                        @for tx in tx_chain {
-                                            tr {
-                                                td { (tx.index) }
-                                                td {
-                                                    @if tx.output >= tx.input {
-                                                        span class="text-success" { "+" (tx.output - tx.input) }
-                                                    } @else {
-                                                        span class="text-danger" { "-" (tx.input - tx.output) }
-                                                    }
-                                                }
-                                                td { (tx.fee.to_sat()) }
-                                                td { (tx.vbytes) }
-                                                td { (tx.feerate()) }
-                                                td { (consensus_block_count.saturating_sub(tx.created)) }
-                                                td {
-                                                    a href={ "https://mempool.space/tx/" (tx.txid) } class="btn btn-sm btn-outline-primary" target="_blank" {
-                                                        "mempool.space"
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                h5 { "Value in Custody" }
+                                canvas id="walletv2-custody-chart" {}
+                                script src="/assets/chart.umd.min.js" {}
+                                (PreEscaped(format!(
+                                    r#"<script>
+                                    document.addEventListener('DOMContentLoaded', function() {{
+                                        var heights = {heights:?};
+                                        var values = {values:?};
+                                        var data = heights.map(function(h, i) {{ return {{x: h, y: values[i]}}; }});
+                                        new Chart(document.getElementById('walletv2-custody-chart'), {{
+                                            type: 'line',
+                                            data: {{
+                                                datasets: [{{
+                                                    label: 'Value in Custody (BTC)',
+                                                    data: data,
+                                                    borderWidth: 2,
+                                                    fill: true,
+                                                    stepped: true,
+                                                    pointRadius: 0
+                                                }}]
+                                            }},
+                                            options: {{
+                                                responsive: true,
+                                                plugins: {{
+                                                    legend: {{ display: false }},
+                                                    tooltip: {{ enabled: false }}
+                                                }},
+                                                scales: {{
+                                                    x: {{
+                                                        type: 'linear',
+                                                        min: heights[0],
+                                                        max: heights[heights.length - 1],
+                                                        title: {{
+                                                            display: true,
+                                                            text: 'Block Height'
+                                                        }}
+                                                    }},
+                                                    y: {{
+                                                        beginAtZero: true,
+                                                        title: {{
+                                                            display: true,
+                                                            text: 'BTC'
+                                                        }}
+                                                    }}
+                                                }}
+                                            }}
+                                        }});
+                                    }});
+                                    </script>"#,
+                                )))
                             }
                         }
 

@@ -37,7 +37,7 @@ enum InfoOpts {
     /// Display the chain of pending bitcoin transactions.
     PendingTxChain,
     /// Display the chain of bitcoin transactions.
-    TxChain { n: usize },
+    TxChain,
 }
 
 pub(crate) async fn handle_cli_command(
@@ -52,7 +52,7 @@ pub(crate) async fn handle_cli_command(
             InfoOpts::BlockCount => json(wallet.block_count().await?),
             InfoOpts::Feerate => json(wallet.feerate().await?),
             InfoOpts::PendingTxChain => json(wallet.pending_tx_chain().await?),
-            InfoOpts::TxChain { n } => json(wallet.tx_chain(n).await?),
+            InfoOpts::TxChain => json(wallet.tx_chain().await?),
         },
         Opts::SendFee => json(wallet.send_fee().await?),
         Opts::Send {
