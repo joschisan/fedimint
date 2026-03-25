@@ -406,15 +406,12 @@ impl ServerModule for Wallet {
             .map(|(key, unsigned_tx)| {
                 let signatures = self.sign_tx(&unsigned_tx);
 
-                assert!(
-                    self.verify_signatures(
-                        &unsigned_tx,
-                        &signatures,
-                        self.cfg.private.bitcoin_sk.public_key(secp256k1::SECP256K1)
-                    )
-                    .is_ok(),
-                    "Our signatures failed verification against our private key"
-                );
+                self.verify_signatures(
+                    &unsigned_tx,
+                    &signatures,
+                    self.cfg.private.bitcoin_sk.public_key(secp256k1::SECP256K1),
+                )
+                .expect("Our signatures failed verification against our private key");
 
                 WalletConsensusItem::Signatures(key.0, signatures)
             })
@@ -1229,10 +1226,10 @@ impl Wallet {
             .enumerate()
             .zip(signatures.iter())
         {
-            let descriptor = self.descriptor(&utxo.tweak).ecdsa_sighash_script_code();
+            let code = self.descriptor(&utxo.tweak).ecdsa_sighash_script_code();
 
             let p2wsh_sighash = sighash_cache
-                .p2wsh_signature_hash(index, &descriptor, utxo.value, EcdsaSighashType::All)
+                .p2wsh_signature_hash(index, &code, utxo.value, EcdsaSighashType::All)
                 .expect("Failed to compute P2WSH segwit sighash");
 
             let pk = tweak_public_key(&pk, &utxo.tweak);
