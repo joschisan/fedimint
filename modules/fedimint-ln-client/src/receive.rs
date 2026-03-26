@@ -61,7 +61,7 @@ impl State for LightningReceiveStateMachine {
 
     fn transitions(
         &self,
-        _context: &Self::ModuleContext,
+        context: &Self::ModuleContext,
         global_context: &DynGlobalClientContext,
     ) -> Vec<StateTransition<Self>> {
         match &self.state {
@@ -69,7 +69,7 @@ impl State for LightningReceiveStateMachine {
                 submitted_offer.transitions(global_context)
             }
             LightningReceiveStates::ConfirmedInvoice(confirmed_invoice) => {
-                confirmed_invoice.transitions(global_context)
+                confirmed_invoice.transitions(context, global_context)
             }
             LightningReceiveStates::Funded(funded) => funded.transitions(global_context),
             LightningReceiveStates::Success(_) | LightningReceiveStates::Canceled(_) => {
@@ -181,20 +181,24 @@ pub struct LightningReceiveConfirmedInvoice {
 impl LightningReceiveConfirmedInvoice {
     fn transitions(
         &self,
+        context: &LightningClientContext,
         global_context: &DynGlobalClientContext,
     ) -> Vec<StateTransition<LightningReceiveStateMachine>> {
         let invoice = self.invoice.clone();
         let receiving_key = self.receiving_key;
         let global_context = global_context.clone();
+        let context = context.clone();
         vec![StateTransition::new(
             Self::await_incoming_contract_account(invoice, global_context.clone()),
             move |dbtx, contract, old_state| {
+                let context = context.clone();
                 Box::pin(Self::transition_funded(
                     old_state,
                     receiving_key,
                     contract,
                     dbtx,
                     global_context.clone(),
+                    context,
                 ))
             },
         )]
@@ -250,9 +254,23 @@ impl LightningReceiveConfirmedInvoice {
         result: Result<IncomingContractAccount, LightningReceiveError>,
         dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
         global_context: DynGlobalClientContext,
+        context: LightningClientContext,
     ) -> LightningReceiveStateMachine {
         match result {
             Ok(contract) => {
+                // None for the gateway since it does not emit the client events
+                if let Some(ref client_ctx) = context.client_ctx {
+                    client_ctx
+                        .log_event(
+                            &mut dbtx.module_tx(),
+                            crate::events::ReceivePaymentEvent {
+                                operation_id: old_state.operation_id,
+                                amount: contract.amount,
+                            },
+                        )
+                        .await;
+                }
+
                 match receiving_key {
                     ReceivingKey::Personal(keypair) => {
                         let change_range =

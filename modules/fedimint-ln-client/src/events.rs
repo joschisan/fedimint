@@ -12,7 +12,7 @@ pub struct SendPaymentEvent {
 }
 
 impl Event for SendPaymentEvent {
-    const MODULE: Option<ModuleKind> = Some(fedimint_lnv2_common::KIND);
+    const MODULE: Option<ModuleKind> = Some(fedimint_ln_common::KIND);
     const KIND: EventKind = EventKind::from_static("payment-send");
     const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
@@ -34,7 +34,7 @@ pub struct SendPaymentUpdateEvent {
 }
 
 impl Event for SendPaymentUpdateEvent {
-    const MODULE: Option<ModuleKind> = Some(fedimint_lnv2_common::KIND);
+    const MODULE: Option<ModuleKind> = Some(fedimint_ln_common::KIND);
     const KIND: EventKind = EventKind::from_static("payment-send-update");
     const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
@@ -48,7 +48,7 @@ pub struct ReceivePaymentEvent {
 }
 
 impl Event for ReceivePaymentEvent {
-    const MODULE: Option<ModuleKind> = Some(fedimint_lnv2_common::KIND);
+    const MODULE: Option<ModuleKind> = Some(fedimint_ln_common::KIND);
     const KIND: EventKind = EventKind::from_static("payment-receive");
     const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }

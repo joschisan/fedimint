@@ -34,7 +34,7 @@ use tbs::{
 use tracing::{debug, warn};
 
 use crate::client_db::NoteKey;
-use crate::event::{NoteCreated, ReceivePaymentStatus, ReceivePaymentUpdateEvent};
+use crate::events::{NoteCreated, ReceivePaymentStatus, ReceivePaymentUpdateEvent};
 use crate::{MintClientContext, MintClientModule, SpendableNote};
 
 /// Child ID used to derive the spend key from a note's [`DerivableSecret`]

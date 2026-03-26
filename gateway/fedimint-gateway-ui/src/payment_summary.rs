@@ -15,7 +15,7 @@ use fedimint_gwv2_client::events::{
     IncomingPaymentSucceeded, OutgoingPaymentFailed, OutgoingPaymentStarted,
     OutgoingPaymentSucceeded,
 };
-use fedimint_mint_client::event::{OOBNotesReissued, OOBNotesSpent};
+use fedimint_mint_client::events::{OOBNotesReissued, OOBNotesSpent};
 use fedimint_ui_common::UiState;
 use fedimint_ui_common::auth::UserAuth;
 use fedimint_wallet_client::events::{DepositConfirmed, WithdrawRequest};

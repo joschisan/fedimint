@@ -289,6 +289,19 @@ impl DecryptingPreimageState {
                 )
                 .await;
 
+                // client_ctx is None for the gateway since it does not emit the client events
+                if let Some(ref client_ctx) = context.client_ctx {
+                    client_ctx
+                        .log_event(
+                            &mut dbtx.module_tx(),
+                            crate::events::SendPaymentUpdateEvent {
+                                operation_id: old_state.common.operation_id,
+                                status: crate::events::SendPaymentStatus::Success(preimage.0),
+                            },
+                        )
+                        .await;
+                }
+
                 IncomingStateMachine {
                     common: old_state.common,
                     state: IncomingSmStates::Preimage(preimage),
@@ -327,6 +340,19 @@ impl DecryptingPreimageState {
             .await
             .expect("Cannot claim input, additional funding needed");
         debug!("Refunded incoming contract {contract:?} with {change_range:?}");
+
+        // client_ctx is None for the gateway since it does not emit the client events
+        if let Some(ref client_ctx) = context.client_ctx {
+            client_ctx
+                .log_event(
+                    &mut dbtx.module_tx(),
+                    crate::events::SendPaymentUpdateEvent {
+                        operation_id: old_state.common.operation_id,
+                        status: crate::events::SendPaymentStatus::Refunded,
+                    },
+                )
+                .await;
+        }
 
         IncomingStateMachine {
             common: old_state.common,
