@@ -13,13 +13,12 @@ use fedimint_ui_common::assets::WithStaticRoutesExt;
 use fedimint_ui_common::auth::UserAuth;
 use fedimint_ui_common::{
     CONNECTIVITY_CHECK_ROUTE, LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState,
-    connectivity_check_handler, connectivity_widget, login_form_response,
+    connectivity_check_handler, copiable_text, login_form, login_submit_response,
+    single_card_layout,
 };
-use maud::{DOCTYPE, Markup, PreEscaped, html};
+use maud::{Markup, PreEscaped, html};
 use qrcode::QrCode;
 use serde::Deserialize;
-
-use crate::{common_head, login_submit_response};
 
 // Setup route constants
 pub const FEDERATION_SETUP_ROUTE: &str = "/federation_setup";
@@ -47,49 +46,104 @@ pub(crate) struct PeerInfoInput {
     pub peer_info: String,
 }
 
-pub fn setup_layout(title: &str, content: Markup) -> Markup {
-    html! {
-        (DOCTYPE)
-        html {
-            head {
-                (common_head(title))
-            }
-            body {
-                div class="container" {
-                    div class="row justify-content-center" {
-                        div class="col-md-8 col-lg-5 narrow-container" {
-                            header class="text-center" {
-                                h1 class="header-title" { "Fedimint Guardian UI" }
-                            }
+fn peer_list_section(
+    connected_peers: &[String],
+    federation_size: Option<u32>,
+    cfg_federation_name: &Option<String>,
+    cfg_base_fees_disabled: Option<bool>,
+    cfg_enabled_modules: &Option<BTreeSet<ModuleKind>>,
+    error: Option<&str>,
+) -> Markup {
+    let total_guardians = connected_peers.len() + 1;
+    let can_start_dkg = federation_size
+        .map(|expected| total_guardians == expected as usize)
+        .unwrap_or(false);
 
-                            div class="card" {
-                                div class="card-body" {
-                                    (content)
-                                }
+    html! {
+        div id="peer-list-section" {
+            @if let Some(expected) = federation_size {
+                p { (format!("{total_guardians} of {expected} guardians connected.")) }
+            } @else {
+                p { "Add setup code for every other guardian." }
+            }
+
+            @if !connected_peers.is_empty() {
+                ul class="list-group mb-2" {
+                    @for peer in connected_peers {
+                        li class="list-group-item" { (peer) }
+                    }
+                }
+
+                form id="reset-form" method="post" action=(RESET_SETUP_CODES_ROUTE) class="d-none" {}
+                div class="text-center mb-4" {
+                    button type="button" class="btn btn-link text-danger text-decoration-none p-0" onclick="if(confirm('Are you sure you want to reset all guardians?')){document.getElementById('reset-form').submit();}" {
+                        "Reset Guardians"
+                    }
+                }
+            }
+
+            @if can_start_dkg {
+                // All guardians connected — show confirm form
+                @let has_settings = cfg_federation_name.is_some()
+                    || federation_size.is_some()
+                    || cfg_base_fees_disabled.is_some()
+                    || cfg_enabled_modules.is_some();
+
+                form id="start-dkg-form" hx-post=(START_DKG_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
+                    @if let Some(error) = error {
+                        div class="alert alert-danger mb-3" { (error) }
+                    }
+                    button type="submit" class="btn btn-warning w-100 py-2" { "Confirm" }
+                }
+
+                @if has_settings {
+                    p class="text-muted mt-3 mb-0" style="font-size: 0.85rem;" {
+                        @if let Some(name) = cfg_federation_name {
+                            (name) " federation has been configured"
+                        } @else {
+                            "The federation has been configured"
+                        }
+                        @if let Some(disabled) = cfg_base_fees_disabled {
+                            " with base fees "
+                            @if disabled { "disabled" } @else { "enabled" }
+                        }
+                        @if let Some(modules) = cfg_enabled_modules {
+                            " and modules "
+                            (modules.iter().map(|m| m.as_str().to_owned()).collect::<Vec<_>>().join(", "))
+                        }
+                        "."
+                    }
+                }
+            } @else {
+                // Still collecting — show add guardian form
+                form id="add-setup-code-form" hx-post=(ADD_SETUP_CODE_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
+                    div class="mb-3" {
+                        div class="input-group" {
+                            input type="text" class="form-control" id="peer_info" name="peer_info"
+                                placeholder="Paste Setup Code" required;
+                            button type="button" class="btn btn-outline-secondary" onclick="startQrScanner()" title="Scan QR Code" {
+                                i class="bi bi-qr-code-scan" {}
                             }
                         }
                     }
+
+                    @if let Some(error) = error {
+                        div class="alert alert-danger mb-3" { (error) }
+                    }
+                    button type="submit" class="btn btn-primary w-100 py-2" { "Add Guardian" }
                 }
-                (connectivity_widget())
-                script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous" {}
-                script src="/assets/html5-qrcode.min.js" {}
             }
         }
     }
 }
 
-// GET handler for the /setup route (display the setup form)
-async fn setup_form(State(state): State<UiState<DynSetupApi>>) -> impl IntoResponse {
-    if state.api.setup_code().await.is_some() {
-        return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
-    }
-
-    let available_modules = state.api.available_modules();
-    let default_modules = state.api.default_modules();
-
-    let content = html! {
-        form method="post" action=(ROOT_ROUTE)
-            hx-post=(ROOT_ROUTE) hx-target="#setup-error" hx-swap="innerHTML" {
+fn setup_form_content(
+    available_modules: &BTreeSet<ModuleKind>,
+    default_modules: &BTreeSet<ModuleKind>,
+    error: Option<&str>,
+) -> Markup {
+    html! {
+        form id="setup-form" hx-post=(ROOT_ROUTE) hx-target="#setup-form" hx-swap="outerHTML" {
             style {
                 r#"
                 .toggle-content {
@@ -157,10 +211,26 @@ async fn setup_form(State(state): State<UiState<DynSetupApi>>) -> impl IntoRespo
                         label class="form-label" for="federation_size" {
                             "Total number of guardians (including you)"
                         }
-                        input type="number" class="form-control" id="federation_size"
-                            name="federation_size" min="1" max="19";
-                        small class="form-text text-muted" {
-                            "At least 4, or 1. Recommended: 4, 7, 10, 13."
+                        select class="form-select" id="federation_size" name="federation_size" {
+                            option value="" selected disabled { "Federation Size" }
+                            option value="1" { "1 — Testing" }
+                            option value="4" { "4 — Recommended" }
+                            option value="5" { "5" }
+                            option value="6" { "6" }
+                            option value="7" { "7 — Recommended" }
+                            option value="8" { "8" }
+                            option value="9" { "9" }
+                            option value="10" { "10 — Recommended" }
+                            option value="11" { "11" }
+                            option value="12" { "12" }
+                            option value="13" { "13 — Recommended" }
+                            option value="14" { "14" }
+                            option value="15" { "15" }
+                            option value="16" { "16 — Recommended" }
+                            option value="17" { "17" }
+                            option value="18" { "18" }
+                            option value="19" { "19 — Recommended" }
+                            option value="20" { "20" }
                         }
                     }
 
@@ -189,7 +259,7 @@ async fn setup_form(State(state): State<UiState<DynSetupApi>>) -> impl IntoRespo
                             div id="modulesConfig" class="accordion-collapse collapse" data-bs-parent="#modulesAccordion" {
                                 div class="accordion-body" {
                                     div id="modules-list" {
-                                        @for kind in &available_modules {
+                                        @for kind in available_modules {
                                             div class="form-check" {
                                                 input type="checkbox" class="form-check-input"
                                                     id=(format!("module_{}", kind.as_str()))
@@ -217,22 +287,35 @@ async fn setup_form(State(state): State<UiState<DynSetupApi>>) -> impl IntoRespo
                 }
             }
 
-            div id="setup-error" {}
-
-            div class="button-container" {
-                button type="submit" class="btn btn-primary setup-btn" { "Confirm" }
+            @if let Some(error) = error {
+                div class="alert alert-danger mb-3" { (error) }
             }
+            button type="submit" class="btn btn-primary w-100 py-2" { "Confirm" }
         }
-    };
-
-    Html(setup_layout("Setup Fedimint Guardian", content).into_string()).into_response()
+    }
 }
 
-// POST handler for the /setup route (process the password setup form)
+// GET handler for the /setup route (display the setup form)
+async fn setup_form(State(state): State<UiState<DynSetupApi>>) -> impl IntoResponse {
+    if state.api.setup_code().await.is_some() {
+        return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
+    }
+
+    let available_modules = state.api.available_modules();
+    let default_modules = state.api.default_modules();
+    let content = setup_form_content(&available_modules, &default_modules, None);
+
+    Html(single_card_layout("Guardian Setup", content).into_string()).into_response()
+}
+
+// POST handler for the /setup route (process the setup form)
 async fn setup_submit(
     State(state): State<UiState<DynSetupApi>>,
     Form(input): Form<SetupInput>,
 ) -> impl IntoResponse {
+    let available_modules = state.api.available_modules();
+    let default_modules = state.api.default_modules();
+
     // Only use these settings if is_lead is true
     let federation_name = if input.is_lead {
         Some(input.federation_name)
@@ -267,9 +350,11 @@ async fn setup_submit(
                 Ok(size) => Some(size),
                 Err(_) => {
                     return Html(
-                        html! {
-                            div class="alert alert-danger" { "Invalid federation size" }
-                        }
+                        setup_form_content(
+                            &available_modules,
+                            &default_modules,
+                            Some("Invalid federation size"),
+                        )
                         .into_string(),
                     )
                     .into_response();
@@ -292,24 +377,26 @@ async fn setup_submit(
         )
         .await
     {
-        Ok(_) => ([("HX-Redirect", LOGIN_ROUTE)], Html(String::new())).into_response(),
+        Ok(_) => (
+            [("HX-Redirect", FEDERATION_SETUP_ROUTE)],
+            Html(String::new()),
+        )
+            .into_response(),
         Err(e) => Html(
-            html! {
-                div class="alert alert-danger" { (e.to_string()) }
-            }
-            .into_string(),
+            setup_form_content(&available_modules, &default_modules, Some(&e.to_string()))
+                .into_string(),
         )
         .into_response(),
     }
 }
 
 // GET handler for the /login route (display the login form)
-async fn login_form(State(state): State<UiState<DynSetupApi>>) -> impl IntoResponse {
+async fn login_form_handler(State(state): State<UiState<DynSetupApi>>) -> impl IntoResponse {
     if state.api.setup_code().await.is_none() {
         return Redirect::to(ROOT_ROUTE).into_response();
     }
 
-    login_form_response("Fedimint Guardian Login").into_response()
+    Html(single_card_layout("Enter Password", login_form(None)).into_string()).into_response()
 }
 
 // POST handler for the /login route (authenticate and set session cookie)
@@ -345,167 +432,35 @@ async fn federation_setup(
         .expect("Successful authentication ensures that the local parameters have been set");
 
     let connected_peers = state.api.connected_peers().await;
-    let guardian_name = state.api.guardian_name().await;
     let federation_size = state.api.federation_size().await;
     let cfg_federation_name = state.api.cfg_federation_name().await;
     let cfg_base_fees_disabled = state.api.cfg_base_fees_disabled().await;
     let cfg_enabled_modules = state.api.cfg_enabled_modules().await;
-    let total_guardians = connected_peers.len() + 1;
-    let can_start_dkg = federation_size
-        .map(|expected| total_guardians == expected as usize)
-        .unwrap_or(false);
 
     let content = html! {
-        @if let Some(ref name) = guardian_name {
-            section class="mb-4" {
-                h4 { "Your name" }
-                p { (name) }
-            }
-        }
+        p { "Share this with your fellow guardians." }
 
-        section class="mb-4" {
-            h4 { "Federation settings" }
-            @if cfg_federation_name.is_some() || federation_size.is_some() || cfg_base_fees_disabled.is_some() || cfg_enabled_modules.is_some() {
-                ul class="list-group list-group-flush" {
-                    @if let Some(ref name) = cfg_federation_name {
-                        li class="list-group-item" {
-                            strong { "Federation name: " }
-                            (name)
-                        }
-                    }
-                    @if let Some(size) = federation_size {
-                        li class="list-group-item" {
-                            strong { "Federation size: " }
-                            (size)
-                        }
-                    }
-                    @if let Some(disabled) = cfg_base_fees_disabled {
-                        li class="list-group-item" {
-                            strong { "Base fees: " }
-                            @if disabled { "disabled" } @else { "enabled" }
-                        }
-                    }
-                    @if let Some(ref modules) = cfg_enabled_modules {
-                        li class="list-group-item" {
-                            strong { "Enabled modules: " }
-                            (modules.iter().map(|m| m.as_str().to_owned()).collect::<Vec<_>>().join(", "))
-                        }
-                    }
-                }
-            } @else {
-                p class="text-muted" { "Leader's setup code not provided yet." }
-            }
-        }
+        @let qr_svg = QrCode::new(&our_connection_info)
+            .expect("Failed to generate QR code")
+            .render::<qrcode::render::svg::Color>()
+            .build();
 
-        hr class="my-4" {}
-
-        section class="mb-4" {
-            h4 { "Your setup code" }
-
-            p { "Share it with other guardians." }
-
-            @let qr_svg = QrCode::new(&our_connection_info)
-                .expect("Failed to generate QR code")
-                .render::<qrcode::render::svg::Color>()
-                .build();
-
-            div class="text-center mb-3" {
-                div class="border rounded p-2 bg-white d-inline-block" style="width: 250px; max-width: 100%;" {
-                    div style="width: 100%; height: auto; overflow: hidden;" {
-                        (PreEscaped(format!(r#"<div style="width: 100%; height: auto;">{}</div>"#,
-                            qr_svg.replace("width=", "data-width=")
-                                  .replace("height=", "data-height=")
-                                  .replace("<svg", r#"<svg style="width: 100%; height: auto; display: block;""#))))
-                    }
-                }
-            }
-
-            div class="alert alert-info mb-3" {
-                (our_connection_info)
-            }
-
-            div class="text-center" {
-                button type="button" class="btn btn-outline-primary setup-btn"
-                    onclick=(format!("navigator.clipboard.writeText('{}')", our_connection_info)) {
-                    "Copy to Clipboard"
+        div class="text-center mb-3" {
+            div class="border rounded p-2 bg-white d-inline-block" style="width: 250px; max-width: 100%;" {
+                div style="width: 100%; height: auto; overflow: hidden;" {
+                    (PreEscaped(format!(r#"<div style="width: 100%; height: auto;">{}</div>"#,
+                        qr_svg.replace("width=", "data-width=")
+                              .replace("height=", "data-height=")
+                              .replace("<svg", r#"<svg style="width: 100%; height: auto; display: block;""#))))
                 }
             }
         }
 
-        hr class="my-4" {}
-
-        section class="mb-4" {
-            h4 { "Other guardians" }
-
-            @if let Some(expected) = federation_size {
-                p { (format!("{total_guardians} of {expected} guardians connected.")) }
-            } @else {
-                p { "Add setup code of every other guardian." }
-            }
-
-            ul class="list-group mb-4" {
-                @for peer in connected_peers {
-                    li class="list-group-item" { (peer) }
-                }
-            }
-
-            form method="post" action=(ADD_SETUP_CODE_ROUTE) {
-                div class="mb-3" {
-                    div class="input-group" {
-                        input type="text" class="form-control" id="peer_info" name="peer_info"
-                            placeholder="Paste setup code" required;
-                        button type="button" class="btn btn-outline-secondary" onclick="startQrScanner()" title="Scan QR Code" {
-                            (PreEscaped(r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 6.827 3h2.344a1 1 0 0 1 .707.293l.828.828A3 3 0 0 0 12.828 5H14a1 1 0 0 1 1 1zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4z"/><path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5m0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0"/></svg>"#))
-                        }
-                    }
-                }
-
-                div class="row mt-3" {
-                    div class="col-6" {
-                        button type="button" class="btn btn-warning w-100" onclick="if(confirm('Are you sure you want to reset all guardians?')){document.getElementById('reset-form').submit();}" {
-                            "Reset Guardians"
-                        }
-                    }
-
-                    div class="col-6" {
-                        button type="submit" class="btn btn-primary w-100"
-                            disabled[can_start_dkg] {
-                            @if can_start_dkg { "List complete" } @else { "Add Guardian" }
-                        }
-                    }
-                }
-            }
-
-            form id="reset-form" method="post" action=(RESET_SETUP_CODES_ROUTE) class="d-none" {}
+        div class="mb-4" {
+            (copiable_text(&our_connection_info))
         }
 
-        hr class="my-4" {}
-
-        section class="mb-4" {
-            div class="alert alert-warning mb-4" {
-                "Verify " b { "all" } " other guardians were added. This process cannot be reversed once started."
-            }
-
-            div class="text-center" {
-                form method="post" action=(START_DKG_ROUTE) {
-                    button type="submit" class="btn btn-warning setup-btn"
-                        disabled[!can_start_dkg] {
-                        "🚀 Confirm"
-                    }
-                }
-                @if !can_start_dkg {
-                    @if let Some(expected) = federation_size {
-                        p class="text-muted mt-2" style="font-size: 0.875rem;" {
-                            (format!("Need to collect {} more setup code(s).", expected as usize - total_guardians))
-                        }
-                    } @else {
-                        p class="text-muted mt-2" style="font-size: 0.875rem;" {
-                            "Need to collect the setup codes from all other guardians."
-                        }
-                    }
-                }
-            }
-        }
+        (peer_list_section(&connected_peers, federation_size, &cfg_federation_name, cfg_base_fees_disabled, &cfg_enabled_modules, None))
 
         // QR Scanner Modal
         div class="modal fade" id="qrScannerModal" tabindex="-1" aria-labelledby="qrScannerModalLabel" aria-hidden="true" {
@@ -525,6 +480,8 @@ async fn federation_setup(
                 }
             }
         }
+
+        script src="/assets/html5-qrcode.min.js" {}
 
         // QR Scanner JavaScript
         script {
@@ -604,7 +561,7 @@ async fn federation_setup(
         }
     };
 
-    Html(setup_layout("Federation Setup", content).into_string()).into_response()
+    Html(single_card_layout("Federation Setup", content).into_string()).into_response()
 }
 
 // POST handler for adding peer connection info
@@ -613,19 +570,26 @@ async fn post_add_setup_code(
     _auth: UserAuth,
     Form(input): Form<PeerInfoInput>,
 ) -> impl IntoResponse {
-    match state.api.add_peer_setup_code(input.peer_info).await {
-        Ok(..) => Redirect::to(FEDERATION_SETUP_ROUTE).into_response(),
-        Err(e) => {
-            let content = html! {
-                div class="alert alert-danger" { (e.to_string()) }
-                div class="button-container" {
-                    a href=(FEDERATION_SETUP_ROUTE) class="btn btn-primary setup-btn" { "Return to Setup" }
-                }
-            };
+    let error = state.api.add_peer_setup_code(input.peer_info).await.err();
 
-            Html(setup_layout("Error", content).into_string()).into_response()
-        }
-    }
+    let connected_peers = state.api.connected_peers().await;
+    let federation_size = state.api.federation_size().await;
+    let cfg_federation_name = state.api.cfg_federation_name().await;
+    let cfg_base_fees_disabled = state.api.cfg_base_fees_disabled().await;
+    let cfg_enabled_modules = state.api.cfg_enabled_modules().await;
+
+    Html(
+        peer_list_section(
+            &connected_peers,
+            federation_size,
+            &cfg_federation_name,
+            cfg_base_fees_disabled,
+            &cfg_enabled_modules,
+            error.as_ref().map(|e| e.to_string()).as_deref(),
+        )
+        .into_string(),
+    )
+    .into_response()
 }
 
 // POST handler for starting the DKG process
@@ -637,34 +601,19 @@ async fn post_start_dkg(
 
     match state.api.start_dkg().await {
         Ok(()) => {
-            // Show DKG progress page with htmx polling
             let content = html! {
-                div class="alert alert-success my-4" {
-                    "Setting up Federation..."
-                }
-
-                p class="text-center" {
-                    "All guardians need to confirm their settings. Once completed you will be redirected to the Dashboard."
-                }
-
                 @if let Some(ref info) = our_connection_info {
-                    hr class="my-4" {}
-                    section class="mb-4" {
-                        h4 { "Your setup code" }
-                        p { "Share with guardians who still need it." }
-                        div class="alert alert-info mb-3" {
-                            (info)
-                        }
-                        div class="text-center" {
-                            button type="button" class="btn btn-outline-primary setup-btn"
-                                onclick=(format!("navigator.clipboard.writeText('{info}')")) {
-                                "Copy to Clipboard"
-                            }
-                        }
+                    p { "Share with guardians who still need it." }
+                    div class="mb-4" {
+                        (copiable_text(info))
                     }
                 }
 
-                // Hidden div that will poll and redirect when the normal UI is ready
+                div class="alert alert-info mb-3" {
+                    "All guardians need to confirm their settings. Once completed you will be redirected to the Dashboard."
+                }
+
+                // Poll until the dashboard is ready, then redirect
                 div
                     hx-get=(ROOT_ROUTE)
                     hx-trigger="every 2s"
@@ -683,17 +632,31 @@ async fn post_start_dkg(
                 }
             };
 
-            Html(setup_layout("DKG Started", content).into_string()).into_response()
+            (
+                [("HX-Retarget", "body"), ("HX-Reswap", "innerHTML")],
+                Html(single_card_layout("DKG Started", content).into_string()),
+            )
+                .into_response()
         }
         Err(e) => {
-            let content = html! {
-                div class="alert alert-danger" { (e.to_string()) }
-                div class="button-container" {
-                    a href=(FEDERATION_SETUP_ROUTE) class="btn btn-primary setup-btn" { "Return to Setup" }
-                }
-            };
+            let connected_peers = state.api.connected_peers().await;
+            let federation_size = state.api.federation_size().await;
+            let cfg_federation_name = state.api.cfg_federation_name().await;
+            let cfg_base_fees_disabled = state.api.cfg_base_fees_disabled().await;
+            let cfg_enabled_modules = state.api.cfg_enabled_modules().await;
 
-            Html(setup_layout("Error", content).into_string()).into_response()
+            Html(
+                peer_list_section(
+                    &connected_peers,
+                    federation_size,
+                    &cfg_federation_name,
+                    cfg_base_fees_disabled,
+                    &cfg_enabled_modules,
+                    Some(&e.to_string()),
+                )
+                .into_string(),
+            )
+            .into_response()
         }
     }
 }
@@ -711,7 +674,7 @@ async fn post_reset_setup_codes(
 pub fn router(api: DynSetupApi) -> Router {
     Router::new()
         .route(ROOT_ROUTE, get(setup_form).post(setup_submit))
-        .route(LOGIN_ROUTE, get(login_form).post(login_submit))
+        .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
         .route(FEDERATION_SETUP_ROUTE, get(federation_setup))
         .route(ADD_SETUP_CODE_ROUTE, post(post_add_setup_code))
         .route(RESET_SETUP_CODES_ROUTE, post(post_reset_setup_codes))

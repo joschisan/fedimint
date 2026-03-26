@@ -12,20 +12,13 @@ body {
 }
 
 .card {
-  border: none;
-  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
-  border-radius: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.card-body {
-  padding: 1.25rem;
+  border-radius: var(--bs-border-radius-lg);
+  box-shadow: none;
 }
 
 .card-header {
-  background-color: #fff;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.125);
   padding: 1rem 1.25rem;
+  background-color: transparent;
 }
 
 /* Form elements */
@@ -77,10 +70,6 @@ body {
     padding-left: 15px;
     padding-right: 15px;
   }
-
-  .card-body {
-    padding: 1rem;
-  }
 }
 
 /* Dashboard-specific styles */
@@ -88,15 +77,12 @@ body {
 /* Card header styling */
 .card-header.dashboard-header {
   font-size: 1.25rem;
-  font-weight: 600;
-  background-color: #f8f9fa;
-  padding: 1rem 1.25rem;
+  font-weight: 400;
 }
 
 /* Modal enhancements */
 .modal-header {
   border-bottom: 1px solid #dee2e6;
-  background-color: #f8f9fa;
 }
 
 .modal-title {
@@ -146,4 +132,10 @@ body {
 .text-abbrev-copy:hover {
   color: #0d6efd;
   border-bottom-color: #0d6efd;
+}
+
+/* Copiable text: style the copied state on the copy button */
+.btn.copied {
+  color: #198754 !important;
+  border-color: #198754 !important;
 }

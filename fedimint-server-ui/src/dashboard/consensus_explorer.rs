@@ -135,7 +135,9 @@ pub async fn consensus_explorer_view(
         }
     };
 
-    Html(dashboard_layout(content, "Fedimint Guardian UI", None).into_string()).into_response()
+    let version = state.api.fedimintd_version().await;
+
+    Html(dashboard_layout(content, &version).into_string()).into_response()
 }
 
 /// Format the type of consensus item for display

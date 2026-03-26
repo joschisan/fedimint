@@ -307,7 +307,7 @@ impl ISetupApi for SetupApi {
 
         ensure!(
             info != local_params.setup_code(),
-            "You cannot add you own connection info"
+            "You cannot add your own setup code"
         );
 
         ensure!(

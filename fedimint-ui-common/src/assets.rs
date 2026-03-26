@@ -6,6 +6,9 @@ use axum::routing::get;
 // Asset route constants
 pub const BOOTSTRAP_CSS_ROUTE: &str = "/assets/bootstrap.min.css";
 pub const BOOTSTRAP_JS_ROUTE: &str = "/assets/bootstrap.bundle.min.js";
+pub const BOOTSTRAP_ICONS_CSS_ROUTE: &str = "/assets/bootstrap-icons.min.css";
+pub const BOOTSTRAP_ICONS_WOFF2_ROUTE: &str = "/assets/fonts/bootstrap-icons.woff2";
+pub const BOOTSTRAP_ICONS_WOFF_ROUTE: &str = "/assets/fonts/bootstrap-icons.woff";
 pub const HTMX_JS_ROUTE: &str = "/assets/htmx.org-2.0.4.min.js";
 pub const HTML5_QRCODE_JS_ROUTE: &str = "/assets/html5-qrcode.min.js";
 pub const CHARTJS_ROUTE: &str = "/assets/chart.umd.min.js";
@@ -33,6 +36,14 @@ pub(crate) fn get_static_js(body: &'static str) -> Response {
     get_static_asset("application/javascript", body.as_bytes())
 }
 
+fn get_static_font(body: &'static [u8]) -> Response {
+    get_static_asset("font/woff2", body)
+}
+
+fn get_static_woff(body: &'static [u8]) -> Response {
+    get_static_asset("font/woff", body)
+}
+
 pub trait WithStaticRoutesExt {
     fn with_static_routes(self) -> Self;
 }
@@ -49,6 +60,24 @@ where
         .route(
             BOOTSTRAP_JS_ROUTE,
             get(|| async move { get_static_js(include_str!("../assets/bootstrap.bundle.min.js")) }),
+        )
+        .route(
+            BOOTSTRAP_ICONS_CSS_ROUTE,
+            get(
+                || async move { get_static_css(include_str!("../assets/bootstrap-icons.min.css")) },
+            ),
+        )
+        .route(
+            BOOTSTRAP_ICONS_WOFF2_ROUTE,
+            get(|| async move {
+                get_static_font(include_bytes!("../assets/fonts/bootstrap-icons.woff2"))
+            }),
+        )
+        .route(
+            BOOTSTRAP_ICONS_WOFF_ROUTE,
+            get(|| async move {
+                get_static_woff(include_bytes!("../assets/fonts/bootstrap-icons.woff"))
+            }),
         )
         .route(
             HTMX_JS_ROUTE,

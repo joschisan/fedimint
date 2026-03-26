@@ -3,7 +3,7 @@ use axum::extract::{Query, State};
 use axum::response::{Html, IntoResponse, Redirect};
 use bip39::Language;
 use fedimint_gateway_common::SetMnemonicPayload;
-use fedimint_ui_common::{ROOT_ROUTE, UiState, login_layout};
+use fedimint_ui_common::{ROOT_ROUTE, UiState, single_card_layout};
 use maud::{PreEscaped, html};
 use serde::Deserialize;
 
@@ -71,7 +71,7 @@ where
         }
     };
 
-    Html(login_layout("Setup Gateway", content).into_string())
+    Html(single_card_layout("Setup Gateway", content).into_string())
 }
 
 /// Handler for creating a new wallet (generates new mnemonic)
@@ -170,7 +170,7 @@ where
         }
     };
 
-    Html(login_layout("Recover Wallet", content).into_string())
+    Html(single_card_layout("Recover Wallet", content).into_string())
 }
 
 /// Handler for recovering a wallet with provided mnemonic words

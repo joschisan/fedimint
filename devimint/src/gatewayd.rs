@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use bitcoin::Address;
@@ -10,6 +10,7 @@ use bitcoin::hashes::sha256;
 use chrono::{DateTime, Utc};
 use esplora_client::Txid;
 use fedimint_core::config::FederationId;
+use fedimint_core::envs::is_env_var_set;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::util::{backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, BitcoinHash};
@@ -30,10 +31,11 @@ use crate::cmd;
 use crate::envs::{
     FM_GATEWAY_API_ADDR_ENV, FM_GATEWAY_DATA_DIR_ENV, FM_GATEWAY_IROH_LISTEN_ADDR_ENV,
     FM_GATEWAY_LISTEN_ADDR_ENV, FM_GATEWAY_METRICS_LISTEN_ADDR_ENV, FM_PORT_LDK_ENV,
+    FM_PRE_DKG_ENV,
 };
 use crate::external::{Bitcoind, LightningNode};
 use crate::federation::Federation;
-use crate::util::{Command, ProcessHandle, ProcessManager, poll, supports_lnv2};
+use crate::util::{Command, ProcessHandle, ProcessManager, poll, poll_with_timeout, supports_lnv2};
 use crate::vars::utf8;
 use crate::version_constants::{VERSION_0_9_0_ALPHA, VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA};
 
@@ -822,8 +824,14 @@ impl Gatewayd {
             )
             .await?;
 
-        let (gateway_id, iroh_gateway_id) = poll(
+        let timeout = if is_env_var_set(FM_PRE_DKG_ENV) {
+            Duration::from_secs(300)
+        } else {
+            Duration::from_secs(60)
+        };
+        let (gateway_id, iroh_gateway_id) = poll_with_timeout(
             "waiting for gateway to be ready to respond to rpc",
+            timeout,
             || async {
                 // Once the gateway id is available via RPC, the gateway is ready
                 let info = cmd!(
