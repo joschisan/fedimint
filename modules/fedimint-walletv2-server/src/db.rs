@@ -11,8 +11,8 @@ use crate::{FederationTx, FederationWallet};
 #[repr(u8)]
 #[derive(Clone, EnumIter, Debug)]
 pub enum DbKeyPrefix {
-    Deposit = 0x30,
-    SpentDeposit = 0x31,
+    Output = 0x30,
+    SpentOutput = 0x31,
     BlockCountVote = 0x32,
     FeeRateVote = 0x33,
     TxLog = 0x34,
@@ -30,35 +30,35 @@ impl std::fmt::Display for DbKeyPrefix {
 }
 
 #[derive(Clone, Debug, Encodable, Decodable, Serialize)]
-pub struct DepositKey(pub u64);
+pub struct OutputKey(pub u64);
 
 #[derive(Clone, Debug, Encodable, Decodable)]
-pub struct DepositPrefix;
+pub struct OutputPrefix;
 
 #[derive(Clone, Debug, Encodable, Decodable, Serialize)]
-pub struct Deposit(pub bitcoin::OutPoint, pub TxOut);
+pub struct Output(pub bitcoin::OutPoint, pub TxOut);
 
 impl_db_record!(
-    key = DepositKey,
-    value = Deposit,
-    db_prefix = DbKeyPrefix::Deposit,
+    key = OutputKey,
+    value = Output,
+    db_prefix = DbKeyPrefix::Output,
 );
 
-impl_db_lookup!(key = DepositKey, query_prefix = DepositPrefix);
+impl_db_lookup!(key = OutputKey, query_prefix = OutputPrefix);
 
 #[derive(Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize)]
-pub struct SpentDepositKey(pub u64);
+pub struct SpentOutputKey(pub u64);
 
 #[derive(Clone, Debug, Encodable, Decodable)]
-pub struct SpentDepositPrefix;
+pub struct SpentOutputPrefix;
 
 impl_db_record!(
-    key = SpentDepositKey,
+    key = SpentOutputKey,
     value = (),
-    db_prefix = DbKeyPrefix::SpentDeposit
+    db_prefix = DbKeyPrefix::SpentOutput
 );
 
-impl_db_lookup!(key = SpentDepositKey, query_prefix = SpentDepositPrefix);
+impl_db_lookup!(key = SpentOutputKey, query_prefix = SpentOutputPrefix);
 
 #[derive(Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize)]
 pub struct FederationWalletPrefix;

@@ -22,7 +22,7 @@ enum Opts {
         #[arg(long)]
         fee: Option<bitcoin::Amount>,
     },
-    /// Return the next unused deposit address.
+    /// Return the next unused receive address.
     Receive,
 }
 

@@ -3,11 +3,11 @@ use fedimint_core::module::ApiRequestErased;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::{OutPoint, apply, async_trait_maybe_send};
 use fedimint_walletv2_common::endpoint_constants::{
-    CONSENSUS_BLOCK_COUNT_ENDPOINT, CONSENSUS_FEERATE_ENDPOINT, DEPOSIT_RANGE_ENDPOINT,
-    FEDERATION_WALLET_ENDPOINT, PENDING_TRANSACTION_CHAIN_ENDPOINT, RECEIVE_FEE_ENDPOINT,
+    CONSENSUS_BLOCK_COUNT_ENDPOINT, CONSENSUS_FEERATE_ENDPOINT, FEDERATION_WALLET_ENDPOINT,
+    OUTPUT_INFO_SLICE_ENDPOINT, PENDING_TRANSACTION_CHAIN_ENDPOINT, RECEIVE_FEE_ENDPOINT,
     SEND_FEE_ENDPOINT, TRANSACTION_CHAIN_ENDPOINT, TRANSACTION_ID_ENDPOINT,
 };
-use fedimint_walletv2_common::{DepositRange, FederationWallet, TxInfo};
+use fedimint_walletv2_common::{FederationWallet, OutputInfo, TxInfo};
 
 #[apply(async_trait_maybe_send!)]
 pub trait WalletFederationApi {
@@ -25,11 +25,11 @@ pub trait WalletFederationApi {
 
     async fn tx_chain(&self) -> FederationResult<Vec<TxInfo>>;
 
-    async fn deposit_range(
+    async fn output_info_slice(
         &self,
         start_index: u64,
         end_index: u64,
-    ) -> FederationResult<DepositRange>;
+    ) -> FederationResult<Vec<OutputInfo>>;
 
     async fn tx_id(&self, outpoint: OutPoint) -> Option<bitcoin::Txid>;
 }
@@ -89,13 +89,13 @@ where
         .await
     }
 
-    async fn deposit_range(
+    async fn output_info_slice(
         &self,
         start_index: u64,
         end_index: u64,
-    ) -> FederationResult<DepositRange> {
+    ) -> FederationResult<Vec<OutputInfo>> {
         self.request_current_consensus(
-            DEPOSIT_RANGE_ENDPOINT.to_string(),
+            OUTPUT_INFO_SLICE_ENDPOINT.to_string(),
             ApiRequestErased::new((start_index, end_index)),
         )
         .await
