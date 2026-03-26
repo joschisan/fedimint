@@ -607,15 +607,8 @@ impl ClientModule for LightningClientModule {
                     yield serde_json::Value::Null;
                 }
                 "pay_lightning_address" => {
-                    let address = payload.get("address")
-                        .and_then(serde_json::Value::as_str)
-                        .context("Missing or invalid 'address' field")?
-                        .to_string();
-                    let amount_msat = payload.get("amount")
-                        .and_then(serde_json::Value::as_u64)
-                        .context("Missing or invalid 'amount' field")?;
-
-                    let invoice = get_invoice(&address, Some(Amount::from_msats(amount_msat)), None).await?;
+                    let req: PayLightningAddressRequest = serde_json::from_value(payload)?;
+                    let invoice = get_invoice(&req.address, Some(Amount::from_msats(req.amount)), None).await?;
                     let gateway = self.get_gateway(None, false).await?;
                     let output = self.pay_bolt11_invoice(gateway, invoice, ()).await?;
 
@@ -694,6 +687,12 @@ struct SubscribeLnClaimRequest {
 struct GetGatewayRequest {
     gateway_id: Option<secp256k1::PublicKey>,
     force_internal: bool,
+}
+
+#[derive(Deserialize)]
+struct PayLightningAddressRequest {
+    address: String,
+    amount: u64,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]

@@ -341,21 +341,9 @@ impl RpcGlobalState {
                 .with_context(|| format!("Client not found: {client_name}"))?;
             match module.as_str() {
                 "" => {
-                    if method == "parse_lightning_address" {
-                        let address = payload.get("address")
-                            .and_then(|v| v.as_str())
-                            .context("Missing or invalid 'address' field")?
-                            .to_string();
-                        let url = fedimint_lnurl::parse_address(&address)
-                            .context("Invalid Lightning Address")?;
-                        let metadata = fedimint_lnurl::request(&url).await
-                            .map_err(|e| anyhow::anyhow!(e))?;
-                        yield serde_json::to_value(metadata)?;
-                    } else {
-                        let mut stream = client.handle_global_rpc(method, payload);
-                        while let Some(item) = stream.next().await {
-                            yield item?;
-                        }
+                    let mut stream = client.handle_global_rpc(method, payload);
+                    while let Some(item) = stream.next().await {
+                        yield item?;
                     }
                 }
                 "ln" => {
