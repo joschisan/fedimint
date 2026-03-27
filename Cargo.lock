@@ -3814,6 +3814,7 @@ name = "fedimint-lnv2-tests"
 version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
+ "async-stream",
  "async-trait",
  "bitcoin",
  "chrono",
@@ -3826,6 +3827,7 @@ dependencies = [
  "fedimint-dummy-client",
  "fedimint-dummy-common",
  "fedimint-dummy-server",
+ "fedimint-eventlog",
  "fedimint-ln-common",
  "fedimint-lnurl",
  "fedimint-lnv2-client",
@@ -3833,6 +3835,7 @@ dependencies = [
  "fedimint-lnv2-server",
  "fedimint-logging",
  "fedimint-testing",
+ "futures",
  "itertools 0.14.0",
  "lightning-invoice",
  "reqwest 0.12.22",
@@ -4161,6 +4164,7 @@ name = "fedimint-mintv2-tests"
 version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
+ "async-stream",
  "bitcoin_hashes",
  "bls12_381",
  "clap",
@@ -4170,6 +4174,7 @@ dependencies = [
  "fedimint-dummy-client",
  "fedimint-dummy-common",
  "fedimint-dummy-server",
+ "fedimint-eventlog",
  "fedimint-logging",
  "fedimint-mintv2-client",
  "fedimint-mintv2-common",
@@ -4788,6 +4793,7 @@ name = "fedimint-walletv2-tests"
 version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
+ "async-stream",
  "bitcoin",
  "bitcoincore-rpc",
  "devimint",
@@ -4797,6 +4803,7 @@ dependencies = [
  "fedimint-dummy-client",
  "fedimint-dummy-common",
  "fedimint-dummy-server",
+ "fedimint-eventlog",
  "fedimint-logging",
  "fedimint-testing",
  "fedimint-walletv2-client",
