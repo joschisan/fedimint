@@ -1,3 +1,4 @@
+use fedimint_ui_common::copiable_text;
 use maud::{Markup, PreEscaped, html};
 use qrcode::QrCode;
 
@@ -18,6 +19,8 @@ pub fn render(invite_code: &str, session_count: u64) -> Markup {
                         .render::<qrcode::render::svg::Color>()
                         .build();
 
+                    p { "Share this with users to onboard them to your federation." }
+
                     // QR Code
                     div class="text-center mb-3" {
                         div class="border rounded p-2 bg-white d-inline-block" style="width: 250px; max-width: 100%;" {
@@ -27,20 +30,12 @@ pub fn render(invite_code: &str, session_count: u64) -> Markup {
                         }
                     }
 
-                    // Flex container for both buttons side by side
-                    div class="d-flex justify-content-center gap-2 mt-3" {
-                        button type="button" class="btn btn-outline-primary" id="copyInviteCodeBtn"
-                            onclick=(format!("navigator.clipboard.writeText('{}').then(() => {{ this.textContent='Copied!'; setTimeout(() => this.textContent='Copy to Clipboard', 2000); }}).catch(() => alert('Copy failed'))", invite_code)) {
-                            "Copy to Clipboard"
-                        }
-
-                        a href=(observer_link) target="_blank" class="btn btn-outline-success" {
-                            "Announce on Nostr"
-                        }
+                    div class="mb-3" {
+                        (copiable_text(invite_code))
                     }
 
-                    p class="text-center mt-3" {
-                        "Share this invite code with users to onboard them to your federation."
+                    a href=(observer_link) target="_blank" class="btn btn-outline-success w-100 py-2" {
+                        "Announce on Nostr"
                     }
                 }
             }

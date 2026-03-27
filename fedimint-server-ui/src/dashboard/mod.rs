@@ -19,8 +19,9 @@ use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi}
 use fedimint_ui_common::assets::WithStaticRoutesExt;
 use fedimint_ui_common::auth::UserAuth;
 use fedimint_ui_common::{
-    CONNECTIVITY_CHECK_ROUTE, LOGIN_ROUTE, ROOT_ROUTE, UiState, connectivity_check_handler,
-    dashboard_layout, login_form_response,
+    CONNECTIVITY_CHECK_ROUTE, LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState,
+    connectivity_check_handler, dashboard_layout, login_form, login_submit_response,
+    single_card_layout,
 };
 use maud::html;
 use {
@@ -30,13 +31,12 @@ use {
 
 use crate::dashboard::modules::{lnv2, meta, mintv2, wallet, walletv2};
 use crate::{
-    CHANGE_PASSWORD_ROUTE, DOWNLOAD_BACKUP_ROUTE, EXPLORER_IDX_ROUTE, EXPLORER_ROUTE, LoginInput,
-    METRICS_ROUTE, login_submit_response,
+    CHANGE_PASSWORD_ROUTE, DOWNLOAD_BACKUP_ROUTE, EXPLORER_IDX_ROUTE, EXPLORER_ROUTE, METRICS_ROUTE,
 };
 
 // Dashboard login form handler
-async fn login_form(State(_state): State<UiState<DynDashboardApi>>) -> impl IntoResponse {
-    login_form_response("Fedimint Guardian Login")
+async fn login_form_handler() -> impl IntoResponse {
+    Html(single_card_layout("Enter Password", login_form(None)).into_string())
 }
 
 // Dashboard login submit handler
@@ -52,7 +52,6 @@ async fn login_submit(
         jar,
         input,
     )
-    .into_response()
 }
 
 // Download backup handler
@@ -109,11 +108,9 @@ async fn change_password(
     if !api_auth.verify(&input.current_password) {
         let content = html! {
             div class="alert alert-danger" { "Current password is incorrect" }
-            div class="button-container" {
-                a href="/" class="btn btn-primary" { "Return to Dashboard" }
-            }
+            a href="/" class="btn btn-primary w-100 py-2" { "Return to Dashboard" }
         };
-        return Html(dashboard_layout(content, "Password Change Failed", None).into_string())
+        return Html(single_card_layout("Password Change Failed", content).into_string())
             .into_response();
     }
 
@@ -121,11 +118,9 @@ async fn change_password(
     if input.new_password != input.confirm_password {
         let content = html! {
             div class="alert alert-danger" { "New passwords do not match" }
-            div class="button-container" {
-                a href="/" class="btn btn-primary" { "Return to Dashboard" }
-            }
+            a href="/" class="btn btn-primary w-100 py-2" { "Return to Dashboard" }
         };
-        return Html(dashboard_layout(content, "Password Change Failed", None).into_string())
+        return Html(single_card_layout("Password Change Failed", content).into_string())
             .into_response();
     }
 
@@ -133,11 +128,9 @@ async fn change_password(
     if input.new_password.is_empty() {
         let content = html! {
             div class="alert alert-danger" { "New password cannot be empty" }
-            div class="button-container" {
-                a href="/" class="btn btn-primary" { "Return to Dashboard" }
-            }
+            a href="/" class="btn btn-primary w-100 py-2" { "Return to Dashboard" }
         };
-        return Html(dashboard_layout(content, "Password Change Failed", None).into_string())
+        return Html(single_card_layout("Password Change Failed", content).into_string())
             .into_response();
     }
 
@@ -159,22 +152,18 @@ async fn change_password(
                 div class="alert alert-info" {
                     "You will need to log in again with your new password once the server restarts."
                 }
-                div class="button-container" {
-                    a href="/login" class="btn btn-primary" { "Go to Login" }
-                }
+                a href="/login" class="btn btn-primary w-100 py-2" { "Go to Login" }
             };
-            Html(dashboard_layout(content, "Password Changed", None).into_string()).into_response()
+            Html(single_card_layout("Password Changed", content).into_string()).into_response()
         }
         Err(err) => {
             let content = html! {
                 div class="alert alert-danger" {
                     "Failed to change password: " (err)
                 }
-                div class="button-container" {
-                    a href="/" class="btn btn-primary" { "Return to Dashboard" }
-                }
+                a href="/" class="btn btn-primary w-100 py-2" { "Return to Dashboard" }
             };
-            Html(dashboard_layout(content, "Password Change Failed", None).into_string())
+            Html(single_card_layout("Password Change Failed", content).into_string())
                 .into_response()
         }
     }
@@ -264,78 +253,44 @@ async fn dashboard_view(
             }
         }
 
-        // Guardian Configuration Backup section
-        div class="row gy-4 mt-4" {
-            div class="col-12" {
-                div class="card" {
-                    div class="card-header bg-warning text-dark" {
-                        h5 class="mb-0" { "Guardian Configuration Backup" }
-                    }
+        // Guardian Backup and Password Change side by side
+        div class="row gy-4 mt-2" {
+            div class="col-lg-6" {
+                div class="card h-100" {
+                    div class="card-header dashboard-header" { "Guardian Backup" }
                     div class="card-body" {
-                        div class="row" {
-                            div class="col-lg-6 mb-3 mb-lg-0" {
-                                p {
-                                    "You only need to download this backup once."
-                                }
-                                p {
-                                    "Use it to restore your guardian if your server fails."
-                                }
-                                a href="/download-backup" class="btn btn-outline-warning btn-lg mt-2" {
-                                    "Download Guardian Backup"
-                                }
-                            }
-                            div class="col-lg-6" {
-                                div class="alert alert-warning mb-0" {
-                                    strong { "Security Warning" }
-                                    br;
-                                    "Store this file securely since anyone with it and your password can run your guardian node."
-                                }
-                            }
+                        div class="alert alert-warning mb-3" {
+                            "You only need to download this backup once. Use it to restore your guardian if your server fails. Store this file securely since it contains your guardians private key for the onchain threshold signature protecting your funds."
+                        }
+                        a href="/download-backup" class="btn btn-primary" {
+                            "Download"
                         }
                     }
                 }
             }
-        }
 
-        // Password Reset section
-        div class="row gy-4 mt-4" {
-            div class="col-12" {
-                div class="card" {
-                    div class="card-header bg-info text-white" {
-                        h5 class="mb-0" { "Change Guardian Password" }
-                    }
+            div class="col-lg-6" {
+                div class="card h-100" {
+                    div class="card-header dashboard-header" { "Change Password" }
                     div class="card-body" {
+                        div class="alert alert-warning mb-3" {
+                            "After changing your password, the server will restart and you will need to log in again. Depending on your setup, a manual restart may be required."
+                        }
                         form method="post" action="/change-password" {
-                            div class="row" {
-                                div class="col-lg-6 mb-3" {
-                                    div class="form-group mb-3" {
-                                        label for="current_password" class="form-label" { "Current Password" }
-                                        input type="password" class="form-control" id="current_password" name="current_password" placeholder="Enter current password" required;
-                                    }
-                                    div class="form-group mb-3" {
-                                        label for="new_password" class="form-label" { "New Password" }
-                                        input type="password" class="form-control" id="new_password" name="new_password" placeholder="Enter new password" required;
-                                    }
-                                    div class="form-group mb-3" {
-                                        label for="confirm_password" class="form-label" { "Confirm New Password" }
-                                        input type="password" class="form-control" id="confirm_password" name="confirm_password" placeholder="Confirm new password" required;
-                                    }
-                                    button type="submit" class="btn btn-info btn-lg mt-2" {
-                                        "Change Password"
-                                    }
-                                }
-                                div class="col-lg-6" {
-                                    div class="alert alert-info mb-0" {
-                                        strong { "Important" }
-                                        br;
-                                        "After changing your password, you will need to log in again with the new password."
-                                    }
-                                    div class="alert alert-info mt-3" {
-                                        strong { "Just so you know" }
-                                        br;
-                                        "Fedimint instance will shut down and might require a manual restart (depending how it's run)"
-                                    }
-                                }
+                            div class="form-group mb-3" {
+                                label for="current_password" class="form-label" { "Current Password" }
+                                input type="password" class="form-control" id="current_password" name="current_password" placeholder="Enter current password" required;
+                            }
+                            div class="form-group mb-3" {
+                                label for="new_password" class="form-label" { "New Password" }
+                                input type="password" class="form-control" id="new_password" name="new_password" placeholder="Enter new password" required;
+                            }
+                            div class="form-group mb-3" {
+                                label for="confirm_password" class="form-label" { "Confirm New Password" }
+                                input type="password" class="form-control" id="confirm_password" name="confirm_password" placeholder="Confirm new password" required;
+                            }
+                            button type="submit" class="btn btn-primary" {
+                                "Change Password"
                             }
                         }
                     }
@@ -344,14 +299,13 @@ async fn dashboard_view(
         }
     };
 
-    Html(dashboard_layout(content, "Fedimint Guardian UI", Some(&fedimintd_version)).into_string())
-        .into_response()
+    Html(dashboard_layout(content, &fedimintd_version).into_string()).into_response()
 }
 
 pub fn router(api: DynDashboardApi) -> Router {
     let mut app = Router::new()
         .route(ROOT_ROUTE, get(dashboard_view))
-        .route(LOGIN_ROUTE, get(login_form).post(login_submit))
+        .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
         .route(EXPLORER_ROUTE, get(consensus_explorer_view))
         .route(EXPLORER_IDX_ROUTE, get(consensus_explorer_view))
         .route(DOWNLOAD_BACKUP_ROUTE, get(download_backup))

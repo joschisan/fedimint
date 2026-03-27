@@ -43,8 +43,8 @@ use fedimint_logging::LOG_GATEWAY_UI;
 use fedimint_ui_common::assets::WithStaticRoutesExt;
 use fedimint_ui_common::auth::UserAuth;
 use fedimint_ui_common::{
-    LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState, dashboard_layout, login_form_response,
-    login_layout,
+    LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState, dashboard_layout,
+    login_form as render_login_form, single_card_layout,
 };
 use lightning_invoice::Bolt11Invoice;
 use maud::html;
@@ -258,8 +258,10 @@ pub trait IAdminGateway {
     ) -> Result<TieredCounts, Self::Error>;
 }
 
-async fn login_form<E>(State(_state): State<UiState<DynGatewayApi<E>>>) -> impl IntoResponse {
-    login_form_response("Fedimint Gateway Login")
+async fn login_form_handler<E>(
+    State(_state): State<UiState<DynGatewayApi<E>>>,
+) -> impl IntoResponse {
+    Html(single_card_layout("Enter Password", render_login_form(None)).into_string())
 }
 
 // Dashboard login submit handler
@@ -268,7 +270,7 @@ async fn login_submit<E>(
     jar: CookieJar,
     Form(input): Form<LoginInput>,
 ) -> impl IntoResponse {
-    if let Ok(verify) = bcrypt::verify(input.password, &state.api.get_password_hash())
+    if let Ok(verify) = bcrypt::verify(&input.password, &state.api.get_password_hash())
         && verify
     {
         let mut cookie = Cookie::new(state.auth_cookie_name.clone(), state.auth_cookie_value);
@@ -278,17 +280,10 @@ async fn login_submit<E>(
         cookie.set_same_site(Some(SameSite::Lax));
 
         let jar = jar.add(cookie);
-        return (jar, Redirect::to(ROOT_ROUTE)).into_response();
+        return (jar, [("HX-Redirect", "/")]).into_response();
     }
 
-    let content = html! {
-        div class="alert alert-danger" { "The password is invalid" }
-        div class="button-container" {
-            a href=(LOGIN_ROUTE) class="btn btn-primary setup-btn" { "Return to Login" }
-        }
-    };
-
-    Html(login_layout("Login Failed", content).into_string()).into_response()
+    Html(render_login_form(Some("The password is invalid")).into_string()).into_response()
 }
 
 async fn dashboard_view<E>(
@@ -317,11 +312,8 @@ where
                     (err.to_string())
                 }
             };
-            return Html(
-                dashboard_layout(content, "Fedimint Gateway UI", Some(&gatewayd_version))
-                    .into_string(),
-            )
-            .into_response();
+            return Html(dashboard_layout(content, &gatewayd_version).into_string())
+                .into_response();
         }
     };
 
@@ -409,8 +401,7 @@ where
         }
     };
 
-    Html(dashboard_layout(content, "Fedimint Gateway UI", Some(&gatewayd_version)).into_string())
-        .into_response()
+    Html(dashboard_layout(content, &gatewayd_version).into_string()).into_response()
 }
 
 async fn stop_gateway_handler<E>(
@@ -475,7 +466,7 @@ pub fn router<E: Display + Send + Sync + std::fmt::Debug + 'static>(
 ) -> Router {
     let app = Router::new()
         .route(ROOT_ROUTE, get(dashboard_view))
-        .route(LOGIN_ROUTE, get(login_form).post(login_submit))
+        .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
         .route(OPEN_CHANNEL_ROUTE, post(open_channel_handler))
         .route(CLOSE_CHANNEL_ROUTE, post(close_channel_handler))
         .route(CHANNEL_FRAGMENT_ROUTE, get(channels_fragment_handler))
