@@ -1,4 +1,7 @@
+use std::pin::pin;
+
 use anyhow::ensure;
+use async_stream::stream;
 use fedimint_client::secret::{PlainRootSecretStrategy, RootSecretStrategy};
 use fedimint_client::transaction::TransactionBuilder;
 use fedimint_client::{ClientHandleArc, RootSecret};
@@ -8,11 +11,66 @@ use fedimint_core::core::OperationId;
 use fedimint_core::db::mem_impl::MemDatabase;
 use fedimint_dummy_client::{DummyClientInit, DummyClientModule};
 use fedimint_dummy_server::DummyInit;
-use fedimint_mintv2_client::{ECash, FinalReceiveOperationState, MintClientInit, MintClientModule};
+use fedimint_eventlog::{Event, EventLogEntry, EventLogId};
+use fedimint_mintv2_client::{
+    ECash, FinalReceiveOperationState, MintClientInit, MintClientModule, ReceivePaymentEvent,
+    ReceivePaymentStatus, ReceivePaymentUpdateEvent, SendPaymentEvent,
+};
+use fedimint_mintv2_common::KIND;
 use fedimint_mintv2_server::MintInit;
 use fedimint_testing::federation::FederationTest;
 use fedimint_testing::fixtures::Fixtures;
+use futures::StreamExt;
 use serde_json::Value;
+
+#[derive(Debug, PartialEq, Eq)]
+enum MintEvent {
+    Send(SendPaymentEvent),
+    Receive(ReceivePaymentEvent),
+    ReceiveUpdate(ReceivePaymentUpdateEvent),
+}
+
+fn mint_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = MintEvent> {
+    let client = client.clone();
+    let mut log_rx = client.log_event_added_rx();
+    let mut next_id = EventLogId::LOG_START;
+
+    stream! {
+        loop {
+            let events = client.get_event_log(Some(next_id), 100).await;
+
+            for entry in events {
+                next_id = entry.id().saturating_add(1);
+
+                if let Some(event) = try_parse_mint_event(entry.as_raw()) {
+                    yield event;
+                }
+            }
+
+            let _ = log_rx.changed().await;
+        }
+    }
+}
+
+fn try_parse_mint_event(entry: &EventLogEntry) -> Option<MintEvent> {
+    if entry.module_kind() != Some(&KIND) {
+        return None;
+    }
+
+    if entry.kind == SendPaymentEvent::KIND {
+        return entry.to_event().map(MintEvent::Send);
+    }
+
+    if entry.kind == ReceivePaymentUpdateEvent::KIND {
+        return entry.to_event().map(MintEvent::ReceiveUpdate);
+    }
+
+    if entry.kind == ReceivePaymentEvent::KIND {
+        return entry.to_event().map(MintEvent::Receive);
+    }
+
+    None
+}
 
 const SEND_SK: [u8; 64] = [0x42; 64];
 const RECEIVE_SK: [u8; 64] = [0x69; 64];
@@ -63,6 +121,9 @@ async fn send_and_receive() -> anyhow::Result<()> {
 
     issue_ecash(&client_send, Amount::from_sats(11_000)).await?;
 
+    let mut send_events = pin!(mint_event_stream(&client_send));
+    let mut receive_events = pin!(mint_event_stream(&client_receive));
+
     for i in 0..10 {
         tracing::info!("Sending ecash payment {i} of 10");
 
@@ -70,6 +131,10 @@ async fn send_and_receive() -> anyhow::Result<()> {
             .get_first_module::<MintClientModule>()?
             .send(Amount::from_sats(1_000), Value::Null)
             .await?;
+
+        let Some(MintEvent::Send(_)) = send_events.next().await else {
+            panic!("Expected Send event");
+        };
 
         let ecash = base32::encode_prefixed(FEDIMINT_PREFIX, &ecash);
 
@@ -86,6 +151,17 @@ async fn send_and_receive() -> anyhow::Result<()> {
             .await;
 
         assert_eq!(state, FinalReceiveOperationState::Success);
+
+        let Some(MintEvent::Receive(receive)) = receive_events.next().await else {
+            panic!("Expected Receive event");
+        };
+        assert_eq!(receive.operation_id, operation_id);
+
+        let Some(MintEvent::ReceiveUpdate(update)) = receive_events.next().await else {
+            panic!("Expected ReceiveUpdate event");
+        };
+        assert_eq!(update.operation_id, receive.operation_id);
+        assert_eq!(update.status, ReceivePaymentStatus::Success);
 
         test_client_recovery(&fed, &client_send, root_secret(&SEND_SK)).await?;
         test_client_recovery(&fed, &client_receive, root_secret(&RECEIVE_SK)).await?;
@@ -143,10 +219,17 @@ async fn double_spend_is_rejected() -> anyhow::Result<()> {
 
     issue_ecash(&client_send, Amount::from_sats(10_000)).await?;
 
+    let mut send_events = pin!(mint_event_stream(&client_send));
+    let mut receive_events = pin!(mint_event_stream(&client_receive));
+
     let ecash = client_send
         .get_first_module::<MintClientModule>()?
         .send(Amount::from_sats(1_000), Value::Null)
         .await?;
+
+    let Some(MintEvent::Send(_)) = send_events.next().await else {
+        panic!("Expected Send event");
+    };
 
     let operation_id = client_send
         .get_first_module::<MintClientModule>()?
@@ -160,6 +243,17 @@ async fn double_spend_is_rejected() -> anyhow::Result<()> {
 
     assert_eq!(state, FinalReceiveOperationState::Success);
 
+    let Some(MintEvent::Receive(receive)) = send_events.next().await else {
+        panic!("Expected Receive event");
+    };
+    assert_eq!(receive.operation_id, operation_id);
+
+    let Some(MintEvent::ReceiveUpdate(update)) = send_events.next().await else {
+        panic!("Expected ReceiveUpdate event");
+    };
+    assert_eq!(update.operation_id, receive.operation_id);
+    assert_eq!(update.status, ReceivePaymentStatus::Success);
+
     let operation_id = client_receive
         .get_first_module::<MintClientModule>()?
         .receive(ecash, Value::Null)
@@ -171,6 +265,17 @@ async fn double_spend_is_rejected() -> anyhow::Result<()> {
         .await;
 
     assert_eq!(state, FinalReceiveOperationState::Rejected);
+
+    let Some(MintEvent::Receive(receive)) = receive_events.next().await else {
+        panic!("Expected Receive event");
+    };
+    assert_eq!(receive.operation_id, operation_id);
+
+    let Some(MintEvent::ReceiveUpdate(update)) = receive_events.next().await else {
+        panic!("Expected ReceiveUpdate event");
+    };
+    assert_eq!(update.operation_id, receive.operation_id);
+    assert_eq!(update.status, ReceivePaymentStatus::Rejected);
 
     Ok(())
 }
@@ -184,10 +289,16 @@ async fn transaction_with_invalid_signature_is_rejected() -> anyhow::Result<()> 
 
     issue_ecash(&client, Amount::from_sats(10_000)).await?;
 
+    let mut events = pin!(mint_event_stream(&client));
+
     let ecash = client
         .get_first_module::<MintClientModule>()?
         .send(Amount::from_sats(1_000), Value::Null)
         .await?;
+
+    let Some(MintEvent::Send(_)) = events.next().await else {
+        panic!("Expected Send event");
+    };
 
     let mut invalid_notes = ecash.notes();
 
@@ -209,6 +320,17 @@ async fn transaction_with_invalid_signature_is_rejected() -> anyhow::Result<()> 
 
     assert_eq!(state, FinalReceiveOperationState::Rejected);
 
+    let Some(MintEvent::Receive(receive)) = events.next().await else {
+        panic!("Expected Receive event");
+    };
+    assert_eq!(receive.operation_id, operation_id);
+
+    let Some(MintEvent::ReceiveUpdate(update)) = events.next().await else {
+        panic!("Expected ReceiveUpdate event");
+    };
+    assert_eq!(update.operation_id, receive.operation_id);
+    assert_eq!(update.status, ReceivePaymentStatus::Rejected);
+
     let valid_ecash = ECash::new(ecash.mint().unwrap(), ecash.notes());
 
     let operation_id = client
@@ -222,6 +344,17 @@ async fn transaction_with_invalid_signature_is_rejected() -> anyhow::Result<()> 
         .await;
 
     assert_eq!(state, FinalReceiveOperationState::Success);
+
+    let Some(MintEvent::Receive(receive)) = events.next().await else {
+        panic!("Expected Receive event");
+    };
+    assert_eq!(receive.operation_id, operation_id);
+
+    let Some(MintEvent::ReceiveUpdate(update)) = events.next().await else {
+        panic!("Expected ReceiveUpdate event");
+    };
+    assert_eq!(update.operation_id, receive.operation_id);
+    assert_eq!(update.status, ReceivePaymentStatus::Success);
 
     Ok(())
 }

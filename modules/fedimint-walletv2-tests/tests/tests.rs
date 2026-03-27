@@ -1,16 +1,79 @@
+use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_stream::stream;
 use bitcoin::Amount;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::task::sleep_in_test;
 use fedimint_dummy_client::DummyClientInit;
 use fedimint_dummy_server::DummyInit;
+use fedimint_eventlog::{Event, EventLogEntry, EventLogId};
 use fedimint_testing::btc::BitcoinTest;
 use fedimint_testing::fixtures::Fixtures;
+use fedimint_walletv2_client::events::{
+    ReceivePaymentEvent, ReceivePaymentUpdateEvent, SendPaymentEvent, SendPaymentStatus,
+    SendPaymentUpdateEvent,
+};
 use fedimint_walletv2_client::{FinalSendOperationState, WalletClientInit, WalletClientModule};
+use fedimint_walletv2_common::KIND;
 use fedimint_walletv2_server::{CONFIRMATION_FINALITY_DELAY, WalletInit};
+use futures::StreamExt;
 use tracing::info;
+
+#[derive(Debug)]
+enum WalletEvent {
+    Send(SendPaymentEvent),
+    SendStatus(SendPaymentUpdateEvent),
+    Receive(ReceivePaymentEvent),
+    ReceiveStatus(ReceivePaymentUpdateEvent),
+}
+
+fn wallet_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = WalletEvent> {
+    let client = client.clone();
+    let mut log_rx = client.log_event_added_rx();
+    let mut next_id = EventLogId::LOG_START;
+
+    stream! {
+        loop {
+            let events = client.get_event_log(Some(next_id), 100).await;
+
+            for entry in events {
+                next_id = entry.id().saturating_add(1);
+
+                if let Some(event) = try_parse_wallet_event(entry.as_raw()) {
+                    yield event;
+                }
+            }
+
+            let _ = log_rx.changed().await;
+        }
+    }
+}
+
+fn try_parse_wallet_event(entry: &EventLogEntry) -> Option<WalletEvent> {
+    if entry.module_kind() != Some(&KIND) {
+        return None;
+    }
+
+    if entry.kind == SendPaymentEvent::KIND {
+        return entry.to_event().map(WalletEvent::Send);
+    }
+
+    if entry.kind == SendPaymentUpdateEvent::KIND {
+        return entry.to_event().map(WalletEvent::SendStatus);
+    }
+
+    if entry.kind == ReceivePaymentEvent::KIND {
+        return entry.to_event().map(WalletEvent::Receive);
+    }
+
+    if entry.kind == ReceivePaymentUpdateEvent::KIND {
+        return entry.to_event().map(WalletEvent::ReceiveStatus);
+    }
+
+    None
+}
 
 fn fixtures() -> Fixtures {
     Fixtures::new_primary(DummyClientInit, DummyInit).with_module(WalletClientInit, WalletInit)
@@ -120,6 +183,17 @@ async fn fee_exceeds_one_bitcoin_with_many_pending_txs() -> anyhow::Result<()> {
 
     let address = bitcoin.get_new_address().await.as_unchecked().clone();
 
+    let mut events = pin!(wallet_event_stream(&client));
+
+    let Some(WalletEvent::Receive(receive)) = events.next().await else {
+        panic!("Expected Receive event");
+    };
+
+    let Some(WalletEvent::ReceiveStatus(status)) = events.next().await else {
+        panic!("Expected ReceiveStatus event");
+    };
+    assert_eq!(status.operation_id, receive.operation_id);
+
     for _ in 0..19 {
         let send_fee = client
             .get_first_module::<WalletClientModule>()?
@@ -141,6 +215,17 @@ async fn fee_exceeds_one_bitcoin_with_many_pending_txs() -> anyhow::Result<()> {
             .await;
 
         assert!(matches!(state, FinalSendOperationState::Success(_)));
+
+        let Some(WalletEvent::Send(e)) = events.next().await else {
+            panic!("Expected Send event");
+        };
+        assert_eq!(e.operation_id, send_op);
+
+        let Some(WalletEvent::SendStatus(e)) = events.next().await else {
+            panic!("Expected SendStatus event");
+        };
+        assert_eq!(e.operation_id, send_op);
+        assert!(matches!(e.status, SendPaymentStatus::Success(_)));
     }
 
     panic!("Transaction fee did not exceed one bitcoin")
