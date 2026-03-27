@@ -5,7 +5,7 @@ use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 
 use crate::WalletClientContext;
-use crate::events::{ReceivePaymentStatus, ReceivePaymentStatusEvent};
+use crate::events::{ReceivePaymentStatus, ReceivePaymentUpdateEvent};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
@@ -92,7 +92,7 @@ impl ReceiveStateMachine {
                     .client_ctx
                     .log_event(
                         &mut dbtx.module_tx(),
-                        ReceivePaymentStatusEvent {
+                        ReceivePaymentUpdateEvent {
                             operation_id: old_state.common.operation_id,
                             status: ReceivePaymentStatus::Success,
                         },
@@ -106,7 +106,7 @@ impl ReceiveStateMachine {
                     .client_ctx
                     .log_event(
                         &mut dbtx.module_tx(),
-                        ReceivePaymentStatusEvent {
+                        ReceivePaymentUpdateEvent {
                             operation_id: old_state.common.operation_id,
                             status: ReceivePaymentStatus::Aborted,
                         },

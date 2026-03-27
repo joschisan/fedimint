@@ -28,14 +28,14 @@ pub enum SendPaymentStatus {
 
 /// Event emitted when a send (peg-out) operation reaches a final state.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SendPaymentStatusEvent {
+pub struct SendPaymentUpdateEvent {
     pub operation_id: OperationId,
     pub status: SendPaymentStatus,
 }
 
-impl Event for SendPaymentStatusEvent {
+impl Event for SendPaymentUpdateEvent {
     const MODULE: Option<ModuleKind> = Some(fedimint_walletv2_common::KIND);
-    const KIND: EventKind = EventKind::from_static("payment-send-status");
+    const KIND: EventKind = EventKind::from_static("payment-send-update");
     const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
 
@@ -64,13 +64,13 @@ pub enum ReceivePaymentStatus {
 
 /// Event emitted when a receive (peg-in) operation reaches a final state.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ReceivePaymentStatusEvent {
+pub struct ReceivePaymentUpdateEvent {
     pub operation_id: OperationId,
     pub status: ReceivePaymentStatus,
 }
 
-impl Event for ReceivePaymentStatusEvent {
+impl Event for ReceivePaymentUpdateEvent {
     const MODULE: Option<ModuleKind> = Some(fedimint_walletv2_common::KIND);
-    const KIND: EventKind = EventKind::from_static("payment-receive-status");
+    const KIND: EventKind = EventKind::from_static("payment-receive-update");
     const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }

@@ -6,7 +6,7 @@ use fedimint_core::encoding::{Decodable, Encodable};
 
 use crate::WalletClientContext;
 use crate::api::WalletFederationApi;
-use crate::events::{SendPaymentStatus, SendPaymentStatusEvent};
+use crate::events::{SendPaymentStatus, SendPaymentUpdateEvent};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
@@ -106,7 +106,7 @@ impl SendStateMachine {
                     .client_ctx
                     .log_event(
                         &mut dbtx.module_tx(),
-                        SendPaymentStatusEvent {
+                        SendPaymentUpdateEvent {
                             operation_id: old_state.common.operation_id,
                             status: SendPaymentStatus::Success(txid),
                         },
@@ -120,7 +120,7 @@ impl SendStateMachine {
                     .client_ctx
                     .log_event(
                         &mut dbtx.module_tx(),
-                        SendPaymentStatusEvent {
+                        SendPaymentUpdateEvent {
                             operation_id: old_state.common.operation_id,
                             status: SendPaymentStatus::Aborted,
                         },
