@@ -1,3 +1,6 @@
+# NOTE: This docker-compose setup is for LNv2 gateways only.
+# It uses iroh for peer-to-peer networking and does not support LNv1.
+
 services:
   gatewayd:
     image: fedimint/gatewayd:v0.10.0
