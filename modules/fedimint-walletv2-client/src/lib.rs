@@ -277,10 +277,12 @@ impl WalletClientModule {
 
         let operation_id = OperationId::new_random();
 
+        let destination = StandardScript::from_address(&address.clone().assume_checked())
+            .ok_or(SendError::UnsupportedAddress)?;
+
         let client_output = ClientOutput::<WalletOutput> {
             output: WalletOutput::V0(WalletOutputV0 {
-                destination: StandardScript::from_address(&address.clone().assume_checked())
-                    .ok_or(SendError::UnsupportedAddress)?,
+                destination,
                 value: amount,
                 fee,
             }),
@@ -309,6 +311,8 @@ impl WalletClientModule {
             vec![client_output_sm],
         ));
 
+        let address_string = address.assume_checked_ref().to_string();
+
         self.client_ctx
             .finalize_and_submit_transaction(
                 operation_id,
@@ -333,6 +337,7 @@ impl WalletClientModule {
                 &mut dbtx,
                 SendPaymentEvent {
                     operation_id,
+                    address: address_string,
                     amount,
                     fee,
                 },
@@ -474,6 +479,7 @@ impl WalletClientModule {
                 &mut dbtx,
                 ReceivePaymentEvent {
                     operation_id,
+                    address: self.derive_address(address_index).to_string(),
                     amount,
                     fee,
                 },

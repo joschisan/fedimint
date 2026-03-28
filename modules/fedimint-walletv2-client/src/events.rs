@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendPaymentEvent {
     pub operation_id: OperationId,
+    pub address: String,
     pub amount: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
@@ -43,6 +44,7 @@ impl Event for SendPaymentUpdateEvent {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReceivePaymentEvent {
     pub operation_id: OperationId,
+    pub address: String,
     pub amount: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
