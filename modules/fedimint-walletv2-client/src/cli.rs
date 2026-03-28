@@ -13,12 +13,12 @@ enum Opts {
     /// Subcommands for operator to retrieve information about the wallet state.
     #[command(subcommand)]
     Info(InfoOpts),
-    /// Fetch the current fee required to send an on-chain payment.
+    /// Fetch the current fee required to send an onchain payment.
     SendFee,
-    /// Send an on-chain payment.
+    /// Send an onchain payment.
     Send {
         address: Address<NetworkUnchecked>,
-        amount: bitcoin::Amount,
+        value: bitcoin::Amount,
         #[arg(long)]
         fee: Option<bitcoin::Amount>,
     },
@@ -57,11 +57,11 @@ pub(crate) async fn handle_cli_command(
         Opts::SendFee => json(wallet.send_fee().await?),
         Opts::Send {
             address,
-            amount,
+            value,
             fee,
         } => json(
             wallet
-                .await_final_send_operation_state(wallet.send(address, amount, fee).await?)
+                .await_final_send_operation_state(wallet.send(address, value, fee).await?)
                 .await,
         ),
         Opts::Receive => json(wallet.receive().await),

@@ -26,7 +26,7 @@ impl ReceiveStateMachine {
 pub struct ReceiveSMCommon {
     pub operation_id: OperationId,
     pub txid: TransactionId,
-    pub amount: bitcoin::Amount,
+    pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 

@@ -27,7 +27,7 @@ impl SendStateMachine {
 pub struct SendSMCommon {
     pub operation_id: OperationId,
     pub outpoint: OutPoint,
-    pub amount: bitcoin::Amount,
+    pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 
