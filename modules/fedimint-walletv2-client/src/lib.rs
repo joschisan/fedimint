@@ -75,18 +75,18 @@ pub enum WalletOperationMeta {
 pub struct SendMeta {
     pub change_outpoint_range: OutPointRange,
     pub address: Address<NetworkUnchecked>,
-    pub amount: bitcoin::Amount,
+    pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiveMeta {
     pub change_outpoint_range: OutPointRange,
-    pub amount: bitcoin::Amount,
+    pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 
-/// The final state of an operation sending bitcoin on-chain.
+/// The final state of an operation sending bitcoin onchain.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FinalSendOperationState {
     /// The transaction was successful.
@@ -241,7 +241,7 @@ impl WalletClientModule {
         self.module_api.tx_chain().await
     }
 
-    /// Fetch the current fee required to send an on-chain payment.
+    /// Fetch the current fee required to send an onchain payment.
     pub async fn send_fee(&self) -> Result<bitcoin::Amount, SendError> {
         self.module_api
             .send_fee()
@@ -250,19 +250,19 @@ impl WalletClientModule {
             .ok_or(SendError::NoConsensusFeerateAvailable)
     }
 
-    /// Send an on-chain payment with the given fee.
+    /// Send an onchain payment with the given fee.
     pub async fn send(
         &self,
         address: Address<NetworkUnchecked>,
-        amount: bitcoin::Amount,
+        value: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
     ) -> Result<OperationId, SendError> {
         if !address.is_valid_for_network(self.cfg.network) {
             return Err(SendError::WrongNetwork);
         }
 
-        if amount < self.cfg.dust_limit {
-            return Err(SendError::DustAmount);
+        if value < self.cfg.dust_limit {
+            return Err(SendError::DustValue);
         }
 
         let fee = match fee {
@@ -277,14 +277,16 @@ impl WalletClientModule {
 
         let operation_id = OperationId::new_random();
 
+        let destination = StandardScript::from_address(&address.clone().assume_checked())
+            .ok_or(SendError::UnsupportedAddress)?;
+
         let client_output = ClientOutput::<WalletOutput> {
             output: WalletOutput::V0(WalletOutputV0 {
-                destination: StandardScript::from_address(&address.clone().assume_checked())
-                    .ok_or(SendError::UnsupportedAddress)?,
-                value: amount,
+                destination,
+                value,
                 fee,
             }),
-            amounts: Amounts::new_bitcoin(Amount::from_sats((amount + fee).to_sat())),
+            amounts: Amounts::new_bitcoin(Amount::from_sats((value + fee).to_sat())),
         };
 
         let client_output_sm = ClientOutputSM::<WalletClientStateMachines> {
@@ -296,7 +298,7 @@ impl WalletClientModule {
                             txid: range.txid(),
                             out_idx: 0,
                         },
-                        amount,
+                        value,
                         fee,
                     },
                     state: SendSMState::Funding,
@@ -309,6 +311,8 @@ impl WalletClientModule {
             vec![client_output_sm],
         ));
 
+        let address_string = address.assume_checked_ref().to_string();
+
         self.client_ctx
             .finalize_and_submit_transaction(
                 operation_id,
@@ -317,7 +321,7 @@ impl WalletClientModule {
                     WalletOperationMeta::Send(SendMeta {
                         change_outpoint_range,
                         address: address.clone(),
-                        amount,
+                        value,
                         fee,
                     })
                 },
@@ -333,7 +337,8 @@ impl WalletClientModule {
                 &mut dbtx,
                 SendPaymentEvent {
                     operation_id,
-                    amount,
+                    address: address_string,
+                    value,
                     fee,
                 },
             )
@@ -415,7 +420,7 @@ impl WalletClientModule {
     async fn receive_output(
         &self,
         output_index: u64,
-        amount: bitcoin::Amount,
+        value: bitcoin::Amount,
         address_index: u64,
         fee: bitcoin::Amount,
     ) -> (OperationId, TransactionId) {
@@ -428,7 +433,7 @@ impl WalletClientModule {
                 tweak: self.derive_tweak(address_index).public_key(),
             }),
             keys: vec![self.derive_tweak(address_index)],
-            amounts: Amounts::new_bitcoin(Amount::from_sats((amount - fee).to_sat())),
+            amounts: Amounts::new_bitcoin(Amount::from_sats((value - fee).to_sat())),
         };
 
         let client_input_sm = ClientInputSM::<WalletClientStateMachines> {
@@ -437,7 +442,7 @@ impl WalletClientModule {
                     common: ReceiveSMCommon {
                         operation_id,
                         txid: range.txid(),
-                        amount,
+                        value,
                         fee,
                     },
                     state: ReceiveSMState::Funding,
@@ -458,7 +463,7 @@ impl WalletClientModule {
                 move |change_outpoint_range| {
                     WalletOperationMeta::Receive(ReceiveMeta {
                         change_outpoint_range,
-                        amount,
+                        value,
                         fee,
                     })
                 },
@@ -474,7 +479,8 @@ impl WalletClientModule {
                 &mut dbtx,
                 ReceivePaymentEvent {
                     operation_id,
-                    amount,
+                    address: self.derive_address(address_index).to_string(),
+                    value,
                     fee,
                 },
             )
@@ -614,8 +620,8 @@ impl WalletClientModule {
 pub enum SendError {
     #[error("Address is from a different network than the federation.")]
     WrongNetwork,
-    #[error("The amount is too small to be sent on-chain")]
-    DustAmount,
+    #[error("The value is too small")]
+    DustValue,
     #[error("Federation returned an error: {0}")]
     FederationError(String),
     #[error("No consensus feerate is available at this time")]

@@ -229,7 +229,7 @@ async fn main() -> anyhow::Result<()> {
 
             assert_ne!(federation_address_2, federation_address_3);
 
-            info!("Send funds back on-chain...");
+            info!("Send funds back onchain...");
 
             let withdraw_address = bitcoind.get_new_address().await?;
 
