@@ -1,4 +1,5 @@
-use bitcoin::Txid;
+use bitcoin::address::NetworkUnchecked;
+use bitcoin::{Address, Txid};
 use fedimint_core::core::{ModuleKind, OperationId};
 use fedimint_eventlog::{Event, EventKind, EventPersistence};
 use serde::{Deserialize, Serialize};
@@ -7,7 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendPaymentEvent {
     pub operation_id: OperationId,
-    pub address: String,
+    pub address: Address<NetworkUnchecked>,
     pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
@@ -44,7 +45,7 @@ impl Event for SendPaymentUpdateEvent {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReceivePaymentEvent {
     pub operation_id: OperationId,
-    pub address: String,
+    pub address: Address<NetworkUnchecked>,
     pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }

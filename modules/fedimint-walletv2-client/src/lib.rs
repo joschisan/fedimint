@@ -311,7 +311,7 @@ impl WalletClientModule {
             vec![client_output_sm],
         ));
 
-        let address_string = address.assume_checked_ref().to_string();
+        let address_clone = address.clone();
 
         self.client_ctx
             .finalize_and_submit_transaction(
@@ -320,7 +320,7 @@ impl WalletClientModule {
                 move |change_outpoint_range| {
                     WalletOperationMeta::Send(SendMeta {
                         change_outpoint_range,
-                        address: address.clone(),
+                        address: address_clone.clone(),
                         value,
                         fee,
                     })
@@ -337,7 +337,7 @@ impl WalletClientModule {
                 &mut dbtx,
                 SendPaymentEvent {
                     operation_id,
-                    address: address_string,
+                    address,
                     value,
                     fee,
                 },
@@ -479,7 +479,7 @@ impl WalletClientModule {
                 &mut dbtx,
                 ReceivePaymentEvent {
                     operation_id,
-                    address: self.derive_address(address_index).to_string(),
+                    address: self.derive_address(address_index).as_unchecked().clone(),
                     value,
                     fee,
                 },
