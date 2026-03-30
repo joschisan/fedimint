@@ -1,5 +1,6 @@
-# NOTE: This docker-compose setup is for LNv2 gateways only.
-# It uses iroh for peer-to-peer networking and does not support LNv1.
+# NOTE: This docker-compose setup uses LDK with iroh for peer-to-peer
+# networking (LNv2 only). For LNv1 support, uncomment the LND section.
+# Older Fedimint clients (pre 0.10) are not compatible with iroh.
 
 services:
   gatewayd:
