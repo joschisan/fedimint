@@ -16,6 +16,11 @@ use crate::util::FmtCompact as _;
 /// all client code handles correct modules that client doesn't know about.
 pub const FM_USE_UNKNOWN_MODULE_ENV: &str = "FM_USE_UNKNOWN_MODULE";
 
+/// Disable automatic consensus version voting for testing and development
+/// environments
+pub const FM_WALLET_DISABLE_AUTOMATIC_CONSENSUS_VERSION_VOTING_ENV: &str =
+    "FM_WALLET_DISABLE_AUTOMATIC_CONSENSUS_VERSION_VOTING";
+
 pub const FM_ENABLE_MODULE_LNV1_ENV: &str = "FM_ENABLE_MODULE_LNV1";
 pub const FM_ENABLE_MODULE_LNV2_ENV: &str = "FM_ENABLE_MODULE_LNV2";
 pub const FM_ENABLE_MODULE_MINT_ENV: &str = "FM_ENABLE_MODULE_MINT";
@@ -81,6 +86,12 @@ pub fn is_running_in_test_env() -> bool {
 /// Use to allow `process_output` to process RBF withdrawal outputs.
 pub fn is_rbf_withdrawal_enabled() -> bool {
     is_env_var_set("FM_UNSAFE_ENABLE_RBF_WITHDRAWAL")
+}
+
+/// Use to disable automatic consensus version voting for testing and
+/// development environments
+pub fn is_automatic_consensus_version_voting_disabled() -> bool {
+    is_env_var_set(FM_WALLET_DISABLE_AUTOMATIC_CONSENSUS_VERSION_VOTING_ENV)
 }
 
 /// Get value of `FEDIMINT_BUILD_CODE_VERSION` at compile time

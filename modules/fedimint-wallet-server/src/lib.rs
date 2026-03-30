@@ -53,8 +53,8 @@ use fedimint_core::db::{
 use fedimint_core::encoding::btc::NetworkLegacyEncodingWrapper;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::envs::{
-    BitcoinRpcConfig, FM_ENABLE_MODULE_WALLET_ENV, is_env_var_set_opt, is_rbf_withdrawal_enabled,
-    is_running_in_test_env,
+    BitcoinRpcConfig, FM_ENABLE_MODULE_WALLET_ENV, is_automatic_consensus_version_voting_disabled,
+    is_env_var_set_opt, is_rbf_withdrawal_enabled, is_running_in_test_env,
 };
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
@@ -570,14 +570,18 @@ impl ServerModule for Wallet {
             });
 
         let active_consensus_version = self.consensus_module_consensus_version(dbtx).await;
-        let automatic_vote = self.peer_supported_consensus_version.borrow().and_then(
-            |supported_consensus_version| {
-                // Only automatically vote if the commonly supported version is higher than the
-                // currently active one
-                (active_consensus_version < supported_consensus_version)
-                    .then_some(supported_consensus_version)
-            },
-        );
+        let automatic_vote = if is_automatic_consensus_version_voting_disabled() {
+            None
+        } else {
+            self.peer_supported_consensus_version
+                .borrow()
+                .and_then(|supported_consensus_version| {
+                    // Only automatically vote if the commonly supported version is higher than the
+                    // currently active one
+                    (active_consensus_version < supported_consensus_version)
+                        .then_some(supported_consensus_version)
+                })
+        };
 
         // Prioritizing automatic vote for now since the manual vote never resets. Once
         // that is fixed this should be switched around.
@@ -2419,6 +2423,7 @@ mod tests {
     use bitcoin::{Address, Amount, OutPoint, Txid, secp256k1};
     use fedimint_core::Feerate;
     use fedimint_core::encoding::btc::NetworkLegacyEncodingWrapper;
+    use fedimint_core::envs::is_automatic_consensus_version_voting_disabled;
     use fedimint_wallet_common::{PegOut, PegOutFees, Rbf, WalletOutputV0};
     use miniscript::descriptor::Wsh;
 
@@ -2537,5 +2542,24 @@ mod tests {
             fees: PegOutFees::new(sats_per_kvb, total_weight),
             txid: Txid::all_zeros(),
         })
+    }
+
+    #[test]
+    fn automatic_vote_suppressed_when_env_set() {
+        unsafe {
+            std::env::set_var("FM_WALLET_DISABLE_AUTOMATIC_CONSENSUS_VERSION_VOTING", "1");
+        }
+        assert!(is_automatic_consensus_version_voting_disabled());
+        unsafe {
+            std::env::remove_var("FM_WALLET_DISABLE_AUTOMATIC_CONSENSUS_VERSION_VOTING");
+        }
+    }
+
+    #[test]
+    fn automatic_vote_active_when_env_unset() {
+        unsafe {
+            std::env::remove_var("FM_WALLET_DISABLE_AUTOMATIC_CONSENSUS_VERSION_VOTING");
+        }
+        assert!(!is_automatic_consensus_version_voting_disabled());
     }
 }
