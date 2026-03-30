@@ -113,6 +113,9 @@ pub enum RpcRequestKind {
     ParseOobNotes {
         oob_notes: String,
     },
+    ParseLightningAddress {
+        address: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -480,6 +483,14 @@ impl RpcGlobalState {
             RpcRequestKind::ParseOobNotes { oob_notes } => Some(Box::pin(try_stream! {
                 let parsed = parse_oob_notes(&oob_notes)?;
                 yield serde_json::to_value(parsed)?;
+            })),
+            RpcRequestKind::ParseLightningAddress { address } => Some(Box::pin(try_stream! {
+                let url = fedimint_lnurl::parse_address(&address)
+                    .context("Invalid Lightning Address")?;
+                let metadata = fedimint_lnurl::request(&url).await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                yield serde_json::to_value(metadata)?;
             })),
             RpcRequestKind::CancelRpc { cancel_request_id } => {
                 if let Some(handle) = self.remove_rpc_handle(cancel_request_id) {

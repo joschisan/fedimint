@@ -606,6 +606,14 @@ impl ClientModule for LightningClientModule {
                     self.update_gateway_cache().await?;
                     yield serde_json::Value::Null;
                 }
+                "pay_lightning_address" => {
+                    let req: PayLightningAddressRequest = serde_json::from_value(payload)?;
+                    let invoice = get_invoice(&req.address, Some(Amount::from_msats(req.amount)), None).await?;
+                    let gateway = self.get_gateway(None, false).await?;
+                    let output = self.pay_bolt11_invoice(gateway, invoice, ()).await?;
+
+                    yield serde_json::to_value(output)?;
+                }
                 _ => {
                     Err(anyhow::format_err!("Unknown method: {}", method))?;
                     unreachable!()
@@ -679,6 +687,12 @@ struct SubscribeLnClaimRequest {
 struct GetGatewayRequest {
     gateway_id: Option<secp256k1::PublicKey>,
     force_internal: bool,
+}
+
+#[derive(Deserialize)]
+struct PayLightningAddressRequest {
+    address: String,
+    amount: u64,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
