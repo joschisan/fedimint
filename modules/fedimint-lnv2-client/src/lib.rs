@@ -760,23 +760,27 @@ impl LightningClientModule {
         &self,
         operation_id: OperationId,
     ) -> anyhow::Result<FinalSendOperationState> {
-        let state = self
+        let mut stream = self
             .subscribe_send_operation_state_updates(operation_id)
             .await?
-            .into_stream()
-            .filter_map(|state| {
-                futures::future::ready(match state {
-                    SendOperationState::Success(_) => Some(FinalSendOperationState::Success),
-                    SendOperationState::Refunded => Some(FinalSendOperationState::Refunded),
-                    SendOperationState::Failure => Some(FinalSendOperationState::Failure),
-                    _ => None,
-                })
-            })
-            .next()
-            .await
-            .expect("Stream contains one final state");
+            .into_stream();
 
-        Ok(state)
+        let mut final_state = None;
+
+        while let Some(state) = stream.next().await {
+            match state {
+                SendOperationState::Success(_) => {
+                    final_state = Some(FinalSendOperationState::Success);
+                }
+                SendOperationState::Refunded => {
+                    final_state = Some(FinalSendOperationState::Refunded);
+                }
+                SendOperationState::Failure => final_state = Some(FinalSendOperationState::Failure),
+                _ => {}
+            }
+        }
+
+        Ok(final_state.expect("Stream contains one final state"))
     }
 
     /// Request an invoice. For testing you can optionally specify a gateway to
@@ -1027,23 +1031,29 @@ impl LightningClientModule {
         &self,
         operation_id: OperationId,
     ) -> anyhow::Result<FinalReceiveOperationState> {
-        let state = self
+        let mut stream = self
             .subscribe_receive_operation_state_updates(operation_id)
             .await?
-            .into_stream()
-            .filter_map(|state| {
-                futures::future::ready(match state {
-                    ReceiveOperationState::Expired => Some(FinalReceiveOperationState::Expired),
-                    ReceiveOperationState::Claimed => Some(FinalReceiveOperationState::Claimed),
-                    ReceiveOperationState::Failure => Some(FinalReceiveOperationState::Failure),
-                    _ => None,
-                })
-            })
-            .next()
-            .await
-            .expect("Stream contains one final state");
+            .into_stream();
 
-        Ok(state)
+        let mut final_state = None;
+
+        while let Some(state) = stream.next().await {
+            match state {
+                ReceiveOperationState::Expired => {
+                    final_state = Some(FinalReceiveOperationState::Expired);
+                }
+                ReceiveOperationState::Claimed => {
+                    final_state = Some(FinalReceiveOperationState::Claimed);
+                }
+                ReceiveOperationState::Failure => {
+                    final_state = Some(FinalReceiveOperationState::Failure);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(final_state.expect("Stream contains one final state"))
     }
 
     /// Generate an lnurl for the client. You can optionally specify a gateway
