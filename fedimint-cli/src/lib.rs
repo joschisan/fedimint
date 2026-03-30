@@ -1,4 +1,4 @@
-#![deny(clippy::pedantic)]
+#![deny(clippy::pedantic, clippy::unwrap_used)]
 #![allow(clippy::doc_markdown)]
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
@@ -1479,6 +1479,7 @@ fn metadata_from_clap_cli(metadata: Vec<String>) -> Result<BTreeMap<String, Stri
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn metadata_from_clap_cli_test() {
     for (args, expected) in [
         (
