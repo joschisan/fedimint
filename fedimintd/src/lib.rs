@@ -22,6 +22,7 @@ use fedimint_core::db::Database;
 use fedimint_core::envs::{
     FM_IROH_DNS_ENV, FM_IROH_RELAY_ENV, FM_USE_UNKNOWN_MODULE_ENV, is_env_var_set,
 };
+use fedimint_core::module::CORE_CONSENSUS_VERSION;
 use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::TaskGroup;
@@ -309,6 +310,20 @@ pub async fn run(
          fragmentation with the default allocator; consider rebuilding with `--features jemalloc`."
     );
 
+    debug!(
+        target: LOG_SERVER,
+        core_consensus = %CORE_CONSENSUS_VERSION,
+        "Supported core consensus version",
+    );
+    for (kind, module) in module_init_registry.iter() {
+        let supported = module.supported_api_versions();
+        debug!(
+            target: LOG_SERVER,
+            module = %kind,
+            supported = %supported,
+            "Supported module versions",
+        );
+    }
     let code_version_str = code_version_vendor_suffix.map_or_else(
         || fedimint_version.to_string(),
         |suffix| format!("{fedimint_version}+{suffix}"),
