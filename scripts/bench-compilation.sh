@@ -36,7 +36,7 @@ trap on_exit EXIT
 cargo fetch
 
 if [ -z "${BENCH_COMP_SKIP_DECORATIONS:-}" ]; then
-  nix run nixpkgs#neofetch -- --stdout
+  nix run nixpkgs#fastfetch -- --logo none --structure Title:Separator:OS:Host:Kernel:CPU:GPU:Memory:Swap:Disk:Battery:PowerAdapter:Break
 
   echo "Date: $(date +%Y-%m-%d)"
   echo "Commit: $(git rev-parse --short HEAD)"
