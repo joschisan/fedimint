@@ -1,0 +1,31 @@
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+name: Crate ownership check
+
+jobs:
+  check-ownership:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check crates.io ownership
+        run: |
+          nix develop -c ./scripts/ci/check-crate-ownership.sh
+
+  notifications:
+    if: always() && github.repository == 'fedimint/fedimint'
+    name: "Notifications"
+    timeout-minutes: 1
+    runs-on: [self-hosted, linux, x64]
+    needs: [ check-ownership ]
+
+    steps:
+    - name: Discord notifications on failure
+      if: ${{ always() && contains(needs.*.result, 'failure') }}
+      uses: sarisia/actions-status-discord@v1
+      with:
+        webhook: ${{ secrets.DISCORD_WEBHOOK }}
+        status: failure
