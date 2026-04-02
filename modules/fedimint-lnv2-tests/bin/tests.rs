@@ -380,7 +380,9 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
         test_fees(fed_id, &client, gw_lnd, gw_ldk, 1_000_000 - 1_000 - 100).await?;
     }
 
-    test_iroh_payment(&client, gw_lnd, gw_ldk).await?;
+    let online_peers: Vec<usize> = federation.members.keys().copied().collect();
+
+    test_iroh_payment(&client, gw_lnd, gw_ldk, &online_peers).await?;
 
     info!("Testing payment summary...");
 
@@ -657,22 +659,21 @@ async fn test_iroh_payment(
     client: &Client,
     gw_lnd: &Gatewayd,
     gw_ldk: &Gatewayd,
+    online_peers: &[usize],
 ) -> anyhow::Result<()> {
     info!("Testing iroh payment...");
-    add_gateway(client, 0, &format!("iroh://{}", gw_lnd.node_id)).await?;
-    add_gateway(client, 1, &format!("iroh://{}", gw_lnd.node_id)).await?;
-    add_gateway(client, 2, &format!("iroh://{}", gw_lnd.node_id)).await?;
-    add_gateway(client, 3, &format!("iroh://{}", gw_lnd.node_id)).await?;
+    for &peer in online_peers {
+        add_gateway(client, peer, &format!("iroh://{}", gw_lnd.node_id)).await?;
+    }
 
     // If the client is below v0.10.0, also add the HTTP address so that the client
     // can fallback to using that, since the iroh gateway will fail.
     if util::FedimintCli::version_or_default().await < *VERSION_0_10_0_ALPHA
         || gw_lnd.gatewayd_version < *VERSION_0_10_0_ALPHA
     {
-        add_gateway(client, 0, &gw_lnd.addr).await?;
-        add_gateway(client, 1, &gw_lnd.addr).await?;
-        add_gateway(client, 2, &gw_lnd.addr).await?;
-        add_gateway(client, 3, &gw_lnd.addr).await?;
+        for &peer in online_peers {
+            add_gateway(client, peer, &gw_lnd.addr).await?;
+        }
     }
 
     let invoice = gw_ldk.client().create_invoice(5_000_000).await?;
@@ -708,16 +709,14 @@ async fn test_iroh_payment(
     if util::FedimintCli::version_or_default().await < *VERSION_0_10_0_ALPHA
         || gw_lnd.gatewayd_version < *VERSION_0_10_0_ALPHA
     {
-        remove_gateway(client, 0, &gw_lnd.addr).await?;
-        remove_gateway(client, 1, &gw_lnd.addr).await?;
-        remove_gateway(client, 2, &gw_lnd.addr).await?;
-        remove_gateway(client, 3, &gw_lnd.addr).await?;
+        for &peer in online_peers {
+            remove_gateway(client, peer, &gw_lnd.addr).await?;
+        }
     }
 
-    remove_gateway(client, 0, &format!("iroh://{}", gw_lnd.node_id)).await?;
-    remove_gateway(client, 1, &format!("iroh://{}", gw_lnd.node_id)).await?;
-    remove_gateway(client, 2, &format!("iroh://{}", gw_lnd.node_id)).await?;
-    remove_gateway(client, 3, &format!("iroh://{}", gw_lnd.node_id)).await?;
+    for &peer in online_peers {
+        remove_gateway(client, peer, &format!("iroh://{}", gw_lnd.node_id)).await?;
+    }
 
     Ok(())
 }
