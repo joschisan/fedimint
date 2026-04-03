@@ -129,7 +129,7 @@ aleph-bft = { package = "fedimint-aleph-bft", version = "0.36.0", default-featur
 anyhow = "1.0.98"
 aquamarine = "0.5.0"
 argon2 = "0.5.3"
-arti-client = { version = "0.33.0", default-features = false }
+arti-client = { version = "0.38.0", default-features = false }
 assert_matches = "1.5.0"
 async-channel = "2.5.0"
 async-lock = "3.4"
@@ -176,7 +176,7 @@ esplora-client = { version = "0.12.3", default-features = false, features = [
     "async",
     "tokio",
 ] }
-tor-rtcompat = { version = "0.33.0" }
+tor-rtcompat = { version = "0.38.0", features = ["tokio", "rustls"] }
 
 fedimint-aead = { path = "./crypto/aead", version = "=0.11.0-alpha" }
 fedimint-api-client = { path = "./fedimint-api-client", version = "=0.11.0-alpha" }
