@@ -1080,6 +1080,22 @@ where
                         }
                     }
 
+                    // Total capacity summary
+                    @let total_outbound_sats: u64 = channels.iter().map(|ch| ch.outbound_liquidity_sats).sum();
+                    @let total_inbound_sats: u64 = channels.iter().map(|ch| ch.inbound_liquidity_sats).sum();
+                    div class="d-flex gap-4 mb-3" {
+                        div class="d-flex align-items-center" {
+                            span style="display:inline-block;width:12px;height:12px;background:#28a745;margin-right:6px;border-radius:2px;" {}
+                            strong class="me-1" { "Total Outbound:" }
+                            (format!("{}", bitcoin::Amount::from_sat(total_outbound_sats)))
+                        }
+                        div class="d-flex align-items-center" {
+                            span style="display:inline-block;width:12px;height:12px;background:#0d6efd;margin-right:6px;border-radius:2px;" {}
+                            strong class="me-1" { "Total Inbound:" }
+                            (format!("{}", bitcoin::Amount::from_sat(total_inbound_sats)))
+                        }
+                    }
+
                     @if channels.is_empty() {
                         div class="alert alert-info" { "No channels found." }
                     } @else {
