@@ -125,7 +125,11 @@ enum CliOutput {
 
 impl fmt::Display for CliOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", serde_json::to_string_pretty(self).unwrap())
+        write!(
+            f,
+            "{}",
+            serde_json::to_string_pretty(self).expect("CliOutput is serializable")
+        )
     }
 }
 
@@ -653,7 +657,9 @@ impl FedimintCli {
 
                 debug!(target: LOG_CLIENT, "Recovery complete");
 
-                Ok(CliOutput::Raw(serde_json::to_value(()).unwrap()))
+                Ok(CliOutput::Raw(
+                    serde_json::to_value(()).expect("unit type is serializable"),
+                ))
             }
             Command::Client(command) => {
                 let client = self.client_open(&cli).await?;
@@ -1153,7 +1159,9 @@ impl FedimintCli {
                 let mut in_file_handle =
                     fs::File::open(in_file).expect("Could not create output cfg file");
                 let mut plaintext_bytes = vec![];
-                in_file_handle.read_to_end(&mut plaintext_bytes).unwrap();
+                in_file_handle
+                    .read_to_end(&mut plaintext_bytes)
+                    .expect("Could not read input cfg file");
 
                 let salt_file = salt_file.unwrap_or_else(|| salt_from_file_path(&out_file));
                 let salt = fs::read_to_string(salt_file).map_err_cli()?;
