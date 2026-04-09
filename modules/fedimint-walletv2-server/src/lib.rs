@@ -58,7 +58,7 @@ use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
-    ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
+    ConfigGenModuleArgs, EnvVarDoc, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
 pub use fedimint_walletv2_common as common;
 use fedimint_walletv2_common::config::{
@@ -279,6 +279,13 @@ impl ServerModuleInit for WalletInit {
 
     fn is_enabled_by_default(&self) -> bool {
         is_env_var_set_opt(FM_ENABLE_MODULE_WALLETV2_ENV).unwrap_or(false)
+    }
+
+    fn get_documented_env_vars(&self) -> Vec<EnvVarDoc> {
+        vec![EnvVarDoc {
+            name: FM_ENABLE_MODULE_WALLETV2_ENV,
+            description: "Set to 1/true to enable the WalletV2 module (experimental). Disabled by default.",
+        }]
     }
 
     async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {

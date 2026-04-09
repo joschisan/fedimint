@@ -49,7 +49,7 @@ use fedimint_server_core::migration::{
     ServerModuleDbMigrationFnContextExt as _,
 };
 use fedimint_server_core::{
-    ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
+    ConfigGenModuleArgs, EnvVarDoc, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
 use futures::{FutureExt as _, StreamExt};
 use itertools::Itertools;
@@ -191,6 +191,13 @@ impl ServerModuleInit for MintInit {
 
     fn is_enabled_by_default(&self) -> bool {
         is_env_var_set_opt(FM_ENABLE_MODULE_MINT_ENV).unwrap_or(true)
+    }
+
+    fn get_documented_env_vars(&self) -> Vec<EnvVarDoc> {
+        vec![EnvVarDoc {
+            name: FM_ENABLE_MODULE_MINT_ENV,
+            description: "Set to 0/false to disable the mint (e-cash) module. Enabled by default.",
+        }]
     }
 
     async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {

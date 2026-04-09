@@ -29,6 +29,18 @@ use crate::migration::{
 };
 use crate::{DynServerModule, ServerModule};
 
+/// Documentation for an environment variable used by a server module.
+///
+/// Modules return a list of these from
+/// [`ServerModuleInit::get_documented_env_vars`] so that `fedimintd --help`
+/// can surface all available env-var knobs to operators.
+pub struct EnvVarDoc {
+    /// The environment variable name (e.g. `"FM_ENABLE_MODULE_WALLET"`).
+    pub name: &'static str,
+    /// A short human-readable description shown in `--help`.
+    pub description: &'static str,
+}
+
 /// Arguments passed to modules during config generation
 ///
 /// This replaces the per-module GenParams approach with a unified struct
@@ -99,6 +111,9 @@ pub trait IServerModuleInit: IDynCommonModuleInit {
 
     /// Whether this module should be enabled by default in the setup UI
     fn is_enabled_by_default(&self) -> bool;
+
+    /// Returns documentation for every environment variable this module reads.
+    fn get_documented_env_vars(&self) -> Vec<EnvVarDoc>;
 }
 
 /// A type that can be used as module-shared value inside
@@ -235,6 +250,14 @@ pub trait ServerModuleInit: ModuleInit + Sized {
     fn is_enabled_by_default(&self) -> bool {
         true
     }
+
+    /// Returns documentation for every environment variable this module reads.
+    ///
+    /// The default implementation returns an empty list. Override this to
+    /// surface your module's env vars in `fedimintd --help`.
+    fn get_documented_env_vars(&self) -> Vec<EnvVarDoc> {
+        vec![]
+    }
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -332,6 +355,10 @@ where
 
     fn is_enabled_by_default(&self) -> bool {
         <Self as ServerModuleInit>::is_enabled_by_default(self)
+    }
+
+    fn get_documented_env_vars(&self) -> Vec<EnvVarDoc> {
+        <Self as ServerModuleInit>::get_documented_env_vars(self)
     }
 }
 
