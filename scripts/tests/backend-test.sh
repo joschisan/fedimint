@@ -49,6 +49,18 @@ function run_tests() {
         ${TEST_ARGS_SERIALIZED} \
         -E 'package(fedimint-lnv2-tests)'
     fi
+    if [ -z "${FM_BITCOIND_TEST_ONLY:-}" ] || [ "${FM_BITCOIND_TEST_ONLY:-}" = "walletv2" ]; then
+      cargo nextest run --locked --workspace --all-targets \
+        ${CARGO_PROFILE:+--cargo-profile ${CARGO_PROFILE}} ${CARGO_PROFILE:+--profile ${CARGO_PROFILE}} \
+        ${TEST_ARGS_SERIALIZED} \
+        -E 'package(fedimint-walletv2-tests)'
+    fi
+    if [ -z "${FM_BITCOIND_TEST_ONLY:-}" ] || [ "${FM_BITCOIND_TEST_ONLY:-}" = "mintv2" ]; then
+      cargo nextest run --locked --workspace --all-targets \
+        ${CARGO_PROFILE:+--cargo-profile ${CARGO_PROFILE}} ${CARGO_PROFILE:+--profile ${CARGO_PROFILE}} \
+        ${TEST_ARGS_SERIALIZED} \
+        -E 'package(fedimint-mintv2-tests)'
+    fi
     >&2 echo "### Testing against bitcoind - complete"
   fi
 
