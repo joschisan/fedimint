@@ -318,11 +318,12 @@ impl DevJitFed {
                 let gw_lnd = gw_lnd.get_try().await?.deref();
                 let gateways: &[NamedGateway<'_>] =
                     &[(gw_ldk_second, "LDK2"), (gw_lnd, "LND"), (gw_ldk, "LDK")];
-
-                debug!(target: LOG_DEVIMINT, "Opening channels between gateways...");
-                let start_time = fedimint_core::time::now();
-                open_channels_between_gateways(&bitcoind, gateways).await?;
-                info!(target: LOG_DEVIMINT, elapsed_ms = %start_time.elapsed()?.as_millis(), "Opened channels between gateways");
+                if !skip_setup && !pre_dkg {
+                    debug!(target: LOG_DEVIMINT, "Opening channels between gateways...");
+                    let start_time = fedimint_core::time::now();
+                    open_channels_between_gateways(&bitcoind, gateways).await?;
+                    info!(target: LOG_DEVIMINT, elapsed_ms = %start_time.elapsed()?.as_millis(), "Opened channels between gateways");
+                }
 
                 Ok(Arc::new(()))
             }
