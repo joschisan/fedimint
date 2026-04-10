@@ -305,6 +305,22 @@ function bckn_bitcoind_lnv2() {
 }
 export -f bckn_bitcoind_lnv2
 
+function bckn_bitcoind_walletv2() {
+  # backend tests don't support different versions, so we skip for backwards-compatibility tests
+  if [ -z "${FM_BACKWARDS_COMPATIBILITY_TEST:-}" ]; then
+    fm-run-test "${FUNCNAME[0]}" env FM_TEST_ONLY=bitcoind FM_BITCOIND_TEST_ONLY=walletv2 ./scripts/tests/backend-test.sh
+  fi
+}
+export -f bckn_bitcoind_walletv2
+
+function bckn_bitcoind_mintv2() {
+  # backend tests don't support different versions, so we skip for backwards-compatibility tests
+  if [ -z "${FM_BACKWARDS_COMPATIBILITY_TEST:-}" ]; then
+    fm-run-test "${FUNCNAME[0]}" env FM_TEST_ONLY=bitcoind FM_BITCOIND_TEST_ONLY=mintv2 ./scripts/tests/backend-test.sh
+  fi
+}
+export -f bckn_bitcoind_mintv2
+
 function bckn_gw_client() {
   # backend tests don't support different versions, so we skip for backwards-compatibility tests
   if [ -z "${FM_BACKWARDS_COMPATIBILITY_TEST:-}" ]; then
@@ -408,6 +424,8 @@ tests_to_run_in_parallel+=(
   "bckn_bitcoind_wallet"
   "bckn_bitcoind_ln"
   "bckn_bitcoind_lnv2"
+  "bckn_bitcoind_walletv2"
+  "bckn_bitcoind_mintv2"
   "bckn_gw_client"
   "bckn_gw_not_client"
   "bckn_esplora"
