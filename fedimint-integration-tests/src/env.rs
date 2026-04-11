@@ -35,7 +35,6 @@ pub const GW2_LN_PORT: u16 = 9736;
 pub const GW2_METRICS_PORT: u16 = 29177;
 
 pub const PASSWORD: &str = "theresnosecondbest";
-const BCRYPT_HASH: &str = "$2y$10$Q/UTDeO84VGG1mRncxw.Nubqyi/HsNRJ40k0TSexFy9eVess1yi/u";
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
 
@@ -319,7 +318,6 @@ async fn start_gatewayd(
             "FM_GATEWAY_METRICS_LISTEN_ADDR",
             format!("127.0.0.1:{metrics_port}"),
         )
-        .env("FM_GATEWAY_BCRYPT_PASSWORD_HASH", BCRYPT_HASH)
         .env("FM_GATEWAY_SKIP_WAIT_FOR_SYNC", "1")
         .env("FM_GATEWAY_NETWORK", "regtest")
         .env("FM_DEFAULT_ROUTING_FEES", "0,0")
@@ -465,7 +463,7 @@ pub async fn fedimint_cli_raw(args: &[&str]) -> anyhow::Result<String> {
 }
 
 pub async fn gateway_cli(gw_addr: &str, args: &[&str]) -> anyhow::Result<serde_json::Value> {
-    let mut full_args = vec!["--rpcpassword", PASSWORD, "-a", gw_addr];
+    let mut full_args = vec!["-a", gw_addr];
     full_args.extend(args);
 
     let output = Command::new(find_binary("gateway-cli"))
