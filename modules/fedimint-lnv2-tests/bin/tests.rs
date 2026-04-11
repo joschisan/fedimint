@@ -380,10 +380,6 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
         test_fees(fed_id, &client, gw_lnd, gw_ldk, 1_000_000 - 1_000 - 100).await?;
     }
 
-    let online_peers: Vec<usize> = federation.members.keys().copied().collect();
-
-    test_iroh_payment(&client, gw_lnd, gw_ldk, &online_peers).await?;
-
     Ok(())
 }
 
@@ -629,68 +625,3 @@ async fn fetch_invoice(lnurl: String, amount_msat: u64) -> anyhow::Result<(Bolt1
     Ok((response.pr, response.verify))
 }
 
-async fn test_iroh_payment(
-    client: &Client,
-    gw_lnd: &Gatewayd,
-    gw_ldk: &Gatewayd,
-    online_peers: &[usize],
-) -> anyhow::Result<()> {
-    info!("Testing iroh payment...");
-    for &peer in online_peers {
-        add_gateway(client, peer, &format!("iroh://{}", gw_lnd.node_id)).await?;
-    }
-
-    // If the client is below v0.10.0, also add the HTTP address so that the client
-    // can fallback to using that, since the iroh gateway will fail.
-    if util::FedimintCli::version_or_default().await < *VERSION_0_10_0_ALPHA
-        || gw_lnd.gatewayd_version < *VERSION_0_10_0_ALPHA
-    {
-        for &peer in online_peers {
-            add_gateway(client, peer, &gw_lnd.addr).await?;
-        }
-    }
-
-    let invoice = gw_ldk.client().create_invoice(5_000_000).await?;
-
-    let send_op = serde_json::from_value::<OperationId>(
-        cmd!(client, "module", "lnv2", "send", invoice,)
-            .out_json()
-            .await?,
-    )?;
-
-    assert_eq!(
-        cmd!(
-            client,
-            "module",
-            "lnv2",
-            "await-send",
-            serde_json::to_string(&send_op)?.substring(1, 65)
-        )
-        .out_json()
-        .await?,
-        serde_json::to_value(FinalSendOperationState::Success).expect("JSON serialization failed"),
-    );
-
-    let (invoice, receive_op) = serde_json::from_value::<(Bolt11Invoice, OperationId)>(
-        cmd!(client, "module", "lnv2", "receive", "5000000",)
-            .out_json()
-            .await?,
-    )?;
-
-    gw_ldk.client().pay_invoice(invoice).await?;
-    common::await_receive_claimed(client, receive_op).await?;
-
-    if util::FedimintCli::version_or_default().await < *VERSION_0_10_0_ALPHA
-        || gw_lnd.gatewayd_version < *VERSION_0_10_0_ALPHA
-    {
-        for &peer in online_peers {
-            remove_gateway(client, peer, &gw_lnd.addr).await?;
-        }
-    }
-
-    for &peer in online_peers {
-        remove_gateway(client, peer, &format!("iroh://{}", gw_lnd.node_id)).await?;
-    }
-
-    Ok(())
-}

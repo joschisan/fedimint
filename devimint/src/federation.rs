@@ -971,14 +971,7 @@ impl Federation {
             .map_err(ControlFlow::Break)?
             .len();
 
-            // After version v0.10.0, the LND gateway will register twice. Once for the HTTP
-            // server, and once for the iroh endpoint.
-            let expected_gateways =
-                if crate::util::Gatewayd::version_or_default().await < *VERSION_0_10_0_ALPHA {
-                    1
-                } else {
-                    2
-                };
+            let expected_gateways = 1;
 
             poll_eq!(num_gateways, expected_gateways)
         })

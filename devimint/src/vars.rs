@@ -111,14 +111,12 @@ use net_overrides::{FederationsNetOverrides, FedimintdPeerOverrides};
 use crate::federation::{
     FEDIMINTD_METRICS_PORT_OFFSET, FEDIMINTD_UI_PORT_OFFSET, PORTS_PER_FEDIMINTD,
 };
-use crate::vars::net_overrides::GatewaydNetOverrides;
 
 pub fn utf8(path: &Path) -> &str {
     path.as_os_str().to_str().expect("must be valid utf8")
 }
 
-// Port offsets from FM_GATEWAY_BASE_PORT when set: 0-2 are Iroh ports for each
-// gateway, 3-4 LND, 5-6 LDK, 7-8 LDK2
+// Port offsets from FM_GATEWAY_BASE_PORT when set: 3-4 LND, 5-6 LDK, 7-8 LDK2
 const GATEWAY_PORT_OFFSET_LND: u16 = 3;
 const GATEWAY_PORT_OFFSET_LND_METRICS: u16 = 4;
 const GATEWAY_PORT_OFFSET_LDK: u16 = 5;
@@ -189,12 +187,6 @@ declare_vars! {
 
         FM_FEDERATION_BASE_PORT: u16 = federation_base_ports; env: "FM_FEDERATION_BASE_PORT";
         fedimintd_overrides: FederationsNetOverrides = FederationsNetOverrides::new(FM_FEDERATION_BASE_PORT, num_feds, NumPeers::from(fed_size)); env: "NOT_USED_FOR_ANYTHING";
-        gw_base_port: u16 = match gateway_base_port {
-            Some(b) => b,
-            None => port_alloc(3)?,
-        }; env: "NOT_USED_FOR_ANYTHING";
-        gatewayd_overrides: GatewaydNetOverrides = GatewaydNetOverrides::new(gw_base_port, num_gateways); env: "NOT_USED_FOR_ANYTHING";
-
         FM_LND_DIR: PathBuf = mkdir(FM_TEST_DIR.join("lnd")).await?; env: "FM_LND_DIR";
         FM_LDK_DIR: PathBuf = mkdir(FM_TEST_DIR.join("ldk")).await?; env: "FM_LDK_DIR";
         FM_BTC_DIR: PathBuf = mkdir(FM_TEST_DIR.join("bitcoin")).await?; env: "FM_BTC_DIR";

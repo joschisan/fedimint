@@ -468,6 +468,5 @@ pub enum LightningInfo {
 #[serde(rename_all = "snake_case")]
 pub enum RegisteredProtocol {
     Http,
-    Iroh,
 }
 

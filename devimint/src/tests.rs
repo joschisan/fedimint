@@ -645,7 +645,6 @@ pub async fn cli_tests(dev_fed: DevFed) -> Result<()> {
 
     fed.pegin_gateways(10_000_000, vec![&gw_lnd]).await?;
 
-    let iroh_lnd_id = gw_lnd.iroh_gateway_id.clone();
     let gw_lnd = gw_lnd.client();
     let gw_ldk = gw_ldk.client();
 
@@ -833,52 +832,6 @@ pub async fn cli_tests(dev_fed: DevFed) -> Result<()> {
     }
 
     // OUTGOING: fedimint-cli pays LDK via LND gateway
-    if let Some(iroh_gw_id) = &iroh_lnd_id
-        && crate::util::FedimintCli::version_or_default().await >= *VERSION_0_10_0_ALPHA
-    {
-        info!("Testing outgoing payment from client to LDK via IROH LND Gateway");
-
-        let initial_lnd_gateway_balance = gw_lnd.ecash_balance(fed_id.clone()).await?;
-        let invoice = gw_ldk.create_invoice(2_000_000).await?;
-        ln_pay(&client, invoice.to_string(), iroh_gw_id.clone()).await?;
-        gw_ldk
-            .wait_bolt11_invoice(invoice.payment_hash().consensus_encode_to_vec())
-            .await?;
-
-        // Assert balances changed by 2_000_000 msat (amount sent) + 0 msat (fee)
-        let final_lnd_outgoing_gateway_balance = gw_lnd.ecash_balance(fed_id.clone()).await?;
-        info!(
-            ?final_lnd_outgoing_gateway_balance,
-            "Final LND ecash balance after iroh payment"
-        );
-        anyhow::ensure!(
-            almost_equal(
-                final_lnd_outgoing_gateway_balance - initial_lnd_gateway_balance,
-                2_000_000,
-                1_000
-            )
-            .is_ok(),
-            "LND Gateway balance changed by {} on LND outgoing IROH payment, expected 2_000_000",
-            (final_lnd_outgoing_gateway_balance - initial_lnd_gateway_balance)
-        );
-
-        // Send the funds back over iroh
-        let recv = ln_invoice(
-            &client,
-            Amount::from_msats(2_000_000),
-            "iroh receive payment".to_string(),
-            iroh_gw_id.clone(),
-        )
-        .await?;
-        gw_ldk
-            .pay_invoice(Bolt11Invoice::from_str(&recv.invoice).expect("Could not parse invoice"))
-            .await?;
-        let operation_id = recv.operation_id;
-        cmd!(client, "await-invoice", operation_id.fmt_full())
-            .run()
-            .await?;
-    }
-
     info!("Testing outgoing payment from client to LDK via LND gateway");
     let initial_lnd_gateway_balance = gw_lnd.ecash_balance(fed_id.clone()).await?;
     let invoice = gw_ldk.create_invoice(2_000_000).await?;

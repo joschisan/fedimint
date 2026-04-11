@@ -4,7 +4,6 @@ use std::str::FromStr;
 
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
-use fedimint_core::envs::{FM_IROH_DNS_ENV, FM_IROH_RELAY_ENV};
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_common::{LightningMode, V1_API_ENDPOINT};
 use fedimint_lnv2_common::gateway_api::PaymentFee;
@@ -115,22 +114,10 @@ pub struct GatewayOpts {
     #[arg(long = "default-transaction-fees", env = envs::FM_DEFAULT_TRANSACTION_FEES_ENV, default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
     default_transaction_fees: PaymentFee,
 
-    /// Gateway iroh listen address
-    #[arg(long = "iroh-listen", env = envs::FM_GATEWAY_IROH_LISTEN_ADDR_ENV)]
-    iroh_listen: Option<SocketAddr>,
-
     /// Gateway metrics listen address. If not set, defaults to localhost on the
     /// UI port + 1.
     #[arg(long = "metrics-listen", env = FM_GATEWAY_METRICS_LISTEN_ADDR_ENV)]
     metrics_listen: Option<SocketAddr>,
-
-    /// Optional URL of the Iroh DNS server
-    #[arg(long, env = FM_IROH_DNS_ENV)]
-    iroh_dns: Option<SafeUrl>,
-
-    /// Optional URLs of the Iroh relays to use for registering
-    #[arg(long, env = FM_IROH_RELAY_ENV, value_delimiter = ',')]
-    iroh_relays: Vec<SafeUrl>,
 
 }
 
@@ -168,9 +155,6 @@ impl GatewayOpts {
             num_route_hints: self.num_route_hints,
             default_routing_fees: self.default_routing_fees,
             default_transaction_fees: self.default_transaction_fees,
-            iroh_listen: self.iroh_listen,
-            iroh_dns: self.iroh_dns.clone(),
-            iroh_relays: self.iroh_relays.clone(),
             metrics_listen,
         })
     }
@@ -192,8 +176,5 @@ pub struct GatewayParameters {
     pub num_route_hints: u32,
     pub default_routing_fees: PaymentFee,
     pub default_transaction_fees: PaymentFee,
-    pub iroh_listen: Option<SocketAddr>,
-    pub iroh_dns: Option<SafeUrl>,
-    pub iroh_relays: Vec<SafeUrl>,
     pub metrics_listen: SocketAddr,
 }

@@ -316,12 +316,6 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                 assert_eq!(first_fed_balance_msat, Amount::ZERO);
                 almost_equal(second_fed_balance_msat.msats, pegin_amount.msats, 10_000).unwrap();
 
-                if gw.gatewayd_version >= *VERSION_0_10_0_ALPHA {
-                    // Try to get the info over iroh
-                    info!(target: LOG_TEST, gatewayd_version = %gw.gatewayd_version, "Getting info over iroh");
-                    gw.client().with_iroh().get_info().await?;
-                }
-
                 info!(target: LOG_TEST, "Gateway configuration test successful");
                 Ok(())
             }),

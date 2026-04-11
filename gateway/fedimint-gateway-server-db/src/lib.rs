@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::str::FromStr;
 
 use bitcoin::hashes::{Hash, sha256};
 use fedimint_core::config::FederationId;
@@ -12,7 +11,6 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::{Amount, impl_db_lookup, impl_db_record, push_db_pair_items, secp256k1};
-use fedimint_gateway_common::envs::FM_GATEWAY_IROH_SECRET_KEY_OVERRIDE_ENV;
 use fedimint_gateway_common::{ConnectorType, FederationConfig, RegisteredProtocol};
 use fedimint_ln_common::serde_routing_fees;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
@@ -85,10 +83,6 @@ pub trait GatewayDbtxNcExt {
         &mut self,
         prefix_names: Vec<String>,
     ) -> BTreeMap<String, Box<dyn erased_serde::Serialize + Send>>;
-
-    /// Returns `iroh::SecretKey` and saves it to the database if it does not
-    /// exist
-    async fn load_or_create_iroh_key(&mut self) -> iroh::SecretKey;
 
 }
 
@@ -225,21 +219,6 @@ impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
         }
 
         gateway_items
-    }
-
-    async fn load_or_create_iroh_key(&mut self) -> iroh::SecretKey {
-        if let Some(iroh_sk) = self.get_value(&IrohKey).await {
-            iroh_sk
-        } else {
-            let iroh_sk = if let Ok(var) = std::env::var(FM_GATEWAY_IROH_SECRET_KEY_OVERRIDE_ENV) {
-                iroh::SecretKey::from_str(&var).expect("Invalid overridden iroh secret key")
-            } else {
-                iroh::SecretKey::generate(&mut OsRng)
-            };
-
-            self.insert_new_entry(&IrohKey, &iroh_sk).await;
-            iroh_sk
-        }
     }
 
 }
@@ -439,15 +418,6 @@ struct PreimageAuthenticationPrefix;
 impl_db_lookup!(
     key = PreimageAuthentication,
     query_prefix = PreimageAuthenticationPrefix
-);
-
-#[derive(Debug, Encodable, Decodable)]
-struct IrohKey;
-
-impl_db_record!(
-    key = IrohKey,
-    value = iroh::SecretKey,
-    db_prefix = DbKeyPrefix::Iroh
 );
 
 pub fn get_gatewayd_database_migrations() -> BTreeMap<DatabaseVersion, GeneralDbMigrationFn> {

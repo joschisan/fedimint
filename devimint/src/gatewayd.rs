@@ -14,7 +14,6 @@ use fedimint_core::envs::is_env_var_set;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::util::{backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, BitcoinHash};
-use fedimint_gateway_common::envs::FM_GATEWAY_IROH_SECRET_KEY_OVERRIDE_ENV;
 use fedimint_gateway_common::{
     ChannelInfo, GatewayBalances, GatewayFedConfig, GetInvoiceResponse,
     ListTransactionsResponse, MnemonicResponse, PaymentDetails, PaymentStatus, V1_API_ENDPOINT,
@@ -29,7 +28,7 @@ use tracing::info;
 
 use crate::cmd;
 use crate::envs::{
-    FM_GATEWAY_API_ADDR_ENV, FM_GATEWAY_DATA_DIR_ENV, FM_GATEWAY_IROH_LISTEN_ADDR_ENV,
+    FM_GATEWAY_API_ADDR_ENV, FM_GATEWAY_DATA_DIR_ENV,
     FM_GATEWAY_LISTEN_ADDR_ENV, FM_GATEWAY_METRICS_LISTEN_ADDR_ENV, FM_PORT_LDK_ENV,
     FM_PRE_DKG_ENV,
 };
@@ -42,18 +41,14 @@ use crate::version_constants::{VERSION_0_9_0_ALPHA, VERSION_0_10_0_ALPHA, VERSIO
 #[derive(Debug, Clone)]
 pub struct GatewayClient {
     http_address: String,
-    iroh_node_id: iroh_base::NodeId,
     password: Option<String>,
-    use_iroh: bool,
 }
 
 impl<'a> GatewayClient {
     pub fn new(gw: &'a Gatewayd) -> Self {
         Self {
             http_address: gw.addr.clone(),
-            iroh_node_id: gw.node_id,
             password: None,
-            use_iroh: false,
         }
     }
 
@@ -79,17 +74,8 @@ impl<'a> GatewayClient {
         self
     }
 
-    pub fn with_iroh(mut self) -> Self {
-        self.use_iroh = true;
-        self
-    }
-
     pub fn address(&self) -> String {
-        if self.use_iroh {
-            format!("iroh://{}", self.iroh_node_id)
-        } else {
-            self.http_address.clone()
-        }
+        self.http_address.clone()
     }
 
     pub async fn client_config(&self, fed_id: String) -> Result<GatewayFedConfig> {
@@ -671,9 +657,6 @@ pub struct Gatewayd {
     pub ldk_port: u16,
     pub metrics_port: u16,
     pub gateway_id: String,
-    pub iroh_gateway_id: Option<String>,
-    pub iroh_port: u16,
-    pub node_id: iroh_base::NodeId,
     pub gateway_index: usize,
 }
 
@@ -706,13 +689,6 @@ impl Gatewayd {
         let test_dir = &process_mgr.globals.FM_TEST_DIR;
         let addr = format!("http://127.0.0.1:{port}/{V1_API_ENDPOINT}");
         let lightning_node_addr = format!("127.0.0.1:{lightning_node_port}");
-        let iroh_endpoint = process_mgr
-            .globals
-            .gatewayd_overrides
-            .gateway_iroh_endpoints
-            .get(gateway_index)
-            .expect("No gateway for index");
-
         let mut gateway_env: HashMap<String, String> = HashMap::from_iter([
             (
                 FM_GATEWAY_DATA_DIR_ENV.to_owned(),
@@ -724,14 +700,6 @@ impl Gatewayd {
             ),
             (FM_GATEWAY_API_ADDR_ENV.to_owned(), addr.clone()),
             (FM_PORT_LDK_ENV.to_owned(), lightning_node_port.to_string()),
-            (
-                FM_GATEWAY_IROH_LISTEN_ADDR_ENV.to_owned(),
-                format!("127.0.0.1:{}", iroh_endpoint.port()),
-            ),
-            (
-                FM_GATEWAY_IROH_SECRET_KEY_OVERRIDE_ENV.to_owned(),
-                iroh_endpoint.secret_key(),
-            ),
             (
                 FM_GATEWAY_METRICS_LISTEN_ADDR_ENV.to_owned(),
                 format!("127.0.0.1:{metrics_port}"),
@@ -777,7 +745,7 @@ impl Gatewayd {
         } else {
             Duration::from_secs(60)
         };
-        let (gateway_id, iroh_gateway_id) = poll_with_timeout(
+        let gateway_id = poll_with_timeout(
             "waiting for gateway to be ready to respond to rpc",
             timeout,
             || async {
@@ -793,28 +761,21 @@ impl Gatewayd {
                 .out_json()
                 .await
                 .map_err(ControlFlow::Continue)?;
-                let (gateway_id, iroh_gateway_id) = if gatewayd_version < *VERSION_0_10_0_ALPHA {
-                    let gateway_id = info["gateway_id"]
+                let gateway_id = if gatewayd_version < *VERSION_0_10_0_ALPHA {
+                    info["gateway_id"]
                         .as_str()
                         .context("gateway_id must be a string")
                         .map_err(ControlFlow::Break)?
-                        .to_owned();
-                    (gateway_id, None)
+                        .to_owned()
                 } else {
-                    let gateway_id = info["registrations"]["http"][1]
+                    info["registrations"]["http"][1]
                         .as_str()
                         .context("gateway id must be a string")
                         .map_err(ControlFlow::Break)?
-                        .to_owned();
-                    let iroh_gateway_id = info["registrations"]["iroh"][1]
-                        .as_str()
-                        .context("gateway id must be a string")
-                        .map_err(ControlFlow::Break)?
-                        .to_owned();
-                    (gateway_id, Some(iroh_gateway_id))
+                        .to_owned()
                 };
 
-                Ok((gateway_id, iroh_gateway_id))
+                Ok(gateway_id)
             },
         )
         .await?;
@@ -835,9 +796,6 @@ impl Gatewayd {
             ldk_port: lightning_node_port,
             metrics_port,
             gateway_id,
-            iroh_gateway_id,
-            iroh_port: iroh_endpoint.port(),
-            node_id: iroh_endpoint.node_id(),
             gateway_index,
         };
 
