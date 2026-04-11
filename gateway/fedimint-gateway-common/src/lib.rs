@@ -380,6 +380,7 @@ pub struct ChannelInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum LightningInfo {
     Connected {
         public_key: secp256k1::PublicKey,
