@@ -54,7 +54,7 @@ use fedimint_client::{Client, ClientHandleArc};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{Committable, Database, DatabaseTransaction, apply_migrations};
+use fedimint_core::db::{Database, DatabaseTransaction, apply_migrations};
 use fedimint_core::envs::is_env_var_set;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::CommonModuleInit;
@@ -72,7 +72,7 @@ use fedimint_core::{
 };
 use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId, StructuredPaymentEvents};
 use fedimint_gateway_common::{
-    BackupPayload, ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
+    ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
     ConnectFedPayload, ConnectorType, CreateInvoiceForOperatorPayload, CreateOfferPayload,
     CreateOfferResponse, DepositAddressPayload, DepositAddressRecheckPayload,
     FederationBalanceInfo, FederationConfig, FederationInfo, GatewayBalances, GatewayFedConfig,
@@ -920,7 +920,6 @@ impl Gateway {
         self.register_clients_timer();
         self.load_clients().await?;
         self.start_gateway(runtime, mnemonic_receiver.resubscribe());
-        self.spawn_backup_task();
         // start metrics server
         fedimint_metrics::spawn_api_server(self.metrics_listen, self.task_group.clone()).await?;
         // start webserver last to avoid handling requests before fully initialized
@@ -928,53 +927,6 @@ impl Gateway {
         run_webserver(Arc::new(self), mnemonic_receiver.resubscribe()).await?;
         let shutdown_receiver = handle.make_shutdown_rx();
         Ok(shutdown_receiver)
-    }
-
-    /// Spawns a background task that checks every `BACKUP_UPDATE_INTERVAL` to
-    /// see if any federations need to be backed up.
-    fn spawn_backup_task(&self) {
-        let self_copy = self.clone();
-        self.task_group
-            .spawn_cancellable_silent("backup ecash", async move {
-                const BACKUP_UPDATE_INTERVAL: Duration = Duration::from_hours(1);
-                let mut interval = tokio::time::interval(BACKUP_UPDATE_INTERVAL);
-                interval.tick().await;
-                loop {
-                    {
-                        let mut dbtx = self_copy.gateway_db.begin_transaction().await;
-                        self_copy.backup_all_federations(&mut dbtx).await;
-                        dbtx.commit_tx().await;
-                        interval.tick().await;
-                    }
-                }
-            });
-    }
-
-    /// Loops through all federations and checks their last save backup time. If
-    /// the last saved backup time is past the threshold time, backup the
-    /// federation.
-    pub async fn backup_all_federations(&self, dbtx: &mut DatabaseTransaction<'_, Committable>) {
-        /// How long the federation manager should wait to backup the ecash for
-        /// each federation
-        const BACKUP_THRESHOLD_DURATION: Duration = Duration::from_hours(24);
-
-        let now = fedimint_core::time::now();
-        let threshold = now
-            .checked_sub(BACKUP_THRESHOLD_DURATION)
-            .expect("Cannot be negative");
-        for (id, last_backup) in dbtx.load_backup_records().await {
-            match last_backup {
-                Some(backup_time) if backup_time < threshold => {
-                    let fed_manager = self.federation_manager.read().await;
-                    fed_manager.backup_federation(&id, dbtx, now).await;
-                }
-                None => {
-                    let fed_manager = self.federation_manager.read().await;
-                    fed_manager.backup_federation(&id, dbtx, now).await;
-                }
-                _ => {}
-            }
-        }
     }
 
     /// Begins the task for listening for intercepted payments from the
@@ -1502,29 +1454,6 @@ impl Gateway {
         Err(PublicGatewayError::LNv1(LNv1Error::OutgoingPayment(
             anyhow!("Ran out of state updates while paying invoice"),
         )))
-    }
-
-    /// Handles a request for the gateway to backup a connected federation's
-    /// ecash.
-    pub async fn handle_backup_msg(
-        &self,
-        BackupPayload { federation_id }: BackupPayload,
-    ) -> AdminResult<()> {
-        let federation_manager = self.federation_manager.read().await;
-        let client = federation_manager
-            .client(&federation_id)
-            .ok_or(AdminGatewayError::ClientCreationError(anyhow::anyhow!(
-                format!("Gateway has not connected to {federation_id}")
-            )))?
-            .value();
-        let metadata: BTreeMap<String, String> = BTreeMap::new();
-        #[allow(deprecated)]
-        client
-            .backup_to_federation(fedimint_client::backup::Metadata::from_json_serialized(
-                metadata,
-            ))
-            .await?;
-        Ok(())
     }
 
     /// Trigger rechecking for deposits on an address
@@ -2203,7 +2132,6 @@ impl IAdminGateway for Gateway {
                 Amount::default()
             }),
             config: federation_config.clone(),
-            last_backup_time: None,
         };
 
         Self::check_federation_network(&client, self.network).await?;
@@ -2236,8 +2164,6 @@ impl IAdminGateway for Gateway {
 
         let mut dbtx = self.gateway_db.begin_transaction().await;
         dbtx.save_federation_config(&federation_config).await;
-        dbtx.save_federation_backup_record(federation_id, None)
-            .await;
         dbtx.commit_tx().await;
         debug!(
             target: LOG_GATEWAY,

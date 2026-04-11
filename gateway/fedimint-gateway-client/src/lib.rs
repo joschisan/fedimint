@@ -8,7 +8,7 @@ use fedimint_core::config::FederationId;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_common::{
-    ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT, BACKUP_ENDPOINT, BackupPayload,
+    ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT,
     CLOSE_CHANNELS_WITH_PEER_ENDPOINT, CONFIGURATION_ENDPOINT, CONNECT_FED_ENDPOINT,
     CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT, CREATE_BOLT12_OFFER_FOR_OPERATOR_ENDPOINT,
     ChannelInfo, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConfigPayload,
@@ -120,16 +120,6 @@ pub async fn leave_federation(
 ) -> ServerResult<FederationInfo> {
     client
         .request(base_url, Method::POST, LEAVE_FED_ENDPOINT, Some(payload))
-        .await
-}
-
-pub async fn backup(
-    client: &GatewayApi,
-    base_url: &SafeUrl,
-    payload: BackupPayload,
-) -> ServerResult<()> {
-    client
-        .request(base_url, Method::POST, BACKUP_ENDPOINT, Some(payload))
         .await
 }
 

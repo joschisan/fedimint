@@ -1,12 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::SystemTime;
-
 use bitcoin::secp256k1::Keypair;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::config::{FederationId, FederationIdPrefix, JsonClientConfig};
-use fedimint_core::db::{Committable, DatabaseTransaction, NonCommittable};
+use fedimint_core::db::{DatabaseTransaction, NonCommittable};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::{FmtCompactAnyhow as _, Spanned};
 use fedimint_core::{PeerId, TieredCounts};
@@ -227,19 +225,11 @@ impl FederationManager {
                         federation_id_prefix: federation_id.to_prefix(),
                     },
                 )?;
-                let last_backup_time =
-                    dbtx.load_backup_record(federation_id)
-                        .await
-                        .ok_or(FederationNotConnected {
-                            federation_id_prefix: federation_id.to_prefix(),
-                        })?;
-
                 Ok(FederationInfo {
                     federation_id,
                     federation_name: self.federation_name(client).await,
                     balance_msat,
                     config,
-                    last_backup_time,
                 })
             })
             .await
@@ -274,17 +264,12 @@ impl FederationManager {
             };
 
             let config = dbtx.load_federation_config(*federation_id).await;
-            let last_backup_time = dbtx
-                .load_backup_record(*federation_id)
-                .await
-                .unwrap_or_default();
             if let Some(config) = config {
                 federation_infos.push(FederationInfo {
                     federation_id: *federation_id,
                     federation_name: self.federation_name(client.value()).await,
                     balance_msat,
                     config,
-                    last_backup_time,
                 });
             }
         }
@@ -319,30 +304,6 @@ impl FederationManager {
             );
         }
         federations
-    }
-
-    pub async fn backup_federation(
-        &self,
-        federation_id: &FederationId,
-        dbtx: &mut DatabaseTransaction<'_, Committable>,
-        now: SystemTime,
-    ) {
-        if let Some(client) = self.client(federation_id) {
-            let metadata: BTreeMap<String, String> = BTreeMap::new();
-            #[allow(deprecated)]
-            if client
-                .value()
-                .backup_to_federation(fedimint_client::backup::Metadata::from_json_serialized(
-                    metadata,
-                ))
-                .await
-                .is_ok()
-            {
-                dbtx.save_federation_backup_record(*federation_id, Some(now))
-                    .await;
-                info!(federation_id = %federation_id, "Successfully backed up federation");
-            }
-        }
     }
 
     pub async fn all_invite_codes(

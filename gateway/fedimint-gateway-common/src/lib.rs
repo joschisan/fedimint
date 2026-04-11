@@ -27,7 +27,6 @@ pub const V1_API_ENDPOINT: &str = "v1";
 
 pub const ADDRESS_ENDPOINT: &str = "/address";
 pub const ADDRESS_RECHECK_ENDPOINT: &str = "/address_recheck";
-pub const BACKUP_ENDPOINT: &str = "/backup";
 pub const CONFIGURATION_ENDPOINT: &str = "/config";
 pub const CONNECT_FED_ENDPOINT: &str = "/connect_fed";
 pub const CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT: &str = "/create_bolt11_invoice_for_operator";
@@ -71,11 +70,6 @@ pub struct LeaveFedPayload {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InfoPayload;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BackupPayload {
-    pub federation_id: FederationId,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ConfigPayload {
@@ -171,7 +165,6 @@ pub struct FederationInfo {
     pub federation_name: Option<String>,
     pub balance_msat: Amount,
     pub config: FederationConfig,
-    pub last_backup_time: Option<SystemTime>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

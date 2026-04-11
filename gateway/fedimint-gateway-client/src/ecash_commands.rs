@@ -5,11 +5,11 @@ use fedimint_core::config::FederationId;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, BitcoinAmountOrAll};
 use fedimint_gateway_client::{
-    backup, get_deposit_address, pegin_from_onchain, receive_ecash, recheck_address, spend_ecash,
+    get_deposit_address, pegin_from_onchain, receive_ecash, recheck_address, spend_ecash,
     withdraw, withdraw_to_onchain,
 };
 use fedimint_gateway_common::{
-    BackupPayload, DepositAddressPayload, DepositAddressRecheckPayload, PeginFromOnchainPayload,
+    DepositAddressPayload, DepositAddressRecheckPayload, PeginFromOnchainPayload,
     ReceiveEcashPayload, SpendEcashPayload, WithdrawPayload, WithdrawToOnchainPayload,
 };
 use fedimint_ln_common::client::GatewayApi;
@@ -20,11 +20,6 @@ use crate::{CliOutput, CliOutputResult};
 /// out of a federation, or spending/receiving ecash.
 #[derive(Subcommand)]
 pub enum EcashCommands {
-    /// Make a backup of snapshot of all e-cash.
-    Backup {
-        #[clap(long)]
-        federation_id: FederationId,
-    },
     /// Generate a new peg-in address to a federation that the gateway can claim
     /// e-cash for later.
     Pegin {
@@ -88,10 +83,6 @@ pub enum EcashCommands {
 impl EcashCommands {
     pub async fn handle(self, client: &GatewayApi, base_url: &SafeUrl) -> CliOutputResult {
         match self {
-            Self::Backup { federation_id } => {
-                backup(client, base_url, BackupPayload { federation_id }).await?;
-                Ok(CliOutput::Empty)
-            }
             Self::Pegin { federation_id } => {
                 let address =
                     get_deposit_address(client, base_url, DepositAddressPayload { federation_id })

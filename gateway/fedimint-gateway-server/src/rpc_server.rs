@@ -13,7 +13,7 @@ use fedimint_core::config::FederationId;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::util::FmtCompact;
 use fedimint_gateway_common::{
-    ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT, BACKUP_ENDPOINT, BackupPayload,
+    ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT,
     CLOSE_CHANNELS_WITH_PEER_ENDPOINT, CONFIGURATION_ENDPOINT, CONNECT_FED_ENDPOINT,
     CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT, CREATE_BOLT12_OFFER_FOR_OPERATOR_ENDPOINT,
     CloseChannelsWithPeerRequest, ConfigPayload, ConnectFedPayload,
@@ -333,13 +333,6 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup, handlers: &mut Handlers)
     );
     let authenticated_routes = register_post_handler(
         handlers,
-        BACKUP_ENDPOINT,
-        backup,
-        is_authenticated,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_post_handler(
-        handlers,
         CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
         create_invoice_for_operator,
         is_authenticated,
@@ -620,16 +613,6 @@ async fn leave_fed(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let fed = gateway.handle_leave_federation(payload).await?;
     Ok(Json(json!(fed)))
-}
-
-/// Backup a gateway actor state
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
-async fn backup(
-    Extension(gateway): Extension<Arc<Gateway>>,
-    Json(payload): Json<BackupPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    gateway.handle_backup_msg(payload).await?;
-    Ok(Json(json!(())))
 }
 
 #[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]

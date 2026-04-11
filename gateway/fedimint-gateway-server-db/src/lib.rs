@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use std::time::SystemTime;
 
 use bitcoin::hashes::{Hash, sha256};
 use fedimint_core::config::FederationId;
@@ -91,21 +90,6 @@ pub trait GatewayDbtxNcExt {
     /// exist
     async fn load_or_create_iroh_key(&mut self) -> iroh::SecretKey;
 
-    /// Returns a `BTreeMap` that maps `FederationId` to its last backup time
-    async fn load_backup_records(&mut self) -> BTreeMap<FederationId, Option<SystemTime>>;
-
-    /// Returns the last backup time for a federation
-    async fn load_backup_record(
-        &mut self,
-        federation_id: FederationId,
-    ) -> Option<Option<SystemTime>>;
-
-    /// Saves the last backup time of a federation
-    async fn save_federation_backup_record(
-        &mut self,
-        federation_id: FederationId,
-        backup_time: Option<SystemTime>,
-    );
 }
 
 impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
@@ -258,29 +242,6 @@ impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
         }
     }
 
-    async fn load_backup_records(&mut self) -> BTreeMap<FederationId, Option<SystemTime>> {
-        self.find_by_prefix(&FederationBackupPrefix)
-            .await
-            .map(|(key, time): (FederationBackupKey, Option<SystemTime>)| (key.federation_id, time))
-            .collect::<BTreeMap<FederationId, Option<SystemTime>>>()
-            .await
-    }
-
-    async fn load_backup_record(
-        &mut self,
-        federation_id: FederationId,
-    ) -> Option<Option<SystemTime>> {
-        self.get_value(&FederationBackupKey { federation_id }).await
-    }
-
-    async fn save_federation_backup_record(
-        &mut self,
-        federation_id: FederationId,
-        backup_time: Option<SystemTime>,
-    ) {
-        self.insert_entry(&FederationBackupKey { federation_id }, &backup_time)
-            .await;
-    }
 }
 
 #[repr(u8)]
@@ -489,25 +450,6 @@ impl_db_record!(
     db_prefix = DbKeyPrefix::Iroh
 );
 
-#[derive(Debug, Encodable, Decodable)]
-pub struct FederationBackupKey {
-    federation_id: FederationId,
-}
-
-#[derive(Debug, Encodable, Decodable)]
-pub struct FederationBackupPrefix;
-
-impl_db_record!(
-    key = FederationBackupKey,
-    value = Option<SystemTime>,
-    db_prefix = DbKeyPrefix::FederationBackup,
-);
-
-impl_db_lookup!(
-    key = FederationBackupKey,
-    query_prefix = FederationBackupPrefix,
-);
-
 pub fn get_gatewayd_database_migrations() -> BTreeMap<DatabaseVersion, GeneralDbMigrationFn> {
     let mut migrations: BTreeMap<DatabaseVersion, GeneralDbMigrationFn> = BTreeMap::new();
     migrations.insert(
@@ -714,23 +656,10 @@ async fn migrate_federation_configs(
     Ok(())
 }
 
-async fn migrate_to_v6(mut ctx: GeneralDbMigrationFnContext<'_>) -> Result<(), anyhow::Error> {
-    let mut dbtx = ctx.dbtx();
-
-    let configs = dbtx
-        .find_by_prefix(&FederationConfigKeyPrefix)
-        .await
-        .collect::<Vec<_>>()
-        .await;
-    for (fed_id, _) in configs {
-        dbtx.insert_new_entry(
-            &FederationBackupKey {
-                federation_id: fed_id.id,
-            },
-            &None,
-        )
-        .await;
-    }
+async fn migrate_to_v6(_ctx: GeneralDbMigrationFnContext<'_>) -> Result<(), anyhow::Error> {
+    // Previously created FederationBackup records for each federation.
+    // Backup functionality has been removed (the mnemonic is the backup),
+    // so this migration is now a no-op.
     Ok(())
 }
 
