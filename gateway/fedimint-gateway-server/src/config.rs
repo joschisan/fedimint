@@ -5,7 +5,7 @@ use std::str::FromStr;
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use fedimint_core::util::SafeUrl;
-use fedimint_gateway_common::{LightningMode, PaymentFee, V1_API_ENDPOINT};
+use fedimint_gateway_common::{PaymentFee, V1_API_ENDPOINT};
 
 use super::envs;
 use crate::envs::{
@@ -47,9 +47,6 @@ pub enum DatabaseBackend {
     )
 )]
 pub struct GatewayOpts {
-    #[clap(subcommand)]
-    pub mode: LightningMode,
-
     /// Path to folder containing gateway config and data files
     #[arg(long = "data-dir", env = envs::FM_GATEWAY_DATA_DIR_ENV)]
     pub data_dir: PathBuf,

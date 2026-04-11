@@ -17,11 +17,10 @@ use fedimint_core::db::mem_impl::MemDatabase;
 use fedimint_core::envs::BitcoinRpcConfig;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::SafeUrl;
-use fedimint_gateway_common::{ChainSource, LightningInfo, LightningMode};
+use fedimint_gateway_common::{ChainSource, LightningContext};
 use fedimint_gateway_server::Gateway;
 use fedimint_gateway_server::client::GatewayClientBuilder;
 use fedimint_gateway_server::config::DatabaseBackend;
-use fedimint_lightning::{ILnRpcClient, LightningContext};
 use fedimint_logging::TracingSetup;
 use fedimint_server::core::{DynServerModuleInit, IServerModuleInit, ServerModuleInitRegistry};
 use fedimint_server_bitcoin_rpc::bitcoind::BitcoindClient;
@@ -38,7 +37,6 @@ use crate::envs::{
     FM_TEST_BITCOIND_RPC_ENV, FM_TEST_USE_REAL_DAEMONS_ENV,
 };
 use crate::federation::{FederationTest, FederationTestBuilder};
-use crate::ln::FakeLightningTest;
 
 /// A default timeout for things happening in tests
 pub const TIMEOUT: Duration = Duration::from_secs(10);
@@ -235,23 +233,12 @@ impl Fixtures {
                 .await
                 .expect("Failed to initialize gateway");
 
-        let ln_client: Arc<dyn ILnRpcClient> = Arc::new(FakeLightningTest::new());
-
-        let LightningInfo::Connected {
-            public_key: lightning_public_key,
-            alias: lightning_alias,
-            network: lightning_network,
-            block_height: _,
-            synced_to_chain: _,
-        } = ln_client.parsed_node_info().await
-        else {
-            panic!("Could not connect to Lightning node")
-        };
         let lightning_context = LightningContext {
-            lnrpc: ln_client.clone(),
-            lightning_public_key,
-            lightning_alias,
-            lightning_network,
+            lightning_public_key: bitcoin::secp256k1::PublicKey::from_slice(&[2; 33])
+                .expect("valid dummy pubkey"),
+            lightning_alias: "FakeNode".to_string(),
+            lightning_network: bitcoin::Network::Regtest,
+            supports_private_payments: false,
         };
 
         // Module tests do not use the webserver, so any port is ok
@@ -264,37 +251,26 @@ impl Fixtures {
         ))
         .expect("Failed to parse default esplora server");
 
-        Gateway::builder(
-            // Fixtures does not use real lightning connection, so just fake the connection
-            // parameters
-            LightningMode::Lnd {
-                lnd_rpc_addr: "FakeRpcAddr".to_string(),
-                lnd_tls_cert: "FakeTlsCert".to_string(),
-                lnd_macaroon: "FakeMacaroon".to_string(),
-            },
-            client_builder,
-            gateway_db,
-        )
-        .listen(listen)
-        .api_addr(address)
-        .bcrypt_password_hash(
-            bcrypt::HashParts::from_str(
-                &bcrypt::hash(DEFAULT_GATEWAY_PASSWORD, bcrypt::DEFAULT_COST).unwrap(),
+        Gateway::builder(client_builder, gateway_db)
+            .listen(listen)
+            .api_addr(address)
+            .bcrypt_password_hash(
+                bcrypt::HashParts::from_str(
+                    &bcrypt::hash(DEFAULT_GATEWAY_PASSWORD, bcrypt::DEFAULT_COST).unwrap(),
+                )
+                .unwrap(),
             )
-            .unwrap(),
-        )
-        .network(bitcoin::Network::Regtest)
-        .num_route_hints(0)
-        // Manually set the gateway's state to `Running`. In tests, we don't run the
-        // webserver or intercept HTLCs, so this is necessary for instructing the
-        // gateway that it is connected to the mock Lightning node.
-        .gateway_state(fedimint_gateway_server::GatewayState::Running { lightning_context })
-        .chain_source(ChainSource::Esplora {
-            server_url: esplora_server_url,
-        })
-        .build()
-        .await
-        .expect("Failed to create gateway")
+            .network(bitcoin::Network::Regtest)
+            // Manually set the gateway's state to `Running`. In tests, we don't run the
+            // webserver or intercept HTLCs, so this is necessary for instructing the
+            // gateway that it is connected to the mock Lightning node.
+            .gateway_state(fedimint_gateway_server::GatewayState::Running { lightning_context })
+            .chain_source(ChainSource::Esplora {
+                server_url: esplora_server_url,
+            })
+            .build()
+            .await
+            .expect("Failed to create gateway")
     }
 
     /// Get a server bitcoin RPC config

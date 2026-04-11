@@ -8,8 +8,7 @@ use fedimint_core::crit;
 use fedimint_core::envs::is_env_var_set;
 use fedimint_core::fmt_utils::OptStacktrace;
 use fedimint_core::util::FmtCompactAnyhow;
-use fedimint_gw_client::pay::OutgoingPaymentError;
-use fedimint_lightning::LightningRpcError;
+use fedimint_gateway_common::LightningRpcError;
 use fedimint_logging::LOG_GATEWAY;
 use reqwest::StatusCode;
 use thiserror::Error;
@@ -44,8 +43,6 @@ impl IntoResponse for GatewayError {
 pub enum PublicGatewayError {
     #[error("Lightning rpc error: {}", .0)]
     Lightning(#[from] LightningRpcError),
-    #[error("LNv1 error: {:?}", .0)]
-    LNv1(#[from] LNv1Error),
     #[error("LNv2 error: {:?}", .0)]
     LNv2(#[from] LNv2Error),
     #[error("{}", .0)]
@@ -72,10 +69,6 @@ impl IntoResponse for PublicGatewayError {
             ),
             PublicGatewayError::Lightning(_) => (
                 "Lightning Network operation failed".to_string(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ),
-            PublicGatewayError::LNv1(_) => (
-                "LNv1 operation failed, please contact gateway operator".to_string(),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ),
             PublicGatewayError::LNv2(_) => (
@@ -132,24 +125,6 @@ impl IntoResponse for AdminGatewayError {
             .body(self.to_string().into())
             .expect("Failed to create Response")
     }
-}
-
-/// Errors that can occur during the LNv1 protocol. LNv1 errors are public and
-/// the error messages should be redacted for privacy reasons.
-#[derive(Debug, Error)]
-pub enum LNv1Error {
-    #[error("Incoming payment error: {}", OptStacktrace(.0))]
-    IncomingPayment(String),
-    #[error(
-        "Outgoing Contract Error Reason: {message} Stack: {}",
-        OptStacktrace(error)
-    )]
-    OutgoingContract {
-        error: Box<OutgoingPaymentError>,
-        message: String,
-    },
-    #[error("Outgoing Payment Error: {}", OptStacktrace(.0))]
-    OutgoingPayment(#[from] anyhow::Error),
 }
 
 /// Errors that can occur during the LNv2 protocol. LNv2 errors are public and

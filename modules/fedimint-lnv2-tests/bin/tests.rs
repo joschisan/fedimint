@@ -4,11 +4,8 @@ use clap::{Parser, Subcommand};
 use devimint::devfed::DevJitFed;
 use devimint::federation::Client;
 use devimint::util::almost_equal;
-use devimint::version_constants::{
-    VERSION_0_9_0_ALPHA, VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA,
-};
+use devimint::version_constants::{VERSION_0_9_0_ALPHA, VERSION_0_11_0_ALPHA};
 use devimint::{Gatewayd, cmd, util};
-use fedimint_core::core::OperationId;
 use fedimint_core::encoding::Encodable;
 use fedimint_core::task::{self};
 use fedimint_core::util::{backoff_util, retry};
@@ -16,7 +13,6 @@ use fedimint_lnurl::{LnurlResponse, VerifyResponse, parse_lnurl};
 use fedimint_lnv2_client::FinalSendOperationState;
 use lightning_invoice::Bolt11Invoice;
 use serde::Deserialize;
-use substring::Substring;
 use tokio::try_join;
 use tracing::info;
 

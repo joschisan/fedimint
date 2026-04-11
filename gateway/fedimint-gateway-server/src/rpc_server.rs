@@ -28,9 +28,6 @@ use fedimint_gateway_common::{
     V1_API_ENDPOINT, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT, WithdrawPayload,
     WithdrawToOnchainPayload,
 };
-use fedimint_ln_common::gateway_endpoint_constants::{
-    GET_GATEWAY_ID_ENDPOINT, PAY_INVOICE_ENDPOINT,
-};
 use fedimint_lnurl::LnurlResponse;
 use fedimint_lnv2_common::endpoint_constants::{
     CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
@@ -168,13 +165,6 @@ where
     router.route(route, post(func))
 }
 
-/// Public routes that are used in the LNv1 protocol
-fn lnv1_routes() -> Router {
-    let router = Router::new();
-    let router = register_post_handler(PAY_INVOICE_ENDPOINT, pay_invoice, router);
-    register_get_handler(GET_GATEWAY_ID_ENDPOINT, get_gateway_id, router)
-}
-
 /// Public routes that are used in the LNv2 protocol
 fn lnv2_routes() -> Router {
     let router = Router::new();
@@ -198,7 +188,6 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
     // Public routes on gateway webserver
     let mut public_routes =
         register_post_handler(RECEIVE_ECASH_ENDPOINT, receive_ecash, Router::new());
-    public_routes = public_routes.merge(lnv1_routes());
     public_routes = public_routes.merge(lnv2_routes());
 
     // Authenticated routes used for gateway administration
@@ -370,15 +359,6 @@ async fn pay_invoice_operator(
     Ok(Json(json!(preimage.0.encode_hex::<String>())))
 }
 
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn pay_invoice(
-    Extension(gateway): Extension<Arc<Gateway>>,
-    Json(payload): Json<fedimint_ln_client::pay::PayInvoicePayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let preimage = gateway.handle_pay_invoice_msg(payload).await?;
-    Ok(Json(json!(preimage.0.encode_hex::<String>())))
-}
-
 /// Join a new federation
 #[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
 async fn join(
@@ -466,13 +446,6 @@ async fn get_balances(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let balances = gateway.handle_get_balances_msg().await?;
     Ok(Json(json!(balances)))
-}
-
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn get_gateway_id(
-    Extension(gateway): Extension<Arc<Gateway>>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    Ok(Json(json!(gateway.http_gateway_id().await)))
 }
 
 #[instrument(target = LOG_GATEWAY, skip_all, err)]

@@ -125,7 +125,7 @@ const GATEWAY_PORT_OFFSET_LDK2: u16 = 7;
 const GATEWAY_PORT_OFFSET_LDK2_METRICS: u16 = 8;
 
 declare_vars! {
-    Global = (test_dir: &Path, num_feds: usize, fed_size: usize, offline_nodes: usize, federation_base_ports: u16, num_gateways: usize, gateway_base_port: Option<u16>) =>
+    Global = (test_dir: &Path, num_feds: usize, fed_size: usize, offline_nodes: usize, federation_base_ports: u16, _num_gateways: usize, gateway_base_port: Option<u16>) =>
     {
         FM_USE_UNKNOWN_MODULE: String = std::env::var(FM_USE_UNKNOWN_MODULE_ENV).unwrap_or_else(|_| "1".into()); env: "FM_USE_UNKNOWN_MODULE";
 

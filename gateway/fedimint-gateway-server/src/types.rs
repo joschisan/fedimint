@@ -2,7 +2,7 @@
 
 use std::fmt::Display;
 
-use fedimint_lightning::InterceptPaymentRequest;
+use fedimint_gateway_common::InterceptPaymentRequest;
 use hex::ToHex;
 
 /// Utility struct for formatting an intercepted HTLC. Useful for debugging.

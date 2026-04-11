@@ -1,19 +1,16 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use bitcoin::secp256k1::Keypair;
 use fedimint_client::ClientHandleArc;
+use fedimint_core::PeerId;
 use fedimint_core::config::{FederationId, FederationIdPrefix, JsonClientConfig};
 use fedimint_core::db::{DatabaseTransaction, NonCommittable};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::{FmtCompactAnyhow as _, Spanned};
-use fedimint_core::{PeerId, TieredCounts};
 use fedimint_gateway_common::FederationInfo;
 use fedimint_gateway_server_db::GatewayDbtxNcExt as _;
-use fedimint_gw_client::GatewayClientModule;
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::LOG_GATEWAY;
-use fedimint_mint_client::MintClientModule;
 use tracing::{info, warn};
 
 use crate::AdminResult;
@@ -66,17 +63,9 @@ impl FederationManager {
             for op_id in active_operations {
                 let log_entry = operation_log.get_operation(op_id).await;
                 if let Some(entry) = log_entry {
-                    match entry.operation_module_kind() {
-                        "lnv2" => {
-                            let lnv2 =
-                                client.value().get_first_module::<GatewayClientModuleV2>()?;
-                            lnv2.await_completion(op_id).await;
-                        }
-                        "ln" => {
-                            let lnv1 = client.value().get_first_module::<GatewayClientModule>()?;
-                            lnv1.await_completion(op_id).await;
-                        }
-                        _ => {}
+                    if entry.operation_module_kind() == "lnv2" {
+                        let lnv2 = client.value().get_first_module::<GatewayClientModuleV2>()?;
+                        lnv2.await_completion(op_id).await;
                     }
                 }
             }
@@ -84,26 +73,6 @@ impl FederationManager {
 
         info!(target: LOG_GATEWAY, "Finished waiting for incoming payments");
         Ok(())
-    }
-
-    /// Iterates through all of the federations the gateway is registered with
-    /// and requests to remove the registration record.
-    pub async fn unannounce_from_all_federations(&self, gateway_keypair: Keypair) {
-        let removal_futures = self
-            .clients
-            .values()
-            .filter_map(|client| {
-                client
-                    .value()
-                    .get_first_module::<GatewayClientModule>()
-                    .ok()
-                    .map(|lnv1| async move {
-                        lnv1.remove_from_federation(gateway_keypair).await;
-                    })
-            })
-            .collect::<Vec<_>>();
-
-        futures::future::join_all(removal_futures).await;
     }
 
     pub fn get_client_for_index(&self, short_channel_id: u64) -> Option<Spanned<ClientHandleArc>> {
@@ -268,20 +237,6 @@ impl FederationManager {
         }
 
         invite_codes
-    }
-
-    pub async fn get_note_summary(
-        &self,
-        federation_id: &FederationId,
-    ) -> AdminResult<TieredCounts> {
-        let client = self.client(federation_id).ok_or(FederationNotConnected {
-            federation_id_prefix: federation_id.to_prefix(),
-        })?;
-        let mint = client.value().get_first_module::<MintClientModule>()?;
-        let mut dbtx = mint.client_ctx.module_db().begin_transaction_nc().await;
-        let counts = mint.get_note_counts_by_denomination(&mut dbtx).await;
-        info!(target: LOG_GATEWAY, ?counts, "Note counts");
-        Ok(counts)
     }
 
     // TODO(tvolk131): Set this value in the constructor.

@@ -51,27 +51,22 @@ fedimint-derive-secret = { workspace = true }
 fedimint-eventlog = { workspace = true }
 fedimint-gateway-common = { workspace = true }
 fedimint-gateway-server-db = { workspace = true }
-fedimint-gw-client = { workspace = true }
 fedimint-gwv2-client = { workspace = true }
-fedimint-lightning = { workspace = true }
-fedimint-ln-client = { workspace = true }
-fedimint-ln-common = { workspace = true }
 fedimint-lnurl = { workspace = true }
 fedimint-lnv2-client = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 fedimint-logging = { workspace = true }
 fedimint-metrics = { workspace = true }
-fedimint-mint-client = { workspace = true }
 fedimint-mintv2-client = { workspace = true }
 fedimint-rocksdb = { workspace = true }
-fedimint-wallet-client = { workspace = true }
 fedimint-walletv2-client = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
 hex = { workspace = true }
+ldk-node = { workspace = true }
+lightning = { workspace = true }
 lightning-invoice = { workspace = true }
 lockable = { workspace = true }
-prost = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -81,8 +76,6 @@ strum_macros = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
-tonic = { workspace = true, features = ["transport", "tls-ring"] }
-tonic_lnd = { workspace = true }
 tower-http = { workspace = true, features = ["cors", "auth"] }
 tracing = { workspace = true, features = ["log"] }
 url = { workspace = true, features = ["serde"] }
@@ -95,7 +88,6 @@ assert_matches = { workspace = true }
 fedimint-dummy-client = { workspace = true }
 fedimint-dummy-common = { workspace = true }
 fedimint-dummy-server = { workspace = true }
-fedimint-ln-server = { workspace = true }
 fedimint-lnv2-server = { workspace = true }
 fedimint-testing = { workspace = true }
 fedimint-unknown-common = { workspace = true }
