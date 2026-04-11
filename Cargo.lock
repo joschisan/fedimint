@@ -3616,6 +3616,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "fedimint-integration-tests"
+version = "0.11.0-alpha"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "bitcoincore-rpc",
+ "fedimint-bip39",
+ "fedimint-client",
+ "fedimint-connectors",
+ "fedimint-core",
+ "fedimint-lnv2-client",
+ "fedimint-lnv2-common",
+ "fedimint-logging",
+ "fedimint-mintv2-client",
+ "fedimint-rocksdb",
+ "fedimint-walletv2-client",
+ "rand 0.8.5",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "fedimint-ldk-node"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

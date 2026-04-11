@@ -1,0 +1,35 @@
+[package]
+authors = { workspace = true }
+description = "Standalone integration tests using in-process clients"
+edition = { workspace = true }
+license = { workspace = true }
+name = "fedimint-integration-tests"
+publish = false
+version = { workspace = true }
+
+[[bin]]
+name = "fedimint-integration-tests"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+bitcoin = { workspace = true }
+bitcoincore-rpc = { workspace = true }
+fedimint-bip39 = { workspace = true }
+fedimint-client = { workspace = true }
+fedimint-connectors = { workspace = true }
+fedimint-core = { workspace = true }
+fedimint-lnv2-client = { workspace = true }
+fedimint-lnv2-common = { workspace = true }
+fedimint-logging = { workspace = true }
+fedimint-mintv2-client = { workspace = true }
+fedimint-rocksdb = { workspace = true }
+fedimint-walletv2-client = { workspace = true }
+rand = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
