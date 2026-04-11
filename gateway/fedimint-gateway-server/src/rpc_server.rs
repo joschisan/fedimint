@@ -30,7 +30,7 @@ use fedimint_gateway_common::{
     SendOnchainRequest, SetFeesPayload, SetMnemonicPayload, SpendEcashPayload, V1_API_ENDPOINT,
     WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT, WithdrawPayload, WithdrawToOnchainPayload,
 };
-use fedimint_gateway_ui::IAdminGateway;
+use crate::IAdminGateway;
 use fedimint_ln_common::gateway_endpoint_constants::{
     GET_GATEWAY_ID_ENDPOINT, PAY_INVOICE_ENDPOINT,
 };
@@ -84,12 +84,10 @@ pub async fn run_webserver(
     let mut handlers = Handlers::new();
 
     let routes = routes(gateway.clone(), task_group.clone(), &mut handlers);
-    let ui_routes = fedimint_gateway_ui::router(gateway.clone());
     let api_v1 = Router::new()
         .nest(&format!("/{V1_API_ENDPOINT}"), routes.clone())
         // Backwards compatibility: Continue supporting gateway APIs without versioning
-        .merge(routes)
-        .merge(ui_routes);
+        .merge(routes);
 
     let handle = task_group.make_handle();
     let shutdown_rx = handle.make_shutdown_rx();
@@ -155,9 +153,7 @@ async fn not_configured_middleware(
             && (path == MNEMONIC_ENDPOINT
                 || path == format!("/{V1_API_ENDPOINT}/{MNEMONIC_ENDPOINT}"));
 
-        let is_setup_route = fedimint_gateway_ui::is_allowed_setup_route(path);
-
-        if !is_mnemonic_api && !is_setup_route {
+        if !is_mnemonic_api {
             return Err(StatusCode::NOT_FOUND);
         }
     }

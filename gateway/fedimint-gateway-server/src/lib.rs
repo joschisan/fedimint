@@ -86,7 +86,151 @@ use fedimint_gateway_common::{
     WithdrawPreviewResponse, WithdrawResponse, WithdrawToOnchainPayload,
 };
 use fedimint_gateway_server_db::{GatewayDbtxNcExt as _, get_gatewayd_database_migrations};
-pub use fedimint_gateway_ui::IAdminGateway;
+
+#[async_trait]
+pub trait IAdminGateway {
+    type Error;
+
+    async fn handle_get_info(&self) -> std::result::Result<GatewayInfo, Self::Error>;
+
+    async fn handle_list_channels_msg(
+        &self,
+    ) -> std::result::Result<Vec<fedimint_gateway_common::ChannelInfo>, Self::Error>;
+
+    async fn handle_payment_summary_msg(
+        &self,
+        PaymentSummaryPayload {
+            start_millis,
+            end_millis,
+        }: PaymentSummaryPayload,
+    ) -> std::result::Result<PaymentSummaryResponse, Self::Error>;
+
+    async fn handle_leave_federation(
+        &self,
+        payload: LeaveFedPayload,
+    ) -> std::result::Result<FederationInfo, Self::Error>;
+
+    async fn handle_connect_federation(
+        &self,
+        payload: ConnectFedPayload,
+    ) -> std::result::Result<FederationInfo, Self::Error>;
+
+    async fn handle_set_fees_msg(
+        &self,
+        payload: SetFeesPayload,
+    ) -> std::result::Result<(), Self::Error>;
+
+    async fn handle_mnemonic_msg(&self) -> std::result::Result<MnemonicResponse, Self::Error>;
+
+    async fn handle_open_channel_msg(
+        &self,
+        payload: OpenChannelRequest,
+    ) -> std::result::Result<Txid, Self::Error>;
+
+    async fn handle_close_channels_with_peer_msg(
+        &self,
+        payload: CloseChannelsWithPeerRequest,
+    ) -> std::result::Result<CloseChannelsWithPeerResponse, Self::Error>;
+
+    async fn handle_get_balances_msg(
+        &self,
+    ) -> std::result::Result<GatewayBalances, Self::Error>;
+
+    async fn handle_send_onchain_msg(
+        &self,
+        payload: SendOnchainRequest,
+    ) -> std::result::Result<Txid, Self::Error>;
+
+    async fn handle_get_ln_onchain_address_msg(
+        &self,
+    ) -> std::result::Result<Address, Self::Error>;
+
+    async fn handle_deposit_address_msg(
+        &self,
+        payload: DepositAddressPayload,
+    ) -> std::result::Result<Address, Self::Error>;
+
+    async fn handle_receive_ecash_msg(
+        &self,
+        payload: ReceiveEcashPayload,
+    ) -> std::result::Result<ReceiveEcashResponse, Self::Error>;
+
+    async fn handle_create_invoice_for_operator_msg(
+        &self,
+        payload: CreateInvoiceForOperatorPayload,
+    ) -> std::result::Result<Bolt11Invoice, Self::Error>;
+
+    async fn handle_pay_invoice_for_operator_msg(
+        &self,
+        payload: PayInvoiceForOperatorPayload,
+    ) -> std::result::Result<Preimage, Self::Error>;
+
+    async fn handle_list_transactions_msg(
+        &self,
+        payload: ListTransactionsPayload,
+    ) -> std::result::Result<ListTransactionsResponse, Self::Error>;
+
+    async fn handle_spend_ecash_msg(
+        &self,
+        payload: SpendEcashPayload,
+    ) -> std::result::Result<SpendEcashResponse, Self::Error>;
+
+    async fn handle_shutdown_msg(
+        &self,
+        task_group: TaskGroup,
+    ) -> std::result::Result<(), Self::Error>;
+
+    fn get_task_group(&self) -> TaskGroup;
+
+    async fn handle_withdraw_msg(
+        &self,
+        payload: WithdrawPayload,
+    ) -> std::result::Result<WithdrawResponse, Self::Error>;
+
+    async fn handle_withdraw_preview_msg(
+        &self,
+        payload: WithdrawPreviewPayload,
+    ) -> std::result::Result<WithdrawPreviewResponse, Self::Error>;
+
+    async fn handle_payment_log_msg(
+        &self,
+        payload: PaymentLogPayload,
+    ) -> std::result::Result<PaymentLogResponse, Self::Error>;
+
+    async fn handle_export_invite_codes(
+        &self,
+    ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>;
+
+    fn get_password_hash(&self) -> String;
+
+    fn gatewayd_version(&self) -> String;
+
+    async fn get_chain_source(&self) -> (ChainSource, Network);
+
+    fn lightning_mode(&self) -> LightningMode;
+
+    async fn is_configured(&self) -> bool;
+
+    async fn handle_set_mnemonic_msg(
+        &self,
+        payload: SetMnemonicPayload,
+    ) -> std::result::Result<(), Self::Error>;
+
+    async fn handle_create_offer_for_operator_msg(
+        &self,
+        payload: CreateOfferPayload,
+    ) -> std::result::Result<CreateOfferResponse, Self::Error>;
+
+    async fn handle_pay_offer_for_operator_msg(
+        &self,
+        payload: PayOfferPayload,
+    ) -> std::result::Result<PayOfferResponse, Self::Error>;
+
+    async fn handle_get_note_summary_msg(
+        &self,
+        federation_id: &FederationId,
+    ) -> std::result::Result<TieredCounts, Self::Error>;
+}
 use fedimint_gw_client::events::compute_lnv1_stats;
 use fedimint_gw_client::pay::{OutgoingPaymentError, OutgoingPaymentErrorType};
 use fedimint_gw_client::{
