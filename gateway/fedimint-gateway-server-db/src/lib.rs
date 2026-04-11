@@ -11,10 +11,10 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::{Amount, impl_db_lookup, impl_db_record, push_db_pair_items, secp256k1};
-use fedimint_gateway_common::{ConnectorType, FederationConfig, RegisteredProtocol};
-use fedimint_gateway_common::serde_routing_fees;
+use fedimint_gateway_common::{
+    ConnectorType, FederationConfig, PaymentFee, RegisteredProtocol, serde_routing_fees,
+};
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
-use fedimint_gateway_common::PaymentFee;
 use futures::{FutureExt, StreamExt};
 use lightning_invoice::RoutingFees;
 use rand::Rng;
@@ -83,7 +83,6 @@ pub trait GatewayDbtxNcExt {
         &mut self,
         prefix_names: Vec<String>,
     ) -> BTreeMap<String, Box<dyn erased_serde::Serialize + Send>>;
-
 }
 
 impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
@@ -220,7 +219,6 @@ impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
 
         gateway_items
     }
-
 }
 
 #[repr(u8)]

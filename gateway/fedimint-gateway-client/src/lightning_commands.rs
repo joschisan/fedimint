@@ -7,10 +7,9 @@ use fedimint_gateway_client::{
     list_transactions, open_channel, open_channel_with_push, pay_invoice,
 };
 use fedimint_gateway_common::{
-    CloseChannelsWithPeerRequest, CreateInvoiceForOperatorPayload,
-    GetInvoiceRequest, ListTransactionsPayload, OpenChannelRequest, PayInvoiceForOperatorPayload,
+    CloseChannelsWithPeerRequest, CreateInvoiceForOperatorPayload, GatewayApi, GetInvoiceRequest,
+    ListTransactionsPayload, OpenChannelRequest, PayInvoiceForOperatorPayload,
 };
-use fedimint_gateway_common::GatewayApi;
 use lightning_invoice::Bolt11Invoice;
 
 use crate::{CliOutput, CliOutputResult, SafeUrl};

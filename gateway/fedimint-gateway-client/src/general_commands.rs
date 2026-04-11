@@ -6,8 +6,7 @@ use fedimint_eventlog::{EventKind, EventLogId};
 use fedimint_gateway_client::{
     get_balances, get_info, get_invite_codes, get_mnemonic, join_federation, payment_log, stop,
 };
-use fedimint_gateway_common::{ConnectFedPayload, PaymentLogPayload};
-use fedimint_gateway_common::GatewayApi;
+use fedimint_gateway_common::{ConnectFedPayload, GatewayApi, PaymentLogPayload};
 
 use crate::{CliOutput, CliOutputResult};
 

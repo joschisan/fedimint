@@ -71,18 +71,16 @@ use fedimint_core::{
 };
 use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId};
 use fedimint_gateway_common::{
-    ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
-    ConnectFedPayload, ConnectorType, CreateInvoiceForOperatorPayload,
-    DepositAddressPayload, DepositAddressRecheckPayload,
-    FederationBalanceInfo, FederationConfig, FederationInfo, GatewayBalances, GatewayFedConfig,
-    GatewayInfo, GetInvoiceRequest, GetInvoiceResponse, LightningInfo,
-    LightningMode, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
-    OpenChannelRequest, PayInvoiceForOperatorPayload,
-    PaymentLogPayload, PaymentLogResponse,
-    PeginFromOnchainPayload, ReceiveEcashPayload, ReceiveEcashResponse,
-    RegisteredProtocol, SendOnchainRequest, SetFeesPayload, SpendEcashPayload,
-    SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload, WithdrawPreviewPayload,
-    WithdrawPreviewResponse, WithdrawResponse, WithdrawToOnchainPayload,
+    ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConnectFedPayload,
+    ConnectorType, CreateInvoiceForOperatorPayload, DepositAddressPayload,
+    DepositAddressRecheckPayload, FederationBalanceInfo, FederationConfig, FederationInfo,
+    GatewayBalances, GatewayFedConfig, GatewayInfo, GetInvoiceRequest, GetInvoiceResponse,
+    LightningInfo, LightningMode, ListTransactionsPayload, ListTransactionsResponse,
+    MnemonicResponse, OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentFee,
+    PaymentLogPayload, PaymentLogResponse, PeginFromOnchainPayload, ReceiveEcashPayload,
+    ReceiveEcashResponse, RegisteredProtocol, SendOnchainRequest, SetFeesPayload,
+    SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload,
+    WithdrawPreviewPayload, WithdrawPreviewResponse, WithdrawResponse, WithdrawToOnchainPayload,
 };
 use fedimint_gateway_server_db::{GatewayDbtxNcExt as _, get_gatewayd_database_migrations};
 
@@ -118,18 +116,14 @@ pub trait IAdminGateway {
         payload: CloseChannelsWithPeerRequest,
     ) -> std::result::Result<CloseChannelsWithPeerResponse, Self::Error>;
 
-    async fn handle_get_balances_msg(
-        &self,
-    ) -> std::result::Result<GatewayBalances, Self::Error>;
+    async fn handle_get_balances_msg(&self) -> std::result::Result<GatewayBalances, Self::Error>;
 
     async fn handle_send_onchain_msg(
         &self,
         payload: SendOnchainRequest,
     ) -> std::result::Result<Txid, Self::Error>;
 
-    async fn handle_get_ln_onchain_address_msg(
-        &self,
-    ) -> std::result::Result<Address, Self::Error>;
+    async fn handle_get_ln_onchain_address_msg(&self) -> std::result::Result<Address, Self::Error>;
 
     async fn handle_deposit_address_msg(
         &self,
@@ -223,7 +217,7 @@ use fedimint_lnurl::VerifyResponse;
 use fedimint_lnv2_common::Bolt11InvoiceDescription;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::{
-    CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
+    CreateBolt11InvoicePayload, RoutingInfo, SendPaymentPayload,
 };
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mint_client::{MintClientInit, MintClientModule, OOBNotes};
@@ -280,12 +274,8 @@ pub enum GatewayState {
     Disconnected,
     Syncing,
     Connected,
-    Running {
-        lightning_context: LightningContext,
-    },
-    ShuttingDown {
-        lightning_context: LightningContext,
-    },
+    Running { lightning_context: LightningContext },
+    ShuttingDown { lightning_context: LightningContext },
 }
 
 impl Display for GatewayState {
@@ -466,7 +456,34 @@ impl std::fmt::Debug for Gateway {
 struct WithdrawDetails {
     amount: Amount,
     mint_fees: Option<Amount>,
-    peg_out_fees: PegOutFees,
+    peg_out_fees: bitcoin::Amount,
+}
+
+/// Converts a `fedimint_gateway_common::InterceptPaymentResponse` to the
+/// `fedimint_lightning` version for passing to lnrpc.
+fn to_lightning_intercept_response(
+    resp: &fedimint_gateway_common::InterceptPaymentResponse,
+) -> InterceptPaymentResponse {
+    InterceptPaymentResponse {
+        incoming_chan_id: resp.incoming_chan_id,
+        htlc_id: resp.htlc_id,
+        payment_hash: resp.payment_hash,
+        action: match &resp.action {
+            fedimint_gateway_common::PaymentAction::Settle(preimage) => {
+                PaymentAction::Settle(Preimage(preimage.0))
+            }
+            fedimint_gateway_common::PaymentAction::Cancel => PaymentAction::Cancel,
+            fedimint_gateway_common::PaymentAction::Forward => PaymentAction::Forward,
+        },
+    }
+}
+
+/// Converts a `fedimint_lightning::LightningRpcError` to the
+/// `fedimint_gateway_common` version.
+fn to_common_lightning_error(err: LightningRpcError) -> fedimint_gateway_common::LightningRpcError {
+    // Both enums have identical variants; serialize + deserialize to convert.
+    let json = serde_json::to_string(&err).expect("LightningRpcError is serializable");
+    serde_json::from_str(&json).expect("LightningRpcError variants match")
 }
 
 /// Executes a withdrawal using the walletv2 module
@@ -518,7 +535,7 @@ async fn withdraw_v2(
         .await_final_send_operation_state(operation_id)
         .await;
 
-    let fees = PegOutFees::from_amount(fee);
+    let fees = fee;
 
     match result {
         fedimint_walletv2_client::FinalSendOperationState::Success(txid) => {
@@ -557,26 +574,27 @@ async fn calculate_max_withdrawable(
                 bitcoin::Amount::from_sat(balance.sats_round_down()),
             )
             .await?
+            .amount()
     } else if let Ok(wallet_module) =
         client.get_first_module::<fedimint_walletv2_client::WalletClientModule>()
     {
-        let fee = wallet_module
+        wallet_module
             .send_fee()
             .await
             .map_err(|e| AdminGatewayError::WithdrawError {
                 failure_reason: e.to_string(),
-            })?;
-        PegOutFees::from_amount(fee)
+            })?
     } else {
         return Err(AdminGatewayError::Unexpected(anyhow!(
             "No wallet module found"
         )));
     };
 
-    let max_withdrawable_before_mint_fees = balance
-        .checked_sub(peg_out_fees.amount().into())
-        .ok_or_else(|| AdminGatewayError::WithdrawError {
-            failure_reason: "Insufficient balance to cover peg-out fees".to_string(),
+    let max_withdrawable_before_mint_fees =
+        balance.checked_sub(peg_out_fees.into()).ok_or_else(|| {
+            AdminGatewayError::WithdrawError {
+                failure_reason: "Insufficient balance to cover peg-out fees".to_string(),
+            }
         })?;
 
     // MintV2 doesn't have fee estimation - only compute fees for MintV1
@@ -704,13 +722,11 @@ impl Gateway {
         if Self::load_mnemonic(&gateway_db).await.is_none() {
             let mnemonic = if let Ok(words) = std::env::var(FM_GATEWAY_MNEMONIC_ENV) {
                 info!(target: LOG_GATEWAY, "Using provided mnemonic from environment variable");
-                Mnemonic::parse_in_normalized(Language::English, words.as_str()).map_err(
-                    |e| {
-                        AdminGatewayError::MnemonicError(anyhow!(format!(
-                            "Seed phrase provided in environment was invalid {e:?}"
-                        )))
-                    },
-                )?
+                Mnemonic::parse_in_normalized(Language::English, words.as_str()).map_err(|e| {
+                    AdminGatewayError::MnemonicError(anyhow!(format!(
+                        "Seed phrase provided in environment was invalid {e:?}"
+                    )))
+                })?
             } else {
                 debug!(target: LOG_GATEWAY, "Generating mnemonic and writing entropy to client storage");
                 Bip39RootSecretStrategy::<12>::random(&mut OsRng)
@@ -837,10 +853,7 @@ impl Gateway {
 
     /// Begins the task for listening for intercepted payments from the
     /// lightning node.
-    fn start_gateway(
-        &self,
-        runtime: Arc<tokio::runtime::Runtime>,
-    ) {
+    fn start_gateway(&self, runtime: Arc<tokio::runtime::Runtime>) {
         const PAYMENT_STREAM_RETRY_SECONDS: u64 = 60;
 
         let self_copy = self.clone();
@@ -1596,7 +1609,6 @@ impl Gateway {
     /// database and reconstructs the clients necessary for interacting with
     /// connection federations.
     async fn load_clients(&self) -> AdminResult<()> {
-
         let mut federation_manager = self.federation_manager.write().await;
 
         let configs = {
@@ -2388,7 +2400,7 @@ impl IAdminGateway for Gateway {
 
         // If fees are provided (from UI preview flow), use them directly
         // Otherwise fetch fees (CLI backwards compatibility)
-        let (withdraw_amount, fees) = match quoted_fees {
+        let (withdraw_amount, peg_out_fees) = match quoted_fees {
             // UI flow: user confirmed these exact values, just use them
             Some(fees) => {
                 let amt = match amount {
@@ -2402,7 +2414,7 @@ impl IAdminGateway for Gateway {
                         });
                     }
                 };
-                (amt, fees)
+                (amt, PegOutFees::from_amount(fees))
             }
             // CLI flow: fetch fees (existing behavior for backwards compatibility)
             None => match amount {
@@ -2423,16 +2435,16 @@ impl IAdminGateway for Gateway {
                             .msats
                             / 1000,
                     );
-                    let fees = wallet_module.get_withdraw_fees(&address, balance).await?;
-                    let withdraw_amount = balance.checked_sub(fees.amount());
+                    let peg_out_fees = wallet_module.get_withdraw_fees(&address, balance).await?;
+                    let withdraw_amount = balance.checked_sub(peg_out_fees.amount());
                     if withdraw_amount.is_none() {
                         return Err(AdminGatewayError::WithdrawError {
                             failure_reason: format!(
-                                "Insufficient funds. Balance: {balance} Fees: {fees:?}"
+                                "Insufficient funds. Balance: {balance} Fees: {peg_out_fees:?}"
                             ),
                         });
                     }
-                    (withdraw_amount.expect("checked above"), fees)
+                    (withdraw_amount.expect("checked above"), peg_out_fees)
                 }
                 BitcoinAmountOrAll::Amount(amount) => (
                     amount,
@@ -2440,9 +2452,10 @@ impl IAdminGateway for Gateway {
                 ),
             },
         };
+        let fees = peg_out_fees.amount();
 
         let operation_id = wallet_module
-            .withdraw(&address, withdraw_amount, fees, ())
+            .withdraw(&address, withdraw_amount, peg_out_fees, ())
             .await?;
         let mut updates = wallet_module
             .subscribe_withdraw_updates(operation_id)
@@ -2499,7 +2512,8 @@ impl IAdminGateway for Gateway {
                         mint_fees: None,
                         peg_out_fees: wallet_module
                             .get_withdraw_fees(&address_checked, btc_amount)
-                            .await?,
+                            .await?
+                            .amount(),
                     }
                 } else if let Ok(wallet_module) = client
                     .value()
@@ -2513,7 +2527,7 @@ impl IAdminGateway for Gateway {
                     WithdrawDetails {
                         amount: btc_amount.into(),
                         mint_fees: None,
-                        peg_out_fees: PegOutFees::from_amount(fee),
+                        peg_out_fees: fee,
                     }
                 } else {
                     return Err(AdminGatewayError::Unexpected(anyhow!(
@@ -2524,7 +2538,7 @@ impl IAdminGateway for Gateway {
         };
 
         let total_cost = amount
-            .checked_add(peg_out_fees.amount().into())
+            .checked_add(peg_out_fees.into())
             .and_then(|a| a.checked_add(mint_fees.unwrap_or(Amount::ZERO)))
             .ok_or_else(|| AdminGatewayError::Unexpected(anyhow!("Total cost overflow")))?;
 
@@ -2596,7 +2610,6 @@ impl IAdminGateway for Gateway {
         Ok(PaymentLogResponse(payment_log))
     }
 
-
     /// Returns a `BTreeMap` that is keyed by the `FederationId` and contains
     /// all the invite codes (with peer names) for the federation.
     async fn handle_export_invite_codes(
@@ -2632,7 +2645,6 @@ impl IAdminGateway for Gateway {
     fn lightning_mode(&self) -> LightningMode {
         self.lightning_mode.clone()
     }
-
 }
 
 // LNv2 Gateway implementation
@@ -2673,6 +2685,14 @@ impl Gateway {
         let lightning_fee = fed_config.lightning_fee;
         let transaction_fee = fed_config.transaction_fee;
 
+        // Convert gateway-common PaymentFee to lnv2-common PaymentFee for RoutingInfo
+        let to_lnv2_fee = |fee: PaymentFee| -> fedimint_lnv2_common::gateway_api::PaymentFee {
+            fedimint_lnv2_common::gateway_api::PaymentFee {
+                base: fee.base,
+                parts_per_million: fee.parts_per_million,
+            }
+        };
+
         Ok(self
             .public_key_v2(federation_id)
             .await
@@ -2680,16 +2700,16 @@ impl Gateway {
                 lightning_public_key: context.lightning_public_key,
                 lightning_alias: Some(context.lightning_alias.clone()),
                 module_public_key,
-                send_fee_default: lightning_fee + transaction_fee,
+                send_fee_default: to_lnv2_fee(lightning_fee + transaction_fee),
                 // The base fee ensures that the gateway does not loose sats sending the payment due
                 // to fees paid on the transaction claiming the outgoing contract or
                 // subsequent transactions spending the newly issued ecash
-                send_fee_minimum: transaction_fee,
+                send_fee_minimum: to_lnv2_fee(transaction_fee),
                 expiration_delta_default: 1440,
                 expiration_delta_minimum: EXPIRATION_DELTA_MINIMUM_V2,
                 // The base fee ensures that the gateway does not loose sats receiving the payment
                 // due to fees paid on the transaction funding the incoming contract
-                receive_fee: transaction_fee,
+                receive_fee: to_lnv2_fee(transaction_fee),
             }))
     }
 
@@ -2924,13 +2944,17 @@ impl Gateway {
 
 #[async_trait]
 impl IGatewayClientV2 for Gateway {
-    async fn complete_htlc(&self, htlc_response: InterceptPaymentResponse) {
+    async fn complete_htlc(
+        &self,
+        htlc_response: fedimint_gateway_common::InterceptPaymentResponse,
+    ) {
+        let lnrpc_response = to_lightning_intercept_response(&htlc_response);
         loop {
             match self.get_lightning_context().await {
                 Ok(lightning_context) => {
                     match lightning_context
                         .lnrpc
-                        .complete_htlc(htlc_response.clone())
+                        .complete_htlc(lnrpc_response.clone())
                         .await
                     {
                         Ok(..) => return,
@@ -2973,13 +2997,17 @@ impl IGatewayClientV2 for Gateway {
         invoice: Bolt11Invoice,
         max_delay: u64,
         max_fee: Amount,
-    ) -> std::result::Result<[u8; 32], LightningRpcError> {
-        let lightning_context = self.get_lightning_context().await?;
+    ) -> std::result::Result<[u8; 32], fedimint_gateway_common::LightningRpcError> {
+        let lightning_context = self
+            .get_lightning_context()
+            .await
+            .map_err(to_common_lightning_error)?;
         lightning_context
             .lnrpc
             .pay(invoice, max_delay, max_fee)
             .await
             .map(|response| response.preimage.0)
+            .map_err(to_common_lightning_error)
     }
 
     async fn min_contract_amount(

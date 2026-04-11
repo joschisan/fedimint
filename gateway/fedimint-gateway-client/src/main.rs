@@ -20,12 +20,11 @@ use fedimint_core::config::FederationId;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_common::{
-    ChannelInfo, CloseChannelsWithPeerResponse, FederationConfig,
-    FederationInfo, GatewayBalances, GatewayFedConfig, GatewayInfo, GetInvoiceResponse,
-    ListTransactionsResponse, MnemonicResponse, PaymentLogResponse,
-    ReceiveEcashResponse, SpendEcashResponse, WithdrawResponse,
+    ChannelInfo, CloseChannelsWithPeerResponse, FederationConfig, FederationInfo, GatewayApi,
+    GatewayBalances, GatewayFedConfig, GatewayInfo, GetInvoiceResponse, ListTransactionsResponse,
+    MnemonicResponse, PaymentLogResponse, ReceiveEcashResponse, SpendEcashResponse,
+    WithdrawResponse,
 };
-use fedimint_gateway_common::GatewayApi;
 use fedimint_logging::TracingSetup;
 use general_commands::GeneralCommands;
 use lightning_commands::LightningCommands;

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+
 use bitcoin::secp256k1::Keypair;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::config::{FederationId, FederationIdPrefix, JsonClientConfig};
@@ -15,8 +16,8 @@ use fedimint_logging::LOG_GATEWAY;
 use fedimint_mint_client::MintClientModule;
 use tracing::{info, warn};
 
-use crate::error::{AdminGatewayError, FederationNotConnected};
 use crate::AdminResult;
+use crate::error::{AdminGatewayError, FederationNotConnected};
 
 /// The first index that the gateway will assign to a federation.
 /// Note: This starts at 1 because LNv1 uses the `federation_index` as an SCID.

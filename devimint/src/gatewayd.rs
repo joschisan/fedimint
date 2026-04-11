@@ -15,9 +15,8 @@ use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::util::{backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, BitcoinHash};
 use fedimint_gateway_common::{
-    ChannelInfo, GatewayBalances, GatewayFedConfig, GetInvoiceResponse,
-    ListTransactionsResponse, MnemonicResponse, PaymentDetails, PaymentStatus, V1_API_ENDPOINT,
-    WithdrawResponse,
+    ChannelInfo, GatewayBalances, GatewayFedConfig, GetInvoiceResponse, ListTransactionsResponse,
+    MnemonicResponse, PaymentDetails, PaymentStatus, V1_API_ENDPOINT, WithdrawResponse,
 };
 use fedimint_ln_server::common::lightning_invoice::Bolt11Invoice;
 use fedimint_lnv2_common::gateway_api::PaymentFee;
@@ -28,9 +27,8 @@ use tracing::info;
 
 use crate::cmd;
 use crate::envs::{
-    FM_GATEWAY_API_ADDR_ENV, FM_GATEWAY_DATA_DIR_ENV,
-    FM_GATEWAY_LISTEN_ADDR_ENV, FM_GATEWAY_METRICS_LISTEN_ADDR_ENV, FM_PORT_LDK_ENV,
-    FM_PRE_DKG_ENV,
+    FM_GATEWAY_API_ADDR_ENV, FM_GATEWAY_DATA_DIR_ENV, FM_GATEWAY_LISTEN_ADDR_ENV,
+    FM_GATEWAY_METRICS_LISTEN_ADDR_ENV, FM_PORT_LDK_ENV, FM_PRE_DKG_ENV,
 };
 use crate::external::{Bitcoind, LightningNode};
 use crate::federation::Federation;
@@ -205,7 +203,6 @@ impl<'a> GatewayClient {
 
         Ok(serde_json::from_value(value)?)
     }
-
 
     pub async fn create_invoice(&self, amount_msats: u64) -> Result<Bolt11Invoice> {
         let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;

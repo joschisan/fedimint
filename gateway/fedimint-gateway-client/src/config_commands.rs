@@ -3,8 +3,7 @@ use fedimint_core::Amount;
 use fedimint_core::config::FederationId;
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_client::{get_config, get_info, set_fees};
-use fedimint_gateway_common::{ConfigPayload, SetFeesPayload};
-use fedimint_gateway_common::GatewayApi;
+use fedimint_gateway_common::{ConfigPayload, GatewayApi, SetFeesPayload};
 
 use crate::{CliOutput, CliOutputResult};
 

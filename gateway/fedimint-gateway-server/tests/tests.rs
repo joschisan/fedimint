@@ -23,9 +23,8 @@ use fedimint_core::{Amount, OutPoint, msats, sats, secp256k1};
 use fedimint_dummy_client::{DummyClientInit, DummyClientModule};
 use fedimint_dummy_server::DummyInit;
 use fedimint_eventlog::Event;
-use fedimint_gateway_common::{PaymentLogPayload, SetFeesPayload};
-use fedimint_gateway_server::Gateway;
-use fedimint_gateway_server::IAdminGateway;
+use fedimint_gateway_common::{PaymentFee, PaymentLogPayload, SetFeesPayload};
+use fedimint_gateway_server::{Gateway, IAdminGateway};
 use fedimint_gw_client::pay::{
     OutgoingContractError, OutgoingPaymentError, OutgoingPaymentErrorType,
 };
@@ -50,7 +49,6 @@ use fedimint_ln_common::contracts::{EncryptedPreimage, FundedContract, Preimage,
 use fedimint_ln_common::{LightningGateway, LightningInput, LightningOutput, PrunedInvoice};
 use fedimint_ln_server::LightningInit;
 use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract, PaymentImage};
-use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_logging::LOG_TEST;
 use fedimint_testing::btc::BitcoinTest;
 use fedimint_testing::db::BYTE_33;

@@ -5,14 +5,13 @@ use fedimint_core::config::FederationId;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, BitcoinAmountOrAll};
 use fedimint_gateway_client::{
-    get_deposit_address, pegin_from_onchain, receive_ecash, recheck_address, spend_ecash,
-    withdraw, withdraw_to_onchain,
+    get_deposit_address, pegin_from_onchain, receive_ecash, recheck_address, spend_ecash, withdraw,
+    withdraw_to_onchain,
 };
 use fedimint_gateway_common::{
-    DepositAddressPayload, DepositAddressRecheckPayload, PeginFromOnchainPayload,
+    DepositAddressPayload, DepositAddressRecheckPayload, GatewayApi, PeginFromOnchainPayload,
     ReceiveEcashPayload, SpendEcashPayload, WithdrawPayload, WithdrawToOnchainPayload,
 };
-use fedimint_gateway_common::GatewayApi;
 
 use crate::{CliOutput, CliOutputResult};
 

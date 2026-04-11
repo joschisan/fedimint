@@ -8,27 +8,23 @@ use fedimint_core::config::FederationId;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_common::{
-    ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT,
-    CLOSE_CHANNELS_WITH_PEER_ENDPOINT, CONFIGURATION_ENDPOINT,
-    CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
-    ChannelInfo, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConfigPayload,
-    ConnectFedPayload, CreateInvoiceForOperatorPayload,
-    DepositAddressPayload, DepositAddressRecheckPayload, FederationInfo, GATEWAY_INFO_ENDPOINT,
-    GET_BALANCES_ENDPOINT, GET_INVOICE_ENDPOINT, GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GatewayBalances,
-    GatewayFedConfig, GatewayInfo, GetInvoiceRequest, GetInvoiceResponse, INVITE_CODES_ENDPOINT,
-    JOIN_ENDPOINT, LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT,
-    ListTransactionsPayload, ListTransactionsResponse, MNEMONIC_ENDPOINT, MnemonicResponse,
-    OPEN_CHANNEL_ENDPOINT, OPEN_CHANNEL_WITH_PUSH_ENDPOINT, OpenChannelRequest,
-    PAY_INVOICE_FOR_OPERATOR_ENDPOINT, PAYMENT_LOG_ENDPOINT,
-    PEGIN_FROM_ONCHAIN_ENDPOINT, PayInvoiceForOperatorPayload,
-    PaymentLogPayload, PaymentLogResponse,
-    PeginFromOnchainPayload, RECEIVE_ECASH_ENDPOINT,
+    ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT, CLOSE_CHANNELS_WITH_PEER_ENDPOINT,
+    CONFIGURATION_ENDPOINT, CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT, ChannelInfo,
+    CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConfigPayload, ConnectFedPayload,
+    CreateInvoiceForOperatorPayload, DepositAddressPayload, DepositAddressRecheckPayload,
+    FederationInfo, GATEWAY_INFO_ENDPOINT, GET_BALANCES_ENDPOINT, GET_INVOICE_ENDPOINT,
+    GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GatewayApi, GatewayBalances, GatewayFedConfig, GatewayInfo,
+    GetInvoiceRequest, GetInvoiceResponse, INVITE_CODES_ENDPOINT, JOIN_ENDPOINT,
+    LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT, ListTransactionsPayload,
+    ListTransactionsResponse, MNEMONIC_ENDPOINT, Method, MnemonicResponse, OPEN_CHANNEL_ENDPOINT,
+    OPEN_CHANNEL_WITH_PUSH_ENDPOINT, OpenChannelRequest, PAY_INVOICE_FOR_OPERATOR_ENDPOINT,
+    PAYMENT_LOG_ENDPOINT, PEGIN_FROM_ONCHAIN_ENDPOINT, PayInvoiceForOperatorPayload,
+    PaymentLogPayload, PaymentLogResponse, PeginFromOnchainPayload, RECEIVE_ECASH_ENDPOINT,
     ReceiveEcashPayload, ReceiveEcashResponse, SEND_ONCHAIN_ENDPOINT, SET_FEES_ENDPOINT,
-    SPEND_ECASH_ENDPOINT, STOP_ENDPOINT, SendOnchainRequest, SetFeesPayload,
-    SpendEcashPayload, SpendEcashResponse, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT,
-    WithdrawPayload, WithdrawResponse, WithdrawToOnchainPayload,
+    SPEND_ECASH_ENDPOINT, STOP_ENDPOINT, SendOnchainRequest, SetFeesPayload, SpendEcashPayload,
+    SpendEcashResponse, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT, WithdrawPayload,
+    WithdrawResponse, WithdrawToOnchainPayload,
 };
-use fedimint_gateway_common::{GatewayApi, Method};
 use lightning_invoice::Bolt11Invoice;
 
 pub async fn get_info(client: &GatewayApi, base_url: &SafeUrl) -> ServerResult<GatewayInfo> {

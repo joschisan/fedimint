@@ -7,8 +7,7 @@ use fedimint_core::db::Database;
 use fedimint_core::db::mem_impl::MemDatabase;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::util::SafeUrl;
-use fedimint_gateway_common::{ConnectorType, RegisteredProtocol};
-use fedimint_lnv2_common::gateway_api::PaymentFee;
+use fedimint_gateway_common::{ConnectorType, PaymentFee, RegisteredProtocol};
 use fedimint_logging::TracingSetup;
 use fedimint_testing::db::{
     BYTE_32, snapshot_db_migrations_with_decoders, validate_migrations_global,

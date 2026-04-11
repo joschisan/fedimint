@@ -856,7 +856,7 @@ impl Federation {
                 .expect("peg out does not exist")
                 .1
                 .fees;
-            let total_fee = fees.amount().to_sat() * 1000;
+            let total_fee = fees.to_sat() * 1000;
             // Walletv2 charges a module fee on top of the on-chain fee:
             // 100 sats base + 1% of amount (amount is in msats)
             let tolerance = if crate::util::supports_wallet_v2() {

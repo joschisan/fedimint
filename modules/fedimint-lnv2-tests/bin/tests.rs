@@ -624,4 +624,3 @@ async fn fetch_invoice(lnurl: String, amount_msat: u64) -> anyhow::Result<(Bolt1
 
     Ok((response.pr, response.verify))
 }
-

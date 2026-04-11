@@ -13,24 +13,21 @@ use fedimint_core::config::FederationId;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::util::FmtCompact;
 use fedimint_gateway_common::{
-    ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT,
-    CLOSE_CHANNELS_WITH_PEER_ENDPOINT, CONFIGURATION_ENDPOINT,
-    CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
+    ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT, CLOSE_CHANNELS_WITH_PEER_ENDPOINT,
+    CONFIGURATION_ENDPOINT, CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
     CloseChannelsWithPeerRequest, ConfigPayload, ConnectFedPayload,
-    CreateInvoiceForOperatorPayload, DepositAddressPayload,
-    DepositAddressRecheckPayload, GATEWAY_INFO_ENDPOINT, GET_BALANCES_ENDPOINT,
-    GET_INVOICE_ENDPOINT, GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GetInvoiceRequest,
-    INVITE_CODES_ENDPOINT, JOIN_ENDPOINT, LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT,
-    ListTransactionsPayload, MNEMONIC_ENDPOINT, OPEN_CHANNEL_ENDPOINT,
-    OPEN_CHANNEL_WITH_PUSH_ENDPOINT, OpenChannelRequest, PAY_INVOICE_FOR_OPERATOR_ENDPOINT,
-    PAYMENT_LOG_ENDPOINT,
-    PEGIN_FROM_ONCHAIN_ENDPOINT, PayInvoiceForOperatorPayload, PaymentLogPayload,
-    PeginFromOnchainPayload, RECEIVE_ECASH_ENDPOINT, ReceiveEcashPayload,
-    SEND_ONCHAIN_ENDPOINT, SET_FEES_ENDPOINT, SPEND_ECASH_ENDPOINT, STOP_ENDPOINT,
-    SendOnchainRequest, SetFeesPayload, SpendEcashPayload, V1_API_ENDPOINT,
-    WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT, WithdrawPayload, WithdrawToOnchainPayload,
+    CreateInvoiceForOperatorPayload, DepositAddressPayload, DepositAddressRecheckPayload,
+    GATEWAY_INFO_ENDPOINT, GET_BALANCES_ENDPOINT, GET_INVOICE_ENDPOINT,
+    GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GetInvoiceRequest, INVITE_CODES_ENDPOINT, JOIN_ENDPOINT,
+    LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT, ListTransactionsPayload, MNEMONIC_ENDPOINT,
+    OPEN_CHANNEL_ENDPOINT, OPEN_CHANNEL_WITH_PUSH_ENDPOINT, OpenChannelRequest,
+    PAY_INVOICE_FOR_OPERATOR_ENDPOINT, PAYMENT_LOG_ENDPOINT, PEGIN_FROM_ONCHAIN_ENDPOINT,
+    PayInvoiceForOperatorPayload, PaymentLogPayload, PeginFromOnchainPayload,
+    RECEIVE_ECASH_ENDPOINT, ReceiveEcashPayload, SEND_ONCHAIN_ENDPOINT, SET_FEES_ENDPOINT,
+    SPEND_ECASH_ENDPOINT, STOP_ENDPOINT, SendOnchainRequest, SetFeesPayload, SpendEcashPayload,
+    V1_API_ENDPOINT, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT, WithdrawPayload,
+    WithdrawToOnchainPayload,
 };
-use crate::IAdminGateway;
 use fedimint_ln_common::gateway_endpoint_constants::{
     GET_GATEWAY_ID_ENDPOINT, PAY_INVOICE_ENDPOINT,
 };
@@ -48,7 +45,7 @@ use tower_http::cors::CorsLayer;
 use tracing::{info, instrument, warn};
 
 use crate::error::{GatewayError, LnurlError};
-use crate::Gateway;
+use crate::{Gateway, IAdminGateway};
 
 // Routes that the liquidity manager is allowed to access. Any authenticated
 // route NOT in this list requires the admin password.
@@ -73,9 +70,7 @@ const LIQUIDITY_MANAGER_ROUTES: [&str; 17] = [
 ];
 
 /// Creates the webserver's routes and spawns the webserver in a separate task.
-pub async fn run_webserver(
-    gateway: Arc<Gateway>,
-) -> anyhow::Result<()> {
+pub async fn run_webserver(gateway: Arc<Gateway>) -> anyhow::Result<()> {
     let task_group = gateway.task_group.clone();
 
     let routes = routes(gateway.clone(), task_group.clone());
@@ -155,11 +150,7 @@ async fn auth_middleware(
 }
 
 /// Registers a GET API handler for the HTTP server.
-fn register_get_handler<F, Fut>(
-    route: &str,
-    func: F,
-    router: Router,
-) -> Router
+fn register_get_handler<F, Fut>(route: &str, func: F, router: Router) -> Router
 where
     F: Fn(Extension<Arc<Gateway>>) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<Json<serde_json::Value>, GatewayError>> + Send + 'static,
@@ -168,11 +159,7 @@ where
 }
 
 /// Registers a POST API handler for the HTTP server.
-fn register_post_handler<P, F, Fut>(
-    route: &str,
-    func: F,
-    router: Router,
-) -> Router
+fn register_post_handler<P, F, Fut>(route: &str, func: F, router: Router) -> Router
 where
     P: DeserializeOwned + Send + 'static,
     F: Fn(Extension<Arc<Gateway>>, Json<P>) -> Fut + Clone + Send + Sync + 'static,
@@ -185,26 +172,14 @@ where
 fn lnv1_routes() -> Router {
     let router = Router::new();
     let router = register_post_handler(PAY_INVOICE_ENDPOINT, pay_invoice, router);
-    register_get_handler(
-        GET_GATEWAY_ID_ENDPOINT,
-        get_gateway_id,
-        router,
-    )
+    register_get_handler(GET_GATEWAY_ID_ENDPOINT, get_gateway_id, router)
 }
 
 /// Public routes that are used in the LNv2 protocol
 fn lnv2_routes() -> Router {
     let router = Router::new();
-    let router = register_post_handler(
-        ROUTING_INFO_ENDPOINT,
-        routing_info_v2,
-        router,
-    );
-    let router = register_post_handler(
-        SEND_PAYMENT_ENDPOINT,
-        pay_bolt11_invoice_v2,
-        router,
-    );
+    let router = register_post_handler(ROUTING_INFO_ENDPOINT, routing_info_v2, router);
+    let router = register_post_handler(SEND_PAYMENT_ENDPOINT, pay_bolt11_invoice_v2, router);
     let router = register_post_handler(
         CREATE_BOLT11_INVOICE_ENDPOINT,
         create_bolt11_invoice_v2,
@@ -221,26 +196,17 @@ fn lnv2_routes() -> Router {
 ///   clients.
 fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
     // Public routes on gateway webserver
-    let mut public_routes = register_post_handler(
-        RECEIVE_ECASH_ENDPOINT,
-        receive_ecash,
-        Router::new(),
-    );
+    let mut public_routes =
+        register_post_handler(RECEIVE_ECASH_ENDPOINT, receive_ecash, Router::new());
     public_routes = public_routes.merge(lnv1_routes());
     public_routes = public_routes.merge(lnv2_routes());
 
     // Authenticated routes used for gateway administration
     let authenticated_routes = Router::new();
-    let authenticated_routes = register_post_handler(
-        ADDRESS_ENDPOINT,
-        address,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_post_handler(
-        WITHDRAW_ENDPOINT,
-        withdraw,
-        authenticated_routes,
-    );
+    let authenticated_routes =
+        register_post_handler(ADDRESS_ENDPOINT, address, authenticated_routes);
+    let authenticated_routes =
+        register_post_handler(WITHDRAW_ENDPOINT, withdraw, authenticated_routes);
     let authenticated_routes = register_post_handler(
         WITHDRAW_TO_ONCHAIN_ENDPOINT,
         withdraw_to_onchain,
@@ -251,11 +217,7 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
         pegin_from_onchain,
         authenticated_routes,
     );
-    let authenticated_routes = register_post_handler(
-        JOIN_ENDPOINT,
-        join,
-        authenticated_routes,
-    );
+    let authenticated_routes = register_post_handler(JOIN_ENDPOINT, join, authenticated_routes);
     let authenticated_routes = register_post_handler(
         CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
         create_invoice_for_operator,
@@ -266,21 +228,15 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
         pay_invoice_operator,
         authenticated_routes,
     );
-    let authenticated_routes = register_post_handler(
-        GET_INVOICE_ENDPOINT,
-        get_invoice,
-        authenticated_routes,
-    );
+    let authenticated_routes =
+        register_post_handler(GET_INVOICE_ENDPOINT, get_invoice, authenticated_routes);
     let authenticated_routes = register_get_handler(
         GET_LN_ONCHAIN_ADDRESS_ENDPOINT,
         get_ln_onchain_address,
         authenticated_routes,
     );
-    let authenticated_routes = register_post_handler(
-        OPEN_CHANNEL_ENDPOINT,
-        open_channel,
-        authenticated_routes,
-    );
+    let authenticated_routes =
+        register_post_handler(OPEN_CHANNEL_ENDPOINT, open_channel, authenticated_routes);
     let authenticated_routes = register_post_handler(
         OPEN_CHANNEL_WITH_PUSH_ENDPOINT,
         open_channel_with_push,
@@ -291,68 +247,38 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
         close_channels_with_peer,
         authenticated_routes,
     );
-    let authenticated_routes = register_get_handler(
-        LIST_CHANNELS_ENDPOINT,
-        list_channels,
-        authenticated_routes,
-    );
+    let authenticated_routes =
+        register_get_handler(LIST_CHANNELS_ENDPOINT, list_channels, authenticated_routes);
     let authenticated_routes = register_post_handler(
         LIST_TRANSACTIONS_ENDPOINT,
         list_transactions,
         authenticated_routes,
     );
-    let authenticated_routes = register_post_handler(
-        SEND_ONCHAIN_ENDPOINT,
-        send_onchain,
-        authenticated_routes,
-    );
+    let authenticated_routes =
+        register_post_handler(SEND_ONCHAIN_ENDPOINT, send_onchain, authenticated_routes);
     let authenticated_routes = register_post_handler(
         ADDRESS_RECHECK_ENDPOINT,
         recheck_address,
         authenticated_routes,
     );
-    let authenticated_routes = register_get_handler(
-        GET_BALANCES_ENDPOINT,
-        get_balances,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_post_handler(
-        SPEND_ECASH_ENDPOINT,
-        spend_ecash,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_get_handler(
-        MNEMONIC_ENDPOINT,
-        mnemonic,
-        authenticated_routes,
-    );
+    let authenticated_routes =
+        register_get_handler(GET_BALANCES_ENDPOINT, get_balances, authenticated_routes);
+    let authenticated_routes =
+        register_post_handler(SPEND_ECASH_ENDPOINT, spend_ecash, authenticated_routes);
+    let authenticated_routes =
+        register_get_handler(MNEMONIC_ENDPOINT, mnemonic, authenticated_routes);
     // Stop does not have the same function signature, it is handled separately
     let authenticated_routes = authenticated_routes.route(STOP_ENDPOINT, get(stop));
-    let authenticated_routes = register_post_handler(
-        PAYMENT_LOG_ENDPOINT,
-        payment_log,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_post_handler(
-        SET_FEES_ENDPOINT,
-        set_fees,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_post_handler(
-        CONFIGURATION_ENDPOINT,
-        configuration,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_get_handler(
-        GATEWAY_INFO_ENDPOINT,
-        info,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_get_handler(
-        INVITE_CODES_ENDPOINT,
-        invite_codes,
-        authenticated_routes,
-    );
+    let authenticated_routes =
+        register_post_handler(PAYMENT_LOG_ENDPOINT, payment_log, authenticated_routes);
+    let authenticated_routes =
+        register_post_handler(SET_FEES_ENDPOINT, set_fees, authenticated_routes);
+    let authenticated_routes =
+        register_post_handler(CONFIGURATION_ENDPOINT, configuration, authenticated_routes);
+    let authenticated_routes =
+        register_get_handler(GATEWAY_INFO_ENDPOINT, info, authenticated_routes);
+    let authenticated_routes =
+        register_get_handler(INVITE_CODES_ENDPOINT, invite_codes, authenticated_routes);
     let authenticated_routes = authenticated_routes.layer(middleware::from_fn(auth_middleware));
 
     Router::new()

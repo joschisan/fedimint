@@ -5,8 +5,7 @@ use std::str::FromStr;
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use fedimint_core::util::SafeUrl;
-use fedimint_gateway_common::{LightningMode, V1_API_ENDPOINT};
-use fedimint_lnv2_common::gateway_api::PaymentFee;
+use fedimint_gateway_common::{LightningMode, PaymentFee, V1_API_ENDPOINT};
 
 use super::envs;
 use crate::envs::{
@@ -118,7 +117,6 @@ pub struct GatewayOpts {
     /// UI port + 1.
     #[arg(long = "metrics-listen", env = FM_GATEWAY_METRICS_LISTEN_ADDR_ENV)]
     metrics_listen: Option<SocketAddr>,
-
 }
 
 impl GatewayOpts {

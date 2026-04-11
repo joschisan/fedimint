@@ -5,7 +5,6 @@ use std::str::FromStr;
 use std::time::SystemTime;
 
 use anyhow::Context as _;
-
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::PublicKey;
@@ -277,7 +276,6 @@ pub struct PaymentLogPayload {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PaymentLogResponse(pub Vec<PersistedLogEntry>);
 
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChannelInfo {
     pub remote_pubkey: secp256k1::PublicKey,
@@ -396,7 +394,6 @@ pub enum PaymentDirection {
     Inbound,
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub enum PaymentStatus {
     Pending,
@@ -485,7 +482,16 @@ pub enum RegisteredProtocol {
 // --- PaymentFee moved from fedimint-lnv2-common ---
 
 #[derive(
-    Debug, Clone, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encodable, Decodable,
+    Debug,
+    Clone,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+    Encodable,
+    Decodable,
     Copy,
 )]
 pub struct PaymentFee {
@@ -996,4 +1002,3 @@ impl GatewayApi {
         self.connection_pool.get_active_connection_receiver()
     }
 }
-

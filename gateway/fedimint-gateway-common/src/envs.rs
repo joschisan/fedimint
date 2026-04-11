@@ -16,4 +16,3 @@ pub const FM_PORT_LDK: &str = "FM_PORT_LDK";
 
 /// The alias for the LDK Node
 pub const FM_LDK_ALIAS_ENV: &str = "FM_LDK_ALIAS";
-

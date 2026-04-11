@@ -3,8 +3,7 @@ use clap::Subcommand;
 use fedimint_core::BitcoinAmountOrAll;
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_client::{get_ln_onchain_address, send_onchain};
-use fedimint_gateway_common::SendOnchainRequest;
-use fedimint_gateway_common::GatewayApi;
+use fedimint_gateway_common::{GatewayApi, SendOnchainRequest};
 
 use crate::{CliOutput, CliOutputResult};
 

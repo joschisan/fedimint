@@ -11,11 +11,7 @@ use tracing::info;
 
 use crate::env::{NUM_GUARDIANS, PASSWORD, TestEnv, fedimint_cli_raw, gateway_cli};
 
-async fn add_gateway(
-    cli_client_dir: &Path,
-    peer: usize,
-    gateway: &str,
-) -> anyhow::Result<bool> {
+async fn add_gateway(cli_client_dir: &Path, peer: usize, gateway: &str) -> anyhow::Result<bool> {
     let result = fedimint_cli_raw(&[
         "--data-dir",
         cli_client_dir.to_str().expect("valid path"),
@@ -34,11 +30,7 @@ async fn add_gateway(
     serde_json::from_str(result.trim()).map_err(Into::into)
 }
 
-async fn remove_gateway(
-    cli_client_dir: &Path,
-    peer: usize,
-    gateway: &str,
-) -> anyhow::Result<bool> {
+async fn remove_gateway(cli_client_dir: &Path, peer: usize, gateway: &str) -> anyhow::Result<bool> {
     let result = fedimint_cli_raw(&[
         "--data-dir",
         cli_client_dir.to_str().expect("valid path"),
