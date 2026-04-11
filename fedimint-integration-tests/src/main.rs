@@ -1,5 +1,6 @@
 mod env;
 mod mintv2;
+mod walletv2;
 
 use tracing::info;
 
@@ -21,8 +22,10 @@ async fn main() -> anyhow::Result<()> {
     info!("Running mintv2 tests...");
     mintv2::run_tests(&env).await?;
 
+    info!("Running walletv2 tests...");
+    walletv2::run_tests(&env).await?;
+
     // TODO: Add module tests here
-    // walletv2::run_tests(&env).await?;
     // lnv2::run_tests(&env).await?;
 
     info!("All integration tests passed!");

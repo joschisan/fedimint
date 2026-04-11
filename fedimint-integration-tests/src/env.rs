@@ -162,6 +162,14 @@ impl TestEnv {
         Ok(client)
     }
 
+    pub fn mine_blocks(&self, n: u64) {
+        tokio::task::block_in_place(|| {
+            self.bitcoind
+                .generate_to_address(n, &dummy_regtest_address())
+        })
+        .expect("failed to mine blocks");
+    }
+
     pub async fn pegin(&self, client: &ClientHandleArc) -> anyhow::Result<()> {
         let walletv2 = client.get_first_module::<WalletClientModule>()?;
         let addr = walletv2.receive().await;
