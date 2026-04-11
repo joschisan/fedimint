@@ -12,7 +12,7 @@ use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::{Amount, impl_db_lookup, impl_db_record, push_db_pair_items, secp256k1};
 use fedimint_gateway_common::{
-    ConnectorType, FederationConfig, PaymentFee, RegisteredProtocol, serde_routing_fees,
+    FederationConfig, PaymentFee, RegisteredProtocol, serde_routing_fees,
 };
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use futures::{FutureExt, StreamExt};
@@ -542,8 +542,6 @@ async fn migrate_to_v4(mut ctx: GeneralDbMigrationFnContext<'_>) -> Result<(), a
                 federation_index: old_federation_config.federation_index,
                 lightning_fee: old_federation_config.fees.into(),
                 transaction_fee: PaymentFee::TRANSACTION_FEE_DEFAULT,
-                // Note: deprecated, unused
-                _connector: ConnectorType::Tcp,
             };
             let new_key = FederationConfigKey { id: fed_id.id };
             dbtx.insert_new_entry(&new_key, &new_fed_config).await;

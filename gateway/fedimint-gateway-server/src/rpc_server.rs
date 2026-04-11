@@ -2,10 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use axum::extract::{Path, Query, Request};
-use axum::http::{StatusCode, header};
-use axum::middleware::{self, Next};
-use axum::response::IntoResponse;
+use axum::extract::{Path, Query};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use bitcoin::hashes::sha256;
@@ -41,30 +38,8 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing::{info, instrument, warn};
 
+use crate::Gateway;
 use crate::error::{GatewayError, LnurlError};
-use crate::{Gateway, IAdminGateway};
-
-// Routes that the liquidity manager is allowed to access. Any authenticated
-// route NOT in this list requires the admin password.
-const LIQUIDITY_MANAGER_ROUTES: [&str; 17] = [
-    ADDRESS_ENDPOINT,
-    ADDRESS_RECHECK_ENDPOINT,
-    CLOSE_CHANNELS_WITH_PEER_ENDPOINT,
-    CONFIGURATION_ENDPOINT,
-    CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
-    GATEWAY_INFO_ENDPOINT,
-    GET_BALANCES_ENDPOINT,
-    GET_INVOICE_ENDPOINT,
-    GET_LN_ONCHAIN_ADDRESS_ENDPOINT,
-    INVITE_CODES_ENDPOINT,
-    LIST_CHANNELS_ENDPOINT,
-    LIST_TRANSACTIONS_ENDPOINT,
-    OPEN_CHANNEL_ENDPOINT,
-    PAYMENT_LOG_ENDPOINT,
-    PEGIN_FROM_ONCHAIN_ENDPOINT,
-    SET_FEES_ENDPOINT,
-    WITHDRAW_TO_ONCHAIN_ENDPOINT,
-];
 
 /// Creates the webserver's routes and spawns the webserver in a separate task.
 pub async fn run_webserver(gateway: Arc<Gateway>) -> anyhow::Result<()> {
@@ -97,53 +72,6 @@ pub async fn run_webserver(gateway: Arc<Gateway>) -> anyhow::Result<()> {
     info!(target: LOG_GATEWAY, listen = %gateway.listen, "Successfully started webserver");
 
     Ok(())
-}
-
-/// Extracts the Bearer token from the Authorization header of the request.
-fn extract_bearer_token(request: &Request) -> Result<String, StatusCode> {
-    let headers = request.headers();
-    let auth_header = headers.get(header::AUTHORIZATION);
-    if let Some(header_value) = auth_header {
-        let auth_str = header_value
-            .to_str()
-            .map_err(|_| StatusCode::UNAUTHORIZED)?;
-        let token = auth_str.trim_start_matches("Bearer ").to_string();
-        return Ok(token);
-    }
-
-    Err(StatusCode::UNAUTHORIZED)
-}
-
-/// Middleware to authenticate an incoming request. Routes that are
-/// authenticated with this middleware always require a Bearer token to be
-/// supplied in the Authorization header.
-async fn auth_middleware(
-    Extension(gateway): Extension<Arc<Gateway>>,
-    request: Request,
-    next: Next,
-) -> Result<impl IntoResponse, StatusCode> {
-    let token = extract_bearer_token(&request)?;
-    if bcrypt::verify(token.clone(), &gateway.bcrypt_password_hash)
-        .expect("Bcrypt hash is valid since we just stringified it")
-    {
-        return Ok(next.run(request).await);
-    }
-
-    // Check the liquidity manager
-    if let Some(liquidity_manager_password_hash) = &gateway.bcrypt_liquidity_manager_password_hash
-        && bcrypt::verify(token, liquidity_manager_password_hash)
-            .expect("Bcrypt hash is valid since we just stringified it")
-    {
-        let path = request.uri().path().to_string();
-
-        if !LIQUIDITY_MANAGER_ROUTES.contains(&path.as_str()) {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-
-        return Ok(next.run(request).await);
-    }
-
-    Err(StatusCode::UNAUTHORIZED)
 }
 
 /// Registers a GET API handler for the HTTP server.
@@ -179,100 +107,60 @@ fn lnv2_routes() -> Router {
     router.route("/verify/{payment_hash}", get(verify_bolt11_preimage_v2_get))
 }
 
-/// Gateway Webserver Routes. The gateway supports two types of routes
-/// - Always Authenticated: these routes always require a Bearer token. Used by
-///   gateway administrators.
-/// - Un-authenticated: anyone can request these routes. Used by fedimint
-///   clients.
+/// Gateway Webserver Routes. The admin API only binds to localhost, so no
+/// authentication is needed.
 fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
-    // Public routes on gateway webserver
-    let mut public_routes =
-        register_post_handler(RECEIVE_ECASH_ENDPOINT, receive_ecash, Router::new());
-    public_routes = public_routes.merge(lnv2_routes());
-
-    // Authenticated routes used for gateway administration
-    let authenticated_routes = Router::new();
-    let authenticated_routes =
-        register_post_handler(ADDRESS_ENDPOINT, address, authenticated_routes);
-    let authenticated_routes =
-        register_post_handler(WITHDRAW_ENDPOINT, withdraw, authenticated_routes);
-    let authenticated_routes = register_post_handler(
-        WITHDRAW_TO_ONCHAIN_ENDPOINT,
-        withdraw_to_onchain,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_post_handler(
-        PEGIN_FROM_ONCHAIN_ENDPOINT,
-        pegin_from_onchain,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_post_handler(JOIN_ENDPOINT, join, authenticated_routes);
-    let authenticated_routes = register_post_handler(
+    let router = Router::new();
+    let router = register_post_handler(RECEIVE_ECASH_ENDPOINT, receive_ecash, router);
+    let router = register_post_handler(ADDRESS_ENDPOINT, address, router);
+    let router = register_post_handler(WITHDRAW_ENDPOINT, withdraw, router);
+    let router = register_post_handler(WITHDRAW_TO_ONCHAIN_ENDPOINT, withdraw_to_onchain, router);
+    let router = register_post_handler(PEGIN_FROM_ONCHAIN_ENDPOINT, pegin_from_onchain, router);
+    let router = register_post_handler(JOIN_ENDPOINT, join, router);
+    let router = register_post_handler(
         CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
         create_invoice_for_operator,
-        authenticated_routes,
+        router,
     );
-    let authenticated_routes = register_post_handler(
+    let router = register_post_handler(
         PAY_INVOICE_FOR_OPERATOR_ENDPOINT,
         pay_invoice_operator,
-        authenticated_routes,
+        router,
     );
-    let authenticated_routes =
-        register_post_handler(GET_INVOICE_ENDPOINT, get_invoice, authenticated_routes);
-    let authenticated_routes = register_get_handler(
+    let router = register_post_handler(GET_INVOICE_ENDPOINT, get_invoice, router);
+    let router = register_get_handler(
         GET_LN_ONCHAIN_ADDRESS_ENDPOINT,
         get_ln_onchain_address,
-        authenticated_routes,
+        router,
     );
-    let authenticated_routes =
-        register_post_handler(OPEN_CHANNEL_ENDPOINT, open_channel, authenticated_routes);
-    let authenticated_routes = register_post_handler(
+    let router = register_post_handler(OPEN_CHANNEL_ENDPOINT, open_channel, router);
+    let router = register_post_handler(
         OPEN_CHANNEL_WITH_PUSH_ENDPOINT,
         open_channel_with_push,
-        authenticated_routes,
+        router,
     );
-    let authenticated_routes = register_post_handler(
+    let router = register_post_handler(
         CLOSE_CHANNELS_WITH_PEER_ENDPOINT,
         close_channels_with_peer,
-        authenticated_routes,
+        router,
     );
-    let authenticated_routes =
-        register_get_handler(LIST_CHANNELS_ENDPOINT, list_channels, authenticated_routes);
-    let authenticated_routes = register_post_handler(
-        LIST_TRANSACTIONS_ENDPOINT,
-        list_transactions,
-        authenticated_routes,
-    );
-    let authenticated_routes =
-        register_post_handler(SEND_ONCHAIN_ENDPOINT, send_onchain, authenticated_routes);
-    let authenticated_routes = register_post_handler(
-        ADDRESS_RECHECK_ENDPOINT,
-        recheck_address,
-        authenticated_routes,
-    );
-    let authenticated_routes =
-        register_get_handler(GET_BALANCES_ENDPOINT, get_balances, authenticated_routes);
-    let authenticated_routes =
-        register_post_handler(SPEND_ECASH_ENDPOINT, spend_ecash, authenticated_routes);
-    let authenticated_routes =
-        register_get_handler(MNEMONIC_ENDPOINT, mnemonic, authenticated_routes);
+    let router = register_get_handler(LIST_CHANNELS_ENDPOINT, list_channels, router);
+    let router = register_post_handler(LIST_TRANSACTIONS_ENDPOINT, list_transactions, router);
+    let router = register_post_handler(SEND_ONCHAIN_ENDPOINT, send_onchain, router);
+    let router = register_post_handler(ADDRESS_RECHECK_ENDPOINT, recheck_address, router);
+    let router = register_get_handler(GET_BALANCES_ENDPOINT, get_balances, router);
+    let router = register_post_handler(SPEND_ECASH_ENDPOINT, spend_ecash, router);
+    let router = register_get_handler(MNEMONIC_ENDPOINT, mnemonic, router);
     // Stop does not have the same function signature, it is handled separately
-    let authenticated_routes = authenticated_routes.route(STOP_ENDPOINT, get(stop));
-    let authenticated_routes =
-        register_post_handler(PAYMENT_LOG_ENDPOINT, payment_log, authenticated_routes);
-    let authenticated_routes =
-        register_post_handler(SET_FEES_ENDPOINT, set_fees, authenticated_routes);
-    let authenticated_routes =
-        register_post_handler(CONFIGURATION_ENDPOINT, configuration, authenticated_routes);
-    let authenticated_routes =
-        register_get_handler(GATEWAY_INFO_ENDPOINT, info, authenticated_routes);
-    let authenticated_routes =
-        register_get_handler(INVITE_CODES_ENDPOINT, invite_codes, authenticated_routes);
-    let authenticated_routes = authenticated_routes.layer(middleware::from_fn(auth_middleware));
+    let router = router.route(STOP_ENDPOINT, get(stop));
+    let router = register_post_handler(PAYMENT_LOG_ENDPOINT, payment_log, router);
+    let router = register_post_handler(SET_FEES_ENDPOINT, set_fees, router);
+    let router = register_post_handler(CONFIGURATION_ENDPOINT, configuration, router);
+    let router = register_get_handler(GATEWAY_INFO_ENDPOINT, info, router);
+    let router = register_get_handler(INVITE_CODES_ENDPOINT, invite_codes, router);
+    let router = router.merge(lnv2_routes());
 
-    Router::new()
-        .merge(public_routes)
-        .merge(authenticated_routes)
+    router
         .layer(Extension(gateway))
         .layer(Extension(task_group))
         .layer(CorsLayer::permissive())

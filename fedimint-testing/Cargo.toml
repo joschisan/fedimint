@@ -24,7 +24,6 @@ async-stream = { workspace = true }
 async-trait = { workspace = true }
 aws-lc-sys = { version = "0.39", features = ["bindgen"] }
 axum = { workspace = true }
-bcrypt = { workspace = true }
 bitcoin = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 fedimint-api-client = { workspace = true }

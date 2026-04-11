@@ -59,7 +59,7 @@ Remove the `fedimint-lightning` crate entirely. No `ILnRpcClient` trait - the ga
 
 ### Admin API: Trait-based Dependency Injection
 
-Both fedimintd and gatewayd already expose admin functionality via a dashboard trait (`IDashboardApi` for guardians, `IAdminGateway` for gateway). This pattern is extended to replace the CLI entirely:
+Both fedimintd and gatewayd already expose admin functionality via a dashboard trait (`IDashboardApi` for guardians, inherent methods on `Gateway`). This pattern is extended to replace the CLI entirely:
 
 - **JSON REST API** served by the daemon on a localhost-only port (no auth needed)
 - **Optional Web UI** on a separate localhost port consuming the same trait

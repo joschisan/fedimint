@@ -7,7 +7,7 @@ use fedimint_core::db::Database;
 use fedimint_core::db::mem_impl::MemDatabase;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::util::SafeUrl;
-use fedimint_gateway_common::{ConnectorType, PaymentFee, RegisteredProtocol};
+use fedimint_gateway_common::{PaymentFee, RegisteredProtocol};
 use fedimint_logging::TracingSetup;
 use fedimint_testing::db::{
     BYTE_32, snapshot_db_migrations_with_decoders, validate_migrations_global,
@@ -188,8 +188,6 @@ async fn test_isolated_db_migration() -> anyhow::Result<()> {
             federation_index: 0,
             lightning_fee: PaymentFee::TRANSACTION_FEE_DEFAULT,
             transaction_fee: PaymentFee::TRANSACTION_FEE_DEFAULT,
-            // Note: deprecated, unused
-            _connector: ConnectorType::Tcp,
         },
     )
     .await;
@@ -208,8 +206,6 @@ async fn test_isolated_db_migration() -> anyhow::Result<()> {
             federation_index: 1,
             lightning_fee: PaymentFee::TRANSACTION_FEE_DEFAULT,
             transaction_fee: PaymentFee::TRANSACTION_FEE_DEFAULT,
-            // Note: deprecated, unused
-            _connector: ConnectorType::Tcp,
         },
     )
     .await;

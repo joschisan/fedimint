@@ -46,7 +46,6 @@ pub enum CliOutput {
     Mnemonic(MnemonicResponse),
     PaymentLog(PaymentLogResponse),
     InviteCodes(BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>),
-    PasswordHash(String),
 
     // Lightning commands
     Invoice {
@@ -102,8 +101,6 @@ pub type CliOutputResult = Result<CliOutput, ServerError>;
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
-    /// Authentication failed (wrong password, missing auth)
-    AuthFailed,
     /// Could not connect to gateway server
     ConnectionFailed,
     /// Invalid command arguments or request format
@@ -130,7 +127,6 @@ pub enum ExitCode {
     Success = 0,
     GeneralError = 1,
     ConnectionError = 2,
-    AuthError = 3,
     InvalidInput = 4,
     NotFound = 5,
     Timeout = 6,
@@ -139,7 +135,6 @@ pub enum ExitCode {
 impl From<ErrorCode> for ExitCode {
     fn from(code: ErrorCode) -> Self {
         match code {
-            ErrorCode::AuthFailed => Self::AuthError,
             ErrorCode::ConnectionFailed => Self::ConnectionError,
             ErrorCode::InvalidInput => Self::InvalidInput,
             ErrorCode::NotFound => Self::NotFound,
@@ -219,10 +214,6 @@ struct Cli {
     /// The command to execute
     #[command(subcommand)]
     command: Commands,
-
-    /// Password for authenticated requests to the gateway
-    #[clap(long)]
-    rpcpassword: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -270,7 +261,7 @@ async fn run() -> CliOutputResult {
         .bind()
         .await
         .map_err(ServerError::InternalClientError)?;
-    let client = GatewayApi::new(cli.rpcpassword, connector_registry);
+    let client = GatewayApi::new(None, connector_registry);
 
     let output = match cli.command {
         Commands::General(general_command) => general_command.handle(&client, &cli.address).await?,

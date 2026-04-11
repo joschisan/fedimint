@@ -1,6 +1,5 @@
 use std::env;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -40,8 +39,6 @@ use crate::federation::{FederationTest, FederationTestBuilder};
 
 /// A default timeout for things happening in tests
 pub const TIMEOUT: Duration = Duration::from_secs(10);
-
-pub const DEFAULT_GATEWAY_PASSWORD: &str = "thereisnosecondbest";
 
 /// A tool for easily writing fedimint integration tests
 pub struct Fixtures {
@@ -254,12 +251,6 @@ impl Fixtures {
         Gateway::builder(client_builder, gateway_db)
             .listen(listen)
             .api_addr(address)
-            .bcrypt_password_hash(
-                bcrypt::HashParts::from_str(
-                    &bcrypt::hash(DEFAULT_GATEWAY_PASSWORD, bcrypt::DEFAULT_COST).unwrap(),
-                )
-                .unwrap(),
-            )
             .network(bitcoin::Network::Regtest)
             // Manually set the gateway's state to `Running`. In tests, we don't run the
             // webserver or intercept HTLCs, so this is necessary for instructing the

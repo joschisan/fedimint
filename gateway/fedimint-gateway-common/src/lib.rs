@@ -8,10 +8,6 @@ use bitcoin::address::NetworkUnchecked;
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Address, Network, OutPoint};
-use clap::Subcommand;
-use envs::{
-    FM_LDK_ALIAS_ENV, FM_LND_MACAROON_ENV, FM_LND_RPC_ADDR_ENV, FM_LND_TLS_CERT_ENV, FM_PORT_LDK,
-};
 use fedimint_connectors::error::ServerError;
 use fedimint_connectors::{
     ConnectionPool, ConnectorRegistry, DynGatewayConnection, IGatewayConnection, ServerResult,
@@ -136,16 +132,6 @@ pub struct WithdrawPreviewResponse {
     pub mint_fees: Option<Amount>,
 }
 
-/// Deprecated, unused, doesn't do anything
-///
-/// Only here for backward-compat reasons.
-#[allow(deprecated)]
-#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub enum ConnectorType {
-    Tcp,
-    Tor,
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct FederationConfig {
     pub invite_code: InviteCode,
@@ -155,8 +141,6 @@ pub struct FederationConfig {
     pub federation_index: u64,
     pub lightning_fee: PaymentFee,
     pub transaction_fee: PaymentFee,
-    #[allow(deprecated)] // only here for decoding backward-compat
-    pub _connector: ConnectorType,
 }
 
 /// Information about one of the feds we are connected to
@@ -178,7 +162,6 @@ pub struct GatewayInfo {
     pub federation_fake_scids: Option<BTreeMap<u64, FederationId>>,
     pub gateway_state: String,
     pub lightning_info: LightningInfo,
-    pub lightning_mode: LightningMode,
     pub registrations: BTreeMap<RegisteredProtocol, (SafeUrl, secp256k1::PublicKey)>,
 }
 
@@ -398,34 +381,6 @@ pub enum PaymentStatus {
     Pending,
     Succeeded,
     Failed,
-}
-
-#[derive(Debug, Clone, Subcommand, Serialize, Deserialize, Eq, PartialEq)]
-pub enum LightningMode {
-    #[clap(name = "lnd")]
-    Lnd {
-        /// LND RPC address
-        #[arg(long = "lnd-rpc-host", env = FM_LND_RPC_ADDR_ENV)]
-        lnd_rpc_addr: String,
-
-        /// LND TLS cert file path
-        #[arg(long = "lnd-tls-cert", env = FM_LND_TLS_CERT_ENV)]
-        lnd_tls_cert: String,
-
-        /// LND macaroon file path
-        #[arg(long = "lnd-macaroon", env = FM_LND_MACAROON_ENV)]
-        lnd_macaroon: String,
-    },
-    #[clap(name = "ldk")]
-    Ldk {
-        /// LDK lightning server port
-        #[arg(long = "ldk-lightning-port", env = FM_PORT_LDK)]
-        lightning_port: u16,
-
-        /// LDK's Alias
-        #[arg(long = "ldk-alias", env = FM_LDK_ALIAS_ENV)]
-        alias: String,
-    },
 }
 
 #[derive(Clone)]

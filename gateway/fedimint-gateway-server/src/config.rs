@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
@@ -59,26 +58,9 @@ pub struct GatewayOpts {
     #[arg(long = "api-addr", env = envs::FM_GATEWAY_API_ADDR_ENV)]
     api_addr: Option<SafeUrl>,
 
-    /// Gateway webserver authentication bcrypt password hash
-    #[arg(long = "bcrypt-password-hash", env = envs::FM_GATEWAY_BCRYPT_PASSWORD_HASH_ENV)]
-    bcrypt_password_hash: String,
-
-    /// Gateway liquidity manager for channel and liquidity management
-    /// operations
-    #[arg(long = "bcrypt_liquidity_manager_password_hash", env = envs::FM_GATEWAY_LIQUIDITY_MANAGER_BCRYPT_PASSWORD_HASH_ENV)]
-    bcrypt_liquidity_manager_password_hash: Option<String>,
-
     /// Bitcoin network this gateway will be running on
     #[arg(long = "network", env = envs::FM_GATEWAY_NETWORK_ENV)]
     network: Network,
-
-    /// Number of route hints to return in invoices
-    #[arg(
-        long = "num-route-hints",
-        env = envs::FM_NUMBER_OF_ROUTE_HINTS_ENV,
-        default_value_t = super::DEFAULT_NUM_ROUTE_HINTS
-    )]
-    num_route_hints: u32,
 
     /// Database backend to use.
     #[arg(long, env = envs::FM_DB_BACKEND_ENV, value_enum, default_value = "rocksdb")]
@@ -125,13 +107,6 @@ impl GatewayOpts {
                 .join(V1_API_ENDPOINT)
                 .expect("Could not join v1 api_addr")
         });
-        let bcrypt_password_hash = bcrypt::HashParts::from_str(&self.bcrypt_password_hash)?;
-        let bcrypt_liquidity_manager_password_hash =
-            if let Some(h) = &self.bcrypt_liquidity_manager_password_hash {
-                Some(bcrypt::HashParts::from_str(h)?)
-            } else {
-                None
-            };
 
         // Default metrics listen to localhost on UI port + 1
         let metrics_listen = self.metrics_listen.unwrap_or_else(|| {
@@ -144,10 +119,7 @@ impl GatewayOpts {
         Ok(GatewayParameters {
             listen: self.listen,
             versioned_api,
-            bcrypt_password_hash,
-            bcrypt_liquidity_manager_password_hash,
             network: self.network,
-            num_route_hints: self.num_route_hints,
             default_routing_fees: self.default_routing_fees,
             default_transaction_fees: self.default_transaction_fees,
             metrics_listen,
@@ -165,10 +137,7 @@ impl GatewayOpts {
 pub struct GatewayParameters {
     pub listen: SocketAddr,
     pub versioned_api: Option<SafeUrl>,
-    pub bcrypt_password_hash: bcrypt::HashParts,
-    pub bcrypt_liquidity_manager_password_hash: Option<bcrypt::HashParts>,
     pub network: Network,
-    pub num_route_hints: u32,
     pub default_routing_fees: PaymentFee,
     pub default_transaction_fees: PaymentFee,
     pub metrics_listen: SocketAddr,

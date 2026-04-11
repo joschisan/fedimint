@@ -16,6 +16,7 @@
 
 pub mod client;
 pub mod config;
+pub mod db;
 pub mod envs;
 mod error;
 mod events;
@@ -53,7 +54,7 @@ use fedimint_client::{Client, ClientHandleArc};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{Database, DatabaseTransaction, apply_migrations};
+use fedimint_core::db::{Database, DatabaseTransaction};
 use fedimint_core::envs::is_env_var_set;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::CommonModuleInit;
@@ -72,123 +73,17 @@ use fedimint_core::{
 use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId};
 use fedimint_gateway_common::{
     ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConnectFedPayload,
-    ConnectorType, CreateInvoiceForOperatorPayload, CreateInvoiceRequest, DepositAddressPayload,
+    CreateInvoiceForOperatorPayload, CreateInvoiceRequest, DepositAddressPayload,
     DepositAddressRecheckPayload, FederationBalanceInfo, FederationConfig, FederationInfo,
     GatewayBalances, GatewayFedConfig, GatewayInfo, GetInvoiceRequest, GetInvoiceResponse,
     InterceptPaymentRequest, InterceptPaymentResponse, InvoiceDescription, LightningContext,
-    LightningInfo, LightningMode, LightningRpcError, ListTransactionsPayload,
-    ListTransactionsResponse, MnemonicResponse, OpenChannelRequest, PayInvoiceForOperatorPayload,
-    PaymentAction, PaymentFee, PaymentLogPayload, PaymentLogResponse, PeginFromOnchainPayload,
-    Preimage, ReceiveEcashPayload, ReceiveEcashResponse, RegisteredProtocol, RouteHtlcStream,
-    SendOnchainRequest, SetFeesPayload, SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT,
-    WithdrawPayload, WithdrawPreviewPayload, WithdrawPreviewResponse, WithdrawResponse,
-    WithdrawToOnchainPayload,
+    LightningInfo, LightningRpcError, ListTransactionsPayload, ListTransactionsResponse,
+    MnemonicResponse, OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentAction, PaymentFee,
+    PaymentLogPayload, PaymentLogResponse, PeginFromOnchainPayload, Preimage, ReceiveEcashPayload,
+    ReceiveEcashResponse, RegisteredProtocol, RouteHtlcStream, SendOnchainRequest, SetFeesPayload,
+    SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload,
+    WithdrawPreviewPayload, WithdrawPreviewResponse, WithdrawResponse, WithdrawToOnchainPayload,
 };
-use fedimint_gateway_server_db::{GatewayDbtxNcExt as _, get_gatewayd_database_migrations};
-
-#[async_trait]
-pub trait IAdminGateway {
-    type Error;
-
-    async fn handle_get_info(&self) -> std::result::Result<GatewayInfo, Self::Error>;
-
-    async fn handle_list_channels_msg(
-        &self,
-    ) -> std::result::Result<Vec<fedimint_gateway_common::ChannelInfo>, Self::Error>;
-
-    async fn handle_connect_federation(
-        &self,
-        payload: ConnectFedPayload,
-    ) -> std::result::Result<FederationInfo, Self::Error>;
-
-    async fn handle_set_fees_msg(
-        &self,
-        payload: SetFeesPayload,
-    ) -> std::result::Result<(), Self::Error>;
-
-    async fn handle_mnemonic_msg(&self) -> std::result::Result<MnemonicResponse, Self::Error>;
-
-    async fn handle_open_channel_msg(
-        &self,
-        payload: OpenChannelRequest,
-    ) -> std::result::Result<Txid, Self::Error>;
-
-    async fn handle_close_channels_with_peer_msg(
-        &self,
-        payload: CloseChannelsWithPeerRequest,
-    ) -> std::result::Result<CloseChannelsWithPeerResponse, Self::Error>;
-
-    async fn handle_get_balances_msg(&self) -> std::result::Result<GatewayBalances, Self::Error>;
-
-    async fn handle_send_onchain_msg(
-        &self,
-        payload: SendOnchainRequest,
-    ) -> std::result::Result<Txid, Self::Error>;
-
-    async fn handle_get_ln_onchain_address_msg(&self) -> std::result::Result<Address, Self::Error>;
-
-    async fn handle_deposit_address_msg(
-        &self,
-        payload: DepositAddressPayload,
-    ) -> std::result::Result<Address, Self::Error>;
-
-    async fn handle_receive_ecash_msg(
-        &self,
-        payload: ReceiveEcashPayload,
-    ) -> std::result::Result<ReceiveEcashResponse, Self::Error>;
-
-    async fn handle_create_invoice_for_operator_msg(
-        &self,
-        payload: CreateInvoiceForOperatorPayload,
-    ) -> std::result::Result<Bolt11Invoice, Self::Error>;
-
-    async fn handle_pay_invoice_for_operator_msg(
-        &self,
-        payload: PayInvoiceForOperatorPayload,
-    ) -> std::result::Result<Preimage, Self::Error>;
-
-    async fn handle_list_transactions_msg(
-        &self,
-        payload: ListTransactionsPayload,
-    ) -> std::result::Result<ListTransactionsResponse, Self::Error>;
-
-    async fn handle_spend_ecash_msg(
-        &self,
-        payload: SpendEcashPayload,
-    ) -> std::result::Result<SpendEcashResponse, Self::Error>;
-
-    async fn handle_shutdown_msg(
-        &self,
-        task_group: TaskGroup,
-    ) -> std::result::Result<(), Self::Error>;
-
-    fn get_task_group(&self) -> TaskGroup;
-
-    async fn handle_withdraw_msg(
-        &self,
-        payload: WithdrawPayload,
-    ) -> std::result::Result<WithdrawResponse, Self::Error>;
-
-    async fn handle_withdraw_preview_msg(
-        &self,
-        payload: WithdrawPreviewPayload,
-    ) -> std::result::Result<WithdrawPreviewResponse, Self::Error>;
-
-    async fn handle_payment_log_msg(
-        &self,
-        payload: PaymentLogPayload,
-    ) -> std::result::Result<PaymentLogResponse, Self::Error>;
-
-    async fn handle_export_invite_codes(
-        &self,
-    ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>;
-
-    fn get_password_hash(&self) -> String;
-
-    fn gatewayd_version(&self) -> String;
-
-    async fn get_chain_source(&self) -> (ChainSource, Network);
-}
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
 };
@@ -206,15 +101,12 @@ use rand::rngs::OsRng;
 use tokio::sync::RwLock;
 use tracing::{debug, info, info_span, warn};
 
+use crate::db::GatewayDbtxNcExt as _;
 use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
 use crate::error::{AdminGatewayError, LNv2Error, PublicGatewayError};
 use crate::ldk::GatewayLdkClient;
 use crate::rpc_server::run_webserver;
 use crate::types::PrettyInterceptPaymentRequest;
-
-/// The default number of route hints that the legacy gateway provides for
-/// invoice creation.
-const DEFAULT_NUM_ROUTE_HINTS: u32 = 1;
 
 /// Default Bitcoin network for testing purposes.
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
@@ -293,7 +185,6 @@ impl Gateway {
     /// let gateway = Gateway::builder(client_builder, gateway_db)
     ///     .listen(addr)
     ///     .api_addr(url)
-    ///     .bcrypt_password_hash(hash)
     ///     .network(Network::Regtest)
     ///     .gateway_state(state)
     ///     .chain_source(chain_source)
@@ -304,8 +195,6 @@ impl Gateway {
     pub async fn new_with_builder(
         #[builder(start_fn)] client_builder: GatewayClientBuilder,
         #[builder(start_fn)] gateway_db: Database,
-        bcrypt_password_hash: bcrypt::HashParts,
-        bcrypt_liquidity_manager_password_hash: Option<bcrypt::HashParts>,
         gateway_state: GatewayState,
         chain_source: ChainSource,
         #[builder(default = ([127, 0, 0, 1], 80).into())] listen: SocketAddr,
@@ -332,10 +221,7 @@ impl Gateway {
             GatewayParameters {
                 listen,
                 versioned_api,
-                bcrypt_password_hash,
-                bcrypt_liquidity_manager_password_hash,
                 network,
-                num_route_hints: DEFAULT_NUM_ROUTE_HINTS,
                 default_routing_fees,
                 default_transaction_fees,
                 metrics_listen,
@@ -387,13 +273,6 @@ pub struct Gateway {
 
     /// The task group for all tasks related to the gateway.
     task_group: TaskGroup,
-
-    /// The bcrypt password hash used to authenticate the gateway.
-    bcrypt_password_hash: String,
-
-    /// The bcrypt password hash used to authenticate the gateway liquidity
-    /// manager.
-    bcrypt_liquidity_manager_password_hash: Option<String>,
 
     /// The Bitcoin network that the Lightning network is configured to.
     network: Network,
@@ -596,18 +475,6 @@ impl Gateway {
             }
         };
 
-        // Apply database migrations before using the database to ensure old database
-        // structures are readable.
-        apply_migrations(
-            &gateway_db,
-            (),
-            "gatewayd".to_string(),
-            get_gatewayd_database_migrations(),
-            None,
-            None,
-        )
-        .await?;
-
         // For legacy reasons, we use the http id for the unique identifier of the
         // bitcoind watch-only wallet
         let http_id = Self::load_or_create_gateway_keypair(&gateway_db, RegisteredProtocol::Http)
@@ -705,10 +572,6 @@ impl Gateway {
             listen: gateway_parameters.listen,
             metrics_listen: gateway_parameters.metrics_listen,
             task_group,
-            bcrypt_password_hash: gateway_parameters.bcrypt_password_hash.to_string(),
-            bcrypt_liquidity_manager_password_hash: gateway_parameters
-                .bcrypt_liquidity_manager_password_hash
-                .map(|h| h.to_string()),
             network,
             chain_source,
             default_routing_fees: gateway_parameters.default_routing_fees,
@@ -994,7 +857,7 @@ impl Gateway {
     /// a normal lightning node.
     ///
     /// Returns the outcome label for metrics tracking.
-    async fn handle_lightning_payment(
+    pub async fn handle_lightning_payment(
         &self,
         payment_request: InterceptPaymentRequest,
     ) -> &'static str {
@@ -1404,13 +1267,10 @@ impl Gateway {
     }
 }
 
-#[async_trait]
-impl IAdminGateway for Gateway {
-    type Error = AdminGatewayError;
-
+impl Gateway {
     /// Returns information about the Gateway back to the client when requested
     /// via the webserver.
-    async fn handle_get_info(&self) -> AdminResult<GatewayInfo> {
+    pub async fn handle_get_info(&self) -> AdminResult<GatewayInfo> {
         let GatewayState::Running { .. } = self.get_state().await else {
             return Ok(GatewayInfo {
                 federations: vec![],
@@ -1418,10 +1278,6 @@ impl IAdminGateway for Gateway {
                 version_hash: fedimint_build_code_version_env!().to_string(),
                 gateway_state: self.state.read().await.to_string(),
                 lightning_info: LightningInfo::NotConnected,
-                lightning_mode: LightningMode::Ldk {
-                    lightning_port: Self::get_ldk_config().lightning_port,
-                    alias: Self::get_ldk_config().alias,
-                },
                 registrations: self
                     .registrations
                     .iter()
@@ -1457,10 +1313,6 @@ impl IAdminGateway for Gateway {
             version_hash: fedimint_build_code_version_env!().to_string(),
             gateway_state: self.state.read().await.to_string(),
             lightning_info,
-            lightning_mode: LightningMode::Ldk {
-                lightning_port: Self::get_ldk_config().lightning_port,
-                alias: Self::get_ldk_config().alias,
-            },
             registrations: self
                 .registrations
                 .iter()
@@ -1471,7 +1323,7 @@ impl IAdminGateway for Gateway {
 
     /// Returns a list of Lightning network channels from the Gateway's
     /// Lightning node.
-    async fn handle_list_channels_msg(
+    pub async fn handle_list_channels_msg(
         &self,
     ) -> AdminResult<Vec<fedimint_gateway_common::ChannelInfo>> {
         let ldk_client = self.get_ldk_client().await;
@@ -1483,7 +1335,7 @@ impl IAdminGateway for Gateway {
     /// download the federation's client configuration, construct a new
     /// client, registers, the gateway with the federation, and persists the
     /// necessary config to reconstruct the client when restarting the gateway.
-    async fn handle_connect_federation(
+    pub async fn handle_connect_federation(
         &self,
         payload: ConnectFedPayload,
     ) -> AdminResult<FederationInfo> {
@@ -1519,8 +1371,6 @@ impl IAdminGateway for Gateway {
             federation_index,
             lightning_fee: self.default_routing_fees,
             transaction_fee: self.default_transaction_fees,
-            // Note: deprecated, unused
-            _connector: ConnectorType::Tcp,
         };
 
         let mnemonic = Self::load_mnemonic(&self.gateway_db)
@@ -1586,7 +1436,7 @@ impl IAdminGateway for Gateway {
 
     /// Handles a request to change the lightning or transaction fees for all
     /// federations or a federation specified by the `FederationId`.
-    async fn handle_set_fees_msg(
+    pub async fn handle_set_fees_msg(
         &self,
         SetFeesPayload {
             federation_id,
@@ -1670,7 +1520,7 @@ impl IAdminGateway for Gateway {
     /// Handles an authenticated request for the gateway's mnemonic. This also
     /// returns a vector of federations that are not using the mnemonic
     /// backup strategy.
-    async fn handle_mnemonic_msg(&self) -> AdminResult<MnemonicResponse> {
+    pub async fn handle_mnemonic_msg(&self) -> AdminResult<MnemonicResponse> {
         let mnemonic = Self::load_mnemonic(&self.gateway_db)
             .await
             .expect("mnemonic should be set");
@@ -1697,7 +1547,7 @@ impl IAdminGateway for Gateway {
 
     /// Instructs the Gateway's Lightning node to open a channel to a peer
     /// specified by `pubkey`.
-    async fn handle_open_channel_msg(&self, payload: OpenChannelRequest) -> AdminResult<Txid> {
+    pub async fn handle_open_channel_msg(&self, payload: OpenChannelRequest) -> AdminResult<Txid> {
         info!(target: LOG_GATEWAY, pubkey = %payload.pubkey, host = %payload.host, amount = %payload.channel_size_sats, "Opening Lightning channel...");
         let ldk_client = self.get_ldk_client().await;
         let res = ldk_client.open_channel(payload).await?;
@@ -1711,7 +1561,7 @@ impl IAdminGateway for Gateway {
 
     /// Instructs the Gateway's Lightning node to close all channels with a peer
     /// specified by `pubkey`.
-    async fn handle_close_channels_with_peer_msg(
+    pub async fn handle_close_channels_with_peer_msg(
         &self,
         payload: CloseChannelsWithPeerRequest,
     ) -> AdminResult<CloseChannelsWithPeerResponse> {
@@ -1724,7 +1574,7 @@ impl IAdminGateway for Gateway {
 
     /// Returns the ecash, lightning, and onchain balances for the gateway and
     /// the gateway's lightning node.
-    async fn handle_get_balances_msg(&self) -> AdminResult<GatewayBalances> {
+    pub async fn handle_get_balances_msg(&self) -> AdminResult<GatewayBalances> {
         let dbtx = self.gateway_db.begin_transaction_nc().await;
         let federation_infos = self
             .federation_manager
@@ -1756,7 +1606,7 @@ impl IAdminGateway for Gateway {
     }
 
     /// Send funds from the gateway's lightning node on-chain wallet.
-    async fn handle_send_onchain_msg(&self, payload: SendOnchainRequest) -> AdminResult<Txid> {
+    pub async fn handle_send_onchain_msg(&self, payload: SendOnchainRequest) -> AdminResult<Txid> {
         let ldk_client = self.get_ldk_client().await;
         let response = ldk_client.send_onchain(payload.clone()).await?;
         let txid =
@@ -1768,7 +1618,7 @@ impl IAdminGateway for Gateway {
     }
 
     /// Generates an onchain address to fund the gateway's lightning node.
-    async fn handle_get_ln_onchain_address_msg(&self) -> AdminResult<Address> {
+    pub async fn handle_get_ln_onchain_address_msg(&self) -> AdminResult<Address> {
         let ldk_client = self.get_ldk_client().await;
         let response = ldk_client.get_ln_onchain_address().await?;
 
@@ -1785,25 +1635,16 @@ impl IAdminGateway for Gateway {
         })
     }
 
-    async fn handle_deposit_address_msg(
+    pub async fn handle_deposit_address_msg(
         &self,
         payload: DepositAddressPayload,
     ) -> AdminResult<Address> {
         self.handle_address_msg(payload).await
     }
 
-    async fn handle_receive_ecash_msg(
-        &self,
-        payload: ReceiveEcashPayload,
-    ) -> AdminResult<ReceiveEcashResponse> {
-        Self::handle_receive_ecash_msg(self, payload)
-            .await
-            .map_err(|e| AdminGatewayError::Unexpected(anyhow::anyhow!("{}", e)))
-    }
-
     /// Creates an invoice that is directly payable to the gateway's lightning
     /// node.
-    async fn handle_create_invoice_for_operator_msg(
+    pub async fn handle_create_invoice_for_operator_msg(
         &self,
         payload: CreateInvoiceForOperatorPayload,
     ) -> AdminResult<Bolt11Invoice> {
@@ -1835,7 +1676,7 @@ impl IAdminGateway for Gateway {
 
     /// Requests the gateway to pay an outgoing LN invoice using its own funds.
     /// Returns the payment hash's preimage on success.
-    async fn handle_pay_invoice_for_operator_msg(
+    pub async fn handle_pay_invoice_for_operator_msg(
         &self,
         payload: PayInvoiceForOperatorPayload,
     ) -> AdminResult<Preimage> {
@@ -1865,7 +1706,7 @@ impl IAdminGateway for Gateway {
     }
 
     /// Lists the transactions that the lightning node has made.
-    async fn handle_list_transactions_msg(
+    pub async fn handle_list_transactions_msg(
         &self,
         payload: ListTransactionsPayload,
     ) -> AdminResult<ListTransactionsResponse> {
@@ -1877,7 +1718,7 @@ impl IAdminGateway for Gateway {
     }
 
     // Handles a request the spend the gateway's ecash for a given federation.
-    async fn handle_spend_ecash_msg(
+    pub async fn handle_spend_ecash_msg(
         &self,
         payload: SpendEcashPayload,
     ) -> AdminResult<SpendEcashResponse> {
@@ -1899,7 +1740,7 @@ impl IAdminGateway for Gateway {
 
     /// Instructs the gateway to shutdown, but only after all incoming payments
     /// have been handled.
-    async fn handle_shutdown_msg(&self, task_group: TaskGroup) -> AdminResult<()> {
+    pub async fn handle_shutdown_msg(&self, task_group: TaskGroup) -> AdminResult<()> {
         // Take the write lock on the state so that no additional payments are processed
         let mut state_guard = self.state.write().await;
         if let GatewayState::Running { lightning_context } = state_guard.clone() {
@@ -1921,13 +1762,16 @@ impl IAdminGateway for Gateway {
         Ok(())
     }
 
-    fn get_task_group(&self) -> TaskGroup {
+    pub fn get_task_group(&self) -> TaskGroup {
         self.task_group.clone()
     }
 
     /// Returns a Bitcoin TXID from a peg-out transaction for a specific
     /// connected federation.
-    async fn handle_withdraw_msg(&self, payload: WithdrawPayload) -> AdminResult<WithdrawResponse> {
+    pub async fn handle_withdraw_msg(
+        &self,
+        payload: WithdrawPayload,
+    ) -> AdminResult<WithdrawResponse> {
         let WithdrawPayload {
             amount,
             address,
@@ -1959,7 +1803,7 @@ impl IAdminGateway for Gateway {
 
     /// Returns a preview of the withdrawal fees without executing the
     /// withdrawal. Used by the UI for two-step withdrawal confirmation.
-    async fn handle_withdraw_preview_msg(
+    pub async fn handle_withdraw_preview_msg(
         &self,
         payload: WithdrawPreviewPayload,
     ) -> AdminResult<WithdrawPreviewResponse> {
@@ -2019,7 +1863,7 @@ impl IAdminGateway for Gateway {
     }
 
     /// Queries the client log for payment events and returns to the user.
-    async fn handle_payment_log_msg(
+    pub async fn handle_payment_log_msg(
         &self,
         PaymentLogPayload {
             end_position,
@@ -2079,23 +1923,19 @@ impl IAdminGateway for Gateway {
 
     /// Returns a `BTreeMap` that is keyed by the `FederationId` and contains
     /// all the invite codes (with peer names) for the federation.
-    async fn handle_export_invite_codes(
+    pub async fn handle_export_invite_codes(
         &self,
     ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>> {
         let fed_manager = self.federation_manager.read().await;
         fed_manager.all_invite_codes().await
     }
 
-    fn get_password_hash(&self) -> String {
-        self.bcrypt_password_hash.clone()
-    }
-
-    fn gatewayd_version(&self) -> String {
+    pub fn gatewayd_version(&self) -> String {
         let gatewayd_version = env!("CARGO_PKG_VERSION");
         gatewayd_version.to_string()
     }
 
-    async fn get_chain_source(&self) -> (ChainSource, Network) {
+    pub async fn get_chain_source(&self) -> (ChainSource, Network) {
         (self.chain_source.clone(), self.network)
     }
 }
