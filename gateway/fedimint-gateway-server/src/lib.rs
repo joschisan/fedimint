@@ -634,7 +634,6 @@ impl Gateway {
         // Gateway module will be attached when the federation clients are created
         let mut registry = ClientModuleInitRegistry::new();
         registry.attach(MintClientInit);
-        registry.attach(MintClientInit);
         registry.attach(fedimint_walletv2_client::WalletClientInit);
 
         let client_builder =

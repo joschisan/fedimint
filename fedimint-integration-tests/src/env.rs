@@ -311,7 +311,6 @@ async fn start_gatewayd(
     let log_file = std::fs::File::create(base.join(format!("{name}.log")))?;
 
     Command::new(find_binary("gatewayd"))
-        .arg("ldk")
         .env("FM_GATEWAY_DATA_DIR", data_dir.to_str().unwrap())
         .env("FM_GATEWAY_LISTEN_ADDR", format!("127.0.0.1:{gw_port}"))
         .env("FM_GATEWAY_API_ADDR", format!("http://127.0.0.1:{gw_port}"))
