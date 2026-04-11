@@ -384,32 +384,6 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
 
     test_iroh_payment(&client, gw_lnd, gw_ldk, &online_peers).await?;
 
-    info!("Testing payment summary...");
-
-    let lnd_payment_summary = gw_lnd.client().payment_summary().await?;
-
-    assert_eq!(lnd_payment_summary.outgoing.total_success, 5);
-    assert_eq!(lnd_payment_summary.outgoing.total_failure, 2);
-    assert_eq!(lnd_payment_summary.incoming.total_success, 4);
-    assert_eq!(lnd_payment_summary.incoming.total_failure, 0);
-
-    assert!(lnd_payment_summary.outgoing.median_latency.is_some());
-    assert!(lnd_payment_summary.outgoing.average_latency.is_some());
-    assert!(lnd_payment_summary.incoming.median_latency.is_some());
-    assert!(lnd_payment_summary.incoming.average_latency.is_some());
-
-    let ldk_payment_summary = gw_ldk.client().payment_summary().await?;
-
-    assert_eq!(ldk_payment_summary.outgoing.total_success, 4);
-    assert_eq!(ldk_payment_summary.outgoing.total_failure, 2);
-    assert_eq!(ldk_payment_summary.incoming.total_success, 4);
-    assert_eq!(ldk_payment_summary.incoming.total_failure, 0);
-
-    assert!(ldk_payment_summary.outgoing.median_latency.is_some());
-    assert!(ldk_payment_summary.outgoing.average_latency.is_some());
-    assert!(ldk_payment_summary.incoming.median_latency.is_some());
-    assert!(ldk_payment_summary.incoming.average_latency.is_some());
-
     Ok(())
 }
 

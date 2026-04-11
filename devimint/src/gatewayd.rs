@@ -16,9 +16,9 @@ use fedimint_core::util::{backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, BitcoinHash};
 use fedimint_gateway_common::envs::FM_GATEWAY_IROH_SECRET_KEY_OVERRIDE_ENV;
 use fedimint_gateway_common::{
-    ChannelInfo, CreateOfferResponse, GatewayBalances, GatewayFedConfig, GetInvoiceResponse,
-    ListTransactionsResponse, MnemonicResponse, PaymentDetails, PaymentStatus,
-    PaymentSummaryResponse, V1_API_ENDPOINT, WithdrawResponse,
+    ChannelInfo, GatewayBalances, GatewayFedConfig, GetInvoiceResponse,
+    ListTransactionsResponse, MnemonicResponse, PaymentDetails, PaymentStatus, V1_API_ENDPOINT,
+    WithdrawResponse,
 };
 use fedimint_ln_server::common::lightning_invoice::Bolt11Invoice;
 use fedimint_lnv2_common::gateway_api::PaymentFee;
@@ -568,11 +568,6 @@ impl<'a> GatewayClient {
         Ok(())
     }
 
-    pub async fn payment_summary(&self) -> Result<PaymentSummaryResponse> {
-        let out_json = cmd!(self, "payment-summary").out_json().await?;
-        Ok(serde_json::from_value(out_json).expect("Could not deserialize PaymentSummaryResponse"))
-    }
-
     pub async fn wait_bolt11_invoice(&self, payment_hash: Vec<u8>) -> Result<()> {
         let payment_hash =
             sha256::Hash::from_slice(&payment_hash).expect("Could not parse payment hash");
@@ -612,47 +607,6 @@ impl<'a> GatewayClient {
         .await?;
         let transactions = serde_json::from_value::<ListTransactionsResponse>(response)?;
         Ok(transactions.transactions)
-    }
-
-    pub async fn create_offer(&self, amount: Option<Amount>) -> Result<String> {
-        let offer_value = if let Some(amount) = amount {
-            cmd!(
-                self,
-                "lightning",
-                "create-offer",
-                "--amount-msat",
-                amount.msats
-            )
-            .out_json()
-            .await?
-        } else {
-            cmd!(self, "lightning", "create-offer").out_json().await?
-        };
-        let offer_response = serde_json::from_value::<CreateOfferResponse>(offer_value)
-            .expect("Could not parse offer response");
-        Ok(offer_response.offer)
-    }
-
-    pub async fn pay_offer(&self, offer: String, amount: Option<Amount>) -> Result<()> {
-        if let Some(amount) = amount {
-            cmd!(
-                self,
-                "lightning",
-                "pay-offer",
-                "--offer",
-                offer,
-                "--amount-msat",
-                amount.msats
-            )
-            .run()
-            .await?;
-        } else {
-            cmd!(self, "lightning", "pay-offer", "--offer", offer)
-                .run()
-                .await?;
-        }
-
-        Ok(())
     }
 
     pub async fn send_onchain(

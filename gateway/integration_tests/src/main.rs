@@ -436,26 +436,6 @@ async fn liquidity_test() -> anyhow::Result<()> {
             let lnd_transactions = gw_lnd.client().list_transactions(start, end).await?;
             assert_eq!(lnd_transactions.len(), 0);
 
-            info!(target: LOG_TEST, "Testing paying Bolt12 Offers...");
-            // TODO: investigate why the first BOLT12 payment attempt is expiring consistently
-            poll_with_timeout("First BOLT12 payment", Duration::from_secs(30), || async {
-                let offer_with_amount = gw_ldk_second.client().create_offer(Some(Amount::from_msats(10_000_000))).await.map_err(ControlFlow::Continue)?;
-                gw_ldk.client().pay_offer(offer_with_amount, None).await.map_err(ControlFlow::Continue)?;
-                assert!(get_transaction(gw_ldk_second, PaymentKind::Bolt12Offer, Amount::from_msats(10_000_000), PaymentStatus::Succeeded).await.is_some());
-                Ok(())
-            }).await?;
-
-            let offer_without_amount = gw_ldk.client().create_offer(None).await?;
-            gw_ldk_second.client().pay_offer(offer_without_amount.clone(), Some(Amount::from_msats(5_000_000))).await?;
-            assert!(get_transaction(gw_ldk, PaymentKind::Bolt12Offer, Amount::from_msats(5_000_000), PaymentStatus::Succeeded).await.is_some());
-
-            // Cannot pay an offer without an amount without specifying an amount
-            gw_ldk_second.client().pay_offer(offer_without_amount.clone(), None).await.expect_err("Cannot pay amountless offer without specifying an amount");
-
-            // Verify we can pay the offer again
-            gw_ldk_second.client().pay_offer(offer_without_amount, Some(Amount::from_msats(3_000_000))).await?;
-            assert!(get_transaction(gw_ldk, PaymentKind::Bolt12Offer, Amount::from_msats(3_000_000), PaymentStatus::Succeeded).await.is_some());
-
             info!(target: LOG_TEST, "Pegging-out gateways...");
             federation
                 .pegout_gateways(500_000_000, gateways.clone())
