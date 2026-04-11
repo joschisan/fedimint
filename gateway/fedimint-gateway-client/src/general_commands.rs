@@ -1,18 +1,14 @@
-use std::time::{Duration, UNIX_EPOCH};
-
 use clap::Subcommand;
-use fedimint_connectors::error::ServerError;
 use fedimint_core::config::FederationId;
 use fedimint_core::fedimint_build_code_version_env;
-use fedimint_core::time::now;
 use fedimint_core::util::SafeUrl;
 use fedimint_eventlog::{EventKind, EventLogId};
 use fedimint_gateway_client::{
     connect_federation, get_balances, get_info, get_invite_codes, get_mnemonic, leave_federation,
-    payment_log, payment_summary, stop,
+    payment_log, stop,
 };
 use fedimint_gateway_common::{
-    ConnectFedPayload, LeaveFedPayload, PaymentLogPayload, PaymentSummaryPayload,
+    ConnectFedPayload, LeaveFedPayload, PaymentLogPayload,
 };
 use fedimint_ln_common::client::GatewayApi;
 
@@ -70,14 +66,6 @@ pub enum GeneralCommands {
         /// The bcrypt cost factor to use when hashing the password
         #[clap(long)]
         cost: Option<u32>,
-    },
-    /// List a payment summary for the last day
-    PaymentSummary {
-        #[clap(long)]
-        start: Option<u64>,
-
-        #[clap(long)]
-        end: Option<u64>,
     },
     /// List all invite codes of each federation the gateway has joined
     InviteCodes,
@@ -158,36 +146,6 @@ impl GeneralCommands {
                 let hash = bcrypt::hash(password, cost.unwrap_or(bcrypt::DEFAULT_COST))
                     .expect("Unable to create bcrypt hash");
                 Ok(CliOutput::PasswordHash(hash))
-            }
-            Self::PaymentSummary { start, end } => {
-                let now = now();
-                let now_millis: u64 = now
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Before unix epoch")
-                    .as_millis()
-                    .try_into()
-                    .map_err(|e| ServerError::InternalClientError(anyhow::anyhow!("{e}")))?;
-                let one_day_ago = now
-                    .checked_sub(Duration::from_hours(24))
-                    .expect("Before unix epoch");
-                let one_day_ago_millis: u64 = one_day_ago
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Before unix epoch")
-                    .as_millis()
-                    .try_into()
-                    .map_err(|e| ServerError::InternalClientError(anyhow::anyhow!("{e}")))?;
-                let end_millis = end.unwrap_or(now_millis);
-                let start_millis = start.unwrap_or(one_day_ago_millis);
-                let payment_summary = payment_summary(
-                    client,
-                    base_url,
-                    PaymentSummaryPayload {
-                        start_millis,
-                        end_millis,
-                    },
-                )
-                .await?;
-                Ok(CliOutput::PaymentSummary(payment_summary))
             }
             Self::InviteCodes => {
                 let invite_codes = get_invite_codes(client, base_url).await?;

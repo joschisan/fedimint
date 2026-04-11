@@ -31,7 +31,7 @@ use std::fmt::Display;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{Context, anyhow, ensure};
 use async_trait::async_trait;
@@ -70,17 +70,17 @@ use fedimint_core::{
     Amount, BitcoinAmountOrAll, PeerId, TieredCounts, crit, fedimint_build_code_version_env,
     get_network_for_address,
 };
-use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId, StructuredPaymentEvents};
+use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId};
 use fedimint_gateway_common::{
     ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
-    ConnectFedPayload, ConnectorType, CreateInvoiceForOperatorPayload, CreateOfferPayload,
-    CreateOfferResponse, DepositAddressPayload, DepositAddressRecheckPayload,
+    ConnectFedPayload, ConnectorType, CreateInvoiceForOperatorPayload,
+    DepositAddressPayload, DepositAddressRecheckPayload,
     FederationBalanceInfo, FederationConfig, FederationInfo, GatewayBalances, GatewayFedConfig,
     GatewayInfo, GetInvoiceRequest, GetInvoiceResponse, LeaveFedPayload, LightningInfo,
     LightningMode, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
-    OpenChannelRequest, PayInvoiceForOperatorPayload, PayOfferPayload, PayOfferResponse,
-    PaymentLogPayload, PaymentLogResponse, PaymentStats, PaymentSummaryPayload,
-    PaymentSummaryResponse, PeginFromOnchainPayload, ReceiveEcashPayload, ReceiveEcashResponse,
+    OpenChannelRequest, PayInvoiceForOperatorPayload,
+    PaymentLogPayload, PaymentLogResponse,
+    PeginFromOnchainPayload, ReceiveEcashPayload, ReceiveEcashResponse,
     RegisteredProtocol, SendOnchainRequest, SetFeesPayload, SpendEcashPayload,
     SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload, WithdrawPreviewPayload,
     WithdrawPreviewResponse, WithdrawResponse, WithdrawToOnchainPayload,
@@ -96,14 +96,6 @@ pub trait IAdminGateway {
     async fn handle_list_channels_msg(
         &self,
     ) -> std::result::Result<Vec<fedimint_gateway_common::ChannelInfo>, Self::Error>;
-
-    async fn handle_payment_summary_msg(
-        &self,
-        PaymentSummaryPayload {
-            start_millis,
-            end_millis,
-        }: PaymentSummaryPayload,
-    ) -> std::result::Result<PaymentSummaryResponse, Self::Error>;
 
     async fn handle_leave_federation(
         &self,
@@ -209,28 +201,16 @@ pub trait IAdminGateway {
 
     fn lightning_mode(&self) -> LightningMode;
 
-    async fn handle_create_offer_for_operator_msg(
-        &self,
-        payload: CreateOfferPayload,
-    ) -> std::result::Result<CreateOfferResponse, Self::Error>;
-
-    async fn handle_pay_offer_for_operator_msg(
-        &self,
-        payload: PayOfferPayload,
-    ) -> std::result::Result<PayOfferResponse, Self::Error>;
-
     async fn handle_get_note_summary_msg(
         &self,
         federation_id: &FederationId,
     ) -> std::result::Result<TieredCounts, Self::Error>;
 }
-use fedimint_gw_client::events::compute_lnv1_stats;
 use fedimint_gw_client::pay::{OutgoingPaymentError, OutgoingPaymentErrorType};
 use fedimint_gw_client::{
     GatewayClientModule, GatewayExtPayStates, GatewayExtReceiveStates, IGatewayClientV1,
     SwapParameters,
 };
-use fedimint_gwv2_client::events::compute_lnv2_stats;
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
 };
@@ -265,7 +245,6 @@ use tracing::{debug, info, info_span, warn};
 
 use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
 use crate::error::{AdminGatewayError, LNv1Error, LNv2Error, PublicGatewayError};
-use crate::events::get_events_for_duration;
 use crate::rpc_server::run_webserver;
 use crate::types::PrettyInterceptPaymentRequest;
 
@@ -1939,48 +1918,6 @@ impl IAdminGateway for Gateway {
         Ok(response.channels)
     }
 
-    /// Computes the 24 hour payment summary statistics for this gateway.
-    /// Combines the LNv1 and LNv2 stats together.
-    async fn handle_payment_summary_msg(
-        &self,
-        PaymentSummaryPayload {
-            start_millis,
-            end_millis,
-        }: PaymentSummaryPayload,
-    ) -> AdminResult<PaymentSummaryResponse> {
-        let federation_manager = self.federation_manager.read().await;
-        let fed_configs = federation_manager.get_all_federation_configs().await;
-        let federation_ids = fed_configs.keys().collect::<Vec<_>>();
-        let start = UNIX_EPOCH + Duration::from_millis(start_millis);
-        let end = UNIX_EPOCH + Duration::from_millis(end_millis);
-
-        if start > end {
-            return Err(AdminGatewayError::Unexpected(anyhow!("Invalid time range")));
-        }
-
-        let mut outgoing = StructuredPaymentEvents::default();
-        let mut incoming = StructuredPaymentEvents::default();
-        for fed_id in federation_ids {
-            let client = federation_manager
-                .client(fed_id)
-                .expect("No client available")
-                .value();
-            let all_events = &get_events_for_duration(client, start, end).await;
-
-            let (mut lnv1_outgoing, mut lnv1_incoming) = compute_lnv1_stats(all_events);
-            let (mut lnv2_outgoing, mut lnv2_incoming) = compute_lnv2_stats(all_events);
-            outgoing.combine(&mut lnv1_outgoing);
-            incoming.combine(&mut lnv1_incoming);
-            outgoing.combine(&mut lnv2_outgoing);
-            incoming.combine(&mut lnv2_incoming);
-        }
-
-        Ok(PaymentSummaryResponse {
-            outgoing: PaymentStats::compute(&outgoing),
-            incoming: PaymentStats::compute(&incoming),
-        })
-    }
-
     /// Handle a request to have the Gateway leave a federation. The Gateway
     /// will request the federation to remove the registration record and
     /// the gateway will remove the configuration needed to construct the
@@ -2732,41 +2669,6 @@ impl IAdminGateway for Gateway {
         Ok(PaymentLogResponse(payment_log))
     }
 
-
-    /// Creates a BOLT12 offer using the gateway's lightning node
-    async fn handle_create_offer_for_operator_msg(
-        &self,
-        payload: CreateOfferPayload,
-    ) -> AdminResult<CreateOfferResponse> {
-        let lightning_context = self.get_lightning_context().await?;
-        let offer = lightning_context.lnrpc.create_offer(
-            payload.amount,
-            payload.description,
-            payload.expiry_secs,
-            payload.quantity,
-        )?;
-        Ok(CreateOfferResponse { offer })
-    }
-
-    /// Pays a BOLT12 offer using the gateway's lightning node
-    async fn handle_pay_offer_for_operator_msg(
-        &self,
-        payload: PayOfferPayload,
-    ) -> AdminResult<PayOfferResponse> {
-        let lightning_context = self.get_lightning_context().await?;
-        let preimage = lightning_context
-            .lnrpc
-            .pay_offer(
-                payload.offer,
-                payload.quantity,
-                payload.amount,
-                payload.payer_note,
-            )
-            .await?;
-        Ok(PayOfferResponse {
-            preimage: preimage.to_string(),
-        })
-    }
 
     /// Returns a `BTreeMap` that is keyed by the `FederationId` and contains
     /// all the invite codes (with peer names) for the federation.

@@ -10,19 +10,19 @@ use fedimint_core::util::SafeUrl;
 use fedimint_gateway_common::{
     ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT,
     CLOSE_CHANNELS_WITH_PEER_ENDPOINT, CONFIGURATION_ENDPOINT, CONNECT_FED_ENDPOINT,
-    CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT, CREATE_BOLT12_OFFER_FOR_OPERATOR_ENDPOINT,
+    CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
     ChannelInfo, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConfigPayload,
-    ConnectFedPayload, CreateInvoiceForOperatorPayload, CreateOfferPayload, CreateOfferResponse,
+    ConnectFedPayload, CreateInvoiceForOperatorPayload,
     DepositAddressPayload, DepositAddressRecheckPayload, FederationInfo, GATEWAY_INFO_ENDPOINT,
     GET_BALANCES_ENDPOINT, GET_INVOICE_ENDPOINT, GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GatewayBalances,
     GatewayFedConfig, GatewayInfo, GetInvoiceRequest, GetInvoiceResponse, INVITE_CODES_ENDPOINT,
     LEAVE_FED_ENDPOINT, LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT, LeaveFedPayload,
     ListTransactionsPayload, ListTransactionsResponse, MNEMONIC_ENDPOINT, MnemonicResponse,
     OPEN_CHANNEL_ENDPOINT, OPEN_CHANNEL_WITH_PUSH_ENDPOINT, OpenChannelRequest,
-    PAY_INVOICE_FOR_OPERATOR_ENDPOINT, PAY_OFFER_FOR_OPERATOR_ENDPOINT, PAYMENT_LOG_ENDPOINT,
-    PAYMENT_SUMMARY_ENDPOINT, PEGIN_FROM_ONCHAIN_ENDPOINT, PayInvoiceForOperatorPayload,
-    PayOfferPayload, PayOfferResponse, PaymentLogPayload, PaymentLogResponse,
-    PaymentSummaryPayload, PaymentSummaryResponse, PeginFromOnchainPayload, RECEIVE_ECASH_ENDPOINT,
+    PAY_INVOICE_FOR_OPERATOR_ENDPOINT, PAYMENT_LOG_ENDPOINT,
+    PEGIN_FROM_ONCHAIN_ENDPOINT, PayInvoiceForOperatorPayload,
+    PaymentLogPayload, PaymentLogResponse,
+    PeginFromOnchainPayload, RECEIVE_ECASH_ENDPOINT,
     ReceiveEcashPayload, ReceiveEcashResponse, SEND_ONCHAIN_ENDPOINT, SET_FEES_ENDPOINT,
     SPEND_ECASH_ENDPOINT, STOP_ENDPOINT, SendOnchainRequest, SetFeesPayload,
     SpendEcashPayload, SpendEcashResponse, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT,
@@ -310,21 +310,6 @@ pub async fn payment_log(
         .await
 }
 
-pub async fn payment_summary(
-    client: &GatewayApi,
-    base_url: &SafeUrl,
-    payload: PaymentSummaryPayload,
-) -> ServerResult<PaymentSummaryResponse> {
-    client
-        .request(
-            base_url,
-            Method::POST,
-            PAYMENT_SUMMARY_ENDPOINT,
-            Some(payload),
-        )
-        .await
-}
-
 pub async fn get_invoice(
     client: &GatewayApi,
     base_url: &SafeUrl,
@@ -345,36 +330,6 @@ pub async fn list_transactions(
             base_url,
             Method::POST,
             LIST_TRANSACTIONS_ENDPOINT,
-            Some(payload),
-        )
-        .await
-}
-
-pub async fn create_offer(
-    client: &GatewayApi,
-    base_url: &SafeUrl,
-    payload: CreateOfferPayload,
-) -> ServerResult<CreateOfferResponse> {
-    client
-        .request(
-            base_url,
-            Method::POST,
-            CREATE_BOLT12_OFFER_FOR_OPERATOR_ENDPOINT,
-            Some(payload),
-        )
-        .await
-}
-
-pub async fn pay_offer(
-    client: &GatewayApi,
-    base_url: &SafeUrl,
-    payload: PayOfferPayload,
-) -> ServerResult<PayOfferResponse> {
-    client
-        .request(
-            base_url,
-            Method::POST,
-            PAY_OFFER_FOR_OPERATOR_ENDPOINT,
             Some(payload),
         )
         .await

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::hashes::sha256;
@@ -13,9 +13,9 @@ use envs::{
 use fedimint_core::config::{FederationId, JsonClientConfig};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::invite_code::InviteCode;
-use fedimint_core::util::{SafeUrl, get_average, get_median};
+use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, BitcoinAmountOrAll, secp256k1};
-use fedimint_eventlog::{EventKind, EventLogId, PersistedLogEntry, StructuredPaymentEvents};
+use fedimint_eventlog::{EventKind, EventLogId, PersistedLogEntry};
 use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_wallet_client::PegOutFees;
 use lightning_invoice::Bolt11Invoice;
@@ -30,7 +30,6 @@ pub const ADDRESS_RECHECK_ENDPOINT: &str = "/address_recheck";
 pub const CONFIGURATION_ENDPOINT: &str = "/config";
 pub const CONNECT_FED_ENDPOINT: &str = "/connect_fed";
 pub const CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT: &str = "/create_bolt11_invoice_for_operator";
-pub const CREATE_BOLT12_OFFER_FOR_OPERATOR_ENDPOINT: &str = "/create_bolt12_offer_for_operator";
 pub const GATEWAY_INFO_ENDPOINT: &str = "/info";
 pub const INVITE_CODES_ENDPOINT: &str = "/invite_codes";
 pub const GET_BALANCES_ENDPOINT: &str = "/balances";
@@ -44,9 +43,7 @@ pub const OPEN_CHANNEL_ENDPOINT: &str = "/open_channel";
 pub const OPEN_CHANNEL_WITH_PUSH_ENDPOINT: &str = "/open_channel_with_push";
 pub const CLOSE_CHANNELS_WITH_PEER_ENDPOINT: &str = "/close_channels_with_peer";
 pub const PAY_INVOICE_FOR_OPERATOR_ENDPOINT: &str = "/pay_invoice_for_operator";
-pub const PAY_OFFER_FOR_OPERATOR_ENDPOINT: &str = "/pay_offer_for_operator";
 pub const PAYMENT_LOG_ENDPOINT: &str = "/payment_log";
-pub const PAYMENT_SUMMARY_ENDPOINT: &str = "/payment_summary";
 pub const PEGIN_FROM_ONCHAIN_ENDPOINT: &str = "/pegin_from_onchain";
 pub const RECEIVE_ECASH_ENDPOINT: &str = "/receive_ecash";
 pub const SET_FEES_ENDPOINT: &str = "/set_fees";
@@ -274,39 +271,6 @@ pub struct PaymentLogPayload {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PaymentLogResponse(pub Vec<PersistedLogEntry>);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PaymentSummaryResponse {
-    pub outgoing: PaymentStats,
-    pub incoming: PaymentStats,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PaymentStats {
-    pub average_latency: Option<Duration>,
-    pub median_latency: Option<Duration>,
-    pub total_fees: Amount,
-    pub total_success: usize,
-    pub total_failure: usize,
-}
-
-impl PaymentStats {
-    /// Computes the payment statistics for the given structured payment events.
-    pub fn compute(events: &StructuredPaymentEvents) -> Self {
-        PaymentStats {
-            average_latency: get_average(&events.latencies_usecs).map(Duration::from_micros),
-            median_latency: get_median(&events.latencies_usecs).map(Duration::from_micros),
-            total_fees: Amount::from_msats(events.fees.iter().map(|a| a.msats).sum()),
-            total_success: events.latencies_usecs.len(),
-            total_failure: events.latencies_failure.len(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PaymentSummaryPayload {
-    pub start_millis: u64,
-    pub end_millis: u64,
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChannelInfo {
@@ -426,31 +390,6 @@ pub enum PaymentDirection {
     Inbound,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CreateOfferPayload {
-    pub amount: Option<Amount>,
-    pub description: Option<String>,
-    pub expiry_secs: Option<u32>,
-    pub quantity: Option<u64>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CreateOfferResponse {
-    pub offer: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PayOfferPayload {
-    pub offer: String,
-    pub amount: Option<Amount>,
-    pub quantity: Option<u64>,
-    pub payer_note: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PayOfferResponse {
-    pub preimage: String,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub enum PaymentStatus {
