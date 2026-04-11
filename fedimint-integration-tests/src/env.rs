@@ -34,7 +34,7 @@ pub const GW2_PORT: u16 = 28177;
 pub const GW2_LN_PORT: u16 = 9736;
 pub const GW2_METRICS_PORT: u16 = 29177;
 
-const PASSWORD: &str = "theresnosecondbest";
+pub const PASSWORD: &str = "theresnosecondbest";
 const BCRYPT_HASH: &str = "$2y$10$Q/UTDeO84VGG1mRncxw.Nubqyi/HsNRJ40k0TSexFy9eVess1yi/u";
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
@@ -162,12 +162,77 @@ impl TestEnv {
         Ok(client)
     }
 
+    pub async fn new_cli_client_dir(&self) -> anyhow::Result<PathBuf> {
+        let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
+        let dir = self.data_dir.path().join(format!("cli-client-{n}"));
+        tokio::fs::create_dir_all(&dir).await?;
+
+        fedimint_cli_raw(&[
+            "--data-dir",
+            dir.to_str().expect("valid path"),
+            "join",
+            &self.invite_code.to_string(),
+        ])
+        .await?;
+
+        info!("Created cli-client-{n}");
+        Ok(dir)
+    }
+
     pub fn mine_blocks(&self, n: u64) {
         tokio::task::block_in_place(|| {
             self.bitcoind
                 .generate_to_address(n, &dummy_regtest_address())
         })
         .expect("failed to mine blocks");
+    }
+
+    pub async fn pegin_gateway(&self, gw_addr: &str) -> anyhow::Result<()> {
+        let fed_id = self.invite_code.federation_id().to_string();
+
+        let value = gateway_cli(
+            gw_addr,
+            &["ecash", "pegin", &format!("--federation-id={fed_id}")],
+        )
+        .await?;
+
+        let pegin_addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = value["address"]
+            .as_str()
+            .context("missing address field")?
+            .parse()?;
+        let pegin_addr = pegin_addr.assume_checked();
+
+        tokio::task::block_in_place(|| self.bitcoind.generate_to_address(1, &pegin_addr))?;
+        tokio::task::block_in_place(|| {
+            self.bitcoind
+                .generate_to_address(100, &dummy_regtest_address())
+        })?;
+
+        retry("gateway pegin balance", || {
+            let gw_addr = gw_addr.to_string();
+            let fed_id = fed_id.clone();
+            async move {
+                let info = gateway_cli(&gw_addr, &["info"]).await?;
+
+                let feds = info["federations"]
+                    .as_array()
+                    .context("missing federations")?;
+
+                let fed = feds
+                    .iter()
+                    .find(|f| f["federation_id"].as_str() == Some(&fed_id))
+                    .context("federation not found")?;
+
+                let balance = fed["balance_msat"].as_u64().context("missing balance")?;
+
+                ensure!(balance > 0, "gateway balance is zero");
+                Ok(())
+            }
+        })
+        .await?;
+
+        info!("Pegged in gateway {gw_addr}");
+        Ok(())
     }
 
     pub async fn pegin(&self, client: &ClientHandleArc) -> anyhow::Result<()> {
@@ -381,7 +446,7 @@ async fn run_dkg(base: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn fedimint_cli_raw(args: &[&str]) -> anyhow::Result<String> {
+pub async fn fedimint_cli_raw(args: &[&str]) -> anyhow::Result<String> {
     let output = Command::new(find_binary("fedimint-cli"))
         .args(args)
         .output()

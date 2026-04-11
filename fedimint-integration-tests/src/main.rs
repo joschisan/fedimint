@@ -1,4 +1,5 @@
 mod env;
+mod lnv2;
 mod mintv2;
 mod walletv2;
 
@@ -19,14 +20,14 @@ async fn main() -> anyhow::Result<()> {
     info!("Gateway 1: {}", env.gw1_addr);
     info!("Gateway 2: {}", env.gw2_addr);
 
+    info!("Running lnv2 tests...");
+    lnv2::run_tests(&env).await?;
+
     info!("Running mintv2 tests...");
     mintv2::run_tests(&env).await?;
 
     info!("Running walletv2 tests...");
     walletv2::run_tests(&env).await?;
-
-    // TODO: Add module tests here
-    // lnv2::run_tests(&env).await?;
 
     info!("All integration tests passed!");
     Ok(())

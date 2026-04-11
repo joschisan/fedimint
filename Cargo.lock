@@ -3632,6 +3632,7 @@ dependencies = [
  "fedimint-mintv2-client",
  "fedimint-rocksdb",
  "fedimint-walletv2-client",
+ "lightning-invoice",
  "rand 0.8.5",
  "serde_json",
  "tempfile",
