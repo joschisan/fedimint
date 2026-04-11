@@ -28,11 +28,6 @@ pub struct FederationManager {
     /// client while handling incoming HTLCs.
     clients: BTreeMap<FederationId, Spanned<fedimint_client::ClientHandleArc>>,
 
-    /// Map of federation indices to `FederationId`. Use for efficient retrieval
-    /// of the client while handling incoming HTLCs.
-    /// Can be removed after LNv1 removal.
-    index_to_federation: BTreeMap<u64, FederationId>,
-
     /// Tracker for federation index assignments. When connecting a new
     /// federation, this value is incremented and assigned to the federation
     /// as the `federation_index`
@@ -43,15 +38,13 @@ impl FederationManager {
     pub fn new() -> Self {
         Self {
             clients: BTreeMap::new(),
-            index_to_federation: BTreeMap::new(),
             next_index: AtomicU64::new(INITIAL_INDEX),
         }
     }
 
-    pub fn add_client(&mut self, index: u64, client: Spanned<fedimint_client::ClientHandleArc>) {
+    pub fn add_client(&mut self, _index: u64, client: Spanned<fedimint_client::ClientHandleArc>) {
         let federation_id = client.borrow().with_sync(|c| c.federation_id());
         self.clients.insert(federation_id, client);
-        self.index_to_federation.insert(index, federation_id);
     }
 
     /// Waits for ongoing incoming LNv1 and LNv2 payments to complete before
@@ -75,21 +68,6 @@ impl FederationManager {
         Ok(())
     }
 
-    pub fn get_client_for_index(&self, short_channel_id: u64) -> Option<Spanned<ClientHandleArc>> {
-        let federation_id = self.index_to_federation.get(&short_channel_id)?;
-        // TODO(tvolk131): Cloning the client here could cause issues with client
-        // shutdown (see `remove_client` above). Perhaps this function should take a
-        // lambda and pass it into `client.with_sync`.
-        match self.clients.get(federation_id).cloned() {
-            Some(client) => Some(client),
-            _ => {
-                panic!(
-                    "`FederationManager.index_to_federation` is out of sync with `FederationManager.clients`! This is a bug."
-                );
-            }
-        }
-    }
-
     pub fn get_client_for_federation_id_prefix(
         &self,
         federation_id_prefix: FederationIdPrefix,
@@ -109,41 +87,6 @@ impl FederationManager {
 
     pub fn client(&self, federation_id: &FederationId) -> Option<&Spanned<ClientHandleArc>> {
         self.clients.get(federation_id)
-    }
-
-    pub async fn federation_info(
-        &self,
-        federation_id: FederationId,
-        dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
-    ) -> std::result::Result<FederationInfo, FederationNotConnected> {
-        self.clients
-            .get(&federation_id)
-            .ok_or(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            })?
-            .borrow()
-            .with(|client| async move {
-                let balance_msat = client
-                    .get_balance_for_btc()
-                    .await
-                    // If primary module is not available, we're not really connected yet
-                    .map_err(|_err| FederationNotConnected {
-                        federation_id_prefix: federation_id.to_prefix(),
-                    })?;
-
-                let config = dbtx.load_federation_config(federation_id).await.ok_or(
-                    FederationNotConnected {
-                        federation_id_prefix: federation_id.to_prefix(),
-                    },
-                )?;
-                Ok(FederationInfo {
-                    federation_id,
-                    federation_name: self.federation_name(client).await,
-                    balance_msat,
-                    config,
-                })
-            })
-            .await
     }
 
     pub async fn federation_name(&self, client: &ClientHandleArc) -> Option<String> {

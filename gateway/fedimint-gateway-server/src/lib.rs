@@ -755,7 +755,6 @@ impl Gateway {
         runtime: Arc<tokio::runtime::Runtime>,
     ) -> anyhow::Result<TaskShutdownToken> {
         install_crypto_provider().await;
-        self.register_clients_timer();
         self.load_clients().await?;
         self.start_gateway(runtime);
         // start metrics server
@@ -1276,16 +1275,6 @@ impl Gateway {
         Ok(txid)
     }
 
-    /// Registers the gateway with each specified federation.
-    /// This is a no-op for LDK since it does not use LNv1 registration.
-    async fn register_federations(
-        &self,
-        _federations: &BTreeMap<FederationId, FederationConfig>,
-        _register_task_group: &TaskGroup,
-    ) {
-        // LDK does not use LNv1 gateway registration
-    }
-
     /// Retrieves a `ClientHandleArc` from the Gateway's in memory structures
     /// that keep track of available clients, given a `federation_id`.
     pub async fn select_client(
@@ -1352,10 +1341,6 @@ impl Gateway {
 
     /// Legacy mechanism for registering the Gateway with connected federations.
     /// This is a no-op for LDK since it does not use LNv1 registration.
-    fn register_clients_timer(&self) {
-        // LDK does not use LNv1 gateway registration
-    }
-
     /// Verifies that the federation has an LNv2 lightning module and that the
     /// network matches the gateway's network.
     async fn check_federation_network(
