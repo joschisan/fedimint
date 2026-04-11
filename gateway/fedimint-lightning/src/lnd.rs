@@ -1378,24 +1378,27 @@ impl ILnRpcClient for GatewayLndClient {
                         let inbound_liquidity_sats =
                             remote_balance_sats.saturating_sub(remote_channel_reserve_sats);
 
-                        let funding_outpoint = OutPoint::from_str(&channel.channel_point).ok();
+                        let funding_txid = OutPoint::from_str(&channel.channel_point)
+                            .ok()
+                            .map(|outpoint| outpoint.txid);
 
                         let remote_address = peer_addresses.get(&channel.remote_pubkey).cloned();
 
                         ChannelInfo {
                             remote_pubkey: PublicKey::from_str(&channel.remote_pubkey)
                                 .expect("Lightning node returned invalid remote channel pubkey"),
-                            channel_size_sats,
-                            outbound_liquidity_sats,
-                            inbound_liquidity_sats,
-                            is_active: channel.active,
-                            funding_outpoint,
-                            remote_node_alias: if channel.peer_alias.is_empty() {
+                            remote_alias: if channel.peer_alias.is_empty() {
                                 None
                             } else {
                                 Some(channel.peer_alias.clone())
                             },
                             remote_address,
+                            channel_size_sats,
+                            outbound_liquidity_sats,
+                            inbound_liquidity_sats,
+                            is_usable: channel.active,
+                            is_outbound: channel.initiator,
+                            funding_txid,
                         }
                     })
                     .collect(),

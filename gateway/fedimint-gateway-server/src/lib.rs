@@ -21,7 +21,6 @@ pub mod envs;
 mod error;
 mod events;
 mod federation_manager;
-pub mod ldk;
 mod metrics;
 pub mod rpc_server;
 mod types;
@@ -30,14 +29,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Display;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use bitcoin::hashes::sha256;
-use bitcoin::{Address, Network, Txid, secp256k1};
+use bitcoin::hashes::{Hash, sha256};
+use bitcoin::{Address, FeeRate, Network, OutPoint, Txid, secp256k1};
 use clap::Parser;
 use client::GatewayClientBuilder;
 pub use config::GatewayParameters;
@@ -62,25 +62,24 @@ use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::secp256k1::schnorr::Signature;
-use fedimint_core::task::{TaskGroup, TaskHandle, TaskShutdownToken, sleep};
+use fedimint_core::task::{TaskGroup, TaskShutdownToken, block_in_place};
 use fedimint_core::time::duration_since_epoch;
-use fedimint_core::util::backoff_util::fibonacci_max_one_hour;
-use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned, retry};
+use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned};
 use fedimint_core::{
     Amount, BitcoinAmountOrAll, PeerId, crit, fedimint_build_code_version_env,
     get_network_for_address,
 };
 use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId};
 use fedimint_gateway_common::{
-    ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConnectFedPayload,
-    CreateInvoiceForOperatorPayload, CreateInvoiceRequest, DepositAddressPayload,
+    ChainSource, ChannelInfo, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
+    ConnectFedPayload, CreateInvoiceForOperatorPayload, DepositAddressPayload,
     DepositAddressRecheckPayload, FederationBalanceInfo, FederationConfig, FederationInfo,
     GatewayBalances, GatewayFedConfig, GatewayInfo, GetInvoiceRequest, GetInvoiceResponse,
-    InterceptPaymentRequest, InterceptPaymentResponse, InvoiceDescription, LightningContext,
-    LightningInfo, LightningRpcError, ListTransactionsPayload, ListTransactionsResponse,
-    MnemonicResponse, OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentAction, PaymentFee,
-    PaymentLogPayload, PaymentLogResponse, PeginFromOnchainPayload, Preimage, ReceiveEcashPayload,
-    ReceiveEcashResponse, RegisteredProtocol, RouteHtlcStream, SendOnchainRequest, SetFeesPayload,
+    InterceptPaymentRequest, InterceptPaymentResponse, LightningContext, LightningInfo,
+    LightningRpcError, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
+    OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentAction, PaymentFee, PaymentLogPayload,
+    PaymentLogResponse, PeginFromOnchainPayload, Preimage, ReceiveEcashPayload,
+    ReceiveEcashResponse, RegisteredProtocol, SendOnchainRequest, SetFeesPayload,
     SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload,
     WithdrawPreviewPayload, WithdrawPreviewResponse, WithdrawResponse, WithdrawToOnchainPayload,
 };
@@ -93,18 +92,24 @@ use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::{
     CreateBolt11InvoicePayload, RoutingInfo, SendPaymentPayload,
 };
-use fedimint_logging::LOG_GATEWAY;
+use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING};
 use fedimint_mintv2_client::{MintClientInit, MintClientModule};
-use futures::stream::StreamExt;
-use lightning_invoice::Bolt11Invoice;
+use ldk_node::lightning::ln::msgs::SocketAddress;
+use ldk_node::lightning::routing::gossip::{NodeAlias, NodeId};
+use ldk_node::payment::{PaymentDirection, PaymentKind, PaymentStatus, SendingParameters};
+use lightning::ln::channelmanager::PaymentId;
+use lightning::offers::offer::OfferId;
+use lightning::types::payment::{PaymentHash, PaymentPreimage};
+use lightning_invoice::{
+    Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
+};
 use rand::rngs::OsRng;
-use tokio::sync::RwLock;
-use tracing::{debug, info, info_span, warn};
+use tokio::sync::{RwLock, oneshot};
+use tracing::{debug, error, info, info_span, warn};
 
 use crate::db::GatewayDbtxNcExt as _;
 use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
 use crate::error::{AdminGatewayError, LNv2Error, PublicGatewayError};
-use crate::ldk::GatewayLdkClient;
 use crate::rpc_server::run_webserver;
 use crate::types::PrettyInterceptPaymentRequest;
 
@@ -122,35 +127,19 @@ const DB_FILE: &str = "gatewayd.db";
 /// running in LDK mode.
 const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// ```mermaid
-/// graph LR
-/// classDef virtual fill:#fff,stroke-dasharray: 5 5
-///
-///    Disconnected -- establish lightning connection --> Connected
-///    Connected -- load federation clients --> Running
-///    Connected -- not synced to chain --> Syncing
-///    Syncing -- load federation clients --> Running
-///    Running -- disconnected from lightning node --> Disconnected
-///    Running -- shutdown initiated --> ShuttingDown
-/// ```
+/// Simplified gateway state: the node is always available, so we only
+/// track whether we are running normally or shutting down.
 #[derive(Clone, Debug)]
 pub enum GatewayState {
-    Disconnected,
-    Syncing,
-    Connected,
-    Running { lightning_context: LightningContext },
-    ShuttingDown { lightning_context: LightningContext },
+    Running,
+    ShuttingDown,
 }
 
 impl Display for GatewayState {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            GatewayState::Disconnected => write!(f, "Disconnected"),
-            GatewayState::Syncing => write!(f, "Syncing"),
-            GatewayState::Connected => write!(f, "Connected"),
-            GatewayState::Running { .. } => write!(f, "Running"),
-            GatewayState::ShuttingDown { .. } => write!(f, "ShuttingDown"),
+            GatewayState::Running => write!(f, "Running"),
+            GatewayState::ShuttingDown => write!(f, "ShuttingDown"),
         }
     }
 }
@@ -186,7 +175,7 @@ impl Gateway {
     ///     .listen(addr)
     ///     .api_addr(url)
     ///     .network(Network::Regtest)
-    ///     .gateway_state(state)
+    ///     .node(node)
     ///     .chain_source(chain_source)
     ///     .build()
     ///     .await?;
@@ -195,7 +184,7 @@ impl Gateway {
     pub async fn new_with_builder(
         #[builder(start_fn)] client_builder: GatewayClientBuilder,
         #[builder(start_fn)] gateway_db: Database,
-        gateway_state: GatewayState,
+        node: Arc<ldk_node::Node>,
         chain_source: ChainSource,
         #[builder(default = ([127, 0, 0, 1], 80).into())] listen: SocketAddr,
         api_addr: Option<SafeUrl>,
@@ -228,23 +217,11 @@ impl Gateway {
             },
             gateway_db,
             client_builder,
-            gateway_state,
+            node,
             chain_source,
         )
         .await
     }
-}
-
-/// The action to take after handling a payment stream.
-enum ReceivePaymentStreamAction {
-    RetryAfterDelay,
-    NoRetry,
-}
-
-/// LDK-specific configuration parameters.
-struct LdkConfig {
-    lightning_port: u16,
-    alias: String,
 }
 
 #[derive(Clone)]
@@ -252,8 +229,8 @@ pub struct Gateway {
     /// The gateway's federation manager.
     federation_manager: Arc<RwLock<FederationManager>>,
 
-    /// The LDK lightning client, available once connected.
-    ldk_client: Arc<RwLock<Option<Arc<GatewayLdkClient>>>>,
+    /// The underlying LDK lightning node, always available.
+    node: Arc<ldk_node::Node>,
 
     /// The current state of the Gateway.
     state: Arc<RwLock<GatewayState>>,
@@ -289,6 +266,21 @@ pub struct Gateway {
     /// A map of the network protocols the gateway supports to the data needed
     /// for registering with a federation.
     registrations: BTreeMap<RegisteredProtocol, Registration>,
+
+    /// Lock pool used to ensure that `pay` doesn't allow for multiple
+    /// simultaneous calls with the same invoice to execute in parallel.
+    outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
+
+    /// Lock pool used to ensure that `pay_offer` doesn't allow for multiple
+    /// simultaneous calls with the same offer to execute in parallel.
+    outbound_offer_lock_pool: Arc<lockable::LockPool<LdkOfferId>>,
+
+    /// A map keyed by the `UserChannelId` of a channel that is currently
+    /// opening. The `Sender` is used to communicate the `OutPoint` back to
+    /// the API handler from the event handler when the channel has been
+    /// opened and is now pending.
+    pending_channels:
+        Arc<RwLock<BTreeMap<UserChannelId, oneshot::Sender<anyhow::Result<OutPoint>>>>>,
 }
 
 impl std::fmt::Debug for Gateway {
@@ -299,6 +291,7 @@ impl std::fmt::Debug for Gateway {
             .field("client_builder", &self.client_builder)
             .field("gateway_db", &self.gateway_db)
             .field("listen", &self.listen)
+            .field("node_id", &self.node.node_id())
             .field("registrations", &self.registrations)
             .finish_non_exhaustive()
     }
@@ -523,7 +516,34 @@ impl Gateway {
                 .await
                 .map_err(AdminGatewayError::MnemonicError)?;
         }
-        let gateway_state = GatewayState::Disconnected;
+
+        let mnemonic = Self::load_mnemonic(&gateway_db)
+            .await
+            .expect("mnemonic should be set");
+
+        let lightning_port = env::var("FM_PORT_LDK")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(9735);
+        let alias = env::var("FM_LDK_ALIAS").unwrap_or_default();
+
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to build LDK runtime"),
+        );
+
+        let node = create_ldk_node(
+            &client_builder.data_dir().join(LDK_NODE_DB_FOLDER),
+            chain_source.clone(),
+            gateway_parameters.network,
+            lightning_port,
+            alias,
+            mnemonic,
+            runtime,
+        )?;
+        let node = Arc::new(node);
 
         info!(
             target: LOG_GATEWAY,
@@ -535,7 +555,7 @@ impl Gateway {
             gateway_parameters,
             gateway_db,
             client_builder,
-            gateway_state,
+            node,
             chain_source,
         )
         .await
@@ -547,7 +567,7 @@ impl Gateway {
         gateway_parameters: GatewayParameters,
         gateway_db: Database,
         client_builder: GatewayClientBuilder,
-        gateway_state: GatewayState,
+        node: Arc<ldk_node::Node>,
         chain_source: ChainSource,
     ) -> anyhow::Result<Gateway> {
         let network = gateway_parameters.network;
@@ -565,8 +585,8 @@ impl Gateway {
 
         Ok(Self {
             federation_manager: Arc::new(RwLock::new(FederationManager::new())),
-            ldk_client: Arc::new(RwLock::new(None)),
-            state: Arc::new(RwLock::new(gateway_state)),
+            node,
+            state: Arc::new(RwLock::new(GatewayState::Running)),
             client_builder,
             gateway_db: gateway_db.clone(),
             listen: gateway_parameters.listen,
@@ -577,6 +597,9 @@ impl Gateway {
             default_routing_fees: gateway_parameters.default_routing_fees,
             default_transaction_fees: gateway_parameters.default_transaction_fees,
             registrations,
+            outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
+            outbound_offer_lock_pool: Arc::new(lockable::LockPool::new()),
+            pending_channels: Arc::new(RwLock::new(BTreeMap::new())),
         })
     }
 
@@ -596,10 +619,6 @@ impl Gateway {
             .public_key()
     }
 
-    async fn get_state(&self) -> GatewayState {
-        self.state.read().await.clone()
-    }
-
     /// Reads and serializes structures from the Gateway's database for the
     /// purpose for serializing to JSON for inspection.
     pub async fn dump_database(
@@ -615,11 +634,17 @@ impl Gateway {
     /// to service requests.
     pub async fn run(
         self,
-        runtime: Arc<tokio::runtime::Runtime>,
+        _runtime: Arc<tokio::runtime::Runtime>,
     ) -> anyhow::Result<TaskShutdownToken> {
         install_crypto_provider().await;
+
+        // Wait for chain sync before loading clients
+        if !is_env_var_set(FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV) {
+            self.wait_for_chain_sync().await?;
+        }
+
         self.load_clients().await?;
-        self.start_gateway(runtime);
+        self.start_ldk_event_loop();
         // start metrics server
         fedimint_metrics::spawn_api_server(self.metrics_listen, self.task_group.clone()).await?;
         // start webserver last to avoid handling requests before fully initialized
@@ -629,232 +654,117 @@ impl Gateway {
         Ok(shutdown_receiver)
     }
 
-    /// Begins the task for listening for intercepted payments from the
-    /// lightning node.
-    fn start_gateway(&self, runtime: Arc<tokio::runtime::Runtime>) {
-        const PAYMENT_STREAM_RETRY_SECONDS: u64 = 60;
+    /// Starts the LDK event loop that processes incoming lightning events.
+    fn start_ldk_event_loop(&self) {
+        let gateway = self.clone();
+        self.task_group.spawn("ldk-events", |handle| async move {
+            loop {
+                let event = tokio::select! {
+                    event = gateway.node.next_event_async() => event,
+                    () = handle.make_shutdown_rx() => break,
+                };
 
-        let self_copy = self.clone();
-        let _tg = self.task_group.clone();
-        self.task_group.spawn(
-            "Subscribe to intercepted lightning payments in stream",
-            |handle| async move {
-                // Repeatedly attempt to establish a connection to the lightning node and create a payment stream, re-trying if the connection is broken.
-                loop {
-                    if handle.is_shutting_down() {
-                        info!(target: LOG_GATEWAY, "Gateway lightning payment stream handler loop is shutting down");
-                        break;
-                    }
+                gateway.process_ldk_event(event).await;
 
-                    let mnemonic = Self::load_mnemonic(&self_copy.gateway_db)
-                        .await
-                        .expect("mnemonic should be set");
-
-                    let ldk_config = Self::get_ldk_config();
-
-                    // Create LDK client with retry
-                    let mut ldk_client = match retry(
-                        "create LDK Node",
-                        fibonacci_max_one_hour(),
-                        || async {
-                            GatewayLdkClient::new(
-                                &self_copy.client_builder.data_dir().join(LDK_NODE_DB_FOLDER),
-                                self_copy.chain_source.clone(),
-                                self_copy.network,
-                                ldk_config.lightning_port,
-                                ldk_config.alias.clone(),
-                                mnemonic.clone(),
-                                runtime.clone(),
-                            )
-                        },
-                    )
-                    .await
-                    {
-                        Ok(client) => client,
-                        Err(err) => {
-                            warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Failed to create LDK client");
-                            sleep(Duration::from_secs(PAYMENT_STREAM_RETRY_SECONDS)).await;
-                            continue;
-                        }
-                    };
-
-                    debug!(target: LOG_GATEWAY, "Establishing lightning payment stream...");
-                    let stream = match ldk_client.route_htlcs() {
-                        Ok(stream) => stream,
-                        Err(err) => {
-                            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to open lightning payment stream");
-                            sleep(Duration::from_secs(PAYMENT_STREAM_RETRY_SECONDS)).await;
-                            continue
-                        }
-                    };
-
-                    let ldk_client = Arc::new(ldk_client);
-
-                    // Successful calls to `route_htlcs` establish a connection
-                    self_copy.set_gateway_state(GatewayState::Connected).await;
-                    *self_copy.ldk_client.write().await = Some(ldk_client.clone());
-                    info!(target: LOG_GATEWAY, "Established lightning payment stream");
-
-                    let route_payments_response =
-                        self_copy.route_lightning_payments(&handle, stream, &ldk_client).await;
-
-                    self_copy.set_gateway_state(GatewayState::Disconnected).await;
-                    *self_copy.ldk_client.write().await = None;
-
-                    match route_payments_response {
-                        ReceivePaymentStreamAction::RetryAfterDelay => {
-                            warn!(target: LOG_GATEWAY, retry_interval = %PAYMENT_STREAM_RETRY_SECONDS, "Disconnected from lightning node");
-                            sleep(Duration::from_secs(PAYMENT_STREAM_RETRY_SECONDS)).await;
-                        }
-                        ReceivePaymentStreamAction::NoRetry => break,
-                    }
+                if let Err(e) = gateway.node.event_handled() {
+                    warn!(
+                        target: LOG_LIGHTNING,
+                        err = %e.fmt_compact(),
+                        "Failed to mark event handled",
+                    );
                 }
-            },
-        );
-    }
-
-    /// Returns the LDK configuration from environment variables.
-    fn get_ldk_config() -> LdkConfig {
-        let lightning_port = env::var("FM_PORT_LDK")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(9735);
-        let alias = env::var("FM_LDK_ALIAS").unwrap_or_default();
-        LdkConfig {
-            lightning_port,
-            alias,
-        }
-    }
-
-    /// Handles a stream of incoming payments from the lightning node after
-    /// ensuring the gateway is properly configured. Awaits until the stream
-    /// is closed, then returns with the appropriate action to take.
-    async fn route_lightning_payments<'a>(
-        &'a self,
-        handle: &TaskHandle,
-        mut stream: RouteHtlcStream<'a>,
-        ldk_client: &Arc<GatewayLdkClient>,
-    ) -> ReceivePaymentStreamAction {
-        let LightningInfo::Connected {
-            public_key: lightning_public_key,
-            alias: lightning_alias,
-            network: lightning_network,
-            block_height: _,
-            synced_to_chain,
-        } = ldk_client.parsed_node_info().await
-        else {
-            warn!(target: LOG_GATEWAY, "Failed to retrieve Lightning info");
-            return ReceivePaymentStreamAction::RetryAfterDelay;
-        };
-
-        assert!(
-            self.network == lightning_network,
-            "Lightning node network does not match Gateway's network. LN: {lightning_network} Gateway: {}",
-            self.network
-        );
-
-        if synced_to_chain || is_env_var_set(FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV) {
-            info!(target: LOG_GATEWAY, "Gateway is already synced to chain");
-        } else {
-            self.set_gateway_state(GatewayState::Syncing).await;
-            info!(target: LOG_GATEWAY, "Waiting for chain sync");
-            if let Err(err) = ldk_client.wait_for_chain_sync().await {
-                warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to wait for chain sync");
-                return ReceivePaymentStreamAction::RetryAfterDelay;
             }
-        }
+        });
+    }
 
-        let lightning_context = LightningContext {
-            lightning_public_key,
-            lightning_alias,
-            lightning_network,
-            supports_private_payments: ldk_client.supports_private_payments(),
-        };
-        self.set_gateway_state(GatewayState::Running { lightning_context })
-            .await;
-        info!(target: LOG_GATEWAY, "Gateway is running");
+    /// Processes a single LDK event.
+    async fn process_ldk_event(&self, event: ldk_node::Event) {
+        match event {
+            ldk_node::Event::PaymentClaimable {
+                payment_id: _,
+                payment_hash,
+                claimable_amount_msat,
+                claim_deadline,
+                custom_records: _,
+            } => {
+                let hash = Hash::from_slice(&payment_hash.0).expect("Failed to create Hash");
 
-        // Runs until the connection to the lightning node breaks or we receive the
-        // shutdown signal.
-        let htlc_task_group = self.task_group.make_subgroup();
-        if handle
-            .cancel_on_shutdown(async move {
-                loop {
-                    let payment_request_or = tokio::select! {
-                        payment_request_or = stream.next() => {
-                            payment_request_or
-                        }
-                        () = self.is_shutting_down_safely() => {
-                            break;
-                        }
-                    };
+                let payment_request = InterceptPaymentRequest {
+                    payment_hash: hash,
+                    amount_msat: claimable_amount_msat,
+                    expiry: claim_deadline.unwrap_or_default(),
+                    short_channel_id: None,
+                    incoming_chan_id: 0,
+                    htlc_id: 0,
+                };
 
-                    let Some(payment_request) = payment_request_or else {
-                        warn!(
-                            target: LOG_GATEWAY,
-                            "Unexpected response from incoming lightning payment stream. Shutting down payment processor"
-                        );
-                        break;
-                    };
-
-                    let state_guard = self.state.read().await;
-                    if let GatewayState::Running { .. } = *state_guard {
-                        // Spawn a subtask to handle each payment in parallel
-                        let gateway = self.clone();
-                        htlc_task_group.spawn_cancellable_silent(
-                            "handle_lightning_payment",
-                            async move {
-                                let start = fedimint_core::time::now();
-                                let outcome = gateway
-                                    .handle_lightning_payment(payment_request)
-                                    .await;
-                                metrics::HTLC_HANDLING_DURATION_SECONDS
-                                    .with_label_values(&[outcome])
-                                    .observe(
-                                        fedimint_core::time::now()
-                                            .duration_since(start)
-                                            .unwrap_or_default()
-                                            .as_secs_f64(),
-                                    );
-                            },
-                        );
+                let start = fedimint_core::time::now();
+                let outcome = self.handle_lightning_payment(payment_request).await;
+                metrics::HTLC_HANDLING_DURATION_SECONDS
+                    .with_label_values(&[outcome])
+                    .observe(
+                        fedimint_core::time::now()
+                            .duration_since(start)
+                            .unwrap_or_default()
+                            .as_secs_f64(),
+                    );
+            }
+            ldk_node::Event::ChannelPending {
+                channel_id,
+                user_channel_id,
+                former_temporary_channel_id: _,
+                counterparty_node_id: _,
+                funding_txo,
+            } => {
+                info!(
+                    target: LOG_LIGHTNING,
+                    %channel_id,
+                    "LDK Channel is pending",
+                );
+                let mut channels = self.pending_channels.write().await;
+                if let Some(sender) = channels.remove(&UserChannelId(user_channel_id)) {
+                    let _ = sender.send(Ok(funding_txo));
+                } else {
+                    debug!(
+                        ?user_channel_id,
+                        "No channel pending channel open for user channel id",
+                    );
+                }
+            }
+            ldk_node::Event::ChannelClosed {
+                channel_id,
+                user_channel_id,
+                counterparty_node_id: _,
+                reason,
+            } => {
+                info!(
+                    target: LOG_LIGHTNING,
+                    %channel_id,
+                    "LDK Channel is closed",
+                );
+                let mut channels = self.pending_channels.write().await;
+                if let Some(sender) = channels.remove(&UserChannelId(user_channel_id)) {
+                    let reason = if let Some(reason) = reason {
+                        reason.to_string()
                     } else {
-                        warn!(
-                            target: LOG_GATEWAY,
-                            state = %state_guard,
-                            "Gateway isn't in a running state, cannot handle incoming payments."
-                        );
-                        break;
-                    }
+                        "Channel has been closed".to_string()
+                    };
+                    let _ = sender.send(Err(anyhow::anyhow!(reason)));
+                } else {
+                    debug!(
+                        ?user_channel_id,
+                        "No channel pending channel open for user channel id",
+                    );
                 }
-            })
-            .await
-            .is_ok()
-        {
-            warn!(target: LOG_GATEWAY, "Lightning payment stream connection broken. Gateway is disconnected");
-            ReceivePaymentStreamAction::RetryAfterDelay
-        } else {
-            info!(target: LOG_GATEWAY, "Received shutdown signal");
-            ReceivePaymentStreamAction::NoRetry
-        }
-    }
-
-    /// Polls the Gateway's state waiting for it to shutdown so the thread
-    /// processing payment requests can exit.
-    async fn is_shutting_down_safely(&self) {
-        loop {
-            if let GatewayState::ShuttingDown { .. } = self.get_state().await {
-                return;
             }
-
-            fedimint_core::task::sleep(Duration::from_secs(1)).await;
+            _ => {}
         }
     }
 
     /// Handles an intercepted lightning payment. If the payment is part of an
     /// incoming payment to a federation, spawns a state machine and hands the
-    /// payment off to it. Otherwise, forwards the payment to the next hop like
-    /// a normal lightning node.
+    /// payment off to it. Otherwise, fails the HTLC since forwarding is not
+    /// supported.
     ///
     /// Returns the outcome label for metrics tracking.
     pub async fn handle_lightning_payment(
@@ -888,7 +798,15 @@ impl Gateway {
             return "lnv2";
         }
 
-        Self::forward_lightning_payment(payment_request, &*self.get_ldk_client().await).await;
+        // No matching federation contract; fail the HTLC
+        let ph = PaymentHash(*payment_request.payment_hash.as_byte_array());
+        if let Err(err) = self.node.bolt11_payment().fail_for_hash(ph) {
+            warn!(
+                target: LOG_GATEWAY,
+                err = %err.fmt_compact(),
+                "Error failing unmatched HTLC",
+            );
+        }
         "forward"
     }
 
@@ -924,52 +842,53 @@ impl Gateway {
         {
             warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Error relaying incoming lightning payment");
 
-            let outcome = InterceptPaymentResponse {
-                action: PaymentAction::Cancel,
-                payment_hash: htlc_request.payment_hash,
-                incoming_chan_id: htlc_request.incoming_chan_id,
-                htlc_id: htlc_request.htlc_id,
-            };
-
-            if let Err(err) = self.get_ldk_client().await.complete_htlc(outcome).await {
-                warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error sending HTLC response to lightning node");
+            let ph = PaymentHash(*htlc_request.payment_hash.as_byte_array());
+            if let Err(err) = self.node.bolt11_payment().fail_for_hash(ph) {
+                warn!(
+                    target: LOG_GATEWAY,
+                    err = %err.fmt_compact(),
+                    "Error failing HTLC after relay error",
+                );
             }
         }
 
         Ok(())
     }
 
-    /// Forwards a lightning payment to the next hop like a normal lightning
-    /// node.
-    async fn forward_lightning_payment(
-        htlc_request: InterceptPaymentRequest,
-        ldk_client: &GatewayLdkClient,
-    ) {
-        let outcome = InterceptPaymentResponse {
-            action: PaymentAction::Forward,
-            payment_hash: htlc_request.payment_hash,
-            incoming_chan_id: htlc_request.incoming_chan_id,
-            htlc_id: htlc_request.htlc_id,
-        };
+    /// Waits for the Lightning node to be synced to the Bitcoin blockchain.
+    async fn wait_for_chain_sync(&self) -> anyhow::Result<()> {
+        use fedimint_core::envs::{FM_IN_DEVIMINT_ENV, is_env_var_set};
+        use fedimint_core::util::{backoff_util, retry};
 
-        if let Err(err) = ldk_client.complete_htlc(outcome).await {
-            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error sending lightning payment response to lightning node");
+        // In devimint, we explicitly sync the onchain wallet to start the sync quicker
+        if is_env_var_set(FM_IN_DEVIMINT_ENV) {
+            block_in_place(|| {
+                let _ = self.node.sync_wallets();
+            });
         }
-    }
 
-    /// Returns the active LDK client, panicking if not connected.
-    async fn get_ldk_client(&self) -> Arc<GatewayLdkClient> {
-        self.ldk_client
-            .read()
-            .await
-            .clone()
-            .expect("LDK client should be available when gateway is running")
-    }
+        retry(
+            "Wait for chain sync",
+            backoff_util::background_backoff(),
+            || async {
+                let node_status = self.node.status();
+                let block_height = node_status.current_best_block.height;
+                if node_status.latest_lightning_wallet_sync_timestamp.is_some() {
+                    Ok(())
+                } else {
+                    warn!(
+                        target: LOG_LIGHTNING,
+                        block_height = %block_height,
+                        "Lightning node is not synced yet",
+                    );
+                    Err(anyhow::anyhow!("Not synced yet"))
+                }
+            },
+        )
+        .await?;
 
-    /// Helper function for atomically changing the Gateway's internal state.
-    async fn set_gateway_state(&self, state: GatewayState) {
-        let mut lock = self.state.write().await;
-        *lock = state;
+        info!(target: LOG_LIGHTNING, "Gateway successfully synced with the chain");
+        Ok(())
     }
 
     /// If the Gateway is connected to the Lightning node, returns the
@@ -978,12 +897,6 @@ impl Gateway {
         &self,
         federation_id_or: Option<FederationId>,
     ) -> AdminResult<GatewayFedConfig> {
-        if !matches!(self.get_state().await, GatewayState::Running { .. }) {
-            return Ok(GatewayFedConfig {
-                federations: BTreeMap::new(),
-            });
-        }
-
         let federations = if let Some(federation_id) = federation_id_or {
             let mut federations = BTreeMap::new();
             federations.insert(
@@ -1097,9 +1010,36 @@ impl Gateway {
         &self,
         payload: GetInvoiceRequest,
     ) -> AdminResult<Option<GetInvoiceResponse>> {
-        let ldk_client = self.get_ldk_client().await;
-        let invoice = ldk_client.get_invoice(payload).await?;
-        Ok(invoice)
+        let invoices = self
+            .node
+            .list_payments_with_filter(|details| {
+                details.direction == PaymentDirection::Inbound
+                    && details.id == PaymentId(payload.payment_hash.to_byte_array())
+                    && !matches!(details.kind, PaymentKind::Onchain { .. })
+            })
+            .iter()
+            .map(|details| {
+                let (preimage, payment_hash, _) = get_preimage_and_payment_hash(&details.kind);
+                let status = match details.status {
+                    PaymentStatus::Failed => fedimint_gateway_common::PaymentStatus::Failed,
+                    PaymentStatus::Succeeded => fedimint_gateway_common::PaymentStatus::Succeeded,
+                    PaymentStatus::Pending => fedimint_gateway_common::PaymentStatus::Pending,
+                };
+                GetInvoiceResponse {
+                    preimage: preimage.map(|p| p.to_string()),
+                    payment_hash,
+                    amount: Amount::from_msats(
+                        details
+                            .amount_msat
+                            .expect("amountless invoices are not supported"),
+                    ),
+                    created_at: UNIX_EPOCH + Duration::from_secs(details.latest_update_timestamp),
+                    status,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        Ok(invoices.first().cloned())
     }
 
     /// Withdraws ecash from a federation and pegs-out to the Lightning node's
@@ -1246,17 +1186,21 @@ impl Gateway {
         Ok(())
     }
 
-    /// Checks the Gateway's current state and returns the proper
-    /// `LightningContext` if it is available. Sometimes the lightning node
-    /// will not be connected and this will return an error.
+    /// Returns the `LightningContext` built from the node's current state.
     pub async fn get_lightning_context(
         &self,
     ) -> std::result::Result<LightningContext, LightningRpcError> {
-        match self.get_state().await {
-            GatewayState::Running { lightning_context }
-            | GatewayState::ShuttingDown { lightning_context } => Ok(lightning_context),
-            _ => Err(LightningRpcError::FailedToConnect),
-        }
+        let alias = match self.node.node_alias() {
+            Some(alias) => alias.to_string(),
+            None => format!("LDK Fedimint Gateway Node {}", self.node.node_id()),
+        };
+
+        Ok(LightningContext {
+            lightning_public_key: self.node.node_id(),
+            lightning_alias: alias,
+            lightning_network: self.node.config().network,
+            supports_private_payments: false,
+        })
     }
 
     /// Iterates through all of the federations the gateway is registered with
@@ -1271,21 +1215,6 @@ impl Gateway {
     /// Returns information about the Gateway back to the client when requested
     /// via the webserver.
     pub async fn handle_get_info(&self) -> AdminResult<GatewayInfo> {
-        let GatewayState::Running { .. } = self.get_state().await else {
-            return Ok(GatewayInfo {
-                federations: vec![],
-                federation_fake_scids: None,
-                version_hash: fedimint_build_code_version_env!().to_string(),
-                gateway_state: self.state.read().await.to_string(),
-                lightning_info: LightningInfo::NotConnected,
-                registrations: self
-                    .registrations
-                    .iter()
-                    .map(|(k, v)| (k.clone(), (v.endpoint_url.clone(), v.keypair.public_key())))
-                    .collect(),
-            });
-        };
-
         let dbtx = self.gateway_db.begin_transaction_nc().await;
         let federations = self
             .federation_manager
@@ -1304,8 +1233,21 @@ impl Gateway {
             })
             .collect();
 
-        let ldk_client = self.get_ldk_client().await;
-        let lightning_info = ldk_client.parsed_node_info().await;
+        let node_status = self.node.status();
+        let synced_to_chain = node_status.latest_lightning_wallet_sync_timestamp.is_some();
+        let block_height = u64::from(node_status.current_best_block.height);
+        let alias = match self.node.node_alias() {
+            Some(alias) => alias.to_string(),
+            None => format!("LDK Fedimint Gateway Node {}", self.node.node_id()),
+        };
+
+        let lightning_info = LightningInfo::Connected {
+            public_key: self.node.node_id(),
+            alias,
+            network: self.node.config().network.to_string(),
+            block_height,
+            synced_to_chain,
+        };
 
         Ok(GatewayInfo {
             federations,
@@ -1326,9 +1268,45 @@ impl Gateway {
     pub async fn handle_list_channels_msg(
         &self,
     ) -> AdminResult<Vec<fedimint_gateway_common::ChannelInfo>> {
-        let ldk_client = self.get_ldk_client().await;
-        let response = ldk_client.list_channels().await?;
-        Ok(response.channels)
+        let mut channels = Vec::new();
+        let network_graph = self.node.network_graph();
+
+        let peer_addresses: std::collections::HashMap<_, _> = self
+            .node
+            .list_peers()
+            .into_iter()
+            .map(|peer| (peer.node_id, peer.address.to_string()))
+            .collect();
+
+        for channel_details in &self.node.list_channels() {
+            let node_id = NodeId::from_pubkey(&channel_details.counterparty_node_id);
+            let node_info = network_graph.node(&node_id);
+
+            let remote_node_alias = node_info.as_ref().and_then(|info| {
+                info.announcement_info.as_ref().and_then(|announcement| {
+                    let alias = announcement.alias().to_string();
+                    if alias.is_empty() { None } else { Some(alias) }
+                })
+            });
+
+            let remote_address = peer_addresses
+                .get(&channel_details.counterparty_node_id)
+                .cloned();
+
+            channels.push(ChannelInfo {
+                remote_pubkey: channel_details.counterparty_node_id,
+                remote_alias: remote_node_alias,
+                remote_address,
+                channel_size_sats: channel_details.channel_value_sats,
+                outbound_liquidity_sats: channel_details.outbound_capacity_msat / 1000,
+                inbound_liquidity_sats: channel_details.inbound_capacity_msat / 1000,
+                is_usable: channel_details.is_usable,
+                is_outbound: channel_details.is_outbound,
+                funding_txid: channel_details.funding_txo.map(|txo| txo.txid),
+            });
+        }
+
+        Ok(channels)
     }
 
     /// Handles a connection request to join a new federation. The gateway will
@@ -1339,12 +1317,6 @@ impl Gateway {
         &self,
         payload: ConnectFedPayload,
     ) -> AdminResult<FederationInfo> {
-        let GatewayState::Running { .. } = self.get_state().await else {
-            return Err(AdminGatewayError::Lightning(
-                LightningRpcError::FailedToConnect,
-            ));
-        };
-
         let invite_code = InviteCode::from_str(&payload.invite_code).map_err(|e| {
             AdminGatewayError::ClientCreationError(anyhow!(format!(
                 "Invalid federation member string {e:?}"
@@ -1548,15 +1520,62 @@ impl Gateway {
     /// Instructs the Gateway's Lightning node to open a channel to a peer
     /// specified by `pubkey`.
     pub async fn handle_open_channel_msg(&self, payload: OpenChannelRequest) -> AdminResult<Txid> {
-        info!(target: LOG_GATEWAY, pubkey = %payload.pubkey, host = %payload.host, amount = %payload.channel_size_sats, "Opening Lightning channel...");
-        let ldk_client = self.get_ldk_client().await;
-        let res = ldk_client.open_channel(payload).await?;
-        info!(target: LOG_GATEWAY, txid = %res.funding_txid, "Initiated channel open");
-        Txid::from_str(&res.funding_txid).map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::InvalidMetadata {
-                failure_reason: format!("Received invalid channel funding txid string {e}"),
+        info!(
+            target: LOG_GATEWAY,
+            pubkey = %payload.pubkey,
+            host = %payload.host,
+            amount = %payload.channel_size_sats,
+            "Opening Lightning channel...",
+        );
+
+        let push_amount_msats_or = if payload.push_amount_sats == 0 {
+            None
+        } else {
+            Some(payload.push_amount_sats * 1000)
+        };
+
+        let (tx, rx) = oneshot::channel::<anyhow::Result<OutPoint>>();
+
+        {
+            let mut channels = self.pending_channels.write().await;
+            let user_channel_id = self
+                .node
+                .open_announced_channel(
+                    payload.pubkey,
+                    SocketAddress::from_str(&payload.host).map_err(|e| {
+                        AdminGatewayError::Lightning(LightningRpcError::FailedToConnectToPeer {
+                            failure_reason: e.to_string(),
+                        })
+                    })?,
+                    payload.channel_size_sats,
+                    push_amount_msats_or,
+                    None,
+                )
+                .map_err(|e| {
+                    AdminGatewayError::Lightning(LightningRpcError::FailedToOpenChannel {
+                        failure_reason: e.to_string(),
+                    })
+                })?;
+
+            channels.insert(UserChannelId(user_channel_id), tx);
+        }
+
+        match rx.await.map_err(|err| {
+            AdminGatewayError::Lightning(LightningRpcError::FailedToOpenChannel {
+                failure_reason: err.to_string(),
             })
-        })
+        })? {
+            Ok(outpoint) => {
+                let funding_txid = outpoint.txid;
+                info!(target: LOG_GATEWAY, txid = %funding_txid, "Initiated channel open");
+                Ok(funding_txid)
+            }
+            Err(err) => Err(AdminGatewayError::Lightning(
+                LightningRpcError::FailedToOpenChannel {
+                    failure_reason: err.to_string(),
+                },
+            )),
+        }
     }
 
     /// Instructs the Gateway's Lightning node to close all channels with a peer
@@ -1566,10 +1585,50 @@ impl Gateway {
         payload: CloseChannelsWithPeerRequest,
     ) -> AdminResult<CloseChannelsWithPeerResponse> {
         info!(target: LOG_GATEWAY, close_channel_request = %payload, "Closing lightning channel...");
-        let ldk_client = self.get_ldk_client().await;
-        let response = ldk_client.close_channels_with_peer(payload.clone()).await?;
+
+        let mut num_channels_closed = 0;
+        for channel_with_peer in self
+            .node
+            .list_channels()
+            .iter()
+            .filter(|channel| channel.counterparty_node_id == payload.pubkey)
+        {
+            if payload.force {
+                match self.node.force_close_channel(
+                    &channel_with_peer.user_channel_id,
+                    payload.pubkey,
+                    Some("User initiated force close".to_string()),
+                ) {
+                    Ok(()) => num_channels_closed += 1,
+                    Err(err) => {
+                        error!(
+                            pubkey = %payload.pubkey,
+                            err = %err.fmt_compact(),
+                            "Could not force close channel",
+                        );
+                    }
+                }
+            } else {
+                match self
+                    .node
+                    .close_channel(&channel_with_peer.user_channel_id, payload.pubkey)
+                {
+                    Ok(()) => num_channels_closed += 1,
+                    Err(err) => {
+                        error!(
+                            pubkey = %payload.pubkey,
+                            err = %err.fmt_compact(),
+                            "Could not close channel",
+                        );
+                    }
+                }
+            }
+        }
+
         info!(target: LOG_GATEWAY, close_channel_request = %payload, "Initiated channel closure");
-        Ok(response)
+        Ok(CloseChannelsWithPeerResponse {
+            num_channels_closed,
+        })
     }
 
     /// Returns the ecash, lightning, and onchain balances for the gateway and
@@ -1593,46 +1652,61 @@ impl Gateway {
             })
             .collect();
 
-        let ldk_client = self.get_ldk_client().await;
-        let lightning_node_balances = ldk_client.get_balances().await?;
+        let balances = self.node.list_balances();
+        let total_inbound_liquidity_msats: u64 = self
+            .node
+            .list_channels()
+            .iter()
+            .filter(|chan| chan.is_usable)
+            .map(|channel| channel.inbound_capacity_msat)
+            .sum();
 
         Ok(GatewayBalances {
-            onchain_balance_sats: lightning_node_balances.onchain_balance_sats,
-            lightning_balance_msats: lightning_node_balances.lightning_balance_msats,
+            onchain_balance_sats: balances.total_onchain_balance_sats,
+            lightning_balance_msats: balances.total_lightning_balance_sats * 1000,
             ecash_balances,
-            inbound_lightning_liquidity_msats: lightning_node_balances
-                .inbound_lightning_liquidity_msats,
+            inbound_lightning_liquidity_msats: total_inbound_liquidity_msats,
         })
     }
 
     /// Send funds from the gateway's lightning node on-chain wallet.
     pub async fn handle_send_onchain_msg(&self, payload: SendOnchainRequest) -> AdminResult<Txid> {
-        let ldk_client = self.get_ldk_client().await;
-        let response = ldk_client.send_onchain(payload.clone()).await?;
-        let txid =
-            Txid::from_str(&response.txid).map_err(|e| AdminGatewayError::WithdrawError {
-                failure_reason: format!("Failed to parse withdrawal TXID: {e}"),
-            })?;
+        let onchain = self.node.onchain_payment();
+        let retain_reserves = false;
+        let checked_address = payload.address.clone().assume_checked();
+        let txid = match payload.amount {
+            BitcoinAmountOrAll::All => onchain
+                .send_all_to_address(
+                    &checked_address,
+                    retain_reserves,
+                    FeeRate::from_sat_per_vb(payload.fee_rate_sats_per_vbyte),
+                )
+                .map_err(|e| AdminGatewayError::WithdrawError {
+                    failure_reason: e.to_string(),
+                })?,
+            BitcoinAmountOrAll::Amount(amount_sats) => onchain
+                .send_to_address(
+                    &checked_address,
+                    amount_sats.to_sat(),
+                    FeeRate::from_sat_per_vb(payload.fee_rate_sats_per_vbyte),
+                )
+                .map_err(|e| AdminGatewayError::WithdrawError {
+                    failure_reason: e.to_string(),
+                })?,
+        };
         info!(onchain_request = %payload, txid = %txid, "Sent onchain transaction");
         Ok(txid)
     }
 
     /// Generates an onchain address to fund the gateway's lightning node.
     pub async fn handle_get_ln_onchain_address_msg(&self) -> AdminResult<Address> {
-        let ldk_client = self.get_ldk_client().await;
-        let response = ldk_client.get_ln_onchain_address().await?;
-
-        let address = Address::from_str(&response.address).map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::InvalidMetadata {
+        let address = self.node.onchain_payment().new_address().map_err(|e| {
+            AdminGatewayError::Lightning(LightningRpcError::FailedToGetLnOnchainAddress {
                 failure_reason: e.to_string(),
             })
         })?;
 
-        address.require_network(self.network).map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::InvalidMetadata {
-                failure_reason: e.to_string(),
-            })
-        })
+        Ok(address)
     }
 
     pub async fn handle_deposit_address_msg(
@@ -1648,30 +1722,29 @@ impl Gateway {
         &self,
         payload: CreateInvoiceForOperatorPayload,
     ) -> AdminResult<Bolt11Invoice> {
-        let GatewayState::Running { .. } = self.get_state().await else {
-            return Err(AdminGatewayError::Lightning(
-                LightningRpcError::FailedToConnect,
-            ));
+        let expiry_secs = payload.expiry_secs.unwrap_or(3600);
+        let description = match payload.description {
+            Some(desc) => {
+                LdkBolt11InvoiceDescription::Direct(Description::new(desc).map_err(|_| {
+                    AdminGatewayError::Lightning(LightningRpcError::FailedToGetInvoice {
+                        failure_reason: "Invalid description".to_string(),
+                    })
+                })?)
+            }
+            None => LdkBolt11InvoiceDescription::Direct(Description::empty()),
         };
 
-        let ldk_client = self.get_ldk_client().await;
-        Bolt11Invoice::from_str(
-            &ldk_client
-                .create_invoice(CreateInvoiceRequest {
-                    payment_hash: None, /* Empty payment hash indicates an invoice payable
-                                         * directly to the gateway. */
-                    amount_msat: payload.amount_msats,
-                    expiry_secs: payload.expiry_secs.unwrap_or(3600),
-                    description: payload.description.map(InvoiceDescription::Direct),
+        let invoice = self
+            .node
+            .bolt11_payment()
+            .receive(payload.amount_msats, &description, expiry_secs)
+            .map_err(|e| {
+                AdminGatewayError::Lightning(LightningRpcError::FailedToGetInvoice {
+                    failure_reason: e.to_string(),
                 })
-                .await?
-                .invoice,
-        )
-        .map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::InvalidMetadata {
-                failure_reason: e.to_string(),
-            })
-        })
+            })?;
+
+        Ok(invoice)
     }
 
     /// Requests the gateway to pay an outgoing LN invoice using its own funds.
@@ -1680,29 +1753,40 @@ impl Gateway {
         &self,
         payload: PayInvoiceForOperatorPayload,
     ) -> AdminResult<Preimage> {
-        // Those are the ldk defaults
-        const BASE_FEE: u64 = 50;
-        const FEE_DENOMINATOR: u64 = 100;
-        const MAX_DELAY: u64 = 1008;
+        let payment_id = self
+            .node
+            .bolt11_payment()
+            .send(&payload.invoice, None)
+            .map_err(|e| {
+                AdminGatewayError::Lightning(LightningRpcError::FailedPayment {
+                    failure_reason: format!("LDK payment failed to initialize: {e:?}"),
+                })
+            })?;
 
-        let GatewayState::Running { .. } = self.get_state().await else {
-            return Err(AdminGatewayError::Lightning(
-                LightningRpcError::FailedToConnect,
-            ));
-        };
-
-        let max_fee = BASE_FEE
-            + payload
-                .invoice
-                .amount_milli_satoshis()
-                .context("Invoice is missing amount")?
-                .saturating_div(FEE_DENOMINATOR);
-
-        let ldk_client = self.get_ldk_client().await;
-        let res = ldk_client
-            .pay(payload.invoice, MAX_DELAY, Amount::from_msats(max_fee))
-            .await?;
-        Ok(res.preimage)
+        loop {
+            if let Some(payment_details) = self.node.payment(&payment_id) {
+                match payment_details.status {
+                    PaymentStatus::Pending => {}
+                    PaymentStatus::Succeeded => {
+                        if let PaymentKind::Bolt11 {
+                            preimage: Some(preimage),
+                            ..
+                        } = payment_details.kind
+                        {
+                            return Ok(Preimage(preimage.0));
+                        }
+                    }
+                    PaymentStatus::Failed => {
+                        return Err(AdminGatewayError::Lightning(
+                            LightningRpcError::FailedPayment {
+                                failure_reason: "LDK payment failed".to_string(),
+                            },
+                        ));
+                    }
+                }
+            }
+            fedimint_core::runtime::sleep(Duration::from_millis(100)).await;
+        }
     }
 
     /// Lists the transactions that the lightning node has made.
@@ -1710,11 +1794,44 @@ impl Gateway {
         &self,
         payload: ListTransactionsPayload,
     ) -> AdminResult<ListTransactionsResponse> {
-        let ldk_client = self.get_ldk_client().await;
-        let response = ldk_client
-            .list_transactions(payload.start_secs, payload.end_secs)
-            .await?;
-        Ok(response)
+        let transactions = self
+            .node
+            .list_payments_with_filter(|details| {
+                !matches!(details.kind, PaymentKind::Onchain { .. })
+                    && details.latest_update_timestamp >= payload.start_secs
+                    && details.latest_update_timestamp < payload.end_secs
+            })
+            .iter()
+            .map(|details| {
+                let (preimage, payment_hash, payment_kind) =
+                    get_preimage_and_payment_hash(&details.kind);
+                let direction = match details.direction {
+                    PaymentDirection::Outbound => {
+                        fedimint_gateway_common::PaymentDirection::Outbound
+                    }
+                    PaymentDirection::Inbound => fedimint_gateway_common::PaymentDirection::Inbound,
+                };
+                let status = match details.status {
+                    PaymentStatus::Failed => fedimint_gateway_common::PaymentStatus::Failed,
+                    PaymentStatus::Succeeded => fedimint_gateway_common::PaymentStatus::Succeeded,
+                    PaymentStatus::Pending => fedimint_gateway_common::PaymentStatus::Pending,
+                };
+                fedimint_gateway_common::PaymentDetails {
+                    payment_hash,
+                    preimage: preimage.map(|p| p.to_string()),
+                    payment_kind,
+                    amount: Amount::from_msats(
+                        details
+                            .amount_msat
+                            .expect("amountless invoices are not supported"),
+                    ),
+                    direction,
+                    status,
+                    timestamp_secs: details.latest_update_timestamp,
+                }
+            })
+            .collect::<Vec<_>>();
+        Ok(ListTransactionsResponse { transactions })
     }
 
     // Handles a request the spend the gateway's ecash for a given federation.
@@ -1743,8 +1860,8 @@ impl Gateway {
     pub async fn handle_shutdown_msg(&self, task_group: TaskGroup) -> AdminResult<()> {
         // Take the write lock on the state so that no additional payments are processed
         let mut state_guard = self.state.write().await;
-        if let GatewayState::Running { lightning_context } = state_guard.clone() {
-            *state_guard = GatewayState::ShuttingDown { lightning_context };
+        if let GatewayState::Running = *state_guard {
+            *state_guard = GatewayState::ShuttingDown;
 
             self.federation_manager
                 .read()
@@ -2122,36 +2239,27 @@ impl Gateway {
         description: Bolt11InvoiceDescription,
         expiry_time: u32,
     ) -> std::result::Result<Bolt11Invoice, LightningRpcError> {
-        let ldk_client = self.get_ldk_client().await;
+        let ph = PaymentHash(*payment_hash.as_byte_array());
 
-        let response = match description {
-            Bolt11InvoiceDescription::Direct(description) => {
-                ldk_client
-                    .create_invoice(CreateInvoiceRequest {
-                        payment_hash: Some(payment_hash),
-                        amount_msat: amount.msats,
-                        expiry_secs: expiry_time,
-                        description: Some(InvoiceDescription::Direct(description)),
-                    })
-                    .await?
+        let ldk_description = match description {
+            Bolt11InvoiceDescription::Direct(desc) => {
+                LdkBolt11InvoiceDescription::Direct(Description::new(desc).map_err(|_| {
+                    LightningRpcError::FailedToGetInvoice {
+                        failure_reason: "Invalid description".to_string(),
+                    }
+                })?)
             }
             Bolt11InvoiceDescription::Hash(hash) => {
-                ldk_client
-                    .create_invoice(CreateInvoiceRequest {
-                        payment_hash: Some(payment_hash),
-                        amount_msat: amount.msats,
-                        expiry_secs: expiry_time,
-                        description: Some(InvoiceDescription::Hash(hash)),
-                    })
-                    .await?
+                LdkBolt11InvoiceDescription::Hash(lightning_invoice::Sha256(hash))
             }
         };
 
-        Bolt11Invoice::from_str(&response.invoice).map_err(|e| {
-            LightningRpcError::FailedToGetInvoice {
+        self.node
+            .bolt11_payment()
+            .receive_for_hash(amount.msats, &ldk_description, expiry_time, ph)
+            .map_err(|e| LightningRpcError::FailedToGetInvoice {
                 failure_reason: e.to_string(),
-            }
-        })
+            })
     }
 
     pub async fn verify_bolt11_preimage_v2(
@@ -2241,19 +2349,43 @@ impl IGatewayClientV2 for Gateway {
         &self,
         htlc_response: fedimint_gateway_common::InterceptPaymentResponse,
     ) {
-        loop {
-            if let Some(ldk_client) = self.ldk_client.read().await.clone() {
-                match ldk_client.complete_htlc(htlc_response.clone()).await {
-                    Ok(..) => return,
-                    Err(err) => {
-                        warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failure trying to complete payment");
-                    }
-                }
-            } else {
-                warn!(target: LOG_GATEWAY, "LDK client not available, retrying...");
-            }
+        let ph = PaymentHash(*htlc_response.payment_hash.as_byte_array());
 
-            sleep(Duration::from_secs(5)).await;
+        // TODO: Get the actual amount from the LDK node. This value is only used by
+        // `ldk-node` to ensure that the amount claimed isn't less than the amount
+        // expected, but we've already verified that the amount is correct when we
+        // intercepted the payment.
+        let claimable_amount_msat = 999_999_999_999_999;
+
+        let ph_hex_str = hex::encode(htlc_response.payment_hash);
+
+        if let PaymentAction::Settle(preimage) = htlc_response.action {
+            if let Err(err) = self.node.bolt11_payment().claim_for_hash(
+                ph,
+                claimable_amount_msat,
+                PaymentPreimage(preimage.0),
+            ) {
+                warn!(
+                    target: LOG_GATEWAY,
+                    payment_hash = %ph_hex_str,
+                    err = %err.fmt_compact(),
+                    "Failed to claim LDK payment",
+                );
+            }
+        } else {
+            warn!(
+                target: LOG_GATEWAY,
+                payment_hash = %ph_hex_str,
+                "Unwinding payment because the action was not Settle",
+            );
+            if let Err(err) = self.node.bolt11_payment().fail_for_hash(ph) {
+                warn!(
+                    target: LOG_GATEWAY,
+                    payment_hash = %ph_hex_str,
+                    err = %err.fmt_compact(),
+                    "Failed to unwind LDK payment",
+                );
+            }
         }
     }
 
@@ -2261,8 +2393,7 @@ impl IGatewayClientV2 for Gateway {
         &self,
         invoice: &Bolt11Invoice,
     ) -> anyhow::Result<Option<(IncomingContract, ClientHandleArc)>> {
-        let lightning_context = self.get_lightning_context().await?;
-        if lightning_context.lightning_public_key == invoice.get_payee_pub_key() {
+        if self.node.node_id() == invoice.get_payee_pub_key() {
             let (contract, client) = self
                 .get_registered_incoming_contract_and_client_v2(
                     PaymentImage::Hash(*invoice.payment_hash()),
@@ -2283,16 +2414,57 @@ impl IGatewayClientV2 for Gateway {
         max_delay: u64,
         max_fee: Amount,
     ) -> std::result::Result<[u8; 32], fedimint_gateway_common::LightningRpcError> {
-        let ldk_client = self
-            .ldk_client
-            .read()
-            .await
-            .clone()
-            .ok_or(LightningRpcError::FailedToConnect)?;
-        ldk_client
-            .pay(invoice, max_delay, max_fee)
-            .await
-            .map(|response| response.preimage.0)
+        let payment_id = PaymentId(*invoice.payment_hash().as_byte_array());
+
+        // Lock by the payment hash to prevent multiple simultaneous calls with the same
+        // invoice from executing.
+        let _payment_lock_guard = self
+            .outbound_lightning_payment_lock_pool
+            .async_lock(payment_id)
+            .await;
+
+        if self.node.payment(&payment_id).is_none() {
+            assert_eq!(
+                self.node
+                    .bolt11_payment()
+                    .send(
+                        &invoice,
+                        Some(SendingParameters {
+                            max_total_routing_fee_msat: Some(Some(max_fee.msats)),
+                            max_total_cltv_expiry_delta: Some(max_delay as u32),
+                            max_path_count: None,
+                            max_channel_saturation_power_of_half: None,
+                        }),
+                    )
+                    .map_err(|e| LightningRpcError::FailedPayment {
+                        failure_reason: format!("LDK payment failed to initialize: {e:?}"),
+                    })?,
+                payment_id
+            );
+        }
+
+        loop {
+            if let Some(payment_details) = self.node.payment(&payment_id) {
+                match payment_details.status {
+                    PaymentStatus::Pending => {}
+                    PaymentStatus::Succeeded => {
+                        if let PaymentKind::Bolt11 {
+                            preimage: Some(preimage),
+                            ..
+                        } = payment_details.kind
+                        {
+                            return Ok(preimage.0);
+                        }
+                    }
+                    PaymentStatus::Failed => {
+                        return Err(LightningRpcError::FailedPayment {
+                            failure_reason: "LDK payment failed".to_string(),
+                        });
+                    }
+                }
+            }
+            fedimint_core::runtime::sleep(Duration::from_millis(100)).await;
+        }
     }
 
     async fn min_contract_amount(
@@ -2320,5 +2492,185 @@ impl IGatewayClientV2 for Gateway {
     ) -> anyhow::Result<FinalReceiveState> {
         // LDK does not support LNv1 swaps
         Err(anyhow!("LNv1 swaps are not supported"))
+    }
+}
+
+/// Creates an LDK node instance from the given configuration parameters.
+pub fn create_ldk_node(
+    data_dir: &Path,
+    chain_source: ChainSource,
+    network: Network,
+    lightning_port: u16,
+    alias: String,
+    mnemonic: Mnemonic,
+    runtime: Arc<tokio::runtime::Runtime>,
+) -> anyhow::Result<ldk_node::Node> {
+    let mut bytes = [0u8; 32];
+    let alias = if alias.is_empty() {
+        "LDK Gateway".to_string()
+    } else {
+        alias
+    };
+    let alias_bytes = alias.as_bytes();
+    let truncated = &alias_bytes[..alias_bytes.len().min(32)];
+    bytes[..truncated.len()].copy_from_slice(truncated);
+    let node_alias = Some(NodeAlias(bytes));
+
+    let mut node_builder = ldk_node::Builder::from_config(ldk_node::config::Config {
+        network,
+        listening_addresses: Some(vec![SocketAddress::TcpIpV4 {
+            addr: [0, 0, 0, 0],
+            port: lightning_port,
+        }]),
+        node_alias,
+        ..Default::default()
+    });
+
+    node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
+
+    match chain_source {
+        ChainSource::Bitcoind {
+            username,
+            password,
+            server_url,
+        } => {
+            node_builder.set_chain_source_bitcoind_rpc(
+                server_url
+                    .host_str()
+                    .expect("Could not retrieve host from bitcoind RPC url")
+                    .to_string(),
+                server_url
+                    .port()
+                    .expect("Could not retrieve port from bitcoind RPC url"),
+                username,
+                password,
+            );
+        }
+        ChainSource::Esplora { server_url } => {
+            node_builder.set_chain_source_esplora(get_esplora_url(server_url)?, None);
+        }
+    }
+    let Some(data_dir_str) = data_dir.to_str() else {
+        return Err(anyhow::anyhow!("Invalid data dir path"));
+    };
+    node_builder.set_storage_dir_path(data_dir_str.to_string());
+
+    info!(
+        target: LOG_LIGHTNING,
+        data_dir = %data_dir_str,
+        alias = %alias,
+        "Starting LDK Node...",
+    );
+    let node = node_builder.build()?;
+    node.start_with_runtime(runtime).map_err(|err| {
+        crit!(
+            target: LOG_LIGHTNING,
+            err = %err.fmt_compact(),
+            "Failed to start LDK Node",
+        );
+        anyhow::anyhow!("Failed to start LDK Node: {err}")
+    })?;
+
+    info!("Successfully started LDK Node");
+    Ok(node)
+}
+
+/// Maps LDK's `PaymentKind` to an optional preimage and an optional payment
+/// hash depending on the type of payment.
+fn get_preimage_and_payment_hash(
+    kind: &PaymentKind,
+) -> (
+    Option<Preimage>,
+    Option<sha256::Hash>,
+    fedimint_gateway_common::PaymentKind,
+) {
+    match kind {
+        PaymentKind::Bolt11 {
+            hash,
+            preimage,
+            secret: _,
+        } => (
+            preimage.map(|p| Preimage(p.0)),
+            Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
+            fedimint_gateway_common::PaymentKind::Bolt11,
+        ),
+        PaymentKind::Bolt11Jit {
+            hash,
+            preimage,
+            secret: _,
+            lsp_fee_limits: _,
+            ..
+        } => (
+            preimage.map(|p| Preimage(p.0)),
+            Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
+            fedimint_gateway_common::PaymentKind::Bolt11,
+        ),
+        PaymentKind::Bolt12Offer {
+            hash,
+            preimage,
+            secret: _,
+            offer_id: _,
+            payer_note: _,
+            quantity: _,
+        } => (
+            preimage.map(|p| Preimage(p.0)),
+            hash.map(|h| sha256::Hash::from_slice(&h.0).expect("Failed to convert payment hash")),
+            fedimint_gateway_common::PaymentKind::Bolt12Offer,
+        ),
+        PaymentKind::Bolt12Refund {
+            hash,
+            preimage,
+            secret: _,
+            payer_note: _,
+            quantity: _,
+        } => (
+            preimage.map(|p| Preimage(p.0)),
+            hash.map(|h| sha256::Hash::from_slice(&h.0).expect("Failed to convert payment hash")),
+            fedimint_gateway_common::PaymentKind::Bolt12Refund,
+        ),
+        PaymentKind::Spontaneous { hash, preimage } => (
+            preimage.map(|p| Preimage(p.0)),
+            Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
+            fedimint_gateway_common::PaymentKind::Bolt11,
+        ),
+        PaymentKind::Onchain { .. } => (None, None, fedimint_gateway_common::PaymentKind::Onchain),
+    }
+}
+
+/// When a port is specified in the Esplora URL, the esplora client inside LDK
+/// node cannot connect to the lightning node when there is a trailing slash.
+fn get_esplora_url(server_url: SafeUrl) -> anyhow::Result<String> {
+    let host = server_url
+        .host_str()
+        .ok_or(anyhow::anyhow!("Missing esplora host"))?;
+    let server_url = if let Some(port) = server_url.port() {
+        format!("{}://{}:{}", server_url.scheme(), host, port)
+    } else {
+        server_url.to_string()
+    };
+    Ok(server_url)
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct LdkOfferId(OfferId);
+
+impl std::hash::Hash for LdkOfferId {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write(&self.0.0);
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct UserChannelId(pub ldk_node::UserChannelId);
+
+impl PartialOrd for UserChannelId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for UserChannelId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.0.cmp(&other.0.0)
     }
 }

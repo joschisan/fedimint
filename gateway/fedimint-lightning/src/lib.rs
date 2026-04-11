@@ -283,7 +283,7 @@ impl dyn ILnRpcClient {
             return LightningInfo::Connected {
                 public_key: info.pub_key,
                 alias: info.alias,
-                network,
+                network: network.to_string(),
                 block_height: info.block_height as u64,
                 synced_to_chain: info.synced_to_chain,
             };

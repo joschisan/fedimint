@@ -1,13 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::fmt::Debug;
-use std::time::SystemTime;
 
 use anyhow::Context as _;
+use bitcoin::Address;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::hashes::sha256;
-use bitcoin::secp256k1::PublicKey;
-use bitcoin::{Address, Network, OutPoint};
 use fedimint_connectors::error::ServerError;
 use fedimint_connectors::{
     ConnectionPool, ConnectorRegistry, DynGatewayConnection, IGatewayConnection, ServerResult,
@@ -19,7 +16,6 @@ use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, BitcoinAmountOrAll, secp256k1};
 use fedimint_eventlog::{EventKind, EventLogId, PersistedLogEntry};
-use futures::stream::BoxStream;
 use lightning_invoice::{Bolt11Invoice, RoutingFees};
 pub use reqwest::Method;
 use serde::de::DeserializeOwned;
@@ -160,8 +156,8 @@ pub struct GatewayInfo {
     // TODO: Remove this alias once it no longer breaks backwards compatibility.
     #[serde(alias = "channels")]
     pub federation_fake_scids: Option<BTreeMap<u64, FederationId>>,
-    pub gateway_state: String,
     pub lightning_info: LightningInfo,
+    pub gateway_state: String,
     pub registrations: BTreeMap<RegisteredProtocol, (SafeUrl, secp256k1::PublicKey)>,
 }
 
@@ -258,19 +254,6 @@ pub struct PaymentLogPayload {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PaymentLogResponse(pub Vec<PersistedLogEntry>);
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ChannelInfo {
-    pub remote_pubkey: secp256k1::PublicKey,
-    pub channel_size_sats: u64,
-    pub outbound_liquidity_sats: u64,
-    pub inbound_liquidity_sats: u64,
-    pub is_active: bool,
-    pub funding_outpoint: Option<OutPoint>,
-    pub remote_node_alias: Option<String>,
-    #[serde(default)]
-    pub remote_address: Option<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OpenChannelRequest {
     pub pubkey: secp256k1::PublicKey,
@@ -327,28 +310,9 @@ pub struct CloseChannelsWithPeerResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GetInvoiceRequest {
-    pub payment_hash: sha256::Hash,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GetInvoiceResponse {
-    pub preimage: Option<String>,
-    pub payment_hash: Option<sha256::Hash>,
-    pub amount: Amount,
-    pub created_at: SystemTime,
-    pub status: PaymentStatus,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ListTransactionsPayload {
     pub start_secs: u64,
     pub end_secs: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ListTransactionsResponse {
-    pub transactions: Vec<PaymentDetails>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -383,6 +347,58 @@ pub enum PaymentStatus {
     Failed,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GetInvoiceRequest {
+    pub payment_hash: sha256::Hash,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GetInvoiceResponse {
+    pub preimage: Option<String>,
+    pub payment_hash: Option<sha256::Hash>,
+    pub amount: Amount,
+    pub created_at: std::time::SystemTime,
+    pub status: PaymentStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ListTransactionsResponse {
+    pub transactions: Vec<PaymentDetails>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ChannelInfo {
+    pub remote_pubkey: secp256k1::PublicKey,
+    pub remote_alias: Option<String>,
+    pub remote_address: Option<String>,
+    pub channel_size_sats: u64,
+    pub outbound_liquidity_sats: u64,
+    pub inbound_liquidity_sats: u64,
+    pub is_usable: bool,
+    pub is_outbound: bool,
+    pub funding_txid: Option<bitcoin::Txid>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum LightningInfo {
+    Connected {
+        public_key: secp256k1::PublicKey,
+        alias: String,
+        network: String,
+        block_height: u64,
+        synced_to_chain: bool,
+    },
+    NotConnected,
+}
+
+#[derive(Debug, Clone)]
+pub struct LightningContext {
+    pub lightning_public_key: secp256k1::PublicKey,
+    pub lightning_alias: String,
+    pub lightning_network: bitcoin::Network,
+    pub supports_private_payments: bool,
+}
+
 #[derive(Clone)]
 pub enum ChainSource {
     Bitcoind {
@@ -410,19 +426,6 @@ impl fmt::Display for ChainSource {
             }
         }
     }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum LightningInfo {
-    Connected {
-        public_key: PublicKey,
-        alias: String,
-        network: Network,
-        block_height: u64,
-        synced_to_chain: bool,
-    },
-    NotConnected,
 }
 
 #[derive(
@@ -561,10 +564,6 @@ impl std::str::FromStr for PaymentFee {
 
 // --- Types moved from fedimint-lightning ---
 
-pub const MAX_LIGHTNING_RETRIES: u32 = 10;
-
-pub type RouteHtlcStream<'a> = BoxStream<'a, InterceptPaymentRequest>;
-
 #[derive(
     Error, Debug, Serialize, Deserialize, Encodable, Decodable, Clone, Eq, PartialEq, Hash,
 )]
@@ -607,24 +606,6 @@ pub enum LightningRpcError {
     Bolt12Error { failure_reason: String },
 }
 
-/// Simplified lightning context without trait object.
-#[derive(Clone, Debug)]
-pub struct LightningContext {
-    pub lightning_public_key: PublicKey,
-    pub lightning_alias: String,
-    pub lightning_network: Network,
-    pub supports_private_payments: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GetNodeInfoResponse {
-    pub pub_key: PublicKey,
-    pub alias: String,
-    pub network: String,
-    pub block_height: u32,
-    pub synced_to_chain: bool,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct InterceptPaymentRequest {
     pub payment_hash: sha256::Hash,
@@ -648,62 +629,6 @@ pub enum PaymentAction {
     Settle(Preimage),
     Cancel,
     Forward,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GetRouteHintsResponse {
-    pub route_hints: Vec<RouteHint>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PayInvoiceResponse {
-    pub preimage: Preimage,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CreateInvoiceRequest {
-    pub payment_hash: Option<sha256::Hash>,
-    pub amount_msat: u64,
-    pub expiry_secs: u32,
-    pub description: Option<InvoiceDescription>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum InvoiceDescription {
-    Direct(String),
-    Hash(sha256::Hash),
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CreateInvoiceResponse {
-    pub invoice: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GetLnOnchainAddressResponse {
-    pub address: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SendOnchainResponse {
-    pub txid: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OpenChannelResponse {
-    pub funding_txid: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ListChannelsResponse {
-    pub channels: Vec<ChannelInfo>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GetBalancesResponse {
-    pub onchain_balance_sats: u64,
-    pub lightning_balance_msats: u64,
-    pub inbound_lightning_liquidity_msats: u64,
 }
 
 // --- Types moved from fedimint-ln-common ---

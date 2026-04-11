@@ -84,6 +84,18 @@ pub struct GatewayOpts {
     #[arg(long, env = FM_ESPLORA_URL_ENV)]
     pub esplora_url: Option<SafeUrl>,
 
+    /// LDK lightning node listen port
+    #[arg(
+        long = "ldk-lightning-port",
+        env = "FM_PORT_LDK",
+        default_value_t = 9735
+    )]
+    pub lightning_port: u16,
+
+    /// LDK node alias
+    #[arg(long = "ldk-alias", env = "FM_LDK_ALIAS", default_value = "")]
+    pub ldk_alias: String,
+
     /// The default routing fees that are applied to new federations
     #[arg(long = "default-routing-fees", env = envs::FM_DEFAULT_ROUTING_FEES_ENV, default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
     default_routing_fees: PaymentFee,

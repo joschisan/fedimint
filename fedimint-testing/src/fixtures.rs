@@ -16,10 +16,10 @@ use fedimint_core::db::mem_impl::MemDatabase;
 use fedimint_core::envs::BitcoinRpcConfig;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::SafeUrl;
-use fedimint_gateway_common::{ChainSource, LightningContext};
-use fedimint_gateway_server::Gateway;
+use fedimint_gateway_common::ChainSource;
 use fedimint_gateway_server::client::GatewayClientBuilder;
 use fedimint_gateway_server::config::DatabaseBackend;
+use fedimint_gateway_server::{Gateway, create_ldk_node};
 use fedimint_logging::TracingSetup;
 use fedimint_server::core::{DynServerModuleInit, IServerModuleInit, ServerModuleInitRegistry};
 use fedimint_server_bitcoin_rpc::bitcoind::BitcoindClient;
@@ -230,14 +230,6 @@ impl Fixtures {
                 .await
                 .expect("Failed to initialize gateway");
 
-        let lightning_context = LightningContext {
-            lightning_public_key: bitcoin::secp256k1::PublicKey::from_slice(&[2; 33])
-                .expect("valid dummy pubkey"),
-            lightning_alias: "FakeNode".to_string(),
-            lightning_network: bitcoin::Network::Regtest,
-            supports_private_payments: false,
-        };
-
         // Module tests do not use the webserver, so any port is ok
         let listen: SocketAddr = "127.0.0.1:9000".parse().unwrap();
         let address: SafeUrl = format!("http://{listen}").parse().unwrap();
@@ -248,17 +240,44 @@ impl Fixtures {
         ))
         .expect("Failed to parse default esplora server");
 
+        let chain_source = ChainSource::Esplora {
+            server_url: esplora_server_url,
+        };
+
+        // Create a test mnemonic for the LDK node
+        let mnemonic = Bip39RootSecretStrategy::<12>::random(&mut OsRng);
+
+        let ldk_data_dir = path.join("ldk_node");
+        std::fs::create_dir_all(&ldk_data_dir).expect("Failed to create LDK data dir");
+
+        // Use a random port to avoid conflicts between parallel tests
+        let lightning_port = 10000 + (rand::random::<u16>() % 50000);
+
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to build LDK runtime"),
+        );
+
+        let node = create_ldk_node(
+            &ldk_data_dir,
+            chain_source.clone(),
+            bitcoin::Network::Regtest,
+            lightning_port,
+            "TestNode".to_string(),
+            mnemonic,
+            runtime,
+        )
+        .expect("Failed to create LDK node");
+        let node = Arc::new(node);
+
         Gateway::builder(client_builder, gateway_db)
             .listen(listen)
             .api_addr(address)
             .network(bitcoin::Network::Regtest)
-            // Manually set the gateway's state to `Running`. In tests, we don't run the
-            // webserver or intercept HTLCs, so this is necessary for instructing the
-            // gateway that it is connected to the mock Lightning node.
-            .gateway_state(fedimint_gateway_server::GatewayState::Running { lightning_context })
-            .chain_source(ChainSource::Esplora {
-                server_url: esplora_server_url,
-            })
+            .node(node)
+            .chain_source(chain_source)
             .build()
             .await
             .expect("Failed to create gateway")

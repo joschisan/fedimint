@@ -407,13 +407,14 @@ impl<'a> GatewayClient {
                 let inbound_liquidity_sats = channel["inbound_liquidity_sats"]
                     .as_u64()
                     .context("inbound_liquidity_sats must be a u64")?;
-                let is_active = channel["is_active"].as_bool().unwrap_or(true);
-                let funding_outpoint = channel.get("funding_outpoint").map(|v| {
-                    serde_json::from_value::<bitcoin::OutPoint>(v.clone())
-                        .expect("Could not deserialize outpoint")
-                });
-                let remote_node_alias = channel
-                    .get("remote_node_alias")
+                let is_usable = channel["is_usable"].as_bool().unwrap_or(true);
+                let is_outbound = channel["is_outbound"].as_bool().unwrap_or(false);
+                let funding_txid = channel
+                    .get("funding_txid")
+                    .and_then(|v| serde_json::from_value::<bitcoin::Txid>(v.clone()).ok());
+                let remote_alias = channel
+                    .get("remote_alias")
+                    .and_then(|v| v.as_str())
                     .map(std::string::ToString::to_string);
                 let remote_address = channel
                     .get("remote_address")
@@ -422,13 +423,14 @@ impl<'a> GatewayClient {
                     remote_pubkey: remote_pubkey
                         .parse()
                         .expect("Lightning node returned invalid remote channel pubkey"),
+                    remote_alias,
+                    remote_address,
                     channel_size_sats,
                     outbound_liquidity_sats,
                     inbound_liquidity_sats,
-                    is_active,
-                    funding_outpoint,
-                    remote_node_alias,
-                    remote_address,
+                    is_usable,
+                    is_outbound,
+                    funding_txid,
                 })
             })
             .collect::<Result<Vec<ChannelInfo>>>()?;

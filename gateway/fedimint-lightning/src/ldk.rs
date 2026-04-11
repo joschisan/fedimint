@@ -678,13 +678,14 @@ impl ILnRpcClient for GatewayLdkClient {
 
             channels.push(ChannelInfo {
                 remote_pubkey: channel_details.counterparty_node_id,
+                remote_alias: remote_node_alias,
+                remote_address,
                 channel_size_sats: channel_details.channel_value_sats,
                 outbound_liquidity_sats: channel_details.outbound_capacity_msat / 1000,
                 inbound_liquidity_sats: channel_details.inbound_capacity_msat / 1000,
-                is_active: channel_details.is_usable,
-                funding_outpoint: channel_details.funding_txo,
-                remote_node_alias,
-                remote_address,
+                is_usable: channel_details.is_usable,
+                is_outbound: channel_details.is_outbound,
+                funding_txid: channel_details.funding_txo.map(|txo| txo.txid),
             });
         }
 

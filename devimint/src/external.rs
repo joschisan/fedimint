@@ -773,7 +773,7 @@ async fn wait_for_ready_channel_on_gateway_with_counterparty(
 
             if channels
                 .iter()
-                .any(|channel| channel.remote_pubkey == counterparty_lightning_node_pubkey && channel.is_active)
+                .any(|channel| channel.remote_pubkey == counterparty_lightning_node_pubkey && channel.is_usable)
             {
                 return Ok(());
             }
