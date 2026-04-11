@@ -93,8 +93,8 @@ impl TestEnv {
         info!("Gateways ready");
 
         info!("Connecting gateways to federation...");
-        gateway_cli(&gw1_addr, &["connect-fed", invite_code_str.trim()]).await?;
-        gateway_cli(&gw2_addr, &["connect-fed", invite_code_str.trim()]).await?;
+        gateway_cli(&gw1_addr, &["join", invite_code_str.trim()]).await?;
+        gateway_cli(&gw2_addr, &["join", invite_code_str.trim()]).await?;
         info!("Gateways connected");
 
         info!("Funding gateways and opening channel...");

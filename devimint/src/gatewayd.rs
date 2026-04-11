@@ -136,9 +136,9 @@ impl<'a> GatewayClient {
         Ok(lightning_pub_key.parse()?)
     }
 
-    pub async fn connect_fed(&self, invite_code: String) -> Result<serde_json::Value> {
-        let fed_info = poll("gateway connect-fed", || async {
-            let value = cmd!(self, "connect-fed", invite_code.clone())
+    pub async fn join(&self, invite_code: String) -> Result<serde_json::Value> {
+        let fed_info = poll("gateway join", || async {
+            let value = cmd!(self, "join", invite_code.clone())
                 .out_json()
                 .await
                 .map_err(ControlFlow::Continue)?;
@@ -152,8 +152,8 @@ impl<'a> GatewayClient {
         let federation_id = fed.calculate_federation_id();
         let invite_code = fed.invite_code()?;
         info!(target: LOG_DEVIMINT, federation_id = %federation_id, "Recovering...");
-        poll("gateway connect-fed --recover=true", || async {
-            cmd!(self, "connect-fed", invite_code.clone(), "--recover=true")
+        poll("gateway join --recover=true", || async {
+            cmd!(self, "join", invite_code.clone(), "--recover=true")
                 .run()
                 .await
                 .map_err(ControlFlow::Continue)?;
@@ -220,12 +220,6 @@ impl<'a> GatewayClient {
         Ok(serde_json::from_value(value)?)
     }
 
-    pub async fn leave_federation(&self, federation_id: FederationId) -> Result<serde_json::Value> {
-        let fed_info = cmd!(self, "leave-fed", "--federation-id", federation_id)
-            .out_json()
-            .await?;
-        Ok(fed_info)
-    }
 
     pub async fn create_invoice(&self, amount_msats: u64) -> Result<Bolt11Invoice> {
         let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;

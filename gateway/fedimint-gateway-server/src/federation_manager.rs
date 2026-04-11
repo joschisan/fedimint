@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use bitcoin::secp256k1::Keypair;
 use fedimint_client::ClientHandleArc;
@@ -17,7 +16,7 @@ use fedimint_mint_client::MintClientModule;
 use tracing::{info, warn};
 
 use crate::error::{AdminGatewayError, FederationNotConnected};
-use crate::{AdminResult, Registration};
+use crate::AdminResult;
 
 /// The first index that the gateway will assign to a federation.
 /// Note: This starts at 1 because LNv1 uses the `federation_index` as an SCID.
@@ -57,47 +56,6 @@ impl FederationManager {
         self.index_to_federation.insert(index, federation_id);
     }
 
-    pub async fn leave_federation(
-        &mut self,
-        federation_id: FederationId,
-        dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
-        registrations: Vec<&Registration>,
-    ) -> AdminResult<FederationInfo> {
-        let federation_info = self.federation_info(federation_id, dbtx).await?;
-
-        for registration in registrations {
-            self.unannounce_from_federation(federation_id, registration.keypair)
-                .await;
-        }
-
-        self.remove_client(federation_id).await?;
-
-        Ok(federation_info)
-    }
-
-    async fn remove_client(&mut self, federation_id: FederationId) -> AdminResult<()> {
-        let client = self
-            .clients
-            .remove(&federation_id)
-            .ok_or(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            })?
-            .into_value();
-
-        self.index_to_federation
-            .retain(|_, fid| *fid != federation_id);
-
-        match Arc::into_inner(client) {
-            Some(client) => {
-                client.shutdown().await;
-                Ok(())
-            }
-            _ => Err(AdminGatewayError::ClientRemovalError(format!(
-                "Federation client {federation_id} is not unique, failed to shutdown client"
-            ))),
-        }
-    }
-
     /// Waits for ongoing incoming LNv1 and LNv2 payments to complete before
     /// returning.
     pub async fn wait_for_incoming_payments(&self) -> AdminResult<()> {
@@ -125,23 +83,6 @@ impl FederationManager {
 
         info!(target: LOG_GATEWAY, "Finished waiting for incoming payments");
         Ok(())
-    }
-
-    async fn unannounce_from_federation(
-        &self,
-        federation_id: FederationId,
-        gateway_keypair: Keypair,
-    ) {
-        if let Ok(client) = self
-            .clients
-            .get(&federation_id)
-            .ok_or(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            })
-            && let Ok(ln) = client.value().get_first_module::<GatewayClientModule>()
-        {
-            ln.remove_from_federation(gateway_keypair).await;
-        }
     }
 
     /// Iterates through all of the federations the gateway is registered with

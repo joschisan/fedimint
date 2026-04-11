@@ -4,12 +4,9 @@ use fedimint_core::fedimint_build_code_version_env;
 use fedimint_core::util::SafeUrl;
 use fedimint_eventlog::{EventKind, EventLogId};
 use fedimint_gateway_client::{
-    connect_federation, get_balances, get_info, get_invite_codes, get_mnemonic, leave_federation,
-    payment_log, stop,
+    get_balances, get_info, get_invite_codes, get_mnemonic, join_federation, payment_log, stop,
 };
-use fedimint_gateway_common::{
-    ConnectFedPayload, LeaveFedPayload, PaymentLogPayload,
-};
+use fedimint_gateway_common::{ConnectFedPayload, PaymentLogPayload};
 use fedimint_ln_common::client::GatewayApi;
 
 use crate::{CliOutput, CliOutputResult};
@@ -25,7 +22,7 @@ pub enum GeneralCommands {
     /// Get the total on-chain, lightning, and eCash balances of the gateway.
     GetBalances,
     /// Register the gateway with a federation.
-    ConnectFed {
+    Join {
         /// Invite code to connect to the federation
         invite_code: String,
         /// Activate usage of Tor (or not) as the connector for the federation
@@ -35,11 +32,6 @@ pub enum GeneralCommands {
         /// Indicates if the client should be recovered from a mnemonic
         #[clap(long)]
         recover: Option<bool>,
-    },
-    /// Leave a federation.
-    LeaveFed {
-        #[clap(long)]
-        federation_id: FederationId,
     },
     /// Prints the seed phrase for the gateway
     Seed,
@@ -88,13 +80,13 @@ impl GeneralCommands {
                 let response = get_balances(client, base_url).await?;
                 Ok(CliOutput::Balances(response))
             }
-            Self::ConnectFed {
+            Self::Join {
                 invite_code,
                 #[cfg(feature = "tor")]
                 use_tor,
                 recover,
             } => {
-                let response = connect_federation(
+                let response = join_federation(
                     client,
                     base_url,
                     ConnectFedPayload {
@@ -108,11 +100,6 @@ impl GeneralCommands {
                 )
                 .await?;
 
-                Ok(CliOutput::Federation(response))
-            }
-            Self::LeaveFed { federation_id } => {
-                let response =
-                    leave_federation(client, base_url, LeaveFedPayload { federation_id }).await?;
                 Ok(CliOutput::Federation(response))
             }
             Self::Seed => {

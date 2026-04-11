@@ -9,14 +9,14 @@ use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_common::{
     ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT,
-    CLOSE_CHANNELS_WITH_PEER_ENDPOINT, CONFIGURATION_ENDPOINT, CONNECT_FED_ENDPOINT,
+    CLOSE_CHANNELS_WITH_PEER_ENDPOINT, CONFIGURATION_ENDPOINT,
     CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
     ChannelInfo, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConfigPayload,
     ConnectFedPayload, CreateInvoiceForOperatorPayload,
     DepositAddressPayload, DepositAddressRecheckPayload, FederationInfo, GATEWAY_INFO_ENDPOINT,
     GET_BALANCES_ENDPOINT, GET_INVOICE_ENDPOINT, GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GatewayBalances,
     GatewayFedConfig, GatewayInfo, GetInvoiceRequest, GetInvoiceResponse, INVITE_CODES_ENDPOINT,
-    LEAVE_FED_ENDPOINT, LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT, LeaveFedPayload,
+    JOIN_ENDPOINT, LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT,
     ListTransactionsPayload, ListTransactionsResponse, MNEMONIC_ENDPOINT, MnemonicResponse,
     OPEN_CHANNEL_ENDPOINT, OPEN_CHANNEL_WITH_PUSH_ENDPOINT, OpenChannelRequest,
     PAY_INVOICE_FOR_OPERATOR_ENDPOINT, PAYMENT_LOG_ENDPOINT,
@@ -103,23 +103,13 @@ pub async fn withdraw_to_onchain(
         .await
 }
 
-pub async fn connect_federation(
+pub async fn join_federation(
     client: &GatewayApi,
     base_url: &SafeUrl,
     payload: ConnectFedPayload,
 ) -> ServerResult<FederationInfo> {
     client
-        .request(base_url, Method::POST, CONNECT_FED_ENDPOINT, Some(payload))
-        .await
-}
-
-pub async fn leave_federation(
-    client: &GatewayApi,
-    base_url: &SafeUrl,
-    payload: LeaveFedPayload,
-) -> ServerResult<FederationInfo> {
-    client
-        .request(base_url, Method::POST, LEAVE_FED_ENDPOINT, Some(payload))
+        .request(base_url, Method::POST, JOIN_ENDPOINT, Some(payload))
         .await
 }
 

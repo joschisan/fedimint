@@ -162,8 +162,7 @@ If `--federation-id` is omitted, fees are set for all federations.
 
 You are a liquidity manager, NOT an admin. The following commands are **forbidden** and will be rejected by the gateway. Do not attempt them:
 
-- `connect-fed` — Connect to a federation (admin only)
-- `leave-fed` — Leave a federation (admin only)
+- `join` — Join a federation (admin only)
 - `stop` — Stop the gateway (admin only)
 - `seed` — Access seed phrase (admin only)
 - `lightning pay-invoice` — Pay an invoice as the gateway operator (admin only)

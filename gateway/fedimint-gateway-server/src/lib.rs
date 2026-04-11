@@ -76,7 +76,7 @@ use fedimint_gateway_common::{
     ConnectFedPayload, ConnectorType, CreateInvoiceForOperatorPayload,
     DepositAddressPayload, DepositAddressRecheckPayload,
     FederationBalanceInfo, FederationConfig, FederationInfo, GatewayBalances, GatewayFedConfig,
-    GatewayInfo, GetInvoiceRequest, GetInvoiceResponse, LeaveFedPayload, LightningInfo,
+    GatewayInfo, GetInvoiceRequest, GetInvoiceResponse, LightningInfo,
     LightningMode, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
     OpenChannelRequest, PayInvoiceForOperatorPayload,
     PaymentLogPayload, PaymentLogResponse,
@@ -96,11 +96,6 @@ pub trait IAdminGateway {
     async fn handle_list_channels_msg(
         &self,
     ) -> std::result::Result<Vec<fedimint_gateway_common::ChannelInfo>, Self::Error>;
-
-    async fn handle_leave_federation(
-        &self,
-        payload: LeaveFedPayload,
-    ) -> std::result::Result<FederationInfo, Self::Error>;
 
     async fn handle_connect_federation(
         &self,
@@ -1918,32 +1913,6 @@ impl IAdminGateway for Gateway {
         Ok(response.channels)
     }
 
-    /// Handle a request to have the Gateway leave a federation. The Gateway
-    /// will request the federation to remove the registration record and
-    /// the gateway will remove the configuration needed to construct the
-    /// federation client.
-    async fn handle_leave_federation(
-        &self,
-        payload: LeaveFedPayload,
-    ) -> AdminResult<FederationInfo> {
-        // Lock the federation manager before starting the db transaction to reduce the
-        // chance of db write conflicts.
-        let mut federation_manager = self.federation_manager.write().await;
-        let mut dbtx = self.gateway_db.begin_transaction().await;
-
-        let federation_info = federation_manager
-            .leave_federation(
-                payload.federation_id,
-                &mut dbtx.to_ref_nc(),
-                self.registrations.values().collect(),
-            )
-            .await?;
-
-        dbtx.remove_federation_config(payload.federation_id).await;
-        dbtx.commit_tx().await;
-        Ok(federation_info)
-    }
-
     /// Handles a connection request to join a new federation. The gateway will
     /// download the federation's client configuration, construct a new
     /// client, registers, the gateway with the federation, and persists the
@@ -2042,7 +2011,7 @@ impl IAdminGateway for Gateway {
             }
         }
 
-        // no need to enter span earlier, because connect-fed has a span
+        // no need to enter span earlier, because join has a span
         federation_manager.add_client(
             federation_index,
             Spanned::new(

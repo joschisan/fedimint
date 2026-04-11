@@ -14,14 +14,14 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::util::FmtCompact;
 use fedimint_gateway_common::{
     ADDRESS_ENDPOINT, ADDRESS_RECHECK_ENDPOINT,
-    CLOSE_CHANNELS_WITH_PEER_ENDPOINT, CONFIGURATION_ENDPOINT, CONNECT_FED_ENDPOINT,
+    CLOSE_CHANNELS_WITH_PEER_ENDPOINT, CONFIGURATION_ENDPOINT,
     CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
     CloseChannelsWithPeerRequest, ConfigPayload, ConnectFedPayload,
     CreateInvoiceForOperatorPayload, DepositAddressPayload,
     DepositAddressRecheckPayload, GATEWAY_INFO_ENDPOINT, GET_BALANCES_ENDPOINT,
     GET_INVOICE_ENDPOINT, GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GetInvoiceRequest,
-    INVITE_CODES_ENDPOINT, LEAVE_FED_ENDPOINT, LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT,
-    LeaveFedPayload, ListTransactionsPayload, MNEMONIC_ENDPOINT, OPEN_CHANNEL_ENDPOINT,
+    INVITE_CODES_ENDPOINT, JOIN_ENDPOINT, LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT,
+    ListTransactionsPayload, MNEMONIC_ENDPOINT, OPEN_CHANNEL_ENDPOINT,
     OPEN_CHANNEL_WITH_PUSH_ENDPOINT, OpenChannelRequest, PAY_INVOICE_FOR_OPERATOR_ENDPOINT,
     PAYMENT_LOG_ENDPOINT,
     PEGIN_FROM_ONCHAIN_ENDPOINT, PayInvoiceForOperatorPayload, PaymentLogPayload,
@@ -284,15 +284,8 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup, handlers: &mut Handlers)
     );
     let authenticated_routes = register_post_handler(
         handlers,
-        CONNECT_FED_ENDPOINT,
-        connect_fed,
-        is_authenticated,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_post_handler(
-        handlers,
-        LEAVE_FED_ENDPOINT,
-        leave_fed,
+        JOIN_ENDPOINT,
+        join,
         is_authenticated,
         authenticated_routes,
     );
@@ -531,23 +524,13 @@ async fn pay_invoice(
     Ok(Json(json!(preimage.0.encode_hex::<String>())))
 }
 
-/// Connect a new federation
+/// Join a new federation
 #[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
-async fn connect_fed(
+async fn join(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(payload): Json<ConnectFedPayload>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let fed = gateway.handle_connect_federation(payload).await?;
-    Ok(Json(json!(fed)))
-}
-
-/// Leave a federation
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
-async fn leave_fed(
-    Extension(gateway): Extension<Arc<Gateway>>,
-    Json(payload): Json<LeaveFedPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let fed = gateway.handle_leave_federation(payload).await?;
     Ok(Json(json!(fed)))
 }
 

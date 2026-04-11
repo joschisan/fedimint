@@ -179,7 +179,7 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
 
                 // Try to connect to already connected federation
                 let invite_code = dev_fed.fed().await?.invite_code()?;
-                gw.client().connect_fed(invite_code).await.expect_err("Connecting to the same federation succeeded");
+                gw.client().join(invite_code).await.expect_err("Connecting to the same federation succeeded");
                 info!(target: LOG_TEST, "Verified that gateway couldn't connect to already connected federation");
 
                 let gatewayd_version = util::Gatewayd::version_or_default().await;
@@ -228,7 +228,7 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                 info!(target: LOG_TEST, "Successfully spawned new federation");
 
                 let new_invite_code = new_fed.invite_code()?;
-                gw.client().connect_fed(new_invite_code.clone()).await?;
+                gw.client().join(new_invite_code.clone()).await?;
 
                 let (default_base, default_ppm) = if gatewayd_version >= *VERSION_0_8_2 {
                     (0, 0)
@@ -315,21 +315,6 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
 
                 assert_eq!(first_fed_balance_msat, Amount::ZERO);
                 almost_equal(second_fed_balance_msat.msats, pegin_amount.msats, 10_000).unwrap();
-
-                let fed_id = FederationId::from_str(&fed_id).expect("invalid Federation ID");
-                let fed_info = gw.client().leave_federation(fed_id).await?;
-                assert_eq!(serde_json::from_value::<FederationId>(fed_info["federation_id"].clone())?, fed_id);
-                assert_eq!(fed_info["config"]["federation_index"].as_u64().expect("Was not u64"), 1);
-                gw.client().leave_federation(fed_id).await.expect_err("Successfully left a federation twice");
-
-                let new_fed_id = FederationId::from_str(&new_fed_id).expect("invalid Federation ID");
-                let fed_info = gw.client().leave_federation(new_fed_id).await?;
-                assert_eq!(serde_json::from_value::<FederationId>(fed_info["federation_id"].clone())?, new_fed_id);
-                assert_eq!(fed_info["config"]["federation_index"].as_u64().expect("Was not u64"), 2);
-
-                // Rejoin new federation, verify that the balance is the same
-                let fed_info = gw.client().connect_fed(new_invite_code).await?;
-                assert_eq!(second_fed_balance_msat, Amount::from_msats(fed_info["balance_msat"].as_u64().expect("Balance should be present")));
 
                 if gw.gatewayd_version >= *VERSION_0_10_0_ALPHA {
                     // Try to get the info over iroh

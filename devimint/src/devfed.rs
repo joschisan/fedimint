@@ -193,7 +193,7 @@ impl DevJitFed {
                 let start_time = fedimint_core::time::now();
                 if !skip_setup && !pre_dkg {
                     let invite = fed.invite_code()?;
-                    gw_lnd.client().connect_fed(invite).await?;
+                    gw_lnd.client().join(invite).await?;
                 }
                 info!(target: LOG_DEVIMINT, elapsed_ms = %start_time.elapsed()?.as_millis(), "Registered lnd gateway");
                 Ok(Arc::new(()))
@@ -255,7 +255,7 @@ impl DevJitFed {
                     if !skip_setup && !pre_dkg {
                         debug!(target: LOG_DEVIMINT, "Registering ldk gateway...");
                         let invite = fed.invite_code()?;
-                        gw_ldk.client().connect_fed(invite).await?;
+                        gw_ldk.client().join(invite).await?;
                     } else {
                         debug!(target: LOG_DEVIMINT, "Skipping registering ldk gateway");
                     }
@@ -275,7 +275,7 @@ impl DevJitFed {
                     let start_time = fedimint_core::time::now();
                     if !skip_setup && !pre_dkg {
                         let invite = fed.invite_code()?;
-                        gw_ldk2.client().connect_fed(invite).await?;
+                        gw_ldk2.client().join(invite).await?;
                     }
                     info!(target: LOG_DEVIMINT, elapsed_ms = %start_time.elapsed()?.as_millis(), "Connected ldk gateway 2");
                 }
