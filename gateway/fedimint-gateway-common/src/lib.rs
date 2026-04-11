@@ -1,6 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fmt::Debug;
+use std::str::FromStr;
 use std::time::SystemTime;
+
+use anyhow::Context as _;
 
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::hashes::sha256;
@@ -10,16 +14,24 @@ use clap::Subcommand;
 use envs::{
     FM_LDK_ALIAS_ENV, FM_LND_MACAROON_ENV, FM_LND_RPC_ADDR_ENV, FM_LND_TLS_CERT_ENV, FM_PORT_LDK,
 };
+use fedimint_connectors::error::ServerError;
+use fedimint_connectors::{
+    ConnectionPool, ConnectorRegistry, DynGatewayConnection, IGatewayConnection, ServerResult,
+};
 use fedimint_core::config::{FederationId, JsonClientConfig};
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::hex::ToHex;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, BitcoinAmountOrAll, secp256k1};
 use fedimint_eventlog::{EventKind, EventLogId, PersistedLogEntry};
-use fedimint_lnv2_common::gateway_api::PaymentFee;
-use fedimint_wallet_client::PegOutFees;
-use lightning_invoice::Bolt11Invoice;
+use futures::stream::BoxStream;
+use lightning_invoice::{Bolt11Invoice, RoutingFees};
+pub use reqwest::Method;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use tokio::sync::watch;
 
 pub mod envs;
 
@@ -93,7 +105,7 @@ pub struct WithdrawPayload {
     /// When provided (from UI preview flow), uses these quoted fees.
     /// When None, fetches current fees from the wallet.
     #[serde(default)]
-    pub quoted_fees: Option<PegOutFees>,
+    pub quoted_fees: Option<bitcoin::Amount>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -105,7 +117,7 @@ pub struct WithdrawToOnchainPayload {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WithdrawResponse {
     pub txid: bitcoin::Txid,
-    pub fees: PegOutFees,
+    pub fees: bitcoin::Amount,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -119,7 +131,7 @@ pub struct WithdrawPreviewPayload {
 pub struct WithdrawPreviewResponse {
     pub withdraw_amount: Amount,
     pub address: String,
-    pub peg_out_fees: PegOutFees,
+    pub peg_out_fees: bitcoin::Amount,
     pub total_cost: Amount,
     /// Estimated mint fees when withdrawing all. None for partial withdrawals.
     #[serde(default)]
@@ -468,5 +480,520 @@ pub enum LightningInfo {
 #[serde(rename_all = "snake_case")]
 pub enum RegisteredProtocol {
     Http,
+}
+
+// --- PaymentFee moved from fedimint-lnv2-common ---
+
+#[derive(
+    Debug, Clone, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encodable, Decodable,
+    Copy,
+)]
+pub struct PaymentFee {
+    pub base: Amount,
+    pub parts_per_million: u64,
+}
+
+impl PaymentFee {
+    /// This is the maximum send fee of one and a half percent plus one hundred
+    /// satoshis a correct gateway may recommend as a default. It accounts for
+    /// the fee required to reliably route this payment over lightning.
+    pub const SEND_FEE_LIMIT: PaymentFee = PaymentFee {
+        base: Amount::from_sats(100),
+        parts_per_million: 15_000,
+    };
+
+    /// This is the fee the gateway uses to cover transaction fees with the
+    /// federation.
+    pub const TRANSACTION_FEE_DEFAULT: PaymentFee = PaymentFee {
+        base: Amount::from_sats(2),
+        parts_per_million: 3000,
+    };
+
+    /// This is the maximum receive fee of half of one percent plus fifty
+    /// satoshis a correct gateway may recommend as a default.
+    pub const RECEIVE_FEE_LIMIT: PaymentFee = PaymentFee {
+        base: Amount::from_sats(50),
+        parts_per_million: 5_000,
+    };
+
+    pub fn add_to(&self, msats: u64) -> Amount {
+        Amount::from_msats(msats.saturating_add(self.absolute_fee(msats)))
+    }
+
+    pub fn subtract_from(&self, msats: u64) -> Amount {
+        Amount::from_msats(msats.saturating_sub(self.absolute_fee(msats)))
+    }
+
+    pub fn fee(&self, msats: u64) -> Amount {
+        Amount::from_msats(self.absolute_fee(msats))
+    }
+
+    fn absolute_fee(&self, msats: u64) -> u64 {
+        msats
+            .saturating_mul(self.parts_per_million)
+            .saturating_div(1_000_000)
+            .checked_add(self.base.msats)
+            .expect("The division creates sufficient headroom to add the base fee")
+    }
+}
+
+impl std::ops::Add for PaymentFee {
+    type Output = PaymentFee;
+    fn add(self, rhs: Self) -> Self::Output {
+        PaymentFee {
+            base: self.base + rhs.base,
+            parts_per_million: self.parts_per_million + rhs.parts_per_million,
+        }
+    }
+}
+
+impl From<RoutingFees> for PaymentFee {
+    fn from(value: RoutingFees) -> Self {
+        PaymentFee {
+            base: Amount::from_msats(u64::from(value.base_msat)),
+            parts_per_million: u64::from(value.proportional_millionths),
+        }
+    }
+}
+
+impl From<PaymentFee> for RoutingFees {
+    fn from(value: PaymentFee) -> Self {
+        RoutingFees {
+            base_msat: u32::try_from(value.base.msats).expect("base msat was truncated from u64"),
+            proportional_millionths: u32::try_from(value.parts_per_million)
+                .expect("ppm was truncated from u64"),
+        }
+    }
+}
+
+impl std::fmt::Display for PaymentFee {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{},{}", self.base, self.parts_per_million)
+    }
+}
+
+impl std::str::FromStr for PaymentFee {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.split(',');
+        let base_str = parts
+            .next()
+            .ok_or(anyhow::anyhow!("Failed to parse base fee"))?;
+        let ppm_str = parts.next().ok_or(anyhow::anyhow!("Failed to parse ppm"))?;
+
+        // Ensure no extra parts
+        if parts.next().is_some() {
+            return Err(anyhow::anyhow!(
+                "Failed to parse fees. Expected format <base>,<ppm>"
+            ));
+        }
+
+        let base = Amount::from_str(base_str)?;
+        let parts_per_million = ppm_str.parse::<u64>()?;
+
+        Ok(PaymentFee {
+            base,
+            parts_per_million,
+        })
+    }
+}
+
+// --- Types moved from fedimint-lightning ---
+
+pub const MAX_LIGHTNING_RETRIES: u32 = 10;
+
+pub type RouteHtlcStream<'a> = BoxStream<'a, InterceptPaymentRequest>;
+
+#[derive(
+    Error, Debug, Serialize, Deserialize, Encodable, Decodable, Clone, Eq, PartialEq, Hash,
+)]
+pub enum LightningRpcError {
+    #[error("Failed to connect to Lightning node")]
+    FailedToConnect,
+    #[error("Failed to retrieve node info: {failure_reason}")]
+    FailedToGetNodeInfo { failure_reason: String },
+    #[error("Failed to retrieve route hints: {failure_reason}")]
+    FailedToGetRouteHints { failure_reason: String },
+    #[error("Payment failed: {failure_reason}")]
+    FailedPayment { failure_reason: String },
+    #[error("Failed to route HTLCs: {failure_reason}")]
+    FailedToRouteHtlcs { failure_reason: String },
+    #[error("Failed to complete HTLC: {failure_reason}")]
+    FailedToCompleteHtlc { failure_reason: String },
+    #[error("Failed to open channel: {failure_reason}")]
+    FailedToOpenChannel { failure_reason: String },
+    #[error("Failed to close channel: {failure_reason}")]
+    FailedToCloseChannelsWithPeer { failure_reason: String },
+    #[error("Failed to get Invoice: {failure_reason}")]
+    FailedToGetInvoice { failure_reason: String },
+    #[error("Failed to list transactions: {failure_reason}")]
+    FailedToListTransactions { failure_reason: String },
+    #[error("Failed to get funding address: {failure_reason}")]
+    FailedToGetLnOnchainAddress { failure_reason: String },
+    #[error("Failed to withdraw funds on-chain: {failure_reason}")]
+    FailedToWithdrawOnchain { failure_reason: String },
+    #[error("Failed to connect to peer: {failure_reason}")]
+    FailedToConnectToPeer { failure_reason: String },
+    #[error("Failed to list active channels: {failure_reason}")]
+    FailedToListChannels { failure_reason: String },
+    #[error("Failed to get balances: {failure_reason}")]
+    FailedToGetBalances { failure_reason: String },
+    #[error("Failed to sync to chain: {failure_reason}")]
+    FailedToSyncToChain { failure_reason: String },
+    #[error("Invalid metadata: {failure_reason}")]
+    InvalidMetadata { failure_reason: String },
+    #[error("Bolt12 Error: {failure_reason}")]
+    Bolt12Error { failure_reason: String },
+}
+
+/// Simplified lightning context without trait object.
+#[derive(Clone, Debug)]
+pub struct LightningContext {
+    pub lightning_public_key: PublicKey,
+    pub lightning_alias: String,
+    pub lightning_network: Network,
+    pub supports_private_payments: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GetNodeInfoResponse {
+    pub pub_key: PublicKey,
+    pub alias: String,
+    pub network: String,
+    pub block_height: u32,
+    pub synced_to_chain: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InterceptPaymentRequest {
+    pub payment_hash: sha256::Hash,
+    pub amount_msat: u64,
+    pub expiry: u32,
+    pub incoming_chan_id: u64,
+    pub short_channel_id: Option<u64>,
+    pub htlc_id: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InterceptPaymentResponse {
+    pub incoming_chan_id: u64,
+    pub htlc_id: u64,
+    pub payment_hash: sha256::Hash,
+    pub action: PaymentAction,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum PaymentAction {
+    Settle(Preimage),
+    Cancel,
+    Forward,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GetRouteHintsResponse {
+    pub route_hints: Vec<RouteHint>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PayInvoiceResponse {
+    pub preimage: Preimage,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateInvoiceRequest {
+    pub payment_hash: Option<sha256::Hash>,
+    pub amount_msat: u64,
+    pub expiry_secs: u32,
+    pub description: Option<InvoiceDescription>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum InvoiceDescription {
+    Direct(String),
+    Hash(sha256::Hash),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateInvoiceResponse {
+    pub invoice: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GetLnOnchainAddressResponse {
+    pub address: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SendOnchainResponse {
+    pub txid: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OpenChannelResponse {
+    pub funding_txid: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ListChannelsResponse {
+    pub channels: Vec<ChannelInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GetBalancesResponse {
+    pub onchain_balance_sats: u64,
+    pub lightning_balance_msats: u64,
+    pub inbound_lightning_liquidity_msats: u64,
+}
+
+// --- Types moved from fedimint-ln-common ---
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
+pub struct Preimage(pub [u8; 32]);
+
+impl std::fmt::Display for Preimage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.encode_hex::<String>())
+    }
+}
+
+// TODO: upstream serde support to LDK
+/// Hack to get a route hint that implements `serde` traits.
+pub mod route_hints {
+    use fedimint_core::encoding::{Decodable, Encodable};
+    use fedimint_core::secp256k1::PublicKey;
+    use lightning_invoice::RoutingFees;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
+    pub struct RouteHintHop {
+        /// The `node_id` of the non-target end of the route
+        pub src_node_id: PublicKey,
+        /// The `short_channel_id` of this channel
+        pub short_channel_id: u64,
+        /// Flat routing fee in millisatoshis
+        pub base_msat: u32,
+        /// Liquidity-based routing fee in millionths of a routed amount.
+        /// In other words, 10000 is 1%.
+        pub proportional_millionths: u32,
+        /// The difference in CLTV values between this node and the next node.
+        pub cltv_expiry_delta: u16,
+        /// The minimum value, in msat, which must be relayed to the next hop.
+        pub htlc_minimum_msat: Option<u64>,
+        /// The maximum value in msat available for routing with a single HTLC.
+        pub htlc_maximum_msat: Option<u64>,
+    }
+
+    /// A list of hops along a payment path terminating with a channel to the
+    /// recipient.
+    #[derive(Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
+    pub struct RouteHint(pub Vec<RouteHintHop>);
+
+    impl RouteHint {
+        pub fn to_ldk_route_hint(&self) -> lightning_invoice::RouteHint {
+            lightning_invoice::RouteHint(
+                self.0
+                    .iter()
+                    .map(|hop| lightning_invoice::RouteHintHop {
+                        src_node_id: hop.src_node_id,
+                        short_channel_id: hop.short_channel_id,
+                        fees: RoutingFees {
+                            base_msat: hop.base_msat,
+                            proportional_millionths: hop.proportional_millionths,
+                        },
+                        cltv_expiry_delta: hop.cltv_expiry_delta,
+                        htlc_minimum_msat: hop.htlc_minimum_msat,
+                        htlc_maximum_msat: hop.htlc_maximum_msat,
+                    })
+                    .collect(),
+            )
+        }
+    }
+
+    impl From<lightning_invoice::RouteHint> for RouteHint {
+        fn from(rh: lightning_invoice::RouteHint) -> Self {
+            RouteHint(rh.0.into_iter().map(Into::into).collect())
+        }
+    }
+
+    impl From<lightning_invoice::RouteHintHop> for RouteHintHop {
+        fn from(rhh: lightning_invoice::RouteHintHop) -> Self {
+            RouteHintHop {
+                src_node_id: rhh.src_node_id,
+                short_channel_id: rhh.short_channel_id,
+                base_msat: rhh.fees.base_msat,
+                proportional_millionths: rhh.fees.proportional_millionths,
+                cltv_expiry_delta: rhh.cltv_expiry_delta,
+                htlc_minimum_msat: rhh.htlc_minimum_msat,
+                htlc_maximum_msat: rhh.htlc_maximum_msat,
+            }
+        }
+    }
+}
+
+pub use route_hints::RouteHint;
+
+// TODO: Upstream serde serialization for
+// lightning_invoice::RoutingFees
+// See https://github.com/lightningdevkit/rust-lightning/blob/b8ed4d2608e32128dd5a1dee92911638a4301138/lightning/src/routing/gossip.rs#L1057-L1065
+pub mod serde_routing_fees {
+    use lightning_invoice::RoutingFees;
+    use serde::ser::SerializeStruct;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    #[allow(missing_docs)]
+    pub fn serialize<S>(fees: &RoutingFees, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("RoutingFees", 2)?;
+        state.serialize_field("base_msat", &fees.base_msat)?;
+        state.serialize_field("proportional_millionths", &fees.proportional_millionths)?;
+        state.end()
+    }
+
+    #[allow(missing_docs)]
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<RoutingFees, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fees = serde_json::Value::deserialize(deserializer)?;
+        // While we deserialize fields as u64, RoutingFees expects u32 for the fields
+        let base_msat = fees["base_msat"]
+            .as_u64()
+            .ok_or_else(|| serde::de::Error::custom("base_msat is not a u64"))?;
+        let proportional_millionths = fees["proportional_millionths"]
+            .as_u64()
+            .ok_or_else(|| serde::de::Error::custom("proportional_millionths is not a u64"))?;
+
+        Ok(RoutingFees {
+            base_msat: base_msat
+                .try_into()
+                .map_err(|_| serde::de::Error::custom("base_msat is greater than u32::MAX"))?,
+            proportional_millionths: proportional_millionths.try_into().map_err(|_| {
+                serde::de::Error::custom("proportional_millionths is greater than u32::MAX")
+            })?,
+        })
+    }
+}
+
+/// Data needed to pay an invoice
+///
+/// This is a subset of the data from a [`lightning_invoice::Bolt11Invoice`]
+/// that does not contain the description, which increases privacy for the user.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Decodable, Encodable)]
+pub struct PrunedInvoice {
+    pub amount: Amount,
+    pub destination: secp256k1::PublicKey,
+    /// Wire-format encoding of feature bit vector
+    #[serde(with = "fedimint_core::hex::serde", default)]
+    pub destination_features: Vec<u8>,
+    pub payment_hash: sha256::Hash,
+    pub payment_secret: [u8; 32],
+    pub route_hints: Vec<RouteHint>,
+    pub min_final_cltv_delta: u64,
+    /// Time at which the invoice expires in seconds since unix epoch
+    pub expiry_timestamp: u64,
+}
+
+impl PrunedInvoice {
+    pub fn new(invoice: &Bolt11Invoice, amount: Amount) -> Self {
+        // We use expires_at since it doesn't rely on the std feature in
+        // lightning-invoice. See #3838.
+        let expiry_timestamp = invoice.expires_at().map_or(u64::MAX, |t| t.as_secs());
+
+        let destination_features = if let Some(features) = invoice.features() {
+            fedimint_core::encode_bolt11_invoice_features_without_length(features)
+        } else {
+            vec![]
+        };
+
+        PrunedInvoice {
+            amount,
+            destination: invoice
+                .payee_pub_key()
+                .copied()
+                .unwrap_or_else(|| invoice.recover_payee_pub_key()),
+            destination_features,
+            payment_hash: *invoice.payment_hash(),
+            payment_secret: invoice.payment_secret().0,
+            route_hints: invoice.route_hints().into_iter().map(Into::into).collect(),
+            min_final_cltv_delta: invoice.min_final_cltv_expiry_delta(),
+            expiry_timestamp,
+        }
+    }
+}
+
+impl TryFrom<Bolt11Invoice> for PrunedInvoice {
+    type Error = anyhow::Error;
+
+    fn try_from(invoice: Bolt11Invoice) -> Result<Self, Self::Error> {
+        Ok(PrunedInvoice::new(
+            &invoice,
+            Amount::from_msats(
+                invoice
+                    .amount_milli_satoshis()
+                    .context("Invoice amount is missing")?,
+            ),
+        ))
+    }
+}
+
+// --- Types moved from fedimint-ln-common/src/client.rs ---
+
+#[derive(Clone, Debug)]
+pub struct GatewayApi {
+    password: Option<String>,
+    connection_pool: ConnectionPool<dyn IGatewayConnection>,
+}
+
+impl GatewayApi {
+    pub fn new(password: Option<String>, connectors: ConnectorRegistry) -> Self {
+        Self {
+            password,
+            connection_pool: ConnectionPool::new(connectors),
+        }
+    }
+
+    async fn get_or_create_connection(&self, url: &SafeUrl) -> ServerResult<DynGatewayConnection> {
+        self.connection_pool
+            .get_or_create_connection(url, None, |url, _api_secret, connectors| async move {
+                let conn = connectors
+                    .connect_gateway(&url)
+                    .await
+                    .map_err(ServerError::Connection)?;
+                Ok(conn)
+            })
+            .await
+    }
+
+    pub async fn request<P: Serialize, T: DeserializeOwned>(
+        &self,
+        base_url: &SafeUrl,
+        method: Method,
+        route: &str,
+        payload: Option<P>,
+    ) -> ServerResult<T> {
+        let conn = self
+            .get_or_create_connection(base_url)
+            .await
+            .context("Failed to connect to gateway")
+            .map_err(ServerError::Connection)?;
+        let payload = payload.map(|p| serde_json::to_value(p).expect("Could not serialize"));
+        let res = conn
+            .request(self.password.clone(), method, route, payload)
+            .await?;
+        let response = serde_json::from_value::<T>(res).map_err(|e| {
+            ServerError::InvalidResponse(anyhow::anyhow!("Received invalid response: {e}"))
+        })?;
+        Ok(response)
+    }
+
+    /// Get receiver for changes in the active connections
+    ///
+    /// This allows real-time monitoring of connection status.
+    pub fn get_active_connection_receiver(&self) -> watch::Receiver<BTreeSet<SafeUrl>> {
+        self.connection_pool.get_active_connection_receiver()
+    }
 }
 

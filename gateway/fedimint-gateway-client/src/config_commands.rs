@@ -4,7 +4,7 @@ use fedimint_core::config::FederationId;
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_client::{get_config, get_info, set_fees};
 use fedimint_gateway_common::{ConfigPayload, SetFeesPayload};
-use fedimint_ln_common::client::GatewayApi;
+use fedimint_gateway_common::GatewayApi;
 
 use crate::{CliOutput, CliOutputResult};
 

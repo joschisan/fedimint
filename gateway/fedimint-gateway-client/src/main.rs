@@ -25,7 +25,7 @@ use fedimint_gateway_common::{
     ListTransactionsResponse, MnemonicResponse, PaymentLogResponse,
     ReceiveEcashResponse, SpendEcashResponse, WithdrawResponse,
 };
-use fedimint_ln_common::client::GatewayApi;
+use fedimint_gateway_common::GatewayApi;
 use fedimint_logging::TracingSetup;
 use general_commands::GeneralCommands;
 use lightning_commands::LightningCommands;

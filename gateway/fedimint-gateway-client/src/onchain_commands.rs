@@ -4,7 +4,7 @@ use fedimint_core::BitcoinAmountOrAll;
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_client::{get_ln_onchain_address, send_onchain};
 use fedimint_gateway_common::SendOnchainRequest;
-use fedimint_ln_common::client::GatewayApi;
+use fedimint_gateway_common::GatewayApi;
 
 use crate::{CliOutput, CliOutputResult};
 

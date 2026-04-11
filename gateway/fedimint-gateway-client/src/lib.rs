@@ -28,8 +28,7 @@ use fedimint_gateway_common::{
     SpendEcashPayload, SpendEcashResponse, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT,
     WithdrawPayload, WithdrawResponse, WithdrawToOnchainPayload,
 };
-use fedimint_ln_common::Method;
-use fedimint_ln_common::client::GatewayApi;
+use fedimint_gateway_common::{GatewayApi, Method};
 use lightning_invoice::Bolt11Invoice;
 
 pub async fn get_info(client: &GatewayApi, base_url: &SafeUrl) -> ServerResult<GatewayInfo> {

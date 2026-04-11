@@ -22,7 +22,6 @@ fedimint-core = { workspace = true }
 fedimint-eventlog = { workspace = true }
 fedimint-gateway-common = { workspace = true }
 fedimint-ln-client = { workspace = true }
-fedimint-ln-common = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 futures = { workspace = true }
 lightning-invoice = { workspace = true }

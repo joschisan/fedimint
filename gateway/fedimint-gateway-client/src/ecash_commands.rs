@@ -12,7 +12,7 @@ use fedimint_gateway_common::{
     DepositAddressPayload, DepositAddressRecheckPayload, PeginFromOnchainPayload,
     ReceiveEcashPayload, SpendEcashPayload, WithdrawPayload, WithdrawToOnchainPayload,
 };
-use fedimint_ln_common::client::GatewayApi;
+use fedimint_gateway_common::GatewayApi;
 
 use crate::{CliOutput, CliOutputResult};
 
