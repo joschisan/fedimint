@@ -538,7 +538,3 @@ pub enum RegisteredProtocol {
     Iroh,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SetMnemonicPayload {
-    pub words: Option<String>,
-}

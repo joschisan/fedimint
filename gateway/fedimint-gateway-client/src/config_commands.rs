@@ -2,8 +2,8 @@ use clap::Subcommand;
 use fedimint_core::Amount;
 use fedimint_core::config::FederationId;
 use fedimint_core::util::SafeUrl;
-use fedimint_gateway_client::{get_config, get_info, set_fees, set_mnemonic};
-use fedimint_gateway_common::{ConfigPayload, SetFeesPayload, SetMnemonicPayload};
+use fedimint_gateway_client::{get_config, get_info, set_fees};
+use fedimint_gateway_common::{ConfigPayload, SetFeesPayload};
 use fedimint_ln_common::client::GatewayApi;
 
 use crate::{CliOutput, CliOutputResult};
@@ -38,12 +38,6 @@ pub enum ConfigCommands {
 
         #[clap(long)]
         tx_ppm: Option<u64>,
-    },
-    /// Instructs the gateway to create a new mnemonic or set it to the provided
-    /// mnemonic
-    SetMnemonic {
-        #[clap(long)]
-        words: Option<String>,
     },
 }
 
@@ -88,10 +82,6 @@ impl ConfigCommands {
                     },
                 )
                 .await?;
-                Ok(CliOutput::Empty)
-            }
-            Self::SetMnemonic { words } => {
-                set_mnemonic(client, base_url, SetMnemonicPayload { words }).await?;
                 Ok(CliOutput::Empty)
             }
         }

@@ -72,6 +72,3 @@ pub const FM_GATEWAY_IROH_LISTEN_ADDR_ENV: &str = "FM_GATEWAY_IROH_LISTEN_ADDR";
 /// UI port + 1.
 pub const FM_GATEWAY_METRICS_LISTEN_ADDR_ENV: &str = "FM_GATEWAY_METRICS_LISTEN_ADDR";
 
-/// Environment variable that instructs the gateway to generate a mnemonic if
-/// one has not already been set.
-pub const FM_GATEWAY_SKIP_SETUP_ENV: &str = "FM_GATEWAY_SKIP_SETUP";

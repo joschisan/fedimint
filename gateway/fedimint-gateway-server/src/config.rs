@@ -12,7 +12,7 @@ use fedimint_lnv2_common::gateway_api::PaymentFee;
 use super::envs;
 use crate::envs::{
     FM_BITCOIND_PASSWORD_ENV, FM_BITCOIND_URL_ENV, FM_BITCOIND_USERNAME_ENV, FM_ESPLORA_URL_ENV,
-    FM_GATEWAY_METRICS_LISTEN_ADDR_ENV, FM_GATEWAY_SKIP_SETUP_ENV,
+    FM_GATEWAY_METRICS_LISTEN_ADDR_ENV,
 };
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -132,8 +132,6 @@ pub struct GatewayOpts {
     #[arg(long, env = FM_IROH_RELAY_ENV, value_delimiter = ',')]
     iroh_relays: Vec<SafeUrl>,
 
-    #[arg(long, env = FM_GATEWAY_SKIP_SETUP_ENV, default_value_t = false)]
-    skip_setup: bool,
 }
 
 impl GatewayOpts {
@@ -173,7 +171,6 @@ impl GatewayOpts {
             iroh_listen: self.iroh_listen,
             iroh_dns: self.iroh_dns.clone(),
             iroh_relays: self.iroh_relays.clone(),
-            skip_setup: self.skip_setup,
             metrics_listen,
         })
     }
@@ -198,6 +195,5 @@ pub struct GatewayParameters {
     pub iroh_listen: Option<SocketAddr>,
     pub iroh_dns: Option<SafeUrl>,
     pub iroh_relays: Vec<SafeUrl>,
-    pub skip_setup: bool,
     pub metrics_listen: SocketAddr,
 }
