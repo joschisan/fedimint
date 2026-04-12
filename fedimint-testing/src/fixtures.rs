@@ -16,9 +16,9 @@ use fedimint_core::db::mem_impl::MemDatabase;
 use fedimint_core::envs::BitcoinRpcConfig;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::SafeUrl;
-use fedimint_gateway_common::ChainSource;
-use fedimint_gateway_daemon::client::GatewayClientBuilder;
-use fedimint_gateway_daemon::{AppState, create_ldk_node};
+use fedimint_gateway_daemon::client::GatewayClientFactory;
+use fedimint_gateway_daemon::federation_manager::FederationManager;
+use fedimint_gateway_daemon::{AppState, GatewayState, derive_gateway_keypair};
 use fedimint_logging::TracingSetup;
 use fedimint_server::core::{DynServerModuleInit, IServerModuleInit, ServerModuleInitRegistry};
 use fedimint_server_bitcoin_rpc::bitcoind::BitcoindClient;
@@ -223,62 +223,65 @@ impl Fixtures {
 
         let (path, _config_dir) = test_dir(&format!("gateway-{}", rand::random::<u64>()));
 
-        // Create federation client builder for the gateway
-        let client_builder: GatewayClientBuilder =
-            GatewayClientBuilder::new(path.clone(), registry)
+        let mnemonic = Bip39RootSecretStrategy::<12>::random(&mut OsRng);
+        let gateway_keypair = derive_gateway_keypair(&mnemonic);
+
+        let client_factory =
+            GatewayClientFactory::init(gateway_db.clone(), mnemonic.clone(), registry)
                 .await
-                .expect("Failed to initialize gateway");
+                .expect("Failed to init client factory");
 
-        // Module tests do not use the webserver, so any port is ok
-        let listen: SocketAddr = "127.0.0.1:9000".parse().unwrap();
-        let address: SafeUrl = format!("http://{listen}").parse().unwrap();
-
-        let esplora_server_url = SafeUrl::parse(&format!(
+        let esplora_url = SafeUrl::parse(&format!(
             "http://127.0.0.1:{}",
             env::var(FM_PORT_ESPLORA_ENV).unwrap_or(String::from("50002"))
         ))
-        .expect("Failed to parse default esplora server");
-
-        let chain_source = ChainSource::Esplora {
-            server_url: esplora_server_url,
-        };
-
-        // Create a test mnemonic for the LDK node
-        let mnemonic = Bip39RootSecretStrategy::<12>::random(&mut OsRng);
+        .expect("Failed to parse esplora url");
 
         let ldk_data_dir = path.join("ldk_node");
         std::fs::create_dir_all(&ldk_data_dir).expect("Failed to create LDK data dir");
 
-        // Use a random port to avoid conflicts between parallel tests
         let lightning_port = 10000 + (rand::random::<u16>() % 50000);
 
+        let mut node_builder = fedimint_gateway_daemon::ldk_node::Builder::new();
+        node_builder.set_network(bitcoin::Network::Regtest);
+        node_builder.set_node_alias("TestNode".to_string()).unwrap();
+        node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
+        node_builder.set_chain_source_esplora(esplora_url.to_string(), None);
+        node_builder.set_storage_dir_path(ldk_data_dir.to_str().expect("valid path").to_string());
+        node_builder
+            .set_listening_addresses(vec![format!("0.0.0.0:{lightning_port}").parse().unwrap()])
+            .unwrap();
+
+        let node = Arc::new(node_builder.build().expect("Failed to build LDK node"));
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .expect("Failed to build LDK runtime"),
         );
+        node.start_with_runtime(runtime)
+            .expect("Failed to start LDK node");
 
-        let node = create_ldk_node(
-            &ldk_data_dir,
-            chain_source.clone(),
-            bitcoin::Network::Regtest,
-            lightning_port,
-            "TestNode".to_string(),
-            mnemonic,
-            runtime,
-        )
-        .expect("Failed to create LDK node");
-        let node = Arc::new(node);
+        let listen: SocketAddr = "127.0.0.1:9000".parse().unwrap();
 
-        AppState::builder(client_builder, gateway_db)
-            .api_bind(listen)
-            .api_addr(address)
-            .network(bitcoin::Network::Regtest)
-            .node(node)
-            .build()
-            .await
-            .expect("Failed to create gateway")
+        AppState {
+            federation_manager: Arc::new(tokio::sync::RwLock::new(FederationManager::new())),
+            node,
+            state: Arc::new(tokio::sync::RwLock::new(GatewayState::Running)),
+            client_factory,
+            gateway_db,
+            api_bind: listen,
+            cli_bind: "127.0.0.1:9001".parse().unwrap(),
+            network: bitcoin::Network::Regtest,
+            routing_fees: fedimint_gateway_common::PaymentFee::TRANSACTION_FEE_DEFAULT,
+            transaction_fees: fedimint_gateway_common::PaymentFee::TRANSACTION_FEE_DEFAULT,
+            gateway_keypair,
+            api_addr: Some(format!("http://{listen}").parse().unwrap()),
+            outbound_lightning_payment_lock_pool: Arc::new(
+                fedimint_gateway_daemon::lockable::LockPool::new(),
+            ),
+            pending_channels: Arc::new(tokio::sync::RwLock::new(std::collections::BTreeMap::new())),
+        }
     }
 
     /// Get a server bitcoin RPC config

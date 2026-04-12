@@ -19,6 +19,9 @@ pub mod cli;
 pub mod client;
 pub mod db;
 pub mod error;
+
+// Re-exports for test fixtures
+pub use {ldk_node, lockable};
 pub mod federation_manager;
 pub mod public;
 
@@ -137,6 +140,11 @@ impl std::fmt::Debug for AppState {
 impl AppState {
     pub fn gateway_id(&self) -> PublicKey {
         self.gateway_keypair.public_key()
+    }
+
+    /// Alias for backwards compatibility with tests.
+    pub async fn http_gateway_id(&self) -> PublicKey {
+        self.gateway_id()
     }
 
     pub fn versioned_api(&self) -> Option<SafeUrl> {
