@@ -23,7 +23,6 @@ mod events;
 mod federation_manager;
 mod metrics;
 pub mod rpc_server;
-mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -34,7 +33,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::{Address, FeeRate, Network, OutPoint, Txid, secp256k1};
@@ -75,13 +74,13 @@ use fedimint_gateway_common::{
     ConnectFedPayload, CreateInvoiceForOperatorPayload, DepositAddressPayload,
     DepositAddressRecheckPayload, FederationBalanceInfo, FederationConfig, FederationInfo,
     GatewayBalances, GatewayFedConfig, GatewayInfo, GetInvoiceRequest, GetInvoiceResponse,
-    InterceptPaymentRequest, InterceptPaymentResponse, LightningContext, LightningInfo,
-    LightningRpcError, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
-    OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentAction, PaymentFee, PaymentLogPayload,
-    PaymentLogResponse, PeginFromOnchainPayload, Preimage, ReceiveEcashPayload,
-    ReceiveEcashResponse, RegisteredProtocol, SendOnchainRequest, SetFeesPayload,
-    SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload,
-    WithdrawPreviewPayload, WithdrawPreviewResponse, WithdrawResponse, WithdrawToOnchainPayload,
+    InterceptPaymentRequest, LightningContext, LightningInfo, LightningRpcError,
+    ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse, OpenChannelRequest,
+    PayInvoiceForOperatorPayload, PaymentAction, PaymentFee, PaymentLogPayload, PaymentLogResponse,
+    PeginFromOnchainPayload, Preimage, ReceiveEcashPayload, ReceiveEcashResponse,
+    RegisteredProtocol, SendOnchainRequest, SetFeesPayload, SpendEcashPayload, SpendEcashResponse,
+    V1_API_ENDPOINT, WithdrawPayload, WithdrawPreviewPayload, WithdrawPreviewResponse,
+    WithdrawResponse, WithdrawToOnchainPayload,
 };
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -98,7 +97,6 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::{NodeAlias, NodeId};
 use ldk_node::payment::{PaymentDirection, PaymentKind, PaymentStatus, SendingParameters};
 use lightning::ln::channelmanager::PaymentId;
-use lightning::offers::offer::OfferId;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
@@ -111,7 +109,6 @@ use crate::db::GatewayDbtxNcExt as _;
 use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
 use crate::error::{AdminGatewayError, LNv2Error, PublicGatewayError};
 use crate::rpc_server::run_webserver;
-use crate::types::PrettyInterceptPaymentRequest;
 
 /// Default Bitcoin network for testing purposes.
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
@@ -273,7 +270,6 @@ pub struct Gateway {
 
     /// Lock pool used to ensure that `pay_offer` doesn't allow for multiple
     /// simultaneous calls with the same offer to execute in parallel.
-    outbound_offer_lock_pool: Arc<lockable::LockPool<LdkOfferId>>,
 
     /// A map keyed by the `UserChannelId` of a channel that is currently
     /// opening. The `Sender` is used to communicate the `OutPoint` back to
@@ -598,7 +594,6 @@ impl Gateway {
             default_transaction_fees: gateway_parameters.default_transaction_fees,
             registrations,
             outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
-            outbound_offer_lock_pool: Arc::new(lockable::LockPool::new()),
             pending_channels: Arc::new(RwLock::new(BTreeMap::new())),
         })
     }
@@ -773,7 +768,8 @@ impl Gateway {
     ) -> &'static str {
         info!(
             target: LOG_GATEWAY,
-            lightning_payment = %PrettyInterceptPaymentRequest(&payment_request),
+            payment_hash = %payment_request.payment_hash,
+            amount_msat = %payment_request.amount_msat,
             "Intercepting lightning payment",
         );
 
@@ -2649,15 +2645,6 @@ fn get_esplora_url(server_url: SafeUrl) -> anyhow::Result<String> {
         server_url.to_string()
     };
     Ok(server_url)
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-struct LdkOfferId(OfferId);
-
-impl std::hash::Hash for LdkOfferId {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write(&self.0.0);
-    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

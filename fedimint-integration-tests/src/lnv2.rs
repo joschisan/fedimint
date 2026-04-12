@@ -63,7 +63,7 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
     let lnv2 = client.get_first_module::<LightningClientModule>()?;
     let cli_client_dir = env.new_cli_client_dir().await?;
 
-    let gateways = [env.gw1_addr.clone(), env.gw2_addr.clone()];
+    let gateways = [env.gw1_public.clone(), env.gw2_public.clone()];
 
     info!("Testing registration of gateways...");
 
@@ -111,8 +111,8 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
 
     let lnv2 = client.get_first_module::<LightningClientModule>()?;
 
-    let gw1: SafeUrl = env.gw1_addr.parse()?;
-    let gw2: SafeUrl = env.gw2_addr.parse()?;
+    let gw1: SafeUrl = env.gw1_public.parse()?;
+    let gw2: SafeUrl = env.gw2_public.parse()?;
 
     // Since both gateways are LDK, same-gateway and cross-gateway are the only
     // unique combinations.

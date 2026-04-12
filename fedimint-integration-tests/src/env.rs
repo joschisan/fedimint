@@ -52,6 +52,8 @@ pub struct TestEnv {
     pub invite_code: InviteCode,
     pub gw1_addr: String,
     pub gw2_addr: String,
+    pub gw1_public: String,
+    pub gw2_public: String,
     client_counter: AtomicU64,
 }
 
@@ -83,8 +85,12 @@ impl TestEnv {
         start_gatewayd(base, "gw1", GW1_PORT, GW1_LN_PORT, GW1_METRICS_PORT).await?;
         start_gatewayd(base, "gw2", GW2_PORT, GW2_LN_PORT, GW2_METRICS_PORT).await?;
 
-        let gw1_addr = format!("http://127.0.0.1:{GW1_PORT}");
-        let gw2_addr = format!("http://127.0.0.1:{GW2_PORT}");
+        // Admin API is on port+1, bound to localhost
+        let gw1_addr = format!("http://127.0.0.1:{}", GW1_PORT + 1);
+        let gw2_addr = format!("http://127.0.0.1:{}", GW2_PORT + 1);
+        // Public API is on the base port (for LNv2 protocol)
+        let gw1_public = format!("http://127.0.0.1:{GW1_PORT}");
+        let gw2_public = format!("http://127.0.0.1:{GW2_PORT}");
 
         info!("Waiting for gateways...");
         retry("gw1 ready", || gateway_cli(&gw1_addr, &["info"])).await?;
@@ -106,6 +112,8 @@ impl TestEnv {
             invite_code,
             gw1_addr,
             gw2_addr,
+            gw1_public,
+            gw2_public,
             client_counter: AtomicU64::new(0),
         })
     }

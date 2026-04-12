@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -18,12 +19,11 @@ use fedimint_gateway_common::{
     GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GetInvoiceRequest, INVITE_CODES_ENDPOINT, JOIN_ENDPOINT,
     LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT, ListTransactionsPayload, MNEMONIC_ENDPOINT,
     OPEN_CHANNEL_ENDPOINT, OPEN_CHANNEL_WITH_PUSH_ENDPOINT, OpenChannelRequest,
-    PAY_INVOICE_FOR_OPERATOR_ENDPOINT, PAYMENT_LOG_ENDPOINT, PEGIN_FROM_ONCHAIN_ENDPOINT,
-    PayInvoiceForOperatorPayload, PaymentLogPayload, PeginFromOnchainPayload,
-    RECEIVE_ECASH_ENDPOINT, ReceiveEcashPayload, SEND_ONCHAIN_ENDPOINT, SET_FEES_ENDPOINT,
-    SPEND_ECASH_ENDPOINT, STOP_ENDPOINT, SendOnchainRequest, SetFeesPayload, SpendEcashPayload,
-    V1_API_ENDPOINT, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT, WithdrawPayload,
-    WithdrawToOnchainPayload,
+    PAY_INVOICE_FOR_OPERATOR_ENDPOINT, PEGIN_FROM_ONCHAIN_ENDPOINT, PayInvoiceForOperatorPayload,
+    PeginFromOnchainPayload, RECEIVE_ECASH_ENDPOINT, ReceiveEcashPayload, SEND_ONCHAIN_ENDPOINT,
+    SET_FEES_ENDPOINT, SPEND_ECASH_ENDPOINT, STOP_ENDPOINT, SendOnchainRequest, SetFeesPayload,
+    SpendEcashPayload, V1_API_ENDPOINT, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT,
+    WithdrawPayload, WithdrawToOnchainPayload,
 };
 use fedimint_lnurl::LnurlResponse;
 use fedimint_lnv2_common::endpoint_constants::{
@@ -41,35 +41,64 @@ use tracing::{info, instrument, warn};
 use crate::Gateway;
 use crate::error::{GatewayError, LnurlError};
 
-/// Creates the webserver's routes and spawns the webserver in a separate task.
+/// Creates two webservers:
+/// - Public: binds to `0.0.0.0:<port>` for LNv2 protocol routes
+/// - Admin: binds to `127.0.0.1:<port>` for all admin/operator routes (no auth
+///   needed)
 pub async fn run_webserver(gateway: Arc<Gateway>) -> anyhow::Result<()> {
     let task_group = gateway.task_group.clone();
+    let listen = gateway.listen;
 
-    let routes = routes(gateway.clone(), task_group.clone());
-    let api_v1 = Router::new()
-        .nest(&format!("/{V1_API_ENDPOINT}"), routes.clone())
-        // Backwards compatibility: Continue supporting gateway APIs without versioning
-        .merge(routes);
+    // Public routes: LNv2 protocol endpoints accessible by federation clients
+    let public_routes = public_routes()
+        .layer(Extension(gateway.clone()))
+        .layer(CorsLayer::permissive());
 
+    let public_api = Router::new()
+        .nest(&format!("/{V1_API_ENDPOINT}"), public_routes.clone())
+        .merge(public_routes);
+
+    // Admin routes: all operator endpoints, localhost-only
+    let admin_routes = admin_routes()
+        .layer(Extension(gateway.clone()))
+        .layer(Extension(task_group.clone()))
+        .layer(CorsLayer::permissive());
+
+    let admin_api = Router::new()
+        .nest(&format!("/{V1_API_ENDPOINT}"), admin_routes.clone())
+        .merge(admin_routes);
+
+    // Public listener on 0.0.0.0
+    let public_addr = SocketAddr::new("0.0.0.0".parse().expect("valid addr"), listen.port());
     let handle = task_group.make_handle();
     let shutdown_rx = handle.make_shutdown_rx();
-    let listener = TcpListener::bind(&gateway.listen).await?;
-    let serve = axum::serve(listener, api_v1.into_make_service());
-    task_group.spawn("Gateway Webserver", |_| async {
-        let graceful = serve.with_graceful_shutdown(async {
+    let public_listener = TcpListener::bind(public_addr).await?;
+    let public_serve = axum::serve(public_listener, public_api.into_make_service());
+    task_group.spawn("Gateway Public Webserver", |_| async {
+        let graceful = public_serve.with_graceful_shutdown(async {
             shutdown_rx.await;
         });
-
-        match graceful.await {
-            Err(err) => {
-                warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error shutting down gatewayd webserver");
-            }
-            _ => {
-                info!(target: LOG_GATEWAY, "Successfully shutdown webserver");
-            }
+        if let Err(err) = graceful.await {
+            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error shutting down public webserver");
         }
     });
-    info!(target: LOG_GATEWAY, listen = %gateway.listen, "Successfully started webserver");
+    info!(target: LOG_GATEWAY, %public_addr, "Started public webserver (LNv2 protocol)");
+
+    // Admin listener on 127.0.0.1
+    let admin_addr = SocketAddr::new("127.0.0.1".parse().expect("valid addr"), listen.port() + 1);
+    let handle = task_group.make_handle();
+    let shutdown_rx = handle.make_shutdown_rx();
+    let admin_listener = TcpListener::bind(admin_addr).await?;
+    let admin_serve = axum::serve(admin_listener, admin_api.into_make_service());
+    task_group.spawn("Gateway Admin Webserver", |_| async {
+        let graceful = admin_serve.with_graceful_shutdown(async {
+            shutdown_rx.await;
+        });
+        if let Err(err) = graceful.await {
+            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error shutting down admin webserver");
+        }
+    });
+    info!(target: LOG_GATEWAY, %admin_addr, "Started admin webserver (localhost-only)");
 
     Ok(())
 }
@@ -93,8 +122,8 @@ where
     router.route(route, post(func))
 }
 
-/// Public routes that are used in the LNv2 protocol
-fn lnv2_routes() -> Router {
+/// Public routes: LNv2 protocol endpoints called by federation clients.
+fn public_routes() -> Router {
     let router = Router::new();
     let router = register_post_handler(ROUTING_INFO_ENDPOINT, routing_info_v2, router);
     let router = register_post_handler(SEND_PAYMENT_ENDPOINT, pay_bolt11_invoice_v2, router);
@@ -103,13 +132,11 @@ fn lnv2_routes() -> Router {
         create_bolt11_invoice_v2,
         router,
     );
-    // Verify endpoint does not have the same signature, it is handled separately
     router.route("/verify/{payment_hash}", get(verify_bolt11_preimage_v2_get))
 }
 
-/// Gateway Webserver Routes. The admin API only binds to localhost, so no
-/// authentication is needed.
-fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
+/// Admin routes: operator endpoints, only accessible via localhost.
+fn admin_routes() -> Router {
     let router = Router::new();
     let router = register_post_handler(RECEIVE_ECASH_ENDPOINT, receive_ecash, router);
     let router = register_post_handler(ADDRESS_ENDPOINT, address, router);
@@ -151,19 +178,11 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
     let router = register_get_handler(GET_BALANCES_ENDPOINT, get_balances, router);
     let router = register_post_handler(SPEND_ECASH_ENDPOINT, spend_ecash, router);
     let router = register_get_handler(MNEMONIC_ENDPOINT, mnemonic, router);
-    // Stop does not have the same function signature, it is handled separately
     let router = router.route(STOP_ENDPOINT, get(stop));
-    let router = register_post_handler(PAYMENT_LOG_ENDPOINT, payment_log, router);
     let router = register_post_handler(SET_FEES_ENDPOINT, set_fees, router);
     let router = register_post_handler(CONFIGURATION_ENDPOINT, configuration, router);
     let router = register_get_handler(GATEWAY_INFO_ENDPOINT, info, router);
-    let router = register_get_handler(INVITE_CODES_ENDPOINT, invite_codes, router);
-    let router = router.merge(lnv2_routes());
-
-    router
-        .layer(Extension(gateway))
-        .layer(Extension(task_group))
-        .layer(CorsLayer::permissive())
+    register_get_handler(INVITE_CODES_ENDPOINT, invite_codes, router)
 }
 
 /// Display high-level information about the Gateway
@@ -409,15 +428,6 @@ pub(crate) async fn stop(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     gateway.handle_shutdown_msg(task_group).await?;
     Ok(Json(json!(())))
-}
-
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn payment_log(
-    Extension(gateway): Extension<Arc<Gateway>>,
-    Json(payload): Json<PaymentLogPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let payment_log = gateway.handle_payment_log_msg(payload).await?;
-    Ok(Json(json!(payment_log)))
 }
 
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
