@@ -31,8 +31,6 @@ struct Cli {
 enum Commands {
     /// Display gateway info
     Info,
-    /// Shutdown the gateway
-    Stop,
     /// Display mnemonic seed words
     Mnemonic,
     /// LDK lightning node management
@@ -253,7 +251,6 @@ fn main() -> Result<()> {
 
     let result = match cli.command {
         Commands::Info => request(addr, ROUTE_INFO, ())?,
-        Commands::Stop => request(addr, ROUTE_STOP, ())?,
         Commands::Mnemonic => request(addr, ROUTE_MNEMONIC, ())?,
         Commands::Ldk(cmd) => match cmd {
             LdkCommands::Balances => request(addr, ROUTE_LDK_BALANCES, ())?,
