@@ -27,6 +27,7 @@ fedimint-rocksdb = { workspace = true }
 fedimint-walletv2-client = { workspace = true }
 lightning-invoice = { workspace = true }
 rand = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }

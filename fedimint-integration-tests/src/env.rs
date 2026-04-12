@@ -491,6 +491,33 @@ pub async fn gateway_cli(gw_addr: &str, args: &[&str]) -> anyhow::Result<serde_j
     }
 }
 
+pub async fn gateway_cli_typed<T: serde::de::DeserializeOwned>(
+    gw_addr: &str,
+    args: &[&str],
+) -> anyhow::Result<T> {
+    let mut full_args = vec!["-a", gw_addr];
+    full_args.extend(args);
+
+    let output = Command::new(find_binary("gateway-cli"))
+        .args(&full_args)
+        .output()
+        .await
+        .context("Failed to run gateway-cli")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        bail!(
+            "gateway-cli {} failed:\nstdout: {stdout}\nstderr: {stderr}",
+            args.join(" ")
+        );
+    }
+
+    let stdout = String::from_utf8(output.stdout)?;
+    serde_json::from_str(stdout.trim())
+        .context(format!("Failed to parse gateway-cli output: {stdout}"))
+}
+
 async fn open_channel_between_gateways(
     bitcoind: &bitcoincore_rpc::Client,
     gw1_addr: &str,

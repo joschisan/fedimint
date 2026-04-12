@@ -10,7 +10,7 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::hex::ToHex;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::SafeUrl;
-use fedimint_core::{Amount, BitcoinAmountOrAll, secp256k1};
+use fedimint_core::{Amount, BitcoinAmountOrAll, PeerId, secp256k1};
 use fedimint_eventlog::{EventKind, EventLogId, PersistedLogEntry};
 use lightning_invoice::{Bolt11Invoice, RoutingFees};
 pub use reqwest::Method;
@@ -899,4 +899,59 @@ pub struct PeerInfo {
     pub node_id: secp256k1::PublicKey,
     pub address: String,
     pub is_connected: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ListChannelsResponse {
+    pub channels: Vec<ChannelInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ListPeersResponse {
+    pub peers: Vec<PeerInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OnchainReceiveResponse {
+    pub address: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OnchainSendResponse {
+    pub txid: bitcoin::Txid,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ChannelOpenResponse {
+    pub txid: bitcoin::Txid,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InvoiceCreateResponse {
+    pub invoice: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InvoicePayResponse {
+    pub preimage: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PeginFromOnchainResponse {
+    pub txid: bitcoin::Txid,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ListFederationsResponse {
+    pub federations: Vec<FederationInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DepositAddressResponse {
+    pub address: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ExportInviteCodesResponse {
+    pub invite_codes: BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>,
 }
