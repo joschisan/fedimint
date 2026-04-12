@@ -218,9 +218,6 @@ fn main() -> anyhow::Result<()> {
 
         // 6. Wait for chain sync
         install_crypto_provider().await;
-        if !is_env_var_set("FM_GATEWAY_SKIP_WAIT_FOR_SYNC") {
-            wait_for_chain_sync(&node).await?;
-        }
 
         // 7. Construct AppState
         let state = AppState::new(
@@ -241,8 +238,6 @@ fn main() -> anyhow::Result<()> {
 
         // 9. Create task group for graceful shutdown
         let task_group = fedimint_core::task::TaskGroup::new();
-
-        task_group.install_kill_handler();
 
         // 10. Spawn tasks
         let public_task = runtime.spawn(public::run_public(
@@ -284,40 +279,6 @@ async fn shutdown_signal() {
         .expect("Failed to install SIGTERM handler")
         .recv()
         .await;
-}
-
-async fn wait_for_chain_sync(node: &ldk_node::Node) -> anyhow::Result<()> {
-    use fedimint_core::envs::{FM_IN_DEVIMINT_ENV, is_env_var_set};
-    use fedimint_core::util::{backoff_util, retry};
-
-    if is_env_var_set(FM_IN_DEVIMINT_ENV) {
-        block_in_place(|| {
-            let _ = node.sync_wallets();
-        });
-    }
-
-    retry(
-        "Wait for chain sync",
-        backoff_util::background_backoff(),
-        || async {
-            let node_status = node.status();
-            let block_height = node_status.current_best_block.height;
-            if node_status.latest_lightning_wallet_sync_timestamp.is_some() {
-                Ok(())
-            } else {
-                warn!(
-                    target: LOG_LIGHTNING,
-                    block_height = %block_height,
-                    "Lightning node is not synced yet",
-                );
-                Err(anyhow::anyhow!("Not synced yet"))
-            }
-        },
-    )
-    .await?;
-
-    info!(target: LOG_LIGHTNING, "Gateway successfully synced with the chain");
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
