@@ -2,16 +2,12 @@ use std::collections::BTreeMap;
 
 use fedimint_client::ClientHandleArc;
 use fedimint_core::PeerId;
-use fedimint_core::config::{FederationId, FederationIdPrefix};
+use fedimint_core::config::FederationId;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::{FmtCompactAnyhow as _, Spanned};
 use fedimint_gateway_common::FederationInfo;
-use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::LOG_GATEWAY;
-use tracing::{info, warn};
-
-use crate::Result;
-use crate::error::CliError;
+use tracing::warn;
 
 #[derive(Debug)]
 pub struct FederationManager {
@@ -28,38 +24,6 @@ impl FederationManager {
     pub fn add_client(&mut self, client: Spanned<ClientHandleArc>) {
         let federation_id = client.borrow().with_sync(|c| c.federation_id());
         self.clients.insert(federation_id, client);
-    }
-
-    pub async fn wait_for_incoming_payments(&self) -> Result<()> {
-        for client in self.clients.values() {
-            let active_operations = client.value().get_active_operations().await;
-            let operation_log = client.value().operation_log();
-            for op_id in active_operations {
-                let log_entry = operation_log.get_operation(op_id).await;
-                if let Some(entry) = log_entry {
-                    if entry.operation_module_kind() == "lnv2" {
-                        let lnv2 = client.value().get_first_module::<GatewayClientModuleV2>()?;
-                        lnv2.await_completion(op_id).await;
-                    }
-                }
-            }
-        }
-
-        info!(target: LOG_GATEWAY, "Finished waiting for incoming payments");
-        Ok(())
-    }
-
-    pub fn get_client_for_federation_id_prefix(
-        &self,
-        federation_id_prefix: FederationIdPrefix,
-    ) -> Option<Spanned<ClientHandleArc>> {
-        self.clients.iter().find_map(|(fid, client)| {
-            if fid.to_prefix() == federation_id_prefix {
-                Some(client.clone())
-            } else {
-                None
-            }
-        })
     }
 
     pub fn has_federation(&self, federation_id: FederationId) -> bool {

@@ -38,7 +38,7 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, info_span, instrument, warn};
 
-use crate::error::{CliError, FederationNotConnected};
+use crate::error::CliError;
 use crate::{AppState, UserChannelId, get_preimage_and_payment_hash};
 
 pub async fn run_cli(state: AppState, handle: TaskHandle) {
@@ -678,19 +678,14 @@ async fn module_mint_receive(
         base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes)
             .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
 
-    let federation_id_prefix = ecash
+    let federation_id = ecash
         .mint()
-        .map(|id| id.to_prefix())
         .ok_or_else(|| CliError::bad_request("ECash does not contain federation id"))?;
 
     let client = state
-        .federation_manager
-        .read()
+        .select_client(federation_id)
         .await
-        .get_client_for_federation_id_prefix(federation_id_prefix)
-        .ok_or(CliError::bad_request(FederationNotConnected {
-            federation_id_prefix,
-        }))?;
+        .map_err(|e| CliError::bad_request(e))?;
 
     let mint = client
         .value()
