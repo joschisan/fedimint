@@ -549,6 +549,20 @@ async fn open_channel_between_gateways(
         ])
         .run_gateway_cli::<serde_json::Value>()?;
 
+    // Wait for the funding tx to be negotiated
+    retry("funding tx", || {
+        let gw1_addr = gw1_addr.to_string();
+        async move {
+            let channels = gateway_cmd(&gw1_addr)
+                .args(["ldk", "channel", "list"])
+                .run_gateway_cli::<ListChannelsResponse>()?
+                .channels;
+            ensure!(!channels.is_empty(), "no channels yet");
+            Ok(())
+        }
+    })
+    .await?;
+
     // Mine to confirm channel
     tokio::task::block_in_place(|| bitcoind.generate_to_address(10, &dummy_regtest_address()))?;
 
