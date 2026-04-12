@@ -10,9 +10,8 @@ use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_gwv2_client::GatewayClientInitV2;
 
+use crate::AppState;
 use crate::db::{ClientConfigKey, DbKeyPrefix, RootEntropyKey};
-use crate::error::CliError;
-use crate::{AppState, Result};
 
 #[derive(Debug, Clone)]
 pub struct GatewayClientFactory {
@@ -88,13 +87,13 @@ impl GatewayClientFactory {
         )
     }
 
-    async fn client_builder(&self, gateway: Arc<AppState>) -> Result<ClientBuilder> {
+    async fn client_builder(&self, gateway: Arc<AppState>) -> anyhow::Result<ClientBuilder> {
         let mut registry = self.registry.clone();
         registry.attach(GatewayClientInitV2 { gateway });
 
         let mut builder = Client::builder()
             .await
-            .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?
+            .map_err(|e| anyhow::anyhow!("Client creation error: {e}"))?
             .with_iroh_enable_dht(true)
             .with_iroh_enable_next(true);
         builder.with_module_inits(registry);
@@ -113,7 +112,7 @@ impl GatewayClientFactory {
         &self,
         invite: &InviteCode,
         gateway: Arc<AppState>,
-    ) -> Result<fedimint_client::ClientHandleArc> {
+    ) -> anyhow::Result<fedimint_client::ClientHandleArc> {
         let federation_id = invite.federation_id();
 
         // Idempotent: if already joined, just load
@@ -129,7 +128,7 @@ impl GatewayClientFactory {
             .join(self.client_database(federation_id), self.root_secret())
             .await
             .map(Arc::new)
-            .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
+            .map_err(|e| anyhow::anyhow!("Client creation error: {e}"))?;
 
         self.save_config(&client.config().await).await;
 
@@ -141,7 +140,7 @@ impl GatewayClientFactory {
         &self,
         federation_id: &FederationId,
         gateway: Arc<AppState>,
-    ) -> Result<Option<fedimint_client::ClientHandleArc>> {
+    ) -> anyhow::Result<Option<fedimint_client::ClientHandleArc>> {
         let db = self.client_database(*federation_id);
 
         if !Client::is_initialized(&db).await {
@@ -154,7 +153,7 @@ impl GatewayClientFactory {
             .open(self.connectors.clone(), db, self.root_secret())
             .await
             .map(Arc::new)
-            .map_err(|e| CliError::internal(format!("Client open error: {e}")))?;
+            .map_err(|e| anyhow::anyhow!("Client open error: {e}"))?;
 
         self.save_config(&client.config().await).await;
 

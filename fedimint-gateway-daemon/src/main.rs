@@ -420,7 +420,7 @@ async fn handle_lightning_payment(state: &AppState, payment_request: InterceptPa
 async fn try_handle_lightning_payment_lnv2(
     state: &AppState,
     htlc_request: &InterceptPaymentRequest,
-) -> fedimint_gateway_daemon::Result<()> {
+) -> anyhow::Result<()> {
     use fedimint_lnv2_common::contracts::PaymentImage;
 
     let (contract, client) = state

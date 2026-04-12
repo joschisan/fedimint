@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{Json, State};
+use axum::response::IntoResponse;
 use axum::routing::post;
 use bitcoin::FeeRate;
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
@@ -33,12 +34,61 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentDirection, PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
+use reqwest::StatusCode;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, info_span, instrument, warn};
 
-use crate::error::CliError;
 use crate::{AppState, UserChannelId, get_preimage_and_payment_hash};
+
+/// Simple error type for CLI/admin endpoints.
+#[derive(Debug)]
+pub struct CliError {
+    pub code: StatusCode,
+    pub error: String,
+}
+
+impl std::fmt::Display for CliError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+
+impl std::error::Error for CliError {}
+
+impl CliError {
+    pub fn bad_request(error: impl std::fmt::Display) -> Self {
+        Self {
+            code: StatusCode::BAD_REQUEST,
+            error: error.to_string(),
+        }
+    }
+
+    pub fn internal(error: impl std::fmt::Display) -> Self {
+        Self {
+            code: StatusCode::INTERNAL_SERVER_ERROR,
+            error: error.to_string(),
+        }
+    }
+}
+
+impl IntoResponse for CliError {
+    fn into_response(self) -> axum::response::Response {
+        (self.code, self.error).into_response()
+    }
+}
+
+impl From<fedimint_gateway_common::LightningRpcError> for CliError {
+    fn from(e: fedimint_gateway_common::LightningRpcError) -> Self {
+        Self::internal(e)
+    }
+}
+
+impl From<anyhow::Error> for CliError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::internal(e)
+    }
+}
 
 pub async fn run_cli(state: AppState, handle: TaskHandle) {
     let listener = TcpListener::bind(state.cli_bind)

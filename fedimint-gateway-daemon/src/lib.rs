@@ -18,7 +18,6 @@
 pub mod cli;
 pub mod client;
 pub mod db;
-pub mod error;
 pub mod public;
 
 // Re-exports for test fixtures
@@ -27,7 +26,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{Context as _, anyhow};
 use async_trait::async_trait;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::{Network, OutPoint, secp256k1};
@@ -72,12 +71,9 @@ pub use {ldk_node, lockable};
 use crate::db::{
     RegisteredIncomingContract as DbRegisteredIncomingContract, RegisteredIncomingContractKey,
 };
-use crate::error::CliError;
 
 /// Default Bitcoin network for testing purposes.
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
-
-pub type Result<T> = std::result::Result<T, CliError>;
 
 /// Name of the gateway's database.
 pub const DB_FILE: &str = "gatewayd.db";
@@ -140,7 +136,7 @@ impl AppState {
     }
 
     /// Load all persisted federation clients on startup.
-    pub async fn load_clients(&self) -> Result<()> {
+    pub async fn load_clients(&self) -> anyhow::Result<()> {
         let mut clients = self.clients.write().await;
 
         let federations = self.client_factory.list_federations().await;
@@ -171,7 +167,7 @@ impl AppState {
     pub async fn check_federation_network(
         client: &ClientHandleArc,
         network: Network,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let federation_id = client.federation_id();
         let config = client.config().await;
 
@@ -181,7 +177,7 @@ impl AppState {
             .find(|m| fedimint_lnv2_common::LightningCommonInit::KIND == m.kind);
 
         if lnv2_cfg.is_none() {
-            return Err(CliError::internal(format!(
+            return Err(anyhow::anyhow!(format!(
                 "Federation {federation_id} does not have an LNv2 lightning module"
             )));
         }
@@ -196,7 +192,7 @@ impl AppState {
                     %network,
                     "Incorrect LNv2 network for federation",
                 );
-                return Err(CliError::internal(format!(
+                return Err(anyhow::anyhow!(format!(
                     "Unsupported LNv2 network {}",
                     ln_cfg.network
                 )));
@@ -310,10 +306,10 @@ impl AppState {
     pub async fn routing_info_v2(
         &self,
         federation_id: &FederationId,
-    ) -> Result<Option<RoutingInfo>> {
+    ) -> anyhow::Result<Option<RoutingInfo>> {
         self.select_client(*federation_id)
             .await
-            .ok_or(CliError::bad_request("Federation not connected"))?;
+            .context("Federation not connected")?;
 
         let context = self.get_lightning_context().await?;
 
@@ -342,38 +338,40 @@ impl AppState {
     pub async fn send_payment_v2(
         &self,
         payload: SendPaymentPayload,
-    ) -> Result<std::result::Result<[u8; 32], Signature>> {
+    ) -> anyhow::Result<std::result::Result<[u8; 32], Signature>> {
         self.select_client(payload.federation_id)
             .await
-            .ok_or(CliError::bad_request("Federation not connected"))?
+            .context("Federation not connected")?
             .value()
             .get_first_module::<GatewayClientModuleV2>()
             .expect("Must have client module")
             .send_payment(payload)
             .await
-            .map_err(|e| CliError::internal(format!("LNv2 outgoing payment error: {e}")))
+            .map_err(|e| anyhow::anyhow!(format!("LNv2 outgoing payment error: {e}")))
     }
 
     pub async fn create_bolt11_invoice_v2(
         &self,
         payload: CreateBolt11InvoicePayload,
-    ) -> Result<Bolt11Invoice> {
+    ) -> anyhow::Result<Bolt11Invoice> {
         if !payload.contract.verify() {
-            return Err(CliError::internal(
+            return Err(anyhow::anyhow!(
                 "LNv2 incoming payment error: The contract is invalid",
             ));
         }
 
-        let payment_info =
-            self.routing_info_v2(&payload.federation_id)
-                .await?
-                .ok_or(CliError::internal(format!(
+        let payment_info = self
+            .routing_info_v2(&payload.federation_id)
+            .await?
+            .with_context(|| {
+                format!(
                     "LNv2 incoming payment error: Federation {} does not exist",
                     payload.federation_id
-                )))?;
+                )
+            })?;
 
         if payload.contract.commitment.refund_pk != payment_info.module_public_key {
-            return Err(CliError::internal(
+            return Err(anyhow::anyhow!(
                 "LNv2 incoming payment error: The incoming contract is keyed to another gateway",
             ));
         }
@@ -381,19 +379,19 @@ impl AppState {
         let contract_amount = payment_info.receive_fee.subtract_from(payload.amount.msats);
 
         if contract_amount == Amount::ZERO {
-            return Err(CliError::internal(
+            return Err(anyhow::anyhow!(
                 "LNv2 incoming payment error: Zero amount incoming contracts are not supported",
             ));
         }
 
         if contract_amount != payload.contract.commitment.amount {
-            return Err(CliError::internal(
+            return Err(anyhow::anyhow!(
                 "LNv2 incoming payment error: The contract amount does not pay the correct amount of fees",
             ));
         }
 
         if payload.contract.commitment.expiration <= duration_since_epoch().as_secs() {
-            return Err(CliError::internal(
+            return Err(anyhow::anyhow!(
                 "LNv2 incoming payment error: The contract has already expired",
             ));
         }
@@ -401,7 +399,7 @@ impl AppState {
         let payment_hash = match payload.contract.commitment.payment_image {
             PaymentImage::Hash(payment_hash) => payment_hash,
             PaymentImage::Point(..) => {
-                return Err(CliError::internal(
+                return Err(anyhow::anyhow!(
                     "LNv2 incoming payment error: PaymentImage is not a payment hash",
                 ));
             }
@@ -430,13 +428,13 @@ impl AppState {
             .await
             .is_some()
         {
-            return Err(CliError::internal(
+            return Err(anyhow::anyhow!(
                 "LNv2 incoming payment error: PaymentHash is already registered",
             ));
         }
 
         dbtx.commit_tx_result().await.map_err(|_| {
-            CliError::internal("LNv2 incoming payment error: Payment hash is already registered")
+            anyhow::anyhow!("LNv2 incoming payment error: Payment hash is already registered")
         })?;
 
         Ok(invoice)
@@ -525,19 +523,19 @@ impl AppState {
         &self,
         payment_image: PaymentImage,
         amount_msats: u64,
-    ) -> Result<(IncomingContract, ClientHandleArc)> {
+    ) -> anyhow::Result<(IncomingContract, ClientHandleArc)> {
         let registered_incoming_contract = self
             .gateway_db
             .begin_transaction_nc()
             .await
             .get_value(&RegisteredIncomingContractKey(payment_image))
             .await
-            .ok_or(CliError::internal(
+            .context(
                 "LNv2 incoming payment error: No corresponding decryption contract available",
-            ))?;
+            )?;
 
         if registered_incoming_contract.incoming_amount_msats != amount_msats {
-            return Err(CliError::internal(
+            return Err(anyhow::anyhow!(
                 "LNv2 incoming payment error: The available decryption contract's amount is not equal to the requested amount",
             ));
         }
@@ -545,7 +543,7 @@ impl AppState {
         let client = self
             .select_client(registered_incoming_contract.federation_id)
             .await
-            .ok_or(CliError::bad_request("Federation not connected"))?
+            .context("Federation not connected")?
             .into_value();
 
         Ok((registered_incoming_contract.contract, client))

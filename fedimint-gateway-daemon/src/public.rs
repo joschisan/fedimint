@@ -1,6 +1,8 @@
 use anyhow::anyhow;
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{Json, Path, Query, State};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use bitcoin::hashes::sha256;
 use fedimint_core::config::FederationId;
@@ -11,13 +13,48 @@ use fedimint_lnv2_common::endpoint_constants::{
 };
 use fedimint_lnv2_common::gateway_api::{CreateBolt11InvoicePayload, SendPaymentPayload};
 use fedimint_logging::LOG_GATEWAY;
+use reqwest::StatusCode;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing::instrument;
 
 use crate::AppState;
-use crate::error::{CliError, LnurlError};
+use crate::cli::CliError;
+
+/// LNURL-compliant error response for verify endpoints.
+#[derive(Debug)]
+pub struct LnurlError {
+    code: StatusCode,
+    reason: anyhow::Error,
+}
+
+impl std::fmt::Display for LnurlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LNURL Error: {}", self.reason)
+    }
+}
+
+impl std::error::Error for LnurlError {}
+
+impl LnurlError {
+    pub fn internal(reason: anyhow::Error) -> Self {
+        Self {
+            code: StatusCode::INTERNAL_SERVER_ERROR,
+            reason,
+        }
+    }
+}
+
+impl IntoResponse for LnurlError {
+    fn into_response(self) -> Response<Body> {
+        let json = Json(serde_json::json!({
+            "status": "ERROR",
+            "reason": self.reason.to_string(),
+        }));
+        (self.code, json).into_response()
+    }
+}
 
 pub async fn run_public(state: AppState, handle: TaskHandle) {
     let listener = TcpListener::bind(state.api_bind)
