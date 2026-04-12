@@ -26,7 +26,6 @@ pub mod federation_manager;
 pub mod public;
 
 use std::collections::BTreeMap;
-use std::fmt::Display;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -88,27 +87,10 @@ pub const DB_FILE: &str = "gatewayd.db";
 /// Name of the folder for LDK node data.
 pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 
-/// Gateway state: running or shutting down.
-#[derive(Clone, Debug)]
-pub enum GatewayState {
-    Running,
-    ShuttingDown,
-}
-
-impl Display for GatewayState {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            GatewayState::Running => write!(f, "Running"),
-            GatewayState::ShuttingDown => write!(f, "ShuttingDown"),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct AppState {
     pub federation_manager: Arc<RwLock<FederationManager>>,
     pub node: Arc<ldk_node::Node>,
-    pub state: Arc<RwLock<GatewayState>>,
     pub client_factory: GatewayClientFactory,
     pub gateway_db: Database,
     pub api_bind: SocketAddr,
@@ -128,7 +110,6 @@ impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppState")
             .field("federation_manager", &self.federation_manager)
-            .field("state", &self.state)
             .field("gateway_db", &self.gateway_db)
             .field("api_bind", &self.api_bind)
             .field("cli_bind", &self.cli_bind)
@@ -142,7 +123,7 @@ impl AppState {
         self.gateway_keypair.public_key()
     }
 
-    /// Alias for backwards compatibility with tests.
+    /// Alias kept for ln-tests compatibility.
     pub async fn http_gateway_id(&self) -> PublicKey {
         self.gateway_id()
     }
@@ -239,7 +220,11 @@ impl AppState {
     pub async fn get_lightning_context(
         &self,
     ) -> std::result::Result<LightningContext, LightningRpcError> {
-        let alias = self.node.node_alias().expect("node alias is set").to_string();
+        let alias = self
+            .node
+            .node_alias()
+            .expect("node alias is set")
+            .to_string();
 
         Ok(LightningContext {
             lightning_public_key: self.node.node_id(),

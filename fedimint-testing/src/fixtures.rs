@@ -18,7 +18,7 @@ use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_daemon::client::GatewayClientFactory;
 use fedimint_gateway_daemon::federation_manager::FederationManager;
-use fedimint_gateway_daemon::{AppState, GatewayState, derive_gateway_keypair};
+use fedimint_gateway_daemon::{AppState, derive_gateway_keypair};
 use fedimint_logging::TracingSetup;
 use fedimint_server::core::{DynServerModuleInit, IServerModuleInit, ServerModuleInitRegistry};
 use fedimint_server_bitcoin_rpc::bitcoind::BitcoindClient;
@@ -267,7 +267,6 @@ impl Fixtures {
         AppState {
             federation_manager: Arc::new(tokio::sync::RwLock::new(FederationManager::new())),
             node,
-            state: Arc::new(tokio::sync::RwLock::new(GatewayState::Running)),
             client_factory,
             gateway_db,
             api_bind: listen,

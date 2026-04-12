@@ -28,7 +28,7 @@ use fedimint_gateway_common::{InterceptPaymentRequest, PaymentFee};
 use fedimint_gateway_daemon::client::GatewayClientFactory;
 use fedimint_gateway_daemon::federation_manager::FederationManager;
 use fedimint_gateway_daemon::{
-    AppState, DB_FILE, GatewayState, LDK_NODE_DB_FOLDER, cli, derive_gateway_keypair, public,
+    AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, derive_gateway_keypair, public,
 };
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
@@ -219,7 +219,6 @@ fn main() -> anyhow::Result<()> {
         let state = AppState {
             federation_manager: Arc::new(RwLock::new(FederationManager::new())),
             node: node.clone(),
-            state: Arc::new(RwLock::new(GatewayState::Running)),
             client_factory,
             gateway_db,
             api_bind: opts.api_bind,

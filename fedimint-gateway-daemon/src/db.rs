@@ -1,8 +1,7 @@
 use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::{impl_db_lookup, impl_db_record, secp256k1};
+use fedimint_core::{impl_db_lookup, impl_db_record};
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
-use secp256k1::Keypair;
 
 #[repr(u8)]
 #[derive(Clone, Debug)]
@@ -10,8 +9,7 @@ pub enum DbKeyPrefix {
     RootEntropy = 0x00,
     ClientDatabase = 0x01,
     ClientConfig = 0x02,
-    GatewayKeypair = 0x03,
-    RegisteredIncomingContract = 0x04,
+    RegisteredIncomingContract = 0x03,
 }
 
 impl std::fmt::Display for DbKeyPrefix {
@@ -44,16 +42,6 @@ impl_db_record!(
 );
 
 impl_db_lookup!(key = ClientConfigKey, query_prefix = ClientConfigPrefix);
-
-// Gateway keypair
-#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct GatewayKeypairKey;
-
-impl_db_record!(
-    key = GatewayKeypairKey,
-    value = Keypair,
-    db_prefix = DbKeyPrefix::GatewayKeypair,
-);
 
 // Registered incoming LNv2 contracts
 #[derive(Debug, Encodable, Decodable)]
