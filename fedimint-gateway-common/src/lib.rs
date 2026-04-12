@@ -24,7 +24,6 @@ pub const V1_API_ENDPOINT: &str = "v1";
 // Top-level
 pub const ROUTE_INFO: &str = "/info";
 pub const ROUTE_BALANCES: &str = "/balances";
-pub const ROUTE_STOP: &str = "/stop";
 pub const ROUTE_MNEMONIC: &str = "/mnemonic";
 
 // LDK node management
