@@ -31,7 +31,7 @@ pub fn find_binary(name: &str) -> PathBuf {
 
 pub const BTC_RPC_PORT: u16 = 18443;
 pub const GUARDIAN_BASE_PORT: u16 = 17000;
-pub const PORTS_PER_GUARDIAN: u16 = 4;
+pub const PORTS_PER_GUARDIAN: u16 = 5;
 pub const NUM_GUARDIANS: usize = 4;
 pub const GW1_PORT: u16 = 28175;
 pub const GW1_LN_PORT: u16 = 9735;
@@ -293,6 +293,7 @@ async fn start_fedimintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
     let api_port = port_base + 1;
     let ui_port = port_base + 2;
     let metrics_port = port_base + 3;
+    let cli_port = port_base + 4;
 
     let data_dir = base.join(format!("fedimintd-{peer_idx}"));
     tokio::fs::create_dir_all(&data_dir).await?;
@@ -312,6 +313,7 @@ async fn start_fedimintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
         .env("FM_BIND_API", format!("127.0.0.1:{api_port}"))
         .env("FM_BIND_UI", format!("127.0.0.1:{ui_port}"))
         .env("FM_BIND_METRICS", format!("127.0.0.1:{metrics_port}"))
+        .env("FM_BIND_CLI", format!("127.0.0.1:{cli_port}"))
         .env("FM_P2P_URL", format!("fedimint://127.0.0.1:{p2p_port}"))
         .env("FM_API_URL", format!("ws://127.0.0.1:{api_port}"))
         .env("FM_ENABLE_MODULE_WALLETV2", "true")
@@ -369,30 +371,33 @@ async fn start_gatewayd(
 }
 
 async fn run_dkg(base: &Path) -> anyhow::Result<()> {
-    let mut endpoints = BTreeMap::new();
+    use fedimint_server_cli_core::*;
+
+    let mut cli_addrs = BTreeMap::new();
     for i in 0..NUM_GUARDIANS {
-        let api_port = GUARDIAN_BASE_PORT + (i as u16 * PORTS_PER_GUARDIAN) + 1;
-        endpoints.insert(i, format!("ws://127.0.0.1:{api_port}"));
+        let cli_port = GUARDIAN_BASE_PORT + (i as u16 * PORTS_PER_GUARDIAN) + 4;
+        cli_addrs.insert(i, format!("http://127.0.0.1:{cli_port}"));
     }
 
+    let http = reqwest::Client::new();
+
     // Wait for all guardians to be ready
-    for (peer, endpoint) in &endpoints {
+    for (peer, addr) in &cli_addrs {
         retry(&format!("fedimintd-{peer} setup status"), || {
-            let endpoint = endpoint.clone();
+            let http = http.clone();
+            let addr = addr.clone();
             async move {
-                let result = fedimint_cli_raw(&[
-                    "--password",
-                    PASSWORD,
-                    "admin",
-                    "setup",
-                    &endpoint,
-                    "status",
-                ])
-                .await?;
-                let status = result.trim();
+                let status: SetupStatus = http
+                    .post(format!("{addr}{ROUTE_SETUP_STATUS}"))
+                    .json(&())
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await?;
                 ensure!(
-                    status.contains("AwaitingLocalParams"),
-                    "Unexpected status: {status}"
+                    status == SetupStatus::AwaitingLocalParams,
+                    "Unexpected status: {status:?}"
                 );
                 Ok(())
             }
@@ -402,62 +407,60 @@ async fn run_dkg(base: &Path) -> anyhow::Result<()> {
     info!("All guardians awaiting local params");
 
     // Set local params: peer 0 is leader, rest are followers
-    let mut connection_infos = BTreeMap::new();
-    for (peer, endpoint) in &endpoints {
-        let mut args = vec![
-            "--password".to_string(),
-            PASSWORD.to_string(),
-            "admin".to_string(),
-            "setup".to_string(),
-            endpoint.clone(),
-            "set-local-params".to_string(),
-            format!("Guardian {peer}"),
-        ];
+    let mut setup_codes = BTreeMap::new();
+    for (peer, addr) in &cli_addrs {
+        let request = SetLocalParamsRequest {
+            password: PASSWORD.to_string(),
+            name: format!("Guardian {peer}"),
+            federation_name: if *peer == 0 {
+                Some("Test Federation".to_string())
+            } else {
+                None
+            },
+            federation_size: if *peer == 0 {
+                Some(NUM_GUARDIANS as u32)
+            } else {
+                None
+            },
+        };
 
-        if *peer == 0 {
-            args.push("--federation-name".to_string());
-            args.push("Test Federation".to_string());
-            args.push("--federation-size".to_string());
-            args.push(NUM_GUARDIANS.to_string());
-        }
+        let resp: SetLocalParamsResponse = http
+            .post(format!("{addr}{ROUTE_SETUP_SET_LOCAL_PARAMS}"))
+            .json(&request)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
 
-        let output = fedimint_cli_raw(&args.iter().map(|s| s.as_str()).collect::<Vec<_>>()).await?;
-        let info: String = serde_json::from_str(output.trim())?;
-        connection_infos.insert(*peer, info);
+        setup_codes.insert(*peer, resp.setup_code);
     }
     info!("Local params set for all guardians");
 
     // Exchange peer connection info
-    for (peer, info) in &connection_infos {
-        for (other_peer, endpoint) in &endpoints {
+    for (peer, code) in &setup_codes {
+        for (other_peer, addr) in &cli_addrs {
             if other_peer == peer {
                 continue;
             }
-            fedimint_cli_raw(&[
-                "--password",
-                PASSWORD,
-                "admin",
-                "setup",
-                endpoint,
-                "add-peer",
-                info,
-            ])
-            .await?;
+            http.post(format!("{addr}{ROUTE_SETUP_ADD_PEER}"))
+                .json(&AddPeerRequest {
+                    setup_code: code.clone(),
+                })
+                .send()
+                .await?
+                .error_for_status()?;
         }
     }
     info!("Peer info exchanged");
 
     // Start DKG on all peers
-    for endpoint in endpoints.values() {
-        fedimint_cli_raw(&[
-            "--password",
-            PASSWORD,
-            "admin",
-            "setup",
-            endpoint,
-            "start-dkg",
-        ])
-        .await?;
+    for addr in cli_addrs.values() {
+        http.post(format!("{addr}{ROUTE_SETUP_START_DKG}"))
+            .json(&())
+            .send()
+            .await?
+            .error_for_status()?;
     }
 
     // Wait for invite code to appear

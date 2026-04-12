@@ -20,6 +20,8 @@ fedimint-client = { workspace = true }
 fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-gateway-common = { workspace = true }
+fedimint-server-cli-core = { workspace = true }
+reqwest = { workspace = true }
 fedimint-lnv2-client = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 fedimint-logging = { workspace = true }

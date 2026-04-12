@@ -26,7 +26,7 @@ impl RunGatewayCli for Command {
 }
 
 pub fn gateway_cmd(gw_addr: &str) -> Command {
-    let mut cmd = Command::new(find_binary("gateway-cli"));
+    let mut cmd = Command::new(find_binary("gatewayd-cli"));
     cmd.arg("-a").arg(gw_addr);
     cmd
 }

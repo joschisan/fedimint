@@ -219,6 +219,7 @@ fn request<R: Serialize>(addr: &str, route: &str, payload: R) -> Result<Value> {
     );
 
     let text = response.text()?;
+
     if text.trim().is_empty() {
         Ok(Value::Null)
     } else {

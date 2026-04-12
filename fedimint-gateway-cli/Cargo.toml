@@ -13,7 +13,7 @@ version = { workspace = true }
 rustc-args = ["--cfg", "tokio_unstable"]
 
 [[bin]]
-name = "gateway-cli"
+name = "gatewayd-cli"
 path = "src/main.rs"
 
 [dependencies]
