@@ -29,10 +29,12 @@ use fedimint_core::task::block_in_place;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
 use fedimint_gateway_common::{InterceptPaymentRequest, PaymentFee};
 use fedimint_gateway_daemon::client::GatewayClientBuilder;
-use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli};
+use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use fedimint_mintv2_client::MintClientInit;
+use fedimint_rocksdb::RocksDb;
+use fedimint_walletv2_client::WalletClientInit;
 use lightning::types::payment::PaymentHash;
 use rand::rngs::OsRng;
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
@@ -135,7 +137,7 @@ fn main() -> anyhow::Result<()> {
 
         // 2. Open database
         let gateway_db = Database::new(
-            fedimint_rocksdb::RocksDb::build(opts.data_dir.join(DB_FILE)).open().await?,
+            RocksDb::build(opts.data_dir.join(DB_FILE)).open().await?,
             ModuleDecoderRegistry::default(),
         );
 
@@ -162,7 +164,7 @@ fn main() -> anyhow::Result<()> {
         // 4. Build client module registry
         let mut registry = ClientModuleInitRegistry::new();
         registry.attach(MintClientInit);
-        registry.attach(fedimint_walletv2_client::WalletClientInit);
+        registry.attach(WalletClientInit);
 
         let client_builder = GatewayClientBuilder::new(opts.data_dir.clone(), registry).await?;
 
@@ -195,27 +197,22 @@ fn main() -> anyhow::Result<()> {
             _ => unreachable!("ArgGroup enforces at least one chain source"),
         }
 
-        let ldk_data_dir = client_builder.data_dir().join(LDK_NODE_DB_FOLDER);
+        let ldk_data_dir = client_builder.data_dir().join(LDK_NODE_DB_FOLDER) .to_str()
+        .expect("Invalid data dir path")
+        .to_string();
         node_builder.set_storage_dir_path(
             ldk_data_dir
-                .to_str()
-                .expect("Invalid data dir path")
-                .to_string(),
+
         );
 
-        info!(target: LOG_LIGHTNING, data_dir = %ldk_data_dir.display(), "Starting LDK Node...");
+        info!(target: LOG_LIGHTNING, "Starting LDK Node...");
 
         let node = node_builder.build()?;
 
-        let ldk_runtime = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("Failed to build LDK runtime"),
-        );
 
-        node.start_with_runtime(ldk_runtime)
-            .map_err(|err| anyhow!("Failed to start LDK Node: {err}"))?;
+        let runtime = Arc::new(tokio::runtime::Runtime::new()?);
+
+        node.start_with_runtime(runtime.clone())?;
 
         info!("Successfully started LDK Node");
         let node = Arc::new(node);
@@ -227,12 +224,6 @@ fn main() -> anyhow::Result<()> {
         }
 
         // 7. Construct AppState
-        info!(
-            target: LOG_GATEWAY,
-            version = %fedimint_build_code_version_env!(),
-            "Starting gatewayd",
-        );
-
         let state = AppState::new(
             gateway_db,
             client_builder,
@@ -251,10 +242,11 @@ fn main() -> anyhow::Result<()> {
 
         // 9. Create task group for graceful shutdown
         let task_group = fedimint_core::task::TaskGroup::new();
+
         task_group.install_kill_handler();
 
         // 10. Spawn tasks
-        let public_task = runtime.spawn(fedimint_gateway_daemon::public::run_public(
+        let public_task = runtime.spawn(public::run_public(
             state.clone(),
             task_group.make_handle(),
         ));
@@ -267,19 +259,23 @@ fn main() -> anyhow::Result<()> {
         shutdown_signal().await;
 
         info!(target: LOG_GATEWAY, "Gatewayd shutting down...");
+
         task_group.shutdown_join_all(None).await?;
 
         if let Err(e) = public_task.await {
             warn!(target: LOG_GATEWAY, err = %e, "Failed to join public webserver task");
         }
+
         if let Err(e) = cli_task.await {
             warn!(target: LOG_GATEWAY, err = %e, "Failed to join CLI webserver task");
         }
+
         if let Err(e) = events_task.await {
             warn!(target: LOG_GATEWAY, err = %e, "Failed to join LDK events task");
         }
 
         info!(target: LOG_GATEWAY, "Gatewayd exiting...");
+
         Ok(())
     })
 }
