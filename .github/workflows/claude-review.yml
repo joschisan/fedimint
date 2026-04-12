@@ -5,7 +5,7 @@ on:
   # Safety: we checkout the base branch (trusted) and only fetch the PR
   # diff as text — no untrusted code is checked out or executed.
   pull_request_target:
-    types: [ready_for_review, synchronize]
+    types: [opened, ready_for_review, synchronize]
 
 # One review per PR at a time
 concurrency:
