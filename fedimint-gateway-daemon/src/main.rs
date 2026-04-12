@@ -158,22 +158,14 @@ fn main() -> anyhow::Result<()> {
         registry.attach(MintClientInit);
         registry.attach(WalletClientInit);
 
-        let client_factory = if let Some(factory) =
-            GatewayClientFactory::try_load(gateway_db.clone(), registry.clone()).await?
-        {
-            factory
-        } else {
-            let mnemonic = if let Ok(words) = std::env::var("FM_GATEWAY_MNEMONIC") {
-                info!(target: LOG_GATEWAY, "Using provided mnemonic from environment variable");
-                Mnemonic::parse_in_normalized(Language::English, words.as_str())
-                    .map_err(|e| anyhow!("Seed phrase provided in environment was invalid {e:?}"))?
-            } else {
-                debug!(target: LOG_GATEWAY, "Generating new mnemonic");
-                Bip39RootSecretStrategy::<12>::random(&mut OsRng)
+        let client_factory =
+            match GatewayClientFactory::try_load(gateway_db.clone(), registry.clone()).await? {
+                Some(factory) => factory,
+                None => {
+                    let mnemonic = Bip39RootSecretStrategy::<12>::random(&mut OsRng);
+                    GatewayClientFactory::init(gateway_db.clone(), mnemonic, registry).await?
+                }
             };
-
-            GatewayClientFactory::init(gateway_db.clone(), mnemonic, registry).await?
-        };
 
         let mnemonic = client_factory.mnemonic().clone();
         let gateway_keypair = derive_gateway_keypair(&mnemonic);
