@@ -21,6 +21,7 @@
 //! Server side fedimint module traits
 
 extern crate fedimint_core;
+pub mod cli;
 pub mod connection_limits;
 pub mod db;
 
@@ -99,6 +100,7 @@ pub async fn run(
     dashboard_ui_router: DashboardUiRouter,
     db_checkpoint_retention: u64,
     iroh_api_limits: ConnectionLimits,
+    cli_bind: Option<std::net::SocketAddr>,
 ) -> anyhow::Result<()> {
     let (cfg, connections, p2p_status_receivers) = match get_config(&data_dir)? {
         Some(cfg) => {
@@ -149,6 +151,7 @@ pub async fn run(
                 force_api_secrets.clone(),
                 setup_ui_router,
                 module_init_registry.clone(),
+                cli_bind,
             ))
             .await?
         }
@@ -241,6 +244,7 @@ pub async fn run_config_gen(
     api_secrets: ApiSecrets,
     setup_ui_handler: SetupUiRouter,
     module_init_registry: ServerModuleInitRegistry,
+    cli_bind: Option<std::net::SocketAddr>,
 ) -> anyhow::Result<(
     ServerConfig,
     DynP2PConnections<P2PMessage>,
@@ -284,6 +288,17 @@ pub async fn run_config_gen(
     });
 
     info!(target: LOG_CONSENSUS, "Setup UI running at http://{} 🚀", settings.ui_bind);
+
+    // Spawn CLI admin server if cli_bind is configured
+    let cli_task_group = TaskGroup::new();
+    if let Some(cli_addr) = cli_bind {
+        let cli_state = cli::CliState {
+            setup_api: setup_api.clone().into_dyn(),
+        };
+        cli_task_group.spawn("setup-cli", move |handle| async move {
+            cli::run_cli(cli_addr, cli_state, handle).await;
+        });
+    }
 
     let cg_params = cgp_receiver
         .recv()

@@ -138,6 +138,10 @@ struct ServerOpts {
     #[arg(long, env = FM_BIND_UI_ENV, default_value = "127.0.0.1:8175")]
     bind_ui: SocketAddr,
 
+    /// Address we bind to for the CLI admin API (localhost-only, no auth)
+    #[arg(long, env = "FM_BIND_CLI", default_value = "127.0.0.1:8177")]
+    bind_cli: SocketAddr,
+
     /// Our external address for communicating with our peers
     ///
     /// `fedimint://<fqdn>:8173` for TCP/TLS p2p connectivity (legacy/standard).
@@ -379,6 +383,7 @@ pub async fn run(
                 server_opts.iroh_api_max_connections,
                 server_opts.iroh_api_max_requests_per_connection,
             ),
+            Some(server_opts.bind_cli),
         )
         .await
         .unwrap_or_else(|err| panic!("Main task returned error: {}", err.fmt_compact_anyhow()));

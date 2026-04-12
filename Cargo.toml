@@ -35,6 +35,8 @@ members = [
     "fedimint-rocksdb",
     "fedimint-server",
     "fedimint-server-bitcoin-rpc",
+    "fedimint-server-cli",
+    "fedimint-server-cli-core",
     "fedimint-server-core",
     "fedimint-server-ui",
     "fedimint-ui-common",
@@ -194,6 +196,8 @@ fedimint-portalloc = { path = "utils/portalloc", version = "=0.11.0-alpha" }
 fedimint-rocksdb = { path = "./fedimint-rocksdb", version = "=0.11.0-alpha" }
 fedimint-server = { path = "./fedimint-server", version = "=0.11.0-alpha" }
 fedimint-server-bitcoin-rpc = { path = "./fedimint-server-bitcoin-rpc", version = "=0.11.0-alpha" }
+fedimint-server-cli = { path = "./fedimint-server-cli", version = "=0.11.0-alpha" }
+fedimint-server-cli-core = { path = "./fedimint-server-cli-core", version = "=0.11.0-alpha" }
 fedimint-server-core = { path = "./fedimint-server-core", version = "=0.11.0-alpha" }
 fedimint-server-ui = { path = "./fedimint-server-ui", version = "=0.11.0-alpha" }
 fedimint-ui-common = { path = "./fedimint-ui-common", version = "=0.11.0-alpha" }
