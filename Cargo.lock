@@ -1461,15 +1461,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "clap_complete"
-version = "4.5.66"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c757a3b7e39161a4e56f9365141ada2a6c915a8622c408ab6bb4b5d047371031"
-dependencies = [
- "clap",
-]
-
-[[package]]
 name = "clap_derive"
 version = "4.5.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2781,49 +2772,6 @@ name = "fedimint-build"
 version = "0.11.0-alpha"
 dependencies = [
  "serde_json",
-]
-
-[[package]]
-name = "fedimint-cli"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "clap",
- "clap_complete",
- "fedimint-aead",
- "fedimint-api-client",
- "fedimint-bip39",
- "fedimint-build",
- "fedimint-client",
- "fedimint-connectors",
- "fedimint-core",
- "fedimint-cursed-redb",
- "fedimint-derive-secret",
- "fedimint-eventlog",
- "fedimint-ln-client",
- "fedimint-lnv2-client",
- "fedimint-logging",
- "fedimint-meta-client",
- "fedimint-mint-client",
- "fedimint-mintv2-client",
- "fedimint-rocksdb",
- "fedimint-wallet-client",
- "fedimint-walletv2-client",
- "fs-lock",
- "futures",
- "hex",
- "itertools 0.14.0",
- "lightning-invoice",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tikv-jemallocator",
- "time",
- "tokio",
- "tracing",
 ]
 
 [[package]]
