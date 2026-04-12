@@ -2262,57 +2262,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "devimint"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "axum 0.8.8",
- "bitcoin",
- "bitcoincore-rpc",
- "bon",
- "chrono",
- "clap",
- "esplora-client 0.12.3",
- "fedimint-aead",
- "fedimint-api-client",
- "fedimint-build",
- "fedimint-client",
- "fedimint-client-module",
- "fedimint-connectors",
- "fedimint-core",
- "fedimint-gateway-common",
- "fedimint-ln-client",
- "fedimint-ln-server",
- "fedimint-lnv2-client",
- "fedimint-lnv2-common",
- "fedimint-logging",
- "fedimint-portalloc",
- "fedimint-server",
- "fedimint-testing-core",
- "fedimint-tonic-lnd",
- "fedimint-wallet-client",
- "fedimint-walletv2-client",
- "fedimint-walletv2-server",
- "fedimintd-envs",
- "fs-lock",
- "futures",
- "hex",
- "iroh-base 0.35.0",
- "itertools 0.14.0",
- "nix",
- "rand 0.8.5",
- "reqwest 0.12.22",
- "semver",
- "serde",
- "serde_json",
- "substring",
- "tokio",
- "tokio-rustls 0.26.4",
- "tower-http",
- "tracing",
-]
-
-[[package]]
 name = "diatomic-waker"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3418,7 +3367,6 @@ dependencies = [
  "fedimint-logging",
  "fedimint-mintv2-client",
  "fedimint-rocksdb",
- "fedimint-testing",
  "fedimint-tpe",
  "fedimint-unknown-common",
  "fedimint-unknown-server",
@@ -3460,7 +3408,6 @@ dependencies = [
  "fedimint-ln-client",
  "fedimint-lnv2-common",
  "fedimint-logging",
- "fedimint-testing",
  "futures",
  "lightning-invoice",
  "rand 0.8.5",
@@ -3713,35 +3660,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-ln-tests"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "assert_matches",
- "bitcoin_hashes",
- "fedimint-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-dummy-client",
- "fedimint-dummy-common",
- "fedimint-dummy-server",
- "fedimint-ln-client",
- "fedimint-ln-common",
- "fedimint-ln-server",
- "fedimint-logging",
- "fedimint-server",
- "fedimint-testing",
- "fedimint-threshold-crypto",
- "futures",
- "lightning-invoice",
- "rand 0.8.5",
- "serde_json",
- "strum 0.27.1",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "fedimint-lnurl"
 version = "0.11.0-alpha"
 dependencies = [
@@ -3830,71 +3748,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-lnv2-tests"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-stream",
- "async-trait",
- "bitcoin",
- "chrono",
- "clap",
- "devimint",
- "fedimint-api-client",
- "fedimint-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-dummy-client",
- "fedimint-dummy-common",
- "fedimint-dummy-server",
- "fedimint-eventlog",
- "fedimint-ln-common",
- "fedimint-lnurl",
- "fedimint-lnv2-client",
- "fedimint-lnv2-common",
- "fedimint-lnv2-server",
- "fedimint-logging",
- "fedimint-testing",
- "futures",
- "itertools 0.14.0",
- "lightning-invoice",
- "reqwest 0.12.22",
- "serde",
- "serde_json",
- "substring",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-load-test-tool"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "clap",
- "devimint",
- "fedimint-api-client",
- "fedimint-client",
- "fedimint-connectors",
- "fedimint-core",
- "fedimint-ln-client",
- "fedimint-ln-common",
- "fedimint-logging",
- "fedimint-mint-client",
- "fedimint-rocksdb",
- "fedimint-wallet-client",
- "futures",
- "jsonrpsee-core",
- "jsonrpsee-ws-client",
- "lightning-invoice",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "fedimint-logging"
 version = "0.11.0-alpha"
 dependencies = [
@@ -3958,20 +3811,6 @@ dependencies = [
  "serde",
  "strum 0.27.1",
  "strum_macros 0.27.1",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-meta-tests"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "clap",
- "devimint",
- "fedimint-core",
- "semver",
- "serde_json",
- "tokio",
  "tracing",
 ]
 
@@ -4069,40 +3908,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-mint-tests"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "assert_matches",
- "bitcoin_hashes",
- "bls12_381",
- "clap",
- "devimint",
- "fedimint-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-derive-secret",
- "fedimint-dummy-client",
- "fedimint-dummy-common",
- "fedimint-dummy-server",
- "fedimint-logging",
- "fedimint-mint-client",
- "fedimint-mint-common",
- "fedimint-mint-server",
- "fedimint-server",
- "fedimint-tbs",
- "fedimint-testing",
- "fedimint-threshold-crypto",
- "ff",
- "futures",
- "rand 0.8.5",
- "serde",
- "strum 0.27.1",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "fedimint-mintv2-client"
 version = "0.11.0-alpha"
 dependencies = [
@@ -4180,39 +3985,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-mintv2-tests"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-stream",
- "bitcoin_hashes",
- "bls12_381",
- "clap",
- "devimint",
- "fedimint-client",
- "fedimint-core",
- "fedimint-dummy-client",
- "fedimint-dummy-common",
- "fedimint-dummy-server",
- "fedimint-eventlog",
- "fedimint-logging",
- "fedimint-mintv2-client",
- "fedimint-mintv2-common",
- "fedimint-mintv2-server",
- "fedimint-tbs",
- "fedimint-testing",
- "fedimint-threshold-crypto",
- "ff",
- "futures",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "strum 0.27.1",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "fedimint-portalloc"
 version = "0.11.0-alpha"
 dependencies = [
@@ -4275,20 +4047,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower-http",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-recurringd-tests"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "devimint",
- "fedimint-lnurl",
- "lightning-invoice",
- "reqwest 0.12.22",
- "serde_json",
- "tokio",
  "tracing",
 ]
 
@@ -4421,26 +4179,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-server-tests"
-version = "0.11.0-alpha"
-dependencies = [
- "bitcoin",
- "fedimint-api-client",
- "fedimint-core",
- "fedimint-dummy-common",
- "fedimint-dummy-server",
- "fedimint-logging",
- "fedimint-server",
- "fedimint-testing-core",
- "futures",
- "itertools 0.14.0",
- "rand 0.8.5",
- "strum 0.27.1",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "fedimint-server-ui"
 version = "0.11.0-alpha"
 dependencies = [
@@ -4480,65 +4218,6 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "sha3",
-]
-
-[[package]]
-name = "fedimint-testing"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-stream",
- "async-trait",
- "aws-lc-sys",
- "axum 0.8.8",
- "bitcoin",
- "bitcoincore-rpc",
- "fedimint-api-client",
- "fedimint-bip39",
- "fedimint-bitcoind",
- "fedimint-client",
- "fedimint-client-module",
- "fedimint-connectors",
- "fedimint-core",
- "fedimint-gateway-common",
- "fedimint-gateway-daemon",
- "fedimint-lightning",
- "fedimint-ln-common",
- "fedimint-logging",
- "fedimint-portalloc",
- "fedimint-rocksdb",
- "fedimint-server",
- "fedimint-server-bitcoin-rpc",
- "fedimint-server-core",
- "fedimint-testing-core",
- "fs-lock",
- "lightning-invoice",
- "rand 0.8.5",
- "serde",
- "tempfile",
- "tokio",
- "tokio-rustls 0.26.4",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-testing-core"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "bitcoin",
- "fedimint-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-logging",
- "fedimint-rocksdb",
- "fedimint-server",
- "futures",
- "rand 0.8.5",
- "tempfile",
- "tokio",
- "tokio-rustls 0.26.4",
- "tracing",
 ]
 
 [[package]]
@@ -4713,39 +4392,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-wallet-tests"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "assert_matches",
- "bitcoin",
- "bitcoincore-rpc",
- "clap",
- "devimint",
- "fedimint-api-client",
- "fedimint-client",
- "fedimint-client-module",
- "fedimint-connectors",
- "fedimint-core",
- "fedimint-dummy-client",
- "fedimint-dummy-common",
- "fedimint-dummy-server",
- "fedimint-logging",
- "fedimint-server",
- "fedimint-server-core",
- "fedimint-testing",
- "fedimint-testing-core",
- "fedimint-wallet-client",
- "fedimint-wallet-common",
- "fedimint-wallet-server",
- "futures",
- "rand 0.8.5",
- "strum 0.27.1",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "fedimint-walletv2-client"
 version = "0.11.0-alpha"
 dependencies = [
@@ -4804,36 +4450,6 @@ dependencies = [
  "serde",
  "strum 0.27.1",
  "strum_macros 0.27.1",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-walletv2-tests"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-stream",
- "bitcoin",
- "bitcoincore-rpc",
- "devimint",
- "fedimint-bitcoind",
- "fedimint-client",
- "fedimint-core",
- "fedimint-dummy-client",
- "fedimint-dummy-common",
- "fedimint-dummy-server",
- "fedimint-eventlog",
- "fedimint-logging",
- "fedimint-testing",
- "fedimint-walletv2-client",
- "fedimint-walletv2-common",
- "fedimint-walletv2-server",
- "futures",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "strum 0.27.1",
- "tokio",
  "tracing",
 ]
 
@@ -7623,18 +7239,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nix"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
-dependencies = [
- "bitflags 2.9.1",
- "cfg-if",
- "cfg_aliases",
- "libc",
-]
-
-[[package]]
 name = "no-std-net"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10221,15 +9825,6 @@ dependencies = [
  "precis-profiles",
  "quoted-string-parser",
  "rand 0.9.1",
-]
-
-[[package]]
-name = "substring"
-version = "1.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42ee6433ecef213b2e72f587ef64a2f5943e7cd16fbd82dbe8bc07486c534c86"
-dependencies = [
- "autocfg",
 ]
 
 [[package]]

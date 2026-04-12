@@ -39,7 +39,7 @@ use rand::rngs::OsRng;
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
 use tikv_jemallocator::Jemalloc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
 #[global_allocator]

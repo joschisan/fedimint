@@ -252,7 +252,10 @@ impl TestEnv {
                     .find(|b| b.federation_id.to_string() == fed_id)
                     .context("federation not found")?;
 
-                ensure!(fed_balance.ecash_balance_msats.msats > 0, "gateway balance is zero");
+                ensure!(
+                    fed_balance.ecash_balance_msats.msats > 0,
+                    "gateway balance is zero"
+                );
                 Ok(())
             }
         })
