@@ -9,7 +9,6 @@ use fedimint_gateway_common::{PaymentFee, V1_API_ENDPOINT};
 use super::envs;
 use crate::envs::{
     FM_BITCOIND_PASSWORD_ENV, FM_BITCOIND_URL_ENV, FM_BITCOIND_USERNAME_ENV, FM_ESPLORA_URL_ENV,
-    FM_GATEWAY_METRICS_LISTEN_ADDR_ENV,
 };
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -103,11 +102,6 @@ pub struct GatewayOpts {
     /// The default transaction fees that are applied to new federations
     #[arg(long = "default-transaction-fees", env = envs::FM_DEFAULT_TRANSACTION_FEES_ENV, default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
     default_transaction_fees: PaymentFee,
-
-    /// Gateway metrics listen address. If not set, defaults to localhost on the
-    /// UI port + 1.
-    #[arg(long = "metrics-listen", env = FM_GATEWAY_METRICS_LISTEN_ADDR_ENV)]
-    metrics_listen: Option<SocketAddr>,
 }
 
 impl GatewayOpts {
@@ -120,21 +114,12 @@ impl GatewayOpts {
                 .expect("Could not join v1 api_addr")
         });
 
-        // Default metrics listen to localhost on UI port + 1
-        let metrics_listen = self.metrics_listen.unwrap_or_else(|| {
-            SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-                self.listen.port() + 1,
-            )
-        });
-
         Ok(GatewayParameters {
             listen: self.listen,
             versioned_api,
             network: self.network,
             default_routing_fees: self.default_routing_fees,
             default_transaction_fees: self.default_transaction_fees,
-            metrics_listen,
         })
     }
 }
@@ -152,5 +137,4 @@ pub struct GatewayParameters {
     pub network: Network,
     pub default_routing_fees: PaymentFee,
     pub default_transaction_fees: PaymentFee,
-    pub metrics_listen: SocketAddr,
 }

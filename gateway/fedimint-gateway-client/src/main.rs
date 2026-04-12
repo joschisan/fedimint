@@ -4,6 +4,7 @@
 use anyhow::{Context, Result, ensure};
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::hashes::sha256;
+use bitcoin::secp256k1::PublicKey;
 use clap::{Parser, Subcommand};
 use fedimint_core::config::FederationId;
 use fedimint_core::{Amount, BitcoinAmountOrAll};
@@ -32,20 +33,14 @@ enum Commands {
     /// Display gateway info
     Info,
     /// Display gateway balances
-    GetBalances,
+    Balances,
     /// Shutdown the gateway
     Stop,
     /// Display mnemonic seed words
-    Seed,
+    Mnemonic,
     /// LDK lightning node management
     #[command(subcommand)]
-    Lightning(LightningCommands),
-    /// Ecash management
-    #[command(subcommand)]
-    Ecash(EcashCommands),
-    /// On-chain wallet management
-    #[command(subcommand)]
-    Onchain(OnchainCommands),
+    Ldk(LdkCommands),
     /// Federation management
     #[command(subcommand)]
     Federation(FederationCommands),
@@ -59,9 +54,9 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
-enum LightningCommands {
+enum LdkCommands {
     /// Create a bolt11 invoice
-    CreateInvoice {
+    InvoiceCreate {
         amount_msats: u64,
         #[arg(long)]
         expiry_secs: Option<u32>,
@@ -69,104 +64,41 @@ enum LightningCommands {
         description: Option<String>,
     },
     /// Pay a bolt11 invoice
-    PayInvoice { invoice: String },
+    InvoicePay { invoice: String },
+    /// Get details about a specific invoice
+    InvoiceGet {
+        #[arg(long)]
+        payment_hash: sha256::Hash,
+    },
     /// Open a channel with another lightning node
-    OpenChannel {
-        #[arg(long)]
-        pubkey: bitcoin::secp256k1::PublicKey,
-        #[arg(long)]
+    ChannelOpen {
+        pubkey: PublicKey,
         host: String,
-        #[arg(long)]
         channel_size_sats: u64,
         #[arg(long)]
         push_amount_sats: Option<u64>,
     },
     /// Close channels with a peer
-    CloseChannelsWithPeer {
-        #[arg(long)]
-        pubkey: bitcoin::secp256k1::PublicKey,
+    ChannelClose {
+        pubkey: PublicKey,
         #[arg(long)]
         force: bool,
         #[arg(long, required_unless_present = "force")]
         sats_per_vbyte: Option<u64>,
     },
     /// List channels
-    ListChannels,
+    ChannelList,
     /// List lightning transactions
-    ListTransactions {
+    TransactionList {
         #[arg(long)]
         start_secs: u64,
         #[arg(long)]
         end_secs: u64,
     },
-    /// Get details about a specific invoice
-    GetInvoice {
-        #[arg(long)]
-        payment_hash: sha256::Hash,
-    },
-}
-
-#[derive(Subcommand)]
-enum EcashCommands {
-    /// Generate a new peg-in address
-    Pegin {
-        #[arg(long)]
-        federation_id: FederationId,
-    },
-    /// Trigger a recheck for deposits on a deposit address
-    PeginRecheck {
-        #[arg(long)]
-        address: bitcoin::Address<NetworkUnchecked>,
-        #[arg(long)]
-        federation_id: FederationId,
-    },
-    /// Send funds from the gateway's onchain wallet to the federation's ecash
-    /// wallet
-    PeginFromOnchain {
-        #[arg(long)]
-        federation_id: FederationId,
-        #[arg(long)]
-        amount: BitcoinAmountOrAll,
-        #[arg(long)]
-        fee_rate_sats_per_vbyte: u64,
-    },
-    /// Claim funds from a gateway federation to an on-chain address
-    Pegout {
-        #[arg(long)]
-        federation_id: FederationId,
-        #[arg(long)]
-        amount: BitcoinAmountOrAll,
-        #[arg(long)]
-        address: bitcoin::Address<NetworkUnchecked>,
-    },
-    /// Claim funds from a gateway federation to the gateway's onchain wallet
-    PegoutToOnchain {
-        #[arg(long)]
-        federation_id: FederationId,
-        #[arg(long)]
-        amount: BitcoinAmountOrAll,
-    },
-    /// Send e-cash out of band
-    Send {
-        #[arg(long)]
-        federation_id: FederationId,
-        amount: Amount,
-    },
-    /// Receive e-cash out of band
-    Receive {
-        #[arg(long)]
-        notes: String,
-        #[arg(long = "no-wait", action = clap::ArgAction::SetFalse)]
-        wait: bool,
-    },
-}
-
-#[derive(Subcommand)]
-enum OnchainCommands {
     /// Get a Bitcoin address from the gateway's lightning node's onchain wallet
-    Address,
+    OnchainAddress,
     /// Send funds from the lightning node's on-chain wallet
-    Send {
+    OnchainSend {
         #[arg(long)]
         address: bitcoin::Address<NetworkUnchecked>,
         #[arg(long)]
@@ -174,6 +106,14 @@ enum OnchainCommands {
         #[arg(long)]
         fee_rate_sats_per_vbyte: u64,
     },
+    /// Display LDK balances
+    Balances,
+    /// Connect to a peer
+    PeerConnect { pubkey: PublicKey, host: String },
+    /// Disconnect from a peer
+    PeerDisconnect { pubkey: PublicKey },
+    /// List connected peers
+    PeerList,
 }
 
 #[derive(Subcommand)]
@@ -188,8 +128,7 @@ enum FederationCommands {
     List,
     /// Set routing fees
     SetFees {
-        #[arg(long)]
-        federation_id: Option<FederationId>,
+        federation_id: FederationId,
         #[arg(long)]
         ln_base: Option<Amount>,
         #[arg(long)]
@@ -199,13 +138,10 @@ enum FederationCommands {
         #[arg(long)]
         tx_ppm: Option<u64>,
     },
-    /// Gets each connected federation's JSON client config
-    ClientConfig {
-        #[arg(long)]
-        federation_id: Option<FederationId>,
-    },
-    /// Get invite codes for each federation
-    InviteCodes,
+    /// Get a connected federation's JSON client config
+    Config { federation_id: FederationId },
+    /// Get invite code for a federation
+    Invite { federation_id: FederationId },
 }
 
 #[derive(Subcommand)]
@@ -301,12 +237,12 @@ fn main() -> Result<()> {
 
     let result = match cli.command {
         Commands::Info => request_get(addr, ROUTE_INFO)?,
-        Commands::GetBalances => request_get(addr, ROUTE_BALANCES)?,
+        Commands::Balances => request_get(addr, ROUTE_BALANCES)?,
         Commands::Stop => request_get(addr, ROUTE_STOP)?,
-        Commands::Seed => request_get(addr, ROUTE_MNEMONIC)?,
+        Commands::Mnemonic => request_get(addr, ROUTE_MNEMONIC)?,
 
-        Commands::Lightning(cmd) => match cmd {
-            LightningCommands::CreateInvoice {
+        Commands::Ldk(cmd) => match cmd {
+            LdkCommands::InvoiceCreate {
                 amount_msats,
                 expiry_secs,
                 description,
@@ -319,7 +255,7 @@ fn main() -> Result<()> {
                     description,
                 },
             )?,
-            LightningCommands::PayInvoice { invoice } => {
+            LdkCommands::InvoicePay { invoice } => {
                 let invoice: lightning_invoice::Bolt11Invoice =
                     invoice.parse().context("Invalid bolt11 invoice")?;
                 request(
@@ -328,7 +264,12 @@ fn main() -> Result<()> {
                     PayInvoiceForOperatorPayload { invoice },
                 )?
             }
-            LightningCommands::OpenChannel {
+            LdkCommands::InvoiceGet { payment_hash } => request(
+                addr,
+                ROUTE_LDK_INVOICE_GET,
+                GetInvoiceRequest { payment_hash },
+            )?,
+            LdkCommands::ChannelOpen {
                 pubkey,
                 host,
                 channel_size_sats,
@@ -342,7 +283,7 @@ fn main() -> Result<()> {
                 };
                 request(addr, ROUTE_LDK_CHANNEL_OPEN, payload)?
             }
-            LightningCommands::CloseChannelsWithPeer {
+            LdkCommands::ChannelClose {
                 pubkey,
                 force,
                 sats_per_vbyte,
@@ -355,8 +296,8 @@ fn main() -> Result<()> {
                     sats_per_vbyte,
                 },
             )?,
-            LightningCommands::ListChannels => request_get(addr, ROUTE_LDK_CHANNEL_LIST)?,
-            LightningCommands::ListTransactions {
+            LdkCommands::ChannelList => request_get(addr, ROUTE_LDK_CHANNEL_LIST)?,
+            LdkCommands::TransactionList {
                 start_secs,
                 end_secs,
             } => request(
@@ -367,89 +308,8 @@ fn main() -> Result<()> {
                     end_secs,
                 },
             )?,
-            LightningCommands::GetInvoice { payment_hash } => request(
-                addr,
-                ROUTE_LDK_INVOICE_GET,
-                GetInvoiceRequest { payment_hash },
-            )?,
-        },
-
-        Commands::Ecash(cmd) => match cmd {
-            EcashCommands::Pegin { federation_id } => request(
-                addr,
-                ROUTE_ECASH_PEGIN,
-                DepositAddressPayload { federation_id },
-            )?,
-            EcashCommands::PeginRecheck {
-                address,
-                federation_id,
-            } => request(
-                addr,
-                ROUTE_ECASH_PEGIN_RECHECK,
-                DepositAddressRecheckPayload {
-                    address,
-                    federation_id,
-                },
-            )?,
-            EcashCommands::PeginFromOnchain {
-                federation_id,
-                amount,
-                fee_rate_sats_per_vbyte,
-            } => request(
-                addr,
-                ROUTE_ECASH_PEGIN_FROM_ONCHAIN,
-                PeginFromOnchainPayload {
-                    federation_id,
-                    amount,
-                    fee_rate_sats_per_vbyte,
-                },
-            )?,
-            EcashCommands::Pegout {
-                federation_id,
-                amount,
-                address,
-            } => request(
-                addr,
-                ROUTE_ECASH_PEGOUT,
-                WithdrawPayload {
-                    federation_id,
-                    amount,
-                    address,
-                    quoted_fees: None,
-                },
-            )?,
-            EcashCommands::PegoutToOnchain {
-                federation_id,
-                amount,
-            } => request(
-                addr,
-                ROUTE_ECASH_PEGOUT_TO_ONCHAIN,
-                WithdrawToOnchainPayload {
-                    federation_id,
-                    amount,
-                },
-            )?,
-            EcashCommands::Send {
-                federation_id,
-                amount,
-            } => request(
-                addr,
-                ROUTE_ECASH_SEND,
-                SpendEcashPayload {
-                    federation_id,
-                    amount,
-                },
-            )?,
-            EcashCommands::Receive { notes, wait } => request(
-                addr,
-                ROUTE_ECASH_RECEIVE,
-                ReceiveEcashPayload { notes, wait },
-            )?,
-        },
-
-        Commands::Onchain(cmd) => match cmd {
-            OnchainCommands::Address => request_get(addr, ROUTE_LDK_ONCHAIN_RECEIVE)?,
-            OnchainCommands::Send {
+            LdkCommands::OnchainAddress => request_get(addr, ROUTE_LDK_ONCHAIN_RECEIVE)?,
+            LdkCommands::OnchainSend {
                 address,
                 amount,
                 fee_rate_sats_per_vbyte,
@@ -462,6 +322,18 @@ fn main() -> Result<()> {
                     fee_rate_sats_per_vbyte,
                 },
             )?,
+            LdkCommands::Balances => request_get(addr, ROUTE_LDK_BALANCES)?,
+            LdkCommands::PeerConnect { pubkey, host } => request(
+                addr,
+                ROUTE_LDK_PEER_CONNECT,
+                PeerConnectRequest { pubkey, host },
+            )?,
+            LdkCommands::PeerDisconnect { pubkey } => request(
+                addr,
+                ROUTE_LDK_PEER_DISCONNECT,
+                PeerDisconnectRequest { pubkey },
+            )?,
+            LdkCommands::PeerList => request_get(addr, ROUTE_LDK_PEER_LIST)?,
         },
 
         Commands::Federation(cmd) => match cmd {
@@ -488,17 +360,25 @@ fn main() -> Result<()> {
                 addr,
                 ROUTE_FED_SET_FEES,
                 SetFeesPayload {
-                    federation_id,
+                    federation_id: Some(federation_id),
                     lightning_base: ln_base,
                     lightning_parts_per_million: ln_ppm,
                     transaction_base: tx_base,
                     transaction_parts_per_million: tx_ppm,
                 },
             )?,
-            FederationCommands::ClientConfig { federation_id } => {
-                request(addr, ROUTE_FED_CONFIG, ConfigPayload { federation_id })?
-            }
-            FederationCommands::InviteCodes => request_get(addr, ROUTE_FED_INVITE)?,
+            FederationCommands::Config { federation_id } => request(
+                addr,
+                ROUTE_FED_CONFIG,
+                ConfigPayload {
+                    federation_id: Some(federation_id),
+                },
+            )?,
+            FederationCommands::Invite { federation_id } => request(
+                addr,
+                ROUTE_FED_INVITE,
+                serde_json::json!({ "federation_id": federation_id }),
+            )?,
         },
 
         Commands::Module {

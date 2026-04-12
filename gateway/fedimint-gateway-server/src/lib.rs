@@ -21,41 +21,36 @@ pub mod envs;
 mod error;
 mod events;
 mod federation_manager;
-mod metrics;
-pub mod rpc_server;
+pub mod rpc;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bitcoin::hashes::{Hash, sha256};
-use bitcoin::{Address, FeeRate, Network, OutPoint, Txid, secp256k1};
+use bitcoin::{Address, Network, OutPoint, secp256k1};
 use clap::Parser;
 use client::GatewayClientBuilder;
 pub use config::GatewayParameters;
 use config::{DatabaseBackend, GatewayOpts};
 use envs::FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV;
 use error::FederationNotConnected;
-use events::ALL_GATEWAY_EVENTS;
 use federation_manager::FederationManager;
 use fedimint_bip39::{Bip39RootSecretStrategy, Language, Mnemonic};
 use fedimint_bitcoind::bitcoincore::BitcoindClient;
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
 use fedimint_client::{Client, ClientHandleArc};
-use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{Database, DatabaseTransaction};
 use fedimint_core::envs::is_env_var_set;
-use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::CommonModuleInit;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
@@ -64,23 +59,10 @@ use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_core::task::{TaskGroup, TaskShutdownToken, block_in_place};
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned};
-use fedimint_core::{
-    Amount, BitcoinAmountOrAll, PeerId, crit, fedimint_build_code_version_env,
-    get_network_for_address,
-};
-use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId};
+use fedimint_core::{Amount, BitcoinAmountOrAll, crit, fedimint_build_code_version_env};
 use fedimint_gateway_common::{
-    ChainSource, ChannelInfo, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
-    ConnectFedPayload, CreateInvoiceForOperatorPayload, DepositAddressPayload,
-    DepositAddressRecheckPayload, FederationBalanceInfo, FederationConfig, FederationInfo,
-    GatewayBalances, GatewayFedConfig, GatewayInfo, GetInvoiceRequest, GetInvoiceResponse,
-    InterceptPaymentRequest, LightningContext, LightningInfo, LightningRpcError,
-    ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse, OpenChannelRequest,
-    PayInvoiceForOperatorPayload, PaymentAction, PaymentFee, PaymentLogPayload, PaymentLogResponse,
-    PeginFromOnchainPayload, Preimage, ReceiveEcashPayload, ReceiveEcashResponse,
-    RegisteredProtocol, SendOnchainRequest, SetFeesPayload, SpendEcashPayload, SpendEcashResponse,
-    V1_API_ENDPOINT, WithdrawPayload, WithdrawPreviewPayload, WithdrawPreviewResponse,
-    WithdrawResponse, WithdrawToOnchainPayload,
+    ChainSource, InterceptPaymentRequest, LightningContext, LightningRpcError, PaymentAction,
+    PaymentFee, Preimage, RegisteredProtocol, V1_API_ENDPOINT, WithdrawResponse,
 };
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -92,10 +74,10 @@ use fedimint_lnv2_common::gateway_api::{
     CreateBolt11InvoicePayload, RoutingInfo, SendPaymentPayload,
 };
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING};
-use fedimint_mintv2_client::{MintClientInit, MintClientModule};
+use fedimint_mintv2_client::MintClientInit;
 use ldk_node::lightning::ln::msgs::SocketAddress;
-use ldk_node::lightning::routing::gossip::{NodeAlias, NodeId};
-use ldk_node::payment::{PaymentDirection, PaymentKind, PaymentStatus, SendingParameters};
+use ldk_node::lightning::routing::gossip::NodeAlias;
+use ldk_node::payment::{PaymentKind, PaymentStatus, SendingParameters};
 use lightning::ln::channelmanager::PaymentId;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning_invoice::{
@@ -103,12 +85,12 @@ use lightning_invoice::{
 };
 use rand::rngs::OsRng;
 use tokio::sync::{RwLock, oneshot};
-use tracing::{debug, error, info, info_span, warn};
+use tracing::{debug, info, info_span, warn};
 
 use crate::db::GatewayDbtxNcExt as _;
 use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
 use crate::error::{AdminGatewayError, LNv2Error, PublicGatewayError};
-use crate::rpc_server::run_webserver;
+use crate::rpc::run_webserver;
 
 /// Default Bitcoin network for testing purposes.
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
@@ -144,12 +126,12 @@ impl Display for GatewayState {
 /// Helper struct for storing the registration parameters for LNv1 for each
 /// network protocol.
 #[derive(Debug, Clone)]
-struct Registration {
+pub(crate) struct Registration {
     /// The url to advertise in the registration that clients can use to connect
-    endpoint_url: SafeUrl,
+    pub(crate) endpoint_url: SafeUrl,
 
     /// Keypair that was used to register the gateway registration
-    keypair: secp256k1::Keypair,
+    pub(crate) keypair: secp256k1::Keypair,
 }
 
 impl Registration {
@@ -189,18 +171,10 @@ impl AppState {
         #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] default_routing_fees: PaymentFee,
         #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)]
         default_transaction_fees: PaymentFee,
-        metrics_listen: Option<SocketAddr>,
     ) -> anyhow::Result<AppState> {
         let versioned_api = api_addr.map(|addr| {
             addr.join(V1_API_ENDPOINT)
                 .expect("Failed to version gateway API address")
-        });
-
-        let metrics_listen = metrics_listen.unwrap_or_else(|| {
-            SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-                listen.port() + 1,
-            )
         });
 
         AppState::new(
@@ -210,7 +184,6 @@ impl AppState {
                 network,
                 default_routing_fees,
                 default_transaction_fees,
-                metrics_listen,
             },
             gateway_db,
             client_builder,
@@ -241,9 +214,6 @@ pub struct AppState {
 
     /// The socket the gateway listens on.
     pub(crate) listen: SocketAddr,
-
-    /// The socket the gateway's metrics server listens on.
-    pub(crate) metrics_listen: SocketAddr,
 
     /// The task group for all tasks related to the gateway.
     pub(crate) task_group: TaskGroup,
@@ -301,7 +271,7 @@ struct WithdrawDetails {
 }
 
 /// Executes a withdrawal using the walletv2 module
-async fn withdraw_v2(
+pub(crate) async fn withdraw_v2(
     client: &ClientHandleArc,
     wallet_module: &fedimint_walletv2_client::WalletClientModule,
     address: &Address,
@@ -586,7 +556,6 @@ impl AppState {
             client_builder,
             gateway_db: gateway_db.clone(),
             listen: gateway_parameters.listen,
-            metrics_listen: gateway_parameters.metrics_listen,
             task_group,
             network,
             chain_source,
@@ -640,8 +609,6 @@ impl AppState {
 
         self.load_clients().await?;
         self.start_ldk_event_loop();
-        // start metrics server
-        fedimint_metrics::spawn_api_server(self.metrics_listen, self.task_group.clone()).await?;
         // start webserver last to avoid handling requests before fully initialized
         let handle = self.task_group.make_handle();
         run_webserver(self.clone()).await?;
@@ -693,16 +660,7 @@ impl AppState {
                     htlc_id: 0,
                 };
 
-                let start = fedimint_core::time::now();
-                let outcome = self.handle_lightning_payment(payment_request).await;
-                metrics::HTLC_HANDLING_DURATION_SECONDS
-                    .with_label_values(&[outcome])
-                    .observe(
-                        fedimint_core::time::now()
-                            .duration_since(start)
-                            .unwrap_or_default()
-                            .as_secs_f64(),
-                    );
+                self.handle_lightning_payment(payment_request).await;
             }
             ldk_node::Event::ChannelPending {
                 channel_id,
@@ -760,12 +718,7 @@ impl AppState {
     /// incoming payment to a federation, spawns a state machine and hands the
     /// payment off to it. Otherwise, fails the HTLC since forwarding is not
     /// supported.
-    ///
-    /// Returns the outcome label for metrics tracking.
-    pub async fn handle_lightning_payment(
-        &self,
-        payment_request: InterceptPaymentRequest,
-    ) -> &'static str {
+    pub async fn handle_lightning_payment(&self, payment_request: InterceptPaymentRequest) {
         info!(
             target: LOG_GATEWAY,
             payment_hash = %payment_request.payment_hash,
@@ -773,25 +726,11 @@ impl AppState {
             "Intercepting lightning payment",
         );
 
-        let lnv2_start = fedimint_core::time::now();
         let lnv2_result = self
             .try_handle_lightning_payment_lnv2(&payment_request)
             .await;
-        let lnv2_outcome = if lnv2_result.is_ok() {
-            "success"
-        } else {
-            "error"
-        };
-        metrics::HTLC_LNV2_ATTEMPT_DURATION_SECONDS
-            .with_label_values(&[lnv2_outcome])
-            .observe(
-                fedimint_core::time::now()
-                    .duration_since(lnv2_start)
-                    .unwrap_or_default()
-                    .as_secs_f64(),
-            );
         if lnv2_result.is_ok() {
-            return "lnv2";
+            return;
         }
 
         // No matching federation contract; fail the HTLC
@@ -803,7 +742,6 @@ impl AppState {
                 "Error failing unmatched HTLC",
             );
         }
-        "forward"
     }
 
     /// Tries to handle a lightning payment using the LNv2 protocol.
@@ -887,193 +825,6 @@ impl AppState {
         Ok(())
     }
 
-    /// If the Gateway is connected to the Lightning node, returns the
-    /// `ClientConfig` for each federation that the Gateway is connected to.
-    pub async fn handle_get_federation_config(
-        &self,
-        federation_id_or: Option<FederationId>,
-    ) -> AdminResult<GatewayFedConfig> {
-        let federations = if let Some(federation_id) = federation_id_or {
-            let mut federations = BTreeMap::new();
-            federations.insert(
-                federation_id,
-                self.federation_manager
-                    .read()
-                    .await
-                    .get_federation_config(federation_id)
-                    .await?,
-            );
-            federations
-        } else {
-            self.federation_manager
-                .read()
-                .await
-                .get_all_federation_configs()
-                .await
-        };
-
-        Ok(GatewayFedConfig { federations })
-    }
-
-    /// Returns a Bitcoin deposit on-chain address for pegging in Bitcoin for a
-    /// specific connected federation.
-    pub async fn handle_address_msg(&self, payload: DepositAddressPayload) -> AdminResult<Address> {
-        let client = self.select_client(payload.federation_id).await?;
-
-        let wallet_module = client
-            .value()
-            .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-            .map_err(|_| AdminGatewayError::Unexpected(anyhow!("No wallet module found")))?;
-
-        Ok(wallet_module.receive().await)
-    }
-
-    /// Trigger rechecking for deposits on an address
-    pub async fn handle_recheck_address_msg(
-        &self,
-        payload: DepositAddressRecheckPayload,
-    ) -> AdminResult<()> {
-        let client = self.select_client(payload.federation_id).await?;
-
-        if client
-            .value()
-            .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-            .is_ok()
-        {
-            // Walletv2 auto-claims deposits, so this is a no-op
-            Ok(())
-        } else {
-            Err(AdminGatewayError::Unexpected(anyhow!(
-                "No wallet module found"
-            )))
-        }
-    }
-
-    /// Handles a request to receive ecash into the gateway.
-    pub async fn handle_receive_ecash_msg(
-        &self,
-        payload: ReceiveEcashPayload,
-    ) -> Result<ReceiveEcashResponse> {
-        let ecash: fedimint_mintv2_client::ECash =
-            base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes).map_err(|e| {
-                PublicGatewayError::ReceiveEcashError {
-                    failure_reason: format!("Invalid ECash: {e}"),
-                }
-            })?;
-
-        let federation_id_prefix = ecash.mint().map(|id| id.to_prefix()).ok_or_else(|| {
-            PublicGatewayError::ReceiveEcashError {
-                failure_reason: "ECash does not contain federation id".to_string(),
-            }
-        })?;
-
-        let client = self
-            .federation_manager
-            .read()
-            .await
-            .get_client_for_federation_id_prefix(federation_id_prefix)
-            .ok_or(FederationNotConnected {
-                federation_id_prefix,
-            })?;
-
-        let mint = client.value().get_first_module::<MintClientModule>()?;
-        let amount = ecash.amount();
-
-        let operation_id = mint
-            .receive(ecash, serde_json::Value::Null)
-            .await
-            .map_err(|e| PublicGatewayError::ReceiveEcashError {
-                failure_reason: e.to_string(),
-            })?;
-
-        if payload.wait {
-            match mint.await_final_receive_operation_state(operation_id).await {
-                fedimint_mintv2_client::FinalReceiveOperationState::Success => {}
-                fedimint_mintv2_client::FinalReceiveOperationState::Rejected => {
-                    return Err(PublicGatewayError::ReceiveEcashError {
-                        failure_reason: "ECash receive was rejected".to_string(),
-                    });
-                }
-            }
-        }
-
-        Ok(ReceiveEcashResponse { amount })
-    }
-
-    /// Retrieves an invoice by the payment hash if it exists, otherwise returns
-    /// `None`.
-    pub async fn handle_get_invoice_msg(
-        &self,
-        payload: GetInvoiceRequest,
-    ) -> AdminResult<Option<GetInvoiceResponse>> {
-        let invoices = self
-            .node
-            .list_payments_with_filter(|details| {
-                details.direction == PaymentDirection::Inbound
-                    && details.id == PaymentId(payload.payment_hash.to_byte_array())
-                    && !matches!(details.kind, PaymentKind::Onchain { .. })
-            })
-            .iter()
-            .map(|details| {
-                let (preimage, payment_hash, _) = get_preimage_and_payment_hash(&details.kind);
-                let status = match details.status {
-                    PaymentStatus::Failed => fedimint_gateway_common::PaymentStatus::Failed,
-                    PaymentStatus::Succeeded => fedimint_gateway_common::PaymentStatus::Succeeded,
-                    PaymentStatus::Pending => fedimint_gateway_common::PaymentStatus::Pending,
-                };
-                GetInvoiceResponse {
-                    preimage: preimage.map(|p| p.to_string()),
-                    payment_hash,
-                    amount: Amount::from_msats(
-                        details
-                            .amount_msat
-                            .expect("amountless invoices are not supported"),
-                    ),
-                    created_at: UNIX_EPOCH + Duration::from_secs(details.latest_update_timestamp),
-                    status,
-                }
-            })
-            .collect::<Vec<_>>();
-
-        Ok(invoices.first().cloned())
-    }
-
-    /// Withdraws ecash from a federation and pegs-out to the Lightning node's
-    /// onchain wallet
-    pub async fn handle_withdraw_to_onchain_msg(
-        &self,
-        payload: WithdrawToOnchainPayload,
-    ) -> AdminResult<WithdrawResponse> {
-        let address = self.handle_get_ln_onchain_address_msg().await?;
-        let withdraw = WithdrawPayload {
-            address: address.into_unchecked(),
-            federation_id: payload.federation_id,
-            amount: payload.amount,
-            quoted_fees: None,
-        };
-        self.handle_withdraw_msg(withdraw).await
-    }
-
-    /// Deposits the specified amount from the gateway's onchain wallet into the
-    /// Federation's ecash wallet
-    pub async fn handle_pegin_from_onchain_msg(
-        &self,
-        payload: PeginFromOnchainPayload,
-    ) -> AdminResult<Txid> {
-        let deposit = DepositAddressPayload {
-            federation_id: payload.federation_id,
-        };
-        let address = self.handle_address_msg(deposit).await?;
-        let send_onchain = SendOnchainRequest {
-            address: address.into_unchecked(),
-            amount: payload.amount,
-            fee_rate_sats_per_vbyte: payload.fee_rate_sats_per_vbyte,
-        };
-        let txid = self.handle_send_onchain_msg(send_onchain).await?;
-
-        Ok(txid)
-    }
-
     /// Retrieves a `ClientHandleArc` from the Gateway's in memory structures
     /// that keep track of available clients, given a `federation_id`.
     pub async fn select_client(
@@ -1091,7 +842,7 @@ impl AppState {
             })
     }
 
-    async fn load_mnemonic(gateway_db: &Database) -> Option<Mnemonic> {
+    pub(crate) async fn load_mnemonic(gateway_db: &Database) -> Option<Mnemonic> {
         let secret = Client::load_decodable_client_secret::<Vec<u8>>(gateway_db)
             .await
             .ok()?;
@@ -1142,7 +893,7 @@ impl AppState {
     /// This is a no-op for LDK since it does not use LNv1 registration.
     /// Verifies that the federation has an LNv2 lightning module and that the
     /// network matches the gateway's network.
-    async fn check_federation_network(
+    pub(crate) async fn check_federation_network(
         client: &ClientHandleArc,
         network: Network,
     ) -> AdminResult<()> {
@@ -1204,852 +955,6 @@ impl AppState {
     /// This is a no-op for LDK since it does not use LNv1 registration.
     pub async fn unannounce_from_all_federations(&self) {
         // LDK does not use LNv1 gateway registration
-    }
-}
-
-impl AppState {
-    /// Returns information about the Gateway back to the client when requested
-    /// via the webserver.
-    pub async fn handle_get_info(&self) -> AdminResult<GatewayInfo> {
-        let dbtx = self.gateway_db.begin_transaction_nc().await;
-        let federations = self
-            .federation_manager
-            .read()
-            .await
-            .federation_info_all_federations(dbtx)
-            .await;
-
-        let channels: BTreeMap<u64, FederationId> = federations
-            .iter()
-            .map(|federation_info| {
-                (
-                    federation_info.config.federation_index,
-                    federation_info.federation_id,
-                )
-            })
-            .collect();
-
-        let node_status = self.node.status();
-        let synced_to_chain = node_status.latest_lightning_wallet_sync_timestamp.is_some();
-        let block_height = u64::from(node_status.current_best_block.height);
-        let alias = match self.node.node_alias() {
-            Some(alias) => alias.to_string(),
-            None => format!("LDK Fedimint Gateway Node {}", self.node.node_id()),
-        };
-
-        let lightning_info = LightningInfo::Connected {
-            public_key: self.node.node_id(),
-            alias,
-            network: self.node.config().network.to_string(),
-            block_height,
-            synced_to_chain,
-        };
-
-        Ok(GatewayInfo {
-            federations,
-            federation_fake_scids: Some(channels),
-            version_hash: fedimint_build_code_version_env!().to_string(),
-            gateway_state: self.state.read().await.to_string(),
-            lightning_info,
-            registrations: self
-                .registrations
-                .iter()
-                .map(|(k, v)| (k.clone(), (v.endpoint_url.clone(), v.keypair.public_key())))
-                .collect(),
-        })
-    }
-
-    /// Returns a list of Lightning network channels from the Gateway's
-    /// Lightning node.
-    pub async fn handle_list_channels_msg(
-        &self,
-    ) -> AdminResult<Vec<fedimint_gateway_common::ChannelInfo>> {
-        let mut channels = Vec::new();
-        let network_graph = self.node.network_graph();
-
-        let peer_addresses: std::collections::HashMap<_, _> = self
-            .node
-            .list_peers()
-            .into_iter()
-            .map(|peer| (peer.node_id, peer.address.to_string()))
-            .collect();
-
-        for channel_details in &self.node.list_channels() {
-            let node_id = NodeId::from_pubkey(&channel_details.counterparty_node_id);
-            let node_info = network_graph.node(&node_id);
-
-            let remote_node_alias = node_info.as_ref().and_then(|info| {
-                info.announcement_info.as_ref().and_then(|announcement| {
-                    let alias = announcement.alias().to_string();
-                    if alias.is_empty() { None } else { Some(alias) }
-                })
-            });
-
-            let remote_address = peer_addresses
-                .get(&channel_details.counterparty_node_id)
-                .cloned();
-
-            channels.push(ChannelInfo {
-                remote_pubkey: channel_details.counterparty_node_id,
-                remote_alias: remote_node_alias,
-                remote_address,
-                channel_size_sats: channel_details.channel_value_sats,
-                outbound_liquidity_sats: channel_details.outbound_capacity_msat / 1000,
-                inbound_liquidity_sats: channel_details.inbound_capacity_msat / 1000,
-                is_usable: channel_details.is_usable,
-                is_outbound: channel_details.is_outbound,
-                funding_txid: channel_details.funding_txo.map(|txo| txo.txid),
-            });
-        }
-
-        Ok(channels)
-    }
-
-    /// Handles a connection request to join a new federation. The gateway will
-    /// download the federation's client configuration, construct a new
-    /// client, registers, the gateway with the federation, and persists the
-    /// necessary config to reconstruct the client when restarting the gateway.
-    pub async fn handle_connect_federation(
-        &self,
-        payload: ConnectFedPayload,
-    ) -> AdminResult<FederationInfo> {
-        let invite_code = InviteCode::from_str(&payload.invite_code).map_err(|e| {
-            AdminGatewayError::ClientCreationError(anyhow!(format!(
-                "Invalid federation member string {e:?}"
-            )))
-        })?;
-
-        let federation_id = invite_code.federation_id();
-
-        let mut federation_manager = self.federation_manager.write().await;
-
-        // Check if this federation has already been registered
-        if federation_manager.has_federation(federation_id) {
-            return Err(AdminGatewayError::ClientCreationError(anyhow!(
-                "Federation has already been registered"
-            )));
-        }
-
-        // The gateway deterministically assigns a unique identifier (u64) to each
-        // federation connected.
-        let federation_index = federation_manager.pop_next_index()?;
-
-        let federation_config = FederationConfig {
-            invite_code,
-            federation_index,
-            lightning_fee: self.default_routing_fees,
-            transaction_fee: self.default_transaction_fees,
-        };
-
-        let mnemonic = Self::load_mnemonic(&self.gateway_db)
-            .await
-            .expect("mnemonic should be set");
-        let recover = payload.recover.unwrap_or(false);
-        if recover {
-            self.client_builder
-                .recover(federation_config.clone(), Arc::new(self.clone()), &mnemonic)
-                .await?;
-        }
-
-        let client = self
-            .client_builder
-            .build(federation_config.clone(), Arc::new(self.clone()), &mnemonic)
-            .await?;
-
-        if recover {
-            client.wait_for_all_active_state_machines().await?;
-        }
-
-        // Instead of using `FederationManager::federation_info`, we manually create
-        // federation info here because short channel id is not yet persisted.
-        let federation_info = FederationInfo {
-            federation_id,
-            federation_name: federation_manager.federation_name(&client).await,
-            balance_msat: client.get_balance_for_btc().await.unwrap_or_else(|err| {
-                warn!(
-                    target: LOG_GATEWAY,
-                    err = %err.fmt_compact_anyhow(),
-                    %federation_id,
-                    "Balance not immediately available after joining/recovering."
-                );
-                Amount::default()
-            }),
-            config: federation_config.clone(),
-        };
-
-        Self::check_federation_network(&client, self.network).await?;
-
-        // no need to enter span earlier, because join has a span
-        federation_manager.add_client(
-            federation_index,
-            Spanned::new(
-                info_span!(target: LOG_GATEWAY, "client", federation_id=%federation_id.clone()),
-                async { client },
-            )
-            .await,
-        );
-
-        let mut dbtx = self.gateway_db.begin_transaction().await;
-        dbtx.save_federation_config(&federation_config).await;
-        dbtx.commit_tx().await;
-        debug!(
-            target: LOG_GATEWAY,
-            federation_id = %federation_id,
-            federation_index = %federation_index,
-            "Federation connected"
-        );
-
-        Ok(federation_info)
-    }
-
-    /// Handles a request to change the lightning or transaction fees for all
-    /// federations or a federation specified by the `FederationId`.
-    pub async fn handle_set_fees_msg(
-        &self,
-        SetFeesPayload {
-            federation_id,
-            lightning_base,
-            lightning_parts_per_million,
-            transaction_base,
-            transaction_parts_per_million,
-        }: SetFeesPayload,
-    ) -> AdminResult<()> {
-        let mut dbtx = self.gateway_db.begin_transaction().await;
-        let mut fed_configs = if let Some(fed_id) = federation_id {
-            dbtx.load_federation_configs()
-                .await
-                .into_iter()
-                .filter(|(id, _)| *id == fed_id)
-                .collect::<BTreeMap<_, _>>()
-        } else {
-            dbtx.load_federation_configs().await
-        };
-
-        let federation_manager = self.federation_manager.read().await;
-
-        for (federation_id, config) in &mut fed_configs {
-            let mut lightning_fee = config.lightning_fee;
-            if let Some(lightning_base) = lightning_base {
-                lightning_fee.base = lightning_base;
-            }
-
-            if let Some(lightning_ppm) = lightning_parts_per_million {
-                lightning_fee.parts_per_million = lightning_ppm;
-            }
-
-            let mut transaction_fee = config.transaction_fee;
-            if let Some(transaction_base) = transaction_base {
-                transaction_fee.base = transaction_base;
-            }
-
-            if let Some(transaction_ppm) = transaction_parts_per_million {
-                transaction_fee.parts_per_million = transaction_ppm;
-            }
-
-            let client =
-                federation_manager
-                    .client(federation_id)
-                    .ok_or(FederationNotConnected {
-                        federation_id_prefix: federation_id.to_prefix(),
-                    })?;
-            let client_config = client.value().config().await;
-            let contains_lnv2 = client_config
-                .modules
-                .values()
-                .any(|m| fedimint_lnv2_common::LightningCommonInit::KIND == m.kind);
-
-            // Check if the lightning fee + transaction fee is higher than the send limit
-            let send_fees = lightning_fee + transaction_fee;
-            if contains_lnv2 && send_fees.gt(&PaymentFee::SEND_FEE_LIMIT) {
-                return Err(AdminGatewayError::GatewayConfigurationError(format!(
-                    "Total Send fees exceeded {}",
-                    PaymentFee::SEND_FEE_LIMIT
-                )));
-            }
-
-            // Check if the transaction fee is higher than the receive limit
-            if contains_lnv2 && transaction_fee.gt(&PaymentFee::RECEIVE_FEE_LIMIT) {
-                return Err(AdminGatewayError::GatewayConfigurationError(format!(
-                    "Transaction fees exceeded RECEIVE LIMIT {}",
-                    PaymentFee::RECEIVE_FEE_LIMIT
-                )));
-            }
-
-            config.lightning_fee = lightning_fee;
-            config.transaction_fee = transaction_fee;
-            dbtx.save_federation_config(config).await;
-        }
-
-        dbtx.commit_tx().await;
-
-        Ok(())
-    }
-
-    /// Handles an authenticated request for the gateway's mnemonic. This also
-    /// returns a vector of federations that are not using the mnemonic
-    /// backup strategy.
-    pub async fn handle_mnemonic_msg(&self) -> AdminResult<MnemonicResponse> {
-        let mnemonic = Self::load_mnemonic(&self.gateway_db)
-            .await
-            .expect("mnemonic should be set");
-        let words = mnemonic
-            .words()
-            .map(std::string::ToString::to_string)
-            .collect::<Vec<_>>();
-        let all_federations = self
-            .federation_manager
-            .read()
-            .await
-            .get_all_federation_configs()
-            .await
-            .keys()
-            .copied()
-            .collect::<BTreeSet<_>>();
-        let legacy_federations = self.client_builder.legacy_federations(all_federations);
-        let mnemonic_response = MnemonicResponse {
-            mnemonic: words,
-            legacy_federations,
-        };
-        Ok(mnemonic_response)
-    }
-
-    /// Instructs the Gateway's Lightning node to open a channel to a peer
-    /// specified by `pubkey`.
-    pub async fn handle_open_channel_msg(&self, payload: OpenChannelRequest) -> AdminResult<Txid> {
-        info!(
-            target: LOG_GATEWAY,
-            pubkey = %payload.pubkey,
-            host = %payload.host,
-            amount = %payload.channel_size_sats,
-            "Opening Lightning channel...",
-        );
-
-        let push_amount_msats_or = if payload.push_amount_sats == 0 {
-            None
-        } else {
-            Some(payload.push_amount_sats * 1000)
-        };
-
-        let (tx, rx) = oneshot::channel::<anyhow::Result<OutPoint>>();
-
-        {
-            let mut channels = self.pending_channels.write().await;
-            let user_channel_id = self
-                .node
-                .open_announced_channel(
-                    payload.pubkey,
-                    SocketAddress::from_str(&payload.host).map_err(|e| {
-                        AdminGatewayError::Lightning(LightningRpcError::FailedToConnectToPeer {
-                            failure_reason: e.to_string(),
-                        })
-                    })?,
-                    payload.channel_size_sats,
-                    push_amount_msats_or,
-                    None,
-                )
-                .map_err(|e| {
-                    AdminGatewayError::Lightning(LightningRpcError::FailedToOpenChannel {
-                        failure_reason: e.to_string(),
-                    })
-                })?;
-
-            channels.insert(UserChannelId(user_channel_id), tx);
-        }
-
-        match rx.await.map_err(|err| {
-            AdminGatewayError::Lightning(LightningRpcError::FailedToOpenChannel {
-                failure_reason: err.to_string(),
-            })
-        })? {
-            Ok(outpoint) => {
-                let funding_txid = outpoint.txid;
-                info!(target: LOG_GATEWAY, txid = %funding_txid, "Initiated channel open");
-                Ok(funding_txid)
-            }
-            Err(err) => Err(AdminGatewayError::Lightning(
-                LightningRpcError::FailedToOpenChannel {
-                    failure_reason: err.to_string(),
-                },
-            )),
-        }
-    }
-
-    /// Instructs the Gateway's Lightning node to close all channels with a peer
-    /// specified by `pubkey`.
-    pub async fn handle_close_channels_with_peer_msg(
-        &self,
-        payload: CloseChannelsWithPeerRequest,
-    ) -> AdminResult<CloseChannelsWithPeerResponse> {
-        info!(target: LOG_GATEWAY, close_channel_request = %payload, "Closing lightning channel...");
-
-        let mut num_channels_closed = 0;
-        for channel_with_peer in self
-            .node
-            .list_channels()
-            .iter()
-            .filter(|channel| channel.counterparty_node_id == payload.pubkey)
-        {
-            if payload.force {
-                match self.node.force_close_channel(
-                    &channel_with_peer.user_channel_id,
-                    payload.pubkey,
-                    Some("User initiated force close".to_string()),
-                ) {
-                    Ok(()) => num_channels_closed += 1,
-                    Err(err) => {
-                        error!(
-                            pubkey = %payload.pubkey,
-                            err = %err.fmt_compact(),
-                            "Could not force close channel",
-                        );
-                    }
-                }
-            } else {
-                match self
-                    .node
-                    .close_channel(&channel_with_peer.user_channel_id, payload.pubkey)
-                {
-                    Ok(()) => num_channels_closed += 1,
-                    Err(err) => {
-                        error!(
-                            pubkey = %payload.pubkey,
-                            err = %err.fmt_compact(),
-                            "Could not close channel",
-                        );
-                    }
-                }
-            }
-        }
-
-        info!(target: LOG_GATEWAY, close_channel_request = %payload, "Initiated channel closure");
-        Ok(CloseChannelsWithPeerResponse {
-            num_channels_closed,
-        })
-    }
-
-    /// Returns the ecash, lightning, and onchain balances for the gateway and
-    /// the gateway's lightning node.
-    pub async fn handle_get_balances_msg(&self) -> AdminResult<GatewayBalances> {
-        let dbtx = self.gateway_db.begin_transaction_nc().await;
-        let federation_infos = self
-            .federation_manager
-            .read()
-            .await
-            .federation_info_all_federations(dbtx)
-            .await;
-
-        let ecash_balances: Vec<FederationBalanceInfo> = federation_infos
-            .iter()
-            .map(|federation_info| FederationBalanceInfo {
-                federation_id: federation_info.federation_id,
-                ecash_balance_msats: Amount {
-                    msats: federation_info.balance_msat.msats,
-                },
-            })
-            .collect();
-
-        let balances = self.node.list_balances();
-        let total_inbound_liquidity_msats: u64 = self
-            .node
-            .list_channels()
-            .iter()
-            .filter(|chan| chan.is_usable)
-            .map(|channel| channel.inbound_capacity_msat)
-            .sum();
-
-        Ok(GatewayBalances {
-            onchain_balance_sats: balances.total_onchain_balance_sats,
-            lightning_balance_msats: balances.total_lightning_balance_sats * 1000,
-            ecash_balances,
-            inbound_lightning_liquidity_msats: total_inbound_liquidity_msats,
-        })
-    }
-
-    /// Send funds from the gateway's lightning node on-chain wallet.
-    pub async fn handle_send_onchain_msg(&self, payload: SendOnchainRequest) -> AdminResult<Txid> {
-        let onchain = self.node.onchain_payment();
-        let retain_reserves = false;
-        let checked_address = payload.address.clone().assume_checked();
-        let txid = match payload.amount {
-            BitcoinAmountOrAll::All => onchain
-                .send_all_to_address(
-                    &checked_address,
-                    retain_reserves,
-                    FeeRate::from_sat_per_vb(payload.fee_rate_sats_per_vbyte),
-                )
-                .map_err(|e| AdminGatewayError::WithdrawError {
-                    failure_reason: e.to_string(),
-                })?,
-            BitcoinAmountOrAll::Amount(amount_sats) => onchain
-                .send_to_address(
-                    &checked_address,
-                    amount_sats.to_sat(),
-                    FeeRate::from_sat_per_vb(payload.fee_rate_sats_per_vbyte),
-                )
-                .map_err(|e| AdminGatewayError::WithdrawError {
-                    failure_reason: e.to_string(),
-                })?,
-        };
-        info!(onchain_request = %payload, txid = %txid, "Sent onchain transaction");
-        Ok(txid)
-    }
-
-    /// Generates an onchain address to fund the gateway's lightning node.
-    pub async fn handle_get_ln_onchain_address_msg(&self) -> AdminResult<Address> {
-        let address = self.node.onchain_payment().new_address().map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::FailedToGetLnOnchainAddress {
-                failure_reason: e.to_string(),
-            })
-        })?;
-
-        Ok(address)
-    }
-
-    pub async fn handle_deposit_address_msg(
-        &self,
-        payload: DepositAddressPayload,
-    ) -> AdminResult<Address> {
-        self.handle_address_msg(payload).await
-    }
-
-    /// Creates an invoice that is directly payable to the gateway's lightning
-    /// node.
-    pub async fn handle_create_invoice_for_operator_msg(
-        &self,
-        payload: CreateInvoiceForOperatorPayload,
-    ) -> AdminResult<Bolt11Invoice> {
-        let expiry_secs = payload.expiry_secs.unwrap_or(3600);
-        let description = match payload.description {
-            Some(desc) => {
-                LdkBolt11InvoiceDescription::Direct(Description::new(desc).map_err(|_| {
-                    AdminGatewayError::Lightning(LightningRpcError::FailedToGetInvoice {
-                        failure_reason: "Invalid description".to_string(),
-                    })
-                })?)
-            }
-            None => LdkBolt11InvoiceDescription::Direct(Description::empty()),
-        };
-
-        let invoice = self
-            .node
-            .bolt11_payment()
-            .receive(payload.amount_msats, &description, expiry_secs)
-            .map_err(|e| {
-                AdminGatewayError::Lightning(LightningRpcError::FailedToGetInvoice {
-                    failure_reason: e.to_string(),
-                })
-            })?;
-
-        Ok(invoice)
-    }
-
-    /// Requests the gateway to pay an outgoing LN invoice using its own funds.
-    /// Returns the payment hash's preimage on success.
-    pub async fn handle_pay_invoice_for_operator_msg(
-        &self,
-        payload: PayInvoiceForOperatorPayload,
-    ) -> AdminResult<Preimage> {
-        let payment_id = self
-            .node
-            .bolt11_payment()
-            .send(&payload.invoice, None)
-            .map_err(|e| {
-                AdminGatewayError::Lightning(LightningRpcError::FailedPayment {
-                    failure_reason: format!("LDK payment failed to initialize: {e:?}"),
-                })
-            })?;
-
-        loop {
-            if let Some(payment_details) = self.node.payment(&payment_id) {
-                match payment_details.status {
-                    PaymentStatus::Pending => {}
-                    PaymentStatus::Succeeded => {
-                        if let PaymentKind::Bolt11 {
-                            preimage: Some(preimage),
-                            ..
-                        } = payment_details.kind
-                        {
-                            return Ok(Preimage(preimage.0));
-                        }
-                    }
-                    PaymentStatus::Failed => {
-                        return Err(AdminGatewayError::Lightning(
-                            LightningRpcError::FailedPayment {
-                                failure_reason: "LDK payment failed".to_string(),
-                            },
-                        ));
-                    }
-                }
-            }
-            fedimint_core::runtime::sleep(Duration::from_millis(100)).await;
-        }
-    }
-
-    /// Lists the transactions that the lightning node has made.
-    pub async fn handle_list_transactions_msg(
-        &self,
-        payload: ListTransactionsPayload,
-    ) -> AdminResult<ListTransactionsResponse> {
-        let transactions = self
-            .node
-            .list_payments_with_filter(|details| {
-                !matches!(details.kind, PaymentKind::Onchain { .. })
-                    && details.latest_update_timestamp >= payload.start_secs
-                    && details.latest_update_timestamp < payload.end_secs
-            })
-            .iter()
-            .map(|details| {
-                let (preimage, payment_hash, payment_kind) =
-                    get_preimage_and_payment_hash(&details.kind);
-                let direction = match details.direction {
-                    PaymentDirection::Outbound => {
-                        fedimint_gateway_common::PaymentDirection::Outbound
-                    }
-                    PaymentDirection::Inbound => fedimint_gateway_common::PaymentDirection::Inbound,
-                };
-                let status = match details.status {
-                    PaymentStatus::Failed => fedimint_gateway_common::PaymentStatus::Failed,
-                    PaymentStatus::Succeeded => fedimint_gateway_common::PaymentStatus::Succeeded,
-                    PaymentStatus::Pending => fedimint_gateway_common::PaymentStatus::Pending,
-                };
-                fedimint_gateway_common::PaymentDetails {
-                    payment_hash,
-                    preimage: preimage.map(|p| p.to_string()),
-                    payment_kind,
-                    amount: Amount::from_msats(
-                        details
-                            .amount_msat
-                            .expect("amountless invoices are not supported"),
-                    ),
-                    direction,
-                    status,
-                    timestamp_secs: details.latest_update_timestamp,
-                }
-            })
-            .collect::<Vec<_>>();
-        Ok(ListTransactionsResponse { transactions })
-    }
-
-    // Handles a request the spend the gateway's ecash for a given federation.
-    pub async fn handle_spend_ecash_msg(
-        &self,
-        payload: SpendEcashPayload,
-    ) -> AdminResult<SpendEcashResponse> {
-        let client = self
-            .select_client(payload.federation_id)
-            .await?
-            .into_value();
-
-        let mint_module = client.get_first_module::<MintClientModule>()?;
-        let ecash = mint_module
-            .send(payload.amount, serde_json::Value::Null)
-            .await
-            .map_err(|e| AdminGatewayError::Unexpected(e.into()))?;
-
-        Ok(SpendEcashResponse {
-            notes: base32::encode_prefixed(FEDIMINT_PREFIX, &ecash),
-        })
-    }
-
-    /// Instructs the gateway to shutdown, but only after all incoming payments
-    /// have been handled.
-    pub async fn handle_shutdown_msg(&self, task_group: TaskGroup) -> AdminResult<()> {
-        // Take the write lock on the state so that no additional payments are processed
-        let mut state_guard = self.state.write().await;
-        if let GatewayState::Running = *state_guard {
-            *state_guard = GatewayState::ShuttingDown;
-
-            self.federation_manager
-                .read()
-                .await
-                .wait_for_incoming_payments()
-                .await?;
-        }
-
-        let tg = task_group.clone();
-        tg.spawn("Kill Gateway", |_task_handle| async {
-            if let Err(err) = task_group.shutdown_join_all(Duration::from_mins(3)).await {
-                warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Error shutting down gateway");
-            }
-        });
-        Ok(())
-    }
-
-    pub fn get_task_group(&self) -> TaskGroup {
-        self.task_group.clone()
-    }
-
-    /// Returns a Bitcoin TXID from a peg-out transaction for a specific
-    /// connected federation.
-    pub async fn handle_withdraw_msg(
-        &self,
-        payload: WithdrawPayload,
-    ) -> AdminResult<WithdrawResponse> {
-        let WithdrawPayload {
-            amount,
-            address,
-            federation_id,
-            quoted_fees: _,
-        } = payload;
-
-        let address_network = get_network_for_address(&address);
-        let gateway_network = self.network;
-        let Ok(address) = address.require_network(gateway_network) else {
-            return Err(AdminGatewayError::WithdrawError {
-                failure_reason: format!(
-                    "Gateway is running on network {gateway_network}, but provided withdraw address is for network {address_network}"
-                ),
-            });
-        };
-
-        let client = self.select_client(federation_id).await?;
-
-        let wallet_module = client
-            .value()
-            .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-            .map_err(|_| AdminGatewayError::WithdrawError {
-                failure_reason: "No wallet module found".to_string(),
-            })?;
-
-        withdraw_v2(client.value(), &wallet_module, &address, amount).await
-    }
-
-    /// Returns a preview of the withdrawal fees without executing the
-    /// withdrawal. Used by the UI for two-step withdrawal confirmation.
-    pub async fn handle_withdraw_preview_msg(
-        &self,
-        payload: WithdrawPreviewPayload,
-    ) -> AdminResult<WithdrawPreviewResponse> {
-        let gateway_network = self.network;
-        let address_checked = payload
-            .address
-            .clone()
-            .require_network(gateway_network)
-            .map_err(|_| AdminGatewayError::WithdrawError {
-                failure_reason: "Address network mismatch".to_string(),
-            })?;
-
-        let client = self.select_client(payload.federation_id).await?;
-
-        let WithdrawDetails {
-            amount,
-            mint_fees,
-            peg_out_fees,
-        } = match payload.amount {
-            BitcoinAmountOrAll::All => {
-                calculate_max_withdrawable(client.value(), &address_checked).await?
-            }
-            BitcoinAmountOrAll::Amount(btc_amount) => {
-                let wallet_module = client
-                    .value()
-                    .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-                    .map_err(|_| {
-                        AdminGatewayError::Unexpected(anyhow!("No wallet module found"))
-                    })?;
-                let fee = wallet_module.send_fee().await.map_err(|e| {
-                    AdminGatewayError::WithdrawError {
-                        failure_reason: e.to_string(),
-                    }
-                })?;
-                {
-                    WithdrawDetails {
-                        amount: btc_amount.into(),
-                        mint_fees: None,
-                        peg_out_fees: fee,
-                    }
-                }
-            }
-        };
-
-        let total_cost = amount
-            .checked_add(peg_out_fees.into())
-            .and_then(|a| a.checked_add(mint_fees.unwrap_or(Amount::ZERO)))
-            .ok_or_else(|| AdminGatewayError::Unexpected(anyhow!("Total cost overflow")))?;
-
-        Ok(WithdrawPreviewResponse {
-            withdraw_amount: amount,
-            address: payload.address.assume_checked().to_string(),
-            peg_out_fees,
-            total_cost,
-            mint_fees,
-        })
-    }
-
-    /// Queries the client log for payment events and returns to the user.
-    pub async fn handle_payment_log_msg(
-        &self,
-        PaymentLogPayload {
-            end_position,
-            pagination_size,
-            federation_id,
-            event_kinds,
-        }: PaymentLogPayload,
-    ) -> AdminResult<PaymentLogResponse> {
-        const BATCH_SIZE: u64 = 10_000;
-        let federation_manager = self.federation_manager.read().await;
-        let client = federation_manager
-            .client(&federation_id)
-            .ok_or(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            })?
-            .value();
-
-        let event_kinds = if event_kinds.is_empty() {
-            ALL_GATEWAY_EVENTS.to_vec()
-        } else {
-            event_kinds
-        };
-
-        let end_position = if let Some(position) = end_position {
-            position
-        } else {
-            let mut dbtx = client.db().begin_transaction_nc().await;
-            dbtx.get_next_event_log_id().await
-        };
-
-        let mut start_position = end_position.saturating_sub(BATCH_SIZE);
-
-        let mut payment_log = Vec::new();
-
-        while payment_log.len() < pagination_size {
-            let batch = client.get_event_log(Some(start_position), BATCH_SIZE).await;
-            let mut filtered_batch = batch
-                .into_iter()
-                .filter(|e| e.id() <= end_position && event_kinds.contains(&e.as_raw().kind))
-                .collect::<Vec<_>>();
-            filtered_batch.reverse();
-            payment_log.extend(filtered_batch);
-
-            // Compute the start position for the next batch query
-            start_position = start_position.saturating_sub(BATCH_SIZE);
-
-            if start_position == EventLogId::LOG_START {
-                break;
-            }
-        }
-
-        // Truncate the payment log to the expected pagination size
-        payment_log.truncate(pagination_size);
-
-        Ok(PaymentLogResponse(payment_log))
-    }
-
-    /// Returns a `BTreeMap` that is keyed by the `FederationId` and contains
-    /// all the invite codes (with peer names) for the federation.
-    pub async fn handle_export_invite_codes(
-        &self,
-    ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>> {
-        let fed_manager = self.federation_manager.read().await;
-        fed_manager.all_invite_codes().await
-    }
-
-    pub fn gatewayd_version(&self) -> String {
-        let gatewayd_version = env!("CARGO_PKG_VERSION");
-        gatewayd_version.to_string()
-    }
-
-    pub async fn get_chain_source(&self) -> (ChainSource, Network) {
-        (self.chain_source.clone(), self.network)
     }
 }
 
@@ -2573,7 +1478,7 @@ pub fn create_ldk_node(
 
 /// Maps LDK's `PaymentKind` to an optional preimage and an optional payment
 /// hash depending on the type of payment.
-fn get_preimage_and_payment_hash(
+pub(crate) fn get_preimage_and_payment_hash(
     kind: &PaymentKind,
 ) -> (
     Option<Preimage>,

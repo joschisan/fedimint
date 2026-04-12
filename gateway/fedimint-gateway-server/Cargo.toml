@@ -54,7 +54,6 @@ fedimint-lnurl = { workspace = true }
 fedimint-lnv2-client = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 fedimint-logging = { workspace = true }
-fedimint-metrics = { workspace = true }
 fedimint-mintv2-client = { workspace = true }
 fedimint-rocksdb = { workspace = true }
 fedimint-walletv2-client = { workspace = true }

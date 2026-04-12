@@ -19,7 +19,6 @@ use fedimint_core::module::{ApiAuth, ApiRequestErased};
 use fedimint_core::net::peers::IP2PConnections;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::{TaskGroup, block_in_place, sleep_in_test};
-use fedimint_gateway_common::ConnectFedPayload;
 use fedimint_gateway_server::AppState;
 use fedimint_logging::LOG_TEST;
 use fedimint_rocksdb::RocksDb;
@@ -216,14 +215,9 @@ impl FederationTest {
     }
 
     /// Connects a gateway to this `FederationTest`
-    pub async fn connect_gateway(&self, gw: &AppState) {
-        gw.handle_connect_federation(ConnectFedPayload {
-            invite_code: self.invite_code().to_string(),
-            use_tor: Some(false),
-            recover: Some(false),
-        })
-        .await
-        .expect("Failed to connect federation");
+    pub async fn connect_gateway(&self, _gw: &AppState) {
+        // Legacy: use gateway-cli federation join instead
+        unimplemented!("Use gateway-cli federation join");
     }
 
     /// Return all online PeerIds
