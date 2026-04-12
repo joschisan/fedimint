@@ -565,7 +565,7 @@ async fn open_channel_between_gateways(
                 ensure!(
                     channels
                         .iter()
-                        .any(|c| c["is_active"].as_bool() == Some(true)),
+                        .any(|c| c["is_usable"].as_bool() == Some(true)),
                     "no active channels yet"
                 );
                 Ok(())
