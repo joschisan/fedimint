@@ -20,7 +20,6 @@ pub mod client;
 pub mod db;
 pub mod public;
 
-// Re-exports for test fixtures
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -28,12 +27,10 @@ use std::time::Duration;
 
 use anyhow::{Context as _, anyhow};
 use async_trait::async_trait;
+use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
-use bitcoin::{Network, secp256k1};
 use client::GatewayClientFactory;
-use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::ClientHandleArc;
-use fedimint_client_module::secret::RootSecretStrategy;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
@@ -42,11 +39,10 @@ use fedimint_core::module::CommonModuleInit;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_core::time::duration_since_epoch;
-use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned};
+use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, Spanned};
 use fedimint_core::{Amount, PeerId, crit};
 use fedimint_gateway_common::{
     FederationInfo, LightningContext, LightningRpcError, PaymentAction, PaymentFee, Preimage,
-    V1_API_ENDPOINT,
 };
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -66,7 +62,6 @@ use lightning_invoice::{
 };
 use tokio::sync::RwLock;
 use tracing::{info_span, warn};
-pub use {ldk_node, lockable};
 
 use crate::db::{
     RegisteredIncomingContract as DbRegisteredIncomingContract, RegisteredIncomingContractKey,
@@ -92,8 +87,6 @@ pub struct AppState {
     pub network: Network,
     pub routing_fees: PaymentFee,
     pub transaction_fees: PaymentFee,
-    pub gateway_keypair: secp256k1::Keypair,
-    pub api_addr: Option<SafeUrl>,
     pub outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
 }
 
@@ -109,22 +102,6 @@ impl std::fmt::Debug for AppState {
 }
 
 impl AppState {
-    pub fn gateway_id(&self) -> PublicKey {
-        self.gateway_keypair.public_key()
-    }
-
-    /// Alias kept for ln-tests compatibility.
-    pub async fn http_gateway_id(&self) -> PublicKey {
-        self.gateway_id()
-    }
-
-    pub fn versioned_api(&self) -> Option<SafeUrl> {
-        self.api_addr.as_ref().map(|addr| {
-            addr.join(V1_API_ENDPOINT)
-                .expect("Failed to version gateway API address")
-        })
-    }
-
     /// Retrieves a client for a given federation.
     pub async fn select_client(
         &self,
@@ -750,18 +727,4 @@ pub fn get_preimage_and_payment_hash(
         ),
         PaymentKind::Onchain { .. } => (None, None, fedimint_gateway_common::PaymentKind::Onchain),
     }
-}
-
-/// Derive the gateway keypair deterministically from the mnemonic.
-pub fn derive_gateway_keypair(mnemonic: &Mnemonic) -> secp256k1::Keypair {
-    use fedimint_derive_secret::ChildId;
-
-    let root_secret = Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic);
-    let secret_bytes: [u8; 32] = root_secret
-        .child_key(ChildId(0))
-        .child_key(ChildId(0))
-        .to_random_bytes();
-    let secret_key =
-        secp256k1::SecretKey::from_slice(&secret_bytes).expect("32 bytes is a valid secret key");
-    secp256k1::Keypair::from_secret_key(&secp256k1::Secp256k1::new(), &secret_key)
 }

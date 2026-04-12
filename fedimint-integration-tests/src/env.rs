@@ -344,7 +344,6 @@ async fn start_gatewayd(
         .env("FM_GATEWAY_DATA_DIR", data_dir.to_str().unwrap())
         .env("FM_GATEWAY_API_BIND", format!("0.0.0.0:{gw_port}"))
         .env("FM_GATEWAY_CLI_BIND", format!("127.0.0.1:{}", gw_port + 1))
-        .env("FM_GATEWAY_API_ADDR", format!("http://127.0.0.1:{gw_port}"))
         .env("FM_LDK_BIND", format!("0.0.0.0:{ln_port}"))
         .env(
             "FM_GATEWAY_METRICS_LISTEN_ADDR",

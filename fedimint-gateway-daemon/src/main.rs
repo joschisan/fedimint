@@ -26,9 +26,7 @@ use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
 use fedimint_core::{Amount, fedimint_build_code_version_env};
 use fedimint_gateway_common::PaymentFee;
 use fedimint_gateway_daemon::client::GatewayClientFactory;
-use fedimint_gateway_daemon::{
-    AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, derive_gateway_keypair, public,
-};
+use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use fedimint_mintv2_client::MintClientInit;
@@ -92,10 +90,6 @@ pub struct GatewayOpts {
     /// Network address and port for the lightning P2P interface
     #[arg(long = "ldk-bind", env = "FM_LDK_BIND", default_value = "0.0.0.0:8177")]
     pub ldk_bind: SocketAddr,
-
-    /// Public URL from which the webserver API is reachable
-    #[arg(long = "api-addr", env = "FM_GATEWAY_API_ADDR")]
-    pub api_addr: Option<SafeUrl>,
 
     /// Bitcoin network this gateway will be running on
     #[arg(long = "network", env = "FM_GATEWAY_NETWORK")]
@@ -170,7 +164,6 @@ fn main() -> anyhow::Result<()> {
             };
 
         let mnemonic = client_factory.mnemonic().clone();
-        let gateway_keypair = derive_gateway_keypair(&mnemonic);
 
         // 4. Build LDK node
         let ldk_data_dir = opts
@@ -234,8 +227,6 @@ fn main() -> anyhow::Result<()> {
                 base: Amount::from_msats(opts.transaction_fee_base_msat),
                 parts_per_million: opts.transaction_fee_ppm,
             },
-            gateway_keypair,
-            api_addr: opts.api_addr,
             outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
         };
 
