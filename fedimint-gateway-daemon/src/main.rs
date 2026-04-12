@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bitcoin::Network;
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::{Hash as _, sha256};
 use clap::{ArgGroup, Parser};
 use fedimint_bip39::Bip39RootSecretStrategy;
 use fedimint_client::module_init::ClientModuleInitRegistry;
@@ -24,7 +24,7 @@ use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
 use fedimint_core::{Amount, fedimint_build_code_version_env};
-use fedimint_gateway_common::{InterceptPaymentRequest, PaymentFee};
+use fedimint_gateway_common::PaymentFee;
 use fedimint_gateway_daemon::client::GatewayClientFactory;
 use fedimint_gateway_daemon::{
     AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, derive_gateway_keypair, public,
@@ -310,31 +310,17 @@ async fn process_ldk_events(state: AppState, handle: fedimint_core::task::TaskHa
 async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
     match event {
         ldk_node::Event::PaymentClaimable {
-            payment_id: _,
             payment_hash,
             claimable_amount_msat,
-            claim_deadline,
-            custom_records: _,
+            ..
         } => {
-            let hash = Hash::from_slice(&payment_hash.0).expect("Failed to create Hash");
-
-            let payment_request = InterceptPaymentRequest {
-                payment_hash: hash,
-                amount_msat: claimable_amount_msat,
-                expiry: claim_deadline.unwrap_or_default(),
-                short_channel_id: None,
-                incoming_chan_id: 0,
-                htlc_id: 0,
-            };
-
-            handle_lightning_payment(state, payment_request).await;
+            handle_lightning_payment(state, payment_hash.0, claimable_amount_msat).await;
         }
         ldk_node::Event::ChannelPending {
             channel_id,
             user_channel_id,
-            former_temporary_channel_id: _,
-            counterparty_node_id: _,
             funding_txo,
+            ..
         } => {
             info!(
                 target: LOG_LIGHTNING,
@@ -356,8 +342,8 @@ async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
         ldk_node::Event::ChannelClosed {
             channel_id,
             user_channel_id,
-            counterparty_node_id: _,
             reason,
+            ..
         } => {
             info!(
                 target: LOG_LIGHTNING,
@@ -389,24 +375,19 @@ async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
 /// incoming payment to a federation, spawns a state machine and hands the
 /// payment off to it. Otherwise, fails the HTLC since forwarding is not
 /// supported.
-async fn handle_lightning_payment(state: &AppState, payment_request: InterceptPaymentRequest) {
-    info!(
-        target: LOG_GATEWAY,
-        payment_hash = %payment_request.payment_hash,
-        amount_msat = %payment_request.amount_msat,
-        "Intercepting lightning payment",
-    );
-
-    if try_handle_lightning_payment_lnv2(state, &payment_request)
+async fn handle_lightning_payment(state: &AppState, payment_hash: [u8; 32], amount_msat: u64) {
+    if try_handle_lightning_payment_lnv2(state, payment_hash, amount_msat)
         .await
         .is_ok()
     {
         return;
     }
 
-    // No matching federation contract; fail the HTLC
-    let ph = PaymentHash(*payment_request.payment_hash.as_byte_array());
-    if let Err(err) = state.node.bolt11_payment().fail_for_hash(ph) {
+    if let Err(err) = state
+        .node
+        .bolt11_payment()
+        .fail_for_hash(PaymentHash(payment_hash))
+    {
         warn!(
             target: LOG_GATEWAY,
             err = %err.fmt_compact(),
@@ -415,37 +396,32 @@ async fn handle_lightning_payment(state: &AppState, payment_request: InterceptPa
     }
 }
 
-/// Tries to handle a lightning payment using the LNv2 protocol.
-/// Returns `Ok` if the payment was handled, `Err` otherwise.
 async fn try_handle_lightning_payment_lnv2(
     state: &AppState,
-    htlc_request: &InterceptPaymentRequest,
+    payment_hash: [u8; 32],
+    amount_msat: u64,
 ) -> anyhow::Result<()> {
     use fedimint_lnv2_common::contracts::PaymentImage;
 
+    let hash = sha256::Hash::from_byte_array(payment_hash);
+
     let (contract, client) = state
-        .get_registered_incoming_contract_and_client_v2(
-            PaymentImage::Hash(htlc_request.payment_hash),
-            htlc_request.amount_msat,
-        )
+        .get_registered_incoming_contract_and_client_v2(PaymentImage::Hash(hash), amount_msat)
         .await?;
 
     if let Err(err) = client
         .get_first_module::<GatewayClientModuleV2>()
         .expect("Must have client module")
-        .relay_incoming_htlc(
-            htlc_request.payment_hash,
-            htlc_request.incoming_chan_id,
-            htlc_request.htlc_id,
-            contract,
-            htlc_request.amount_msat,
-        )
+        .relay_incoming_htlc(hash, 0, 0, contract, amount_msat)
         .await
     {
         warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Error relaying incoming lightning payment");
 
-        let ph = PaymentHash(*htlc_request.payment_hash.as_byte_array());
-        if let Err(err) = state.node.bolt11_payment().fail_for_hash(ph) {
+        if let Err(err) = state
+            .node
+            .bolt11_payment()
+            .fail_for_hash(PaymentHash(payment_hash))
+        {
             warn!(
                 target: LOG_GATEWAY,
                 err = %err.fmt_compact(),
