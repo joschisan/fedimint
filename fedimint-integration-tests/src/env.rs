@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use anyhow::{Context, bail, ensure};
+use anyhow::{Context, ensure};
 use bitcoincore_rpc::RpcApi;
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::secret::RootSecretStrategy;
@@ -193,23 +193,6 @@ impl TestEnv {
 
         info!("Created client-{n}");
         Ok(client)
-    }
-
-    pub async fn new_cli_client_dir(&self) -> anyhow::Result<PathBuf> {
-        let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
-        let dir = self.data_dir.path().join(format!("cli-client-{n}"));
-        tokio::fs::create_dir_all(&dir).await?;
-
-        fedimint_cli_raw(&[
-            "--data-dir",
-            dir.to_str().expect("valid path"),
-            "join",
-            &self.invite_code.to_string(),
-        ])
-        .await?;
-
-        info!("Created cli-client-{n}");
-        Ok(dir)
     }
 
     pub fn mine_blocks(&self, n: u64) {
@@ -474,25 +457,6 @@ async fn run_dkg(base: &Path) -> anyhow::Result<()> {
 
     info!("DKG complete");
     Ok(())
-}
-
-pub async fn fedimint_cli_raw(args: &[&str]) -> anyhow::Result<String> {
-    let output = Command::new(find_binary("fedimint-cli"))
-        .args(args)
-        .output()
-        .await
-        .context("Failed to run fedimint-cli")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        bail!(
-            "fedimint-cli {:?} failed:\nstdout: {stdout}\nstderr: {stderr}",
-            args
-        );
-    }
-
-    Ok(String::from_utf8(output.stdout)?)
 }
 
 async fn open_channel_between_gateways(

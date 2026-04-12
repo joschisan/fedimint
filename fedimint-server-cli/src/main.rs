@@ -25,6 +25,9 @@ enum Commands {
     /// Setup commands (DKG)
     #[command(subcommand)]
     Setup(SetupCommands),
+    /// Module admin commands
+    #[command(subcommand)]
+    Module(ModuleCommands),
 }
 
 #[derive(Subcommand)]
@@ -52,6 +55,30 @@ enum SetupCommands {
     },
     /// Start distributed key generation
     StartDkg,
+}
+
+#[derive(Subcommand)]
+enum ModuleCommands {
+    /// LNv2 module commands
+    #[command(subcommand)]
+    Lnv2(Lnv2Commands),
+}
+
+#[derive(Subcommand)]
+enum Lnv2Commands {
+    /// Gateway management
+    #[command(subcommand)]
+    Gateway(Lnv2GatewayCommands),
+}
+
+#[derive(Subcommand)]
+enum Lnv2GatewayCommands {
+    /// Add a vetted gateway
+    Add { url: String },
+    /// Remove a vetted gateway
+    Remove { url: String },
+    /// List vetted gateways
+    List,
 }
 
 fn request<R: Serialize>(addr: &str, route: &str, payload: R) -> Result<Value> {
@@ -109,6 +136,25 @@ fn main() -> Result<()> {
                 request(addr, ROUTE_SETUP_ADD_PEER, AddPeerRequest { setup_code })?
             }
             SetupCommands::StartDkg => request(addr, ROUTE_SETUP_START_DKG, ())?,
+        },
+        Commands::Module(cmd) => match cmd {
+            ModuleCommands::Lnv2(cmd) => match cmd {
+                Lnv2Commands::Gateway(cmd) => match cmd {
+                    Lnv2GatewayCommands::Add { url } => request(
+                        addr,
+                        ROUTE_MODULE_LNV2_GATEWAY_ADD,
+                        GatewayUrlRequest { url },
+                    )?,
+                    Lnv2GatewayCommands::Remove { url } => request(
+                        addr,
+                        ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
+                        GatewayUrlRequest { url },
+                    )?,
+                    Lnv2GatewayCommands::List => {
+                        request(addr, ROUTE_MODULE_LNV2_GATEWAY_LIST, ())?
+                    }
+                },
+            },
         },
     };
 

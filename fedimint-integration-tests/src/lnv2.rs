@@ -1,5 +1,6 @@
-use std::path::Path;
+use std::process::Command;
 
+use anyhow::{Context, Result};
 use fedimint_core::Amount;
 use fedimint_core::util::SafeUrl;
 use fedimint_lnv2_client::{
@@ -10,44 +11,33 @@ use serde_json::Value;
 use tracing::info;
 
 use crate::cli::RunGatewayCli;
-use crate::env::{NUM_GUARDIANS, PASSWORD, TestEnv, fedimint_cli_raw};
+use crate::env::{
+    GUARDIAN_BASE_PORT, NUM_GUARDIANS, PORTS_PER_GUARDIAN, TestEnv, find_binary,
+};
 
-async fn add_gateway(cli_client_dir: &Path, peer: usize, gateway: &str) -> anyhow::Result<bool> {
-    let result = fedimint_cli_raw(&[
-        "--data-dir",
-        cli_client_dir.to_str().expect("valid path"),
-        "--our-id",
-        &peer.to_string(),
-        "--password",
-        PASSWORD,
-        "module",
-        "lnv2",
-        "gateways",
-        "add",
-        gateway,
-    ])
-    .await?;
-
-    serde_json::from_str(result.trim()).map_err(Into::into)
+fn fedimintd_cli(peer: usize) -> Command {
+    let cli_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN) + 4;
+    let mut cmd = Command::new(find_binary("fedimintd-cli"));
+    cmd.arg("-a").arg(format!("http://127.0.0.1:{cli_port}"));
+    cmd
 }
 
-async fn remove_gateway(cli_client_dir: &Path, peer: usize, gateway: &str) -> anyhow::Result<bool> {
-    let result = fedimint_cli_raw(&[
-        "--data-dir",
-        cli_client_dir.to_str().expect("valid path"),
-        "--our-id",
-        &peer.to_string(),
-        "--password",
-        PASSWORD,
-        "module",
-        "lnv2",
-        "gateways",
-        "remove",
-        gateway,
-    ])
-    .await?;
+fn add_gateway(peer: usize, gateway: &str) -> Result<bool> {
+    let output = fedimintd_cli(peer)
+        .args(["module", "lnv2", "gateway", "add", gateway])
+        .output()
+        .context("Failed to run fedimintd-cli")?;
+    let stdout = String::from_utf8(output.stdout)?;
+    serde_json::from_str(stdout.trim()).context("Failed to parse response")
+}
 
-    serde_json::from_str(result.trim()).map_err(Into::into)
+fn remove_gateway(peer: usize, gateway: &str) -> Result<bool> {
+    let output = fedimintd_cli(peer)
+        .args(["module", "lnv2", "gateway", "remove", gateway])
+        .output()
+        .context("Failed to run fedimintd-cli")?;
+    let stdout = String::from_utf8(output.stdout)?;
+    serde_json::from_str(stdout.trim()).context("Failed to parse response")
 }
 
 pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
@@ -62,7 +52,6 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
 
     let client = env.new_client().await?;
     let lnv2 = client.get_first_module::<LightningClientModule>()?;
-    let cli_client_dir = env.new_cli_client_dir().await?;
 
     let gateways = [env.gw1_public.clone(), env.gw2_public.clone()];
 
@@ -70,7 +59,7 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
 
     for gateway in &gateways {
         for peer in 0..NUM_GUARDIANS {
-            assert!(add_gateway(&cli_client_dir, peer, gateway).await?);
+            assert!(add_gateway(peer, gateway)?);
         }
     }
 
@@ -86,7 +75,7 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
 
     for gateway in &gateways {
         for peer in 0..NUM_GUARDIANS {
-            assert!(remove_gateway(&cli_client_dir, peer, gateway).await?);
+            assert!(remove_gateway(peer, gateway)?);
         }
     }
 
@@ -102,7 +91,6 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
 
     Ok(())
 }
-
 async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
     info!("lnv2: test_payments");
 
