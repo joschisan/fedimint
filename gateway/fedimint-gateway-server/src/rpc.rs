@@ -1,13 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use axum::Router;
 use axum::extract::{Json, Path, Query, State};
 use axum::routing::{get, post};
-use bitcoin::hashes::{Hash, sha256};
+use bitcoin::hashes::sha256;
 use bitcoin::{Address, FeeRate};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
@@ -16,16 +16,15 @@ use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
 use fedimint_core::{Amount, BitcoinAmountOrAll, fedimint_build_code_version_env};
 use fedimint_gateway_common::{
     CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConfigPayload, ConnectFedPayload,
-    CreateInvoiceForOperatorPayload, DepositAddressPayload, DepositAddressRecheckPayload,
-    FederationBalanceInfo, FederationConfig, FederationInfo, GatewayBalances, GatewayFedConfig,
-    GatewayInfo, GetInvoiceRequest, GetInvoiceResponse, LightningInfo, LightningRpcError,
-    ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse, OpenChannelRequest,
-    PayInvoiceForOperatorPayload, PaymentFee, PeginFromOnchainPayload, Preimage, ROUTE_BALANCES,
-    ROUTE_ECASH_PEGIN, ROUTE_ECASH_PEGIN_FROM_ONCHAIN, ROUTE_ECASH_PEGIN_RECHECK,
+    CreateInvoiceForOperatorPayload, DepositAddressPayload, FederationBalanceInfo,
+    FederationConfig, FederationInfo, GatewayBalances, GatewayFedConfig, GatewayInfo,
+    LightningInfo, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
+    OpenChannelRequest, PayInvoiceForOperatorPayload, PaymentFee, PeginFromOnchainPayload,
+    Preimage, ROUTE_BALANCES, ROUTE_ECASH_PEGIN, ROUTE_ECASH_PEGIN_FROM_ONCHAIN,
     ROUTE_ECASH_PEGOUT, ROUTE_ECASH_PEGOUT_TO_ONCHAIN, ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND,
     ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_FED_SET_FEES,
     ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST,
-    ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_GET, ROUTE_LDK_INVOICE_PAY,
+    ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY,
     ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT,
     ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC,
     ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_RECEIVE, ROUTE_STOP,
@@ -51,7 +50,7 @@ use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, info_span, instrument, warn};
 
 use crate::db::GatewayDbtxNcExt as _;
-use crate::error::{AdminGatewayError, FederationNotConnected, GatewayError, LnurlError};
+use crate::error::{CliError, FederationNotConnected, LnurlError};
 use crate::{AppState, GatewayState, UserChannelId, get_preimage_and_payment_hash, withdraw_v2};
 
 /// Creates two webservers:
@@ -131,27 +130,25 @@ fn public_routes() -> Router<AppState> {
 fn admin_routes() -> Router<AppState> {
     Router::new()
         // Top-level
-        .route(ROUTE_INFO, get(info))
-        .route(ROUTE_BALANCES, get(balances))
-        .route(ROUTE_STOP, get(stop))
-        .route(ROUTE_MNEMONIC, get(mnemonic))
+        .route(ROUTE_INFO, post(info))
+        .route(ROUTE_BALANCES, post(balances))
+        .route(ROUTE_STOP, post(stop))
+        .route(ROUTE_MNEMONIC, post(mnemonic))
         // LDK node management
-        .route(ROUTE_LDK_BALANCES, get(ldk_balances))
+        .route(ROUTE_LDK_BALANCES, post(ldk_balances))
         .route(ROUTE_LDK_CHANNEL_OPEN, post(ldk_channel_open))
         .route(ROUTE_LDK_CHANNEL_CLOSE, post(ldk_channel_close))
-        .route(ROUTE_LDK_CHANNEL_LIST, get(ldk_channel_list))
-        .route(ROUTE_LDK_ONCHAIN_RECEIVE, get(ldk_onchain_receive))
+        .route(ROUTE_LDK_CHANNEL_LIST, post(ldk_channel_list))
+        .route(ROUTE_LDK_ONCHAIN_RECEIVE, post(ldk_onchain_receive))
         .route(ROUTE_LDK_ONCHAIN_SEND, post(ldk_onchain_send))
         .route(ROUTE_LDK_INVOICE_CREATE, post(ldk_invoice_create))
         .route(ROUTE_LDK_INVOICE_PAY, post(ldk_invoice_pay))
-        .route(ROUTE_LDK_INVOICE_GET, post(ldk_invoice_get))
         .route(ROUTE_LDK_PEER_CONNECT, post(ldk_peer_connect))
         .route(ROUTE_LDK_PEER_DISCONNECT, post(ldk_peer_disconnect))
-        .route(ROUTE_LDK_PEER_LIST, get(ldk_peer_list))
+        .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
         .route(ROUTE_LDK_TRANSACTION_LIST, post(ldk_transaction_list))
         // Ecash / peg-in / peg-out
         .route(ROUTE_ECASH_PEGIN, post(ecash_pegin))
-        .route(ROUTE_ECASH_PEGIN_RECHECK, post(ecash_pegin_recheck))
         .route(
             ROUTE_ECASH_PEGIN_FROM_ONCHAIN,
             post(ecash_pegin_from_onchain),
@@ -162,10 +159,10 @@ fn admin_routes() -> Router<AppState> {
         .route(ROUTE_ECASH_RECEIVE, post(ecash_receive))
         // Federation management
         .route(ROUTE_FED_JOIN, post(federation_join))
-        .route(ROUTE_FED_LIST, get(federation_list))
+        .route(ROUTE_FED_LIST, post(federation_list))
         .route(ROUTE_FED_SET_FEES, post(federation_set_fees))
         .route(ROUTE_FED_CONFIG, post(federation_config))
-        .route(ROUTE_FED_INVITE, get(federation_invite))
+        .route(ROUTE_FED_INVITE, post(federation_invite))
         // Per-federation module commands
         .route(ROUTE_MODULE_MINT_SEND, post(module_mint_send))
         .route(ROUTE_MODULE_MINT_RECEIVE, post(module_mint_receive))
@@ -178,7 +175,7 @@ fn admin_routes() -> Router<AppState> {
 
 /// Display high-level information about the Gateway
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn info(State(state): State<AppState>) -> Result<Json<serde_json::Value>, GatewayError> {
+async fn info(State(state): State<AppState>) -> Result<Json<serde_json::Value>, CliError> {
     let dbtx = state.gateway_db.begin_transaction_nc().await;
     let federations = state
         .federation_manager
@@ -233,7 +230,7 @@ async fn info(State(state): State<AppState>) -> Result<Json<serde_json::Value>, 
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 pub(crate) async fn stop(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let task_group = state.task_group.clone();
 
     // Take the write lock on the state so that no additional payments are processed
@@ -262,7 +259,7 @@ pub(crate) async fn stop(
 
 /// Returns the gateway's mnemonic words
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn mnemonic(State(state): State<AppState>) -> Result<Json<serde_json::Value>, GatewayError> {
+async fn mnemonic(State(state): State<AppState>) -> Result<Json<serde_json::Value>, CliError> {
     let mnemonic = AppState::load_mnemonic(&state.gateway_db)
         .await
         .expect("mnemonic should be set");
@@ -290,7 +287,7 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<serde_json::Valu
 
 /// Returns the combined ecash, lightning, and onchain balances
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn balances(State(state): State<AppState>) -> Result<Json<serde_json::Value>, GatewayError> {
+async fn balances(State(state): State<AppState>) -> Result<Json<serde_json::Value>, CliError> {
     let dbtx = state.gateway_db.begin_transaction_nc().await;
     let federation_infos = state
         .federation_manager
@@ -334,9 +331,7 @@ async fn balances(State(state): State<AppState>) -> Result<Json<serde_json::Valu
 
 /// Returns the ecash, lightning, and onchain balances (LDK-specific)
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn ldk_balances(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+async fn ldk_balances(State(state): State<AppState>) -> Result<Json<serde_json::Value>, CliError> {
     let dbtx = state.gateway_db.begin_transaction_nc().await;
     let federation_infos = state
         .federation_manager
@@ -379,7 +374,7 @@ async fn ldk_balances(
 async fn ldk_channel_open(
     State(state): State<AppState>,
     Json(payload): Json<OpenChannelRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     info!(
         target: LOG_GATEWAY,
         pubkey = %payload.pubkey,
@@ -402,40 +397,27 @@ async fn ldk_channel_open(
             .node
             .open_announced_channel(
                 payload.pubkey,
-                SocketAddress::from_str(&payload.host).map_err(|e| {
-                    AdminGatewayError::Lightning(LightningRpcError::FailedToConnectToPeer {
-                        failure_reason: e.to_string(),
-                    })
-                })?,
+                SocketAddress::from_str(&payload.host)
+                    .map_err(|e| CliError::internal(format!("Failed to connect to peer: {e}")))?,
                 payload.channel_size_sats,
                 push_amount_msats_or,
                 None,
             )
-            .map_err(|e| {
-                AdminGatewayError::Lightning(LightningRpcError::FailedToOpenChannel {
-                    failure_reason: e.to_string(),
-                })
-            })?;
+            .map_err(|e| CliError::internal(format!("Failed to open channel: {e}")))?;
 
         channels.insert(UserChannelId(user_channel_id), tx);
     }
 
-    match rx.await.map_err(|err| {
-        AdminGatewayError::Lightning(LightningRpcError::FailedToOpenChannel {
-            failure_reason: err.to_string(),
-        })
-    })? {
+    match rx
+        .await
+        .map_err(|err| CliError::internal(format!("Failed to open channel: {err}")))?
+    {
         Ok(outpoint) => {
             let funding_txid = outpoint.txid;
             info!(target: LOG_GATEWAY, txid = %funding_txid, "Initiated channel open");
             Ok(Json(json!(funding_txid)))
         }
-        Err(err) => Err(
-            AdminGatewayError::Lightning(LightningRpcError::FailedToOpenChannel {
-                failure_reason: err.to_string(),
-            })
-            .into(),
-        ),
+        Err(err) => Err(CliError::internal(format!("Failed to open channel: {err}"))),
     }
 }
 
@@ -444,7 +426,7 @@ async fn ldk_channel_open(
 async fn ldk_channel_close(
     State(state): State<AppState>,
     Json(payload): Json<CloseChannelsWithPeerRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     info!(target: LOG_GATEWAY, close_channel_request = %payload, "Closing lightning channel...");
 
     let mut num_channels_closed = 0;
@@ -497,7 +479,7 @@ async fn ldk_channel_close(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_channel_list(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let mut channels = Vec::new();
     let network_graph = state.node.network_graph();
 
@@ -543,12 +525,12 @@ async fn ldk_channel_list(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_onchain_receive(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let address = state.node.onchain_payment().new_address().map_err(|e| {
-        AdminGatewayError::Lightning(LightningRpcError::FailedToGetLnOnchainAddress {
-            failure_reason: e.to_string(),
-        })
-    })?;
+) -> Result<Json<serde_json::Value>, CliError> {
+    let address = state
+        .node
+        .onchain_payment()
+        .new_address()
+        .map_err(|e| CliError::internal(format!("Failed to get onchain address: {e}")))?;
 
     Ok(Json(json!(address.to_string())))
 }
@@ -558,7 +540,7 @@ async fn ldk_onchain_receive(
 async fn ldk_onchain_send(
     State(state): State<AppState>,
     Json(payload): Json<SendOnchainRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let onchain = state.node.onchain_payment();
     let retain_reserves = false;
     let checked_address = payload.address.clone().assume_checked();
@@ -569,18 +551,14 @@ async fn ldk_onchain_send(
                 retain_reserves,
                 FeeRate::from_sat_per_vb(payload.fee_rate_sats_per_vbyte),
             )
-            .map_err(|e| AdminGatewayError::WithdrawError {
-                failure_reason: e.to_string(),
-            })?,
+            .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
         BitcoinAmountOrAll::Amount(amount_sats) => onchain
             .send_to_address(
                 &checked_address,
                 amount_sats.to_sat(),
                 FeeRate::from_sat_per_vb(payload.fee_rate_sats_per_vbyte),
             )
-            .map_err(|e| AdminGatewayError::WithdrawError {
-                failure_reason: e.to_string(),
-            })?,
+            .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
     };
     info!(onchain_request = %payload, txid = %txid, "Sent onchain transaction");
     Ok(Json(json!(txid)))
@@ -591,16 +569,13 @@ async fn ldk_onchain_send(
 async fn ldk_invoice_create(
     State(state): State<AppState>,
     Json(payload): Json<CreateInvoiceForOperatorPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let expiry_secs = payload.expiry_secs.unwrap_or(3600);
     let description = match payload.description {
-        Some(desc) => {
-            LdkBolt11InvoiceDescription::Direct(Description::new(desc).map_err(|_| {
-                AdminGatewayError::Lightning(LightningRpcError::FailedToGetInvoice {
-                    failure_reason: "Invalid description".to_string(),
-                })
-            })?)
-        }
+        Some(desc) => LdkBolt11InvoiceDescription::Direct(
+            Description::new(desc)
+                .map_err(|_| CliError::internal("Invalid invoice description"))?,
+        ),
         None => LdkBolt11InvoiceDescription::Direct(Description::empty()),
     };
 
@@ -608,11 +583,7 @@ async fn ldk_invoice_create(
         .node
         .bolt11_payment()
         .receive(payload.amount_msats, &description, expiry_secs)
-        .map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::FailedToGetInvoice {
-                failure_reason: e.to_string(),
-            })
-        })?;
+        .map_err(|e| CliError::internal(format!("Failed to get invoice: {e}")))?;
 
     Ok(Json(json!(invoice)))
 }
@@ -622,16 +593,12 @@ async fn ldk_invoice_create(
 async fn ldk_invoice_pay(
     State(state): State<AppState>,
     Json(payload): Json<PayInvoiceForOperatorPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let payment_id = state
         .node
         .bolt11_payment()
         .send(&payload.invoice, None)
-        .map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::FailedPayment {
-                failure_reason: format!("LDK payment failed to initialize: {e:?}"),
-            })
-        })?;
+        .map_err(|e| CliError::internal(format!("LDK payment failed to initialize: {e:?}")))?;
 
     let preimage = loop {
         if let Some(payment_details) = state.node.payment(&payment_id) {
@@ -647,12 +614,7 @@ async fn ldk_invoice_pay(
                     }
                 }
                 PaymentStatus::Failed => {
-                    return Err(
-                        AdminGatewayError::Lightning(LightningRpcError::FailedPayment {
-                            failure_reason: "LDK payment failed".to_string(),
-                        })
-                        .into(),
-                    );
+                    return Err(CliError::internal("LDK payment failed"));
                 }
             }
         }
@@ -662,69 +624,27 @@ async fn ldk_invoice_pay(
     Ok(Json(json!(preimage.0.encode_hex::<String>())))
 }
 
-/// Retrieves an invoice by payment hash
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn ldk_invoice_get(
-    State(state): State<AppState>,
-    Json(payload): Json<GetInvoiceRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let invoices = state
-        .node
-        .list_payments_with_filter(|details| {
-            details.direction == PaymentDirection::Inbound
-                && details.id
-                    == lightning::ln::channelmanager::PaymentId(
-                        payload.payment_hash.to_byte_array(),
-                    )
-                && !matches!(details.kind, PaymentKind::Onchain { .. })
-        })
-        .iter()
-        .map(|details| {
-            let (preimage, payment_hash, _) = get_preimage_and_payment_hash(&details.kind);
-            let status = match details.status {
-                PaymentStatus::Failed => fedimint_gateway_common::PaymentStatus::Failed,
-                PaymentStatus::Succeeded => fedimint_gateway_common::PaymentStatus::Succeeded,
-                PaymentStatus::Pending => fedimint_gateway_common::PaymentStatus::Pending,
-            };
-            GetInvoiceResponse {
-                preimage: preimage.map(|p| p.to_string()),
-                payment_hash,
-                amount: Amount::from_msats(
-                    details
-                        .amount_msat
-                        .expect("amountless invoices are not supported"),
-                ),
-                created_at: UNIX_EPOCH + Duration::from_secs(details.latest_update_timestamp),
-                status,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let invoice: Option<GetInvoiceResponse> = invoices.first().cloned();
-    Ok(Json(json!(invoice)))
-}
-
 /// Connects to a Lightning peer
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_peer_connect(
     State(state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let pubkey = payload["pubkey"]
         .as_str()
-        .ok_or_else(|| AdminGatewayError::Unexpected(anyhow!("Missing pubkey")))?
+        .ok_or_else(|| CliError::bad_request("Missing pubkey"))?
         .parse()
-        .map_err(|e| AdminGatewayError::Unexpected(anyhow!("Invalid pubkey: {e}")))?;
+        .map_err(|e| CliError::bad_request(format!("Invalid pubkey: {e}")))?;
     let address: SocketAddress = payload["address"]
         .as_str()
-        .ok_or_else(|| AdminGatewayError::Unexpected(anyhow!("Missing address")))?
+        .ok_or_else(|| CliError::bad_request("Missing address"))?
         .parse()
-        .map_err(|e| AdminGatewayError::Unexpected(anyhow!("Invalid address: {e}")))?;
+        .map_err(|e| CliError::bad_request(format!("Invalid address: {e}")))?;
 
     state
         .node
         .connect(pubkey, address, true)
-        .map_err(|e| AdminGatewayError::Unexpected(anyhow!("Failed to connect to peer: {e}")))?;
+        .map_err(|e| CliError::internal(format!("Failed to connect to peer: {e}")))?;
 
     info!(target: LOG_GATEWAY, %pubkey, "Connected to peer");
     Ok(Json(json!(())))
@@ -735,16 +655,17 @@ async fn ldk_peer_connect(
 async fn ldk_peer_disconnect(
     State(state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let pubkey = payload["pubkey"]
         .as_str()
-        .ok_or_else(|| AdminGatewayError::Unexpected(anyhow!("Missing pubkey")))?
+        .ok_or_else(|| CliError::bad_request("Missing pubkey"))?
         .parse()
-        .map_err(|e| AdminGatewayError::Unexpected(anyhow!("Invalid pubkey: {e}")))?;
+        .map_err(|e| CliError::bad_request(format!("Invalid pubkey: {e}")))?;
 
-    state.node.disconnect(pubkey).map_err(|e| {
-        AdminGatewayError::Unexpected(anyhow!("Failed to disconnect from peer: {e}"))
-    })?;
+    state
+        .node
+        .disconnect(pubkey)
+        .map_err(|e| CliError::internal(format!("Failed to disconnect from peer: {e}")))?;
 
     info!(target: LOG_GATEWAY, %pubkey, "Disconnected from peer");
     Ok(Json(json!(())))
@@ -752,9 +673,7 @@ async fn ldk_peer_disconnect(
 
 /// Lists all Lightning peers
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn ldk_peer_list(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+async fn ldk_peer_list(State(state): State<AppState>) -> Result<Json<serde_json::Value>, CliError> {
     let peers: Vec<serde_json::Value> = state
         .node
         .list_peers()
@@ -777,7 +696,7 @@ async fn ldk_peer_list(
 async fn ldk_transaction_list(
     State(state): State<AppState>,
     Json(payload): Json<ListTransactionsPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let transactions = state
         .node
         .list_payments_with_filter(|details| {
@@ -826,13 +745,9 @@ async fn ldk_transaction_list(
 async fn federation_join(
     State(state): State<AppState>,
     Json(payload): Json<ConnectFedPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let invite_code = fedimint_core::invite_code::InviteCode::from_str(&payload.invite_code)
-        .map_err(|e| {
-            AdminGatewayError::ClientCreationError(anyhow!(format!(
-                "Invalid federation member string {e:?}"
-            )))
-        })?;
+        .map_err(|e| CliError::bad_request(format!("Invalid federation member string {e:?}")))?;
 
     let federation_id = invite_code.federation_id();
 
@@ -840,10 +755,9 @@ async fn federation_join(
 
     // Check if this federation has already been registered
     if federation_manager.has_federation(federation_id) {
-        return Err(AdminGatewayError::ClientCreationError(anyhow!(
-            "Federation has already been registered"
-        ))
-        .into());
+        return Err(CliError::bad_request(
+            "Federation has already been registered",
+        ));
     }
 
     // The gateway deterministically assigns a unique identifier (u64) to each
@@ -885,7 +799,7 @@ async fn federation_join(
         client
             .wait_for_all_active_state_machines()
             .await
-            .map_err(AdminGatewayError::Unexpected)?;
+            .map_err(|e| CliError::internal(e))?;
     }
 
     // Instead of using `FederationManager::federation_info`, we manually create
@@ -934,7 +848,7 @@ async fn federation_join(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_list(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let dbtx = state.gateway_db.begin_transaction_nc().await;
     let federations = state
         .federation_manager
@@ -950,13 +864,13 @@ async fn federation_list(
 async fn federation_set_fees(
     State(state): State<AppState>,
     Json(payload): Json<SetFeesPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let SetFeesPayload {
         federation_id,
-        lightning_base,
-        lightning_parts_per_million,
-        transaction_base,
-        transaction_parts_per_million,
+        ln_base,
+        ln_ppm,
+        tx_base,
+        tx_ppm,
     } = payload;
 
     let mut dbtx = state.gateway_db.begin_transaction().await;
@@ -974,28 +888,28 @@ async fn federation_set_fees(
 
     for (federation_id, config) in &mut fed_configs {
         let mut lightning_fee = config.lightning_fee;
-        if let Some(lightning_base) = lightning_base {
-            lightning_fee.base = lightning_base;
+        if let Some(ln_base) = ln_base {
+            lightning_fee.base = ln_base;
         }
 
-        if let Some(lightning_ppm) = lightning_parts_per_million {
-            lightning_fee.parts_per_million = lightning_ppm;
+        if let Some(ln_ppm) = ln_ppm {
+            lightning_fee.parts_per_million = ln_ppm;
         }
 
         let mut transaction_fee = config.transaction_fee;
-        if let Some(transaction_base) = transaction_base {
-            transaction_fee.base = transaction_base;
+        if let Some(tx_base) = tx_base {
+            transaction_fee.base = tx_base;
         }
 
-        if let Some(transaction_ppm) = transaction_parts_per_million {
-            transaction_fee.parts_per_million = transaction_ppm;
+        if let Some(tx_ppm) = tx_ppm {
+            transaction_fee.parts_per_million = tx_ppm;
         }
 
-        let client = federation_manager.client(federation_id).ok_or(
-            AdminGatewayError::FederationNotConnected(FederationNotConnected {
+        let client = federation_manager
+            .client(federation_id)
+            .ok_or(CliError::bad_request(FederationNotConnected {
                 federation_id_prefix: federation_id.to_prefix(),
-            }),
-        )?;
+            }))?;
         let client_config = client.value().config().await;
         let contains_lnv2 = client_config
             .modules
@@ -1005,20 +919,18 @@ async fn federation_set_fees(
         // Check if the lightning fee + transaction fee is higher than the send limit
         let send_fees = lightning_fee + transaction_fee;
         if contains_lnv2 && send_fees.gt(&PaymentFee::SEND_FEE_LIMIT) {
-            return Err(AdminGatewayError::GatewayConfigurationError(format!(
+            return Err(CliError::bad_request(format!(
                 "Total Send fees exceeded {}",
                 PaymentFee::SEND_FEE_LIMIT
-            ))
-            .into());
+            )));
         }
 
         // Check if the transaction fee is higher than the receive limit
         if contains_lnv2 && transaction_fee.gt(&PaymentFee::RECEIVE_FEE_LIMIT) {
-            return Err(AdminGatewayError::GatewayConfigurationError(format!(
+            return Err(CliError::bad_request(format!(
                 "Transaction fees exceeded RECEIVE LIMIT {}",
                 PaymentFee::RECEIVE_FEE_LIMIT
-            ))
-            .into());
+            )));
         }
 
         config.lightning_fee = lightning_fee;
@@ -1036,7 +948,7 @@ async fn federation_set_fees(
 async fn federation_config(
     State(state): State<AppState>,
     Json(payload): Json<ConfigPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let federations = if let Some(federation_id) = payload.federation_id {
         let mut federations = BTreeMap::new();
         federations.insert(
@@ -1066,7 +978,7 @@ async fn federation_config(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_invite(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let fed_manager = state.federation_manager.read().await;
     let invite_codes = fed_manager.all_invite_codes().await;
     Ok(Json(json!(invite_codes)))
@@ -1081,20 +993,20 @@ async fn federation_invite(
 async fn module_mint_send(
     State(state): State<AppState>,
     Json(payload): Json<SpendEcashPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let client = state
         .select_client(payload.federation_id)
         .await
-        .map_err(AdminGatewayError::from)?
+        .map_err(|e| CliError::bad_request(e))?
         .into_value();
 
     let mint_module = client
         .get_first_module::<MintClientModule>()
-        .map_err(AdminGatewayError::Unexpected)?;
+        .map_err(|e| CliError::internal(e))?;
     let ecash = mint_module
         .send(payload.amount, serde_json::Value::Null)
         .await
-        .map_err(|e| AdminGatewayError::Unexpected(e.into()))?;
+        .map_err(|e| CliError::internal(e))?;
 
     let response = SpendEcashResponse {
         notes: base32::encode_prefixed(FEDIMINT_PREFIX, &ecash),
@@ -1107,54 +1019,41 @@ async fn module_mint_send(
 async fn module_mint_receive(
     State(state): State<AppState>,
     Json(payload): Json<ReceiveEcashPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let ecash: fedimint_mintv2_client::ECash =
-        base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes).map_err(|e| {
-            crate::error::PublicGatewayError::ReceiveEcashError {
-                failure_reason: format!("Invalid ECash: {e}"),
-            }
-        })?;
+        base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes)
+            .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
 
-    let federation_id_prefix = ecash.mint().map(|id| id.to_prefix()).ok_or_else(|| {
-        crate::error::PublicGatewayError::ReceiveEcashError {
-            failure_reason: "ECash does not contain federation id".to_string(),
-        }
-    })?;
+    let federation_id_prefix = ecash
+        .mint()
+        .map(|id| id.to_prefix())
+        .ok_or_else(|| CliError::bad_request("ECash does not contain federation id"))?;
 
     let client = state
         .federation_manager
         .read()
         .await
         .get_client_for_federation_id_prefix(federation_id_prefix)
-        .ok_or(crate::error::PublicGatewayError::FederationNotConnected(
-            FederationNotConnected {
-                federation_id_prefix,
-            },
-        ))?;
+        .ok_or(CliError::bad_request(FederationNotConnected {
+            federation_id_prefix,
+        }))?;
 
     let mint = client
         .value()
         .get_first_module::<MintClientModule>()
-        .map_err(|e| crate::error::PublicGatewayError::ReceiveEcashError {
-            failure_reason: e.to_string(),
-        })?;
+        .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
     let amount = ecash.amount();
 
     let operation_id = mint
         .receive(ecash, serde_json::Value::Null)
         .await
-        .map_err(|e| crate::error::PublicGatewayError::ReceiveEcashError {
-            failure_reason: e.to_string(),
-        })?;
+        .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
 
     if payload.wait {
         match mint.await_final_receive_operation_state(operation_id).await {
             fedimint_mintv2_client::FinalReceiveOperationState::Success => {}
             fedimint_mintv2_client::FinalReceiveOperationState::Rejected => {
-                return Err(crate::error::PublicGatewayError::ReceiveEcashError {
-                    failure_reason: "ECash receive was rejected".to_string(),
-                }
-                .into());
+                return Err(CliError::internal("ECash receive was rejected"));
             }
         }
     }
@@ -1168,16 +1067,16 @@ async fn module_mint_receive(
 async fn module_wallet_receive(
     State(state): State<AppState>,
     Json(payload): Json<DepositAddressPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let client = state
         .select_client(payload.federation_id)
         .await
-        .map_err(AdminGatewayError::from)?;
+        .map_err(|e| CliError::bad_request(e))?;
 
     let wallet_module = client
         .value()
         .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| AdminGatewayError::Unexpected(anyhow!("No wallet module found")))?;
+        .map_err(|_| CliError::internal("No wallet module found"))?;
 
     let address = wallet_module.receive().await;
     Ok(Json(json!(address)))
@@ -1192,42 +1091,19 @@ async fn module_wallet_receive(
 async fn ecash_pegin(
     State(state): State<AppState>,
     Json(payload): Json<DepositAddressPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let client = state
         .select_client(payload.federation_id)
         .await
-        .map_err(AdminGatewayError::from)?;
+        .map_err(|e| CliError::bad_request(e))?;
 
     let wallet_module = client
         .value()
         .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| AdminGatewayError::Unexpected(anyhow!("No wallet module found")))?;
+        .map_err(|_| CliError::internal("No wallet module found"))?;
 
     let address = wallet_module.receive().await;
     Ok(Json(json!(address)))
-}
-
-/// Trigger rechecking for deposits on an address
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
-async fn ecash_pegin_recheck(
-    State(state): State<AppState>,
-    Json(payload): Json<DepositAddressRecheckPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let client = state
-        .select_client(payload.federation_id)
-        .await
-        .map_err(AdminGatewayError::from)?;
-
-    if client
-        .value()
-        .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .is_ok()
-    {
-        // Walletv2 auto-claims deposits, so this is a no-op
-        Ok(Json(json!({})))
-    } else {
-        Err(AdminGatewayError::Unexpected(anyhow!("No wallet module found")).into())
-    }
 }
 
 /// Peg in from the gateway's onchain wallet into a federation
@@ -1235,17 +1111,17 @@ async fn ecash_pegin_recheck(
 async fn ecash_pegin_from_onchain(
     State(state): State<AppState>,
     Json(payload): Json<PeginFromOnchainPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     // Inline handle_address_msg: get deposit address for the federation
     let client = state
         .select_client(payload.federation_id)
         .await
-        .map_err(AdminGatewayError::from)?;
+        .map_err(|e| CliError::bad_request(e))?;
 
     let wallet_module = client
         .value()
         .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| AdminGatewayError::Unexpected(anyhow!("No wallet module found")))?;
+        .map_err(|_| CliError::internal("No wallet module found"))?;
 
     let address: Address = wallet_module.receive().await;
 
@@ -1266,18 +1142,14 @@ async fn ecash_pegin_from_onchain(
                 retain_reserves,
                 FeeRate::from_sat_per_vb(send_onchain.fee_rate_sats_per_vbyte),
             )
-            .map_err(|e| AdminGatewayError::WithdrawError {
-                failure_reason: e.to_string(),
-            })?,
+            .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
         BitcoinAmountOrAll::Amount(amount_sats) => onchain
             .send_to_address(
                 &checked_address,
                 amount_sats.to_sat(),
                 FeeRate::from_sat_per_vb(send_onchain.fee_rate_sats_per_vbyte),
             )
-            .map_err(|e| AdminGatewayError::WithdrawError {
-                failure_reason: e.to_string(),
-            })?,
+            .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
     };
     info!(onchain_request = %send_onchain, txid = %txid, "Sent onchain transaction");
 
@@ -1289,7 +1161,7 @@ async fn ecash_pegin_from_onchain(
 async fn ecash_pegout(
     State(state): State<AppState>,
     Json(payload): Json<WithdrawPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let WithdrawPayload {
         amount,
         address,
@@ -1300,25 +1172,20 @@ async fn ecash_pegout(
     let address_network = fedimint_core::get_network_for_address(&address);
     let gateway_network = state.network;
     let Ok(address) = address.require_network(gateway_network) else {
-        return Err(AdminGatewayError::WithdrawError {
-            failure_reason: format!(
-                "Gateway is running on network {gateway_network}, but provided withdraw address is for network {address_network}"
-            ),
-        }
-        .into());
+        return Err(CliError::bad_request(format!(
+            "Gateway is running on network {gateway_network}, but provided withdraw address is for network {address_network}"
+        )));
     };
 
     let client = state
         .select_client(federation_id)
         .await
-        .map_err(AdminGatewayError::from)?;
+        .map_err(|e| CliError::bad_request(e))?;
 
     let wallet_module = client
         .value()
         .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| AdminGatewayError::WithdrawError {
-            failure_reason: "No wallet module found".to_string(),
-        })?;
+        .map_err(|_| CliError::internal("No wallet module found"))?;
 
     let response = withdraw_v2(client.value(), &wallet_module, &address, amount).await?;
     Ok(Json(json!(response)))
@@ -1329,13 +1196,13 @@ async fn ecash_pegout(
 async fn ecash_pegout_to_onchain(
     State(state): State<AppState>,
     Json(payload): Json<WithdrawToOnchainPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     // Inline handle_get_ln_onchain_address_msg: get LDK onchain address
-    let address = state.node.onchain_payment().new_address().map_err(|e| {
-        AdminGatewayError::Lightning(LightningRpcError::FailedToGetLnOnchainAddress {
-            failure_reason: e.to_string(),
-        })
-    })?;
+    let address = state
+        .node
+        .onchain_payment()
+        .new_address()
+        .map_err(|e| CliError::internal(format!("Failed to get onchain address: {e}")))?;
 
     // Inline handle_withdraw_msg: withdraw from federation to that address
     let withdraw_payload = WithdrawPayload {
@@ -1355,25 +1222,20 @@ async fn ecash_pegout_to_onchain(
     let address_network = fedimint_core::get_network_for_address(&address);
     let gateway_network = state.network;
     let Ok(address) = address.require_network(gateway_network) else {
-        return Err(AdminGatewayError::WithdrawError {
-            failure_reason: format!(
-                "Gateway is running on network {gateway_network}, but provided withdraw address is for network {address_network}"
-            ),
-        }
-        .into());
+        return Err(CliError::bad_request(format!(
+            "Gateway is running on network {gateway_network}, but provided withdraw address is for network {address_network}"
+        )));
     };
 
     let client = state
         .select_client(federation_id)
         .await
-        .map_err(AdminGatewayError::from)?;
+        .map_err(|e| CliError::bad_request(e))?;
 
     let wallet_module = client
         .value()
         .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| AdminGatewayError::WithdrawError {
-            failure_reason: "No wallet module found".to_string(),
-        })?;
+        .map_err(|_| CliError::internal("No wallet module found"))?;
 
     let response = withdraw_v2(client.value(), &wallet_module, &address, amount).await?;
     Ok(Json(json!(response)))
@@ -1384,20 +1246,20 @@ async fn ecash_pegout_to_onchain(
 async fn ecash_send(
     State(state): State<AppState>,
     Json(payload): Json<SpendEcashPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let client = state
         .select_client(payload.federation_id)
         .await
-        .map_err(AdminGatewayError::from)?
+        .map_err(|e| CliError::bad_request(e))?
         .into_value();
 
     let mint_module = client
         .get_first_module::<MintClientModule>()
-        .map_err(AdminGatewayError::Unexpected)?;
+        .map_err(|e| CliError::internal(e))?;
     let ecash = mint_module
         .send(payload.amount, serde_json::Value::Null)
         .await
-        .map_err(|e| AdminGatewayError::Unexpected(e.into()))?;
+        .map_err(|e| CliError::internal(e))?;
 
     let response = SpendEcashResponse {
         notes: base32::encode_prefixed(FEDIMINT_PREFIX, &ecash),
@@ -1410,54 +1272,41 @@ async fn ecash_send(
 async fn ecash_receive(
     State(state): State<AppState>,
     Json(payload): Json<ReceiveEcashPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let ecash: fedimint_mintv2_client::ECash =
-        base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes).map_err(|e| {
-            crate::error::PublicGatewayError::ReceiveEcashError {
-                failure_reason: format!("Invalid ECash: {e}"),
-            }
-        })?;
+        base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes)
+            .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
 
-    let federation_id_prefix = ecash.mint().map(|id| id.to_prefix()).ok_or_else(|| {
-        crate::error::PublicGatewayError::ReceiveEcashError {
-            failure_reason: "ECash does not contain federation id".to_string(),
-        }
-    })?;
+    let federation_id_prefix = ecash
+        .mint()
+        .map(|id| id.to_prefix())
+        .ok_or_else(|| CliError::bad_request("ECash does not contain federation id"))?;
 
     let client = state
         .federation_manager
         .read()
         .await
         .get_client_for_federation_id_prefix(federation_id_prefix)
-        .ok_or(crate::error::PublicGatewayError::FederationNotConnected(
-            FederationNotConnected {
-                federation_id_prefix,
-            },
-        ))?;
+        .ok_or(CliError::bad_request(FederationNotConnected {
+            federation_id_prefix,
+        }))?;
 
     let mint = client
         .value()
         .get_first_module::<MintClientModule>()
-        .map_err(|e| crate::error::PublicGatewayError::ReceiveEcashError {
-            failure_reason: e.to_string(),
-        })?;
+        .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
     let amount = ecash.amount();
 
     let operation_id = mint
         .receive(ecash, serde_json::Value::Null)
         .await
-        .map_err(|e| crate::error::PublicGatewayError::ReceiveEcashError {
-            failure_reason: e.to_string(),
-        })?;
+        .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
 
     if payload.wait {
         match mint.await_final_receive_operation_state(operation_id).await {
             fedimint_mintv2_client::FinalReceiveOperationState::Success => {}
             fedimint_mintv2_client::FinalReceiveOperationState::Rejected => {
-                return Err(crate::error::PublicGatewayError::ReceiveEcashError {
-                    failure_reason: "ECash receive was rejected".to_string(),
-                }
-                .into());
+                return Err(CliError::internal("ECash receive was rejected"));
             }
         }
     }
@@ -1474,7 +1323,7 @@ async fn ecash_receive(
 async fn routing_info_v2(
     State(state): State<AppState>,
     Json(federation_id): Json<FederationId>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let routing_info = state.routing_info_v2(&federation_id).await?;
     Ok(Json(json!(routing_info)))
 }
@@ -1483,7 +1332,7 @@ async fn routing_info_v2(
 async fn pay_bolt11_invoice_v2(
     State(state): State<AppState>,
     Json(payload): Json<SendPaymentPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let payment_result = state.send_payment_v2(payload).await?;
     Ok(Json(json!(payment_result)))
 }
@@ -1492,7 +1341,7 @@ async fn pay_bolt11_invoice_v2(
 async fn create_bolt11_invoice_v2(
     State(state): State<AppState>,
     Json(payload): Json<CreateBolt11InvoicePayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, CliError> {
     let invoice = state.create_bolt11_invoice_v2(payload).await?;
     Ok(Json(json!(invoice)))
 }
@@ -1501,7 +1350,7 @@ pub(crate) async fn verify_bolt11_preimage_v2_get(
     State(state): State<AppState>,
     Path(payment_hash): Path<sha256::Hash>,
     Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, LnurlError> {
     let response = state
         .verify_bolt11_preimage_v2(payment_hash, query.contains_key("wait"))
         .await

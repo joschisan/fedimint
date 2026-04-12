@@ -499,7 +499,7 @@ async fn open_channel_between_gateways(
     let gw2_info = gateway_cli(gw2_addr, &["info"]).await?;
 
     for gw_addr in [gw1_addr, gw2_addr] {
-        let addr_json = gateway_cli(gw_addr, &["ldk", "onchain-address"]).await?;
+        let addr_json = gateway_cli(gw_addr, &["ldk", "onchain", "receive"]).await?;
         let funding_addr = addr_json.as_str().context("missing address string")?;
 
         let addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = funding_addr.parse()?;
@@ -539,7 +539,8 @@ async fn open_channel_between_gateways(
         gw1_addr,
         &[
             "ldk",
-            "channel-open",
+            "channel",
+            "open",
             gw2_pubkey,
             &gw2_ln_addr,
             "10000000",
@@ -557,7 +558,7 @@ async fn open_channel_between_gateways(
         retry("channel active", || {
             let gw_addr = gw_addr.to_string();
             async move {
-                let channels = gateway_cli(&gw_addr, &["ldk", "channel-list"]).await?;
+                let channels = gateway_cli(&gw_addr, &["ldk", "channel", "list"]).await?;
                 let channels = channels.as_array().context("channels not an array")?;
                 ensure!(
                     channels

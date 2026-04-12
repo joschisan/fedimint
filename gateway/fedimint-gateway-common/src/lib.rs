@@ -182,10 +182,10 @@ pub struct GatewayFedConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SetFeesPayload {
     pub federation_id: Option<FederationId>,
-    pub lightning_base: Option<Amount>,
-    pub lightning_parts_per_million: Option<u64>,
-    pub transaction_base: Option<Amount>,
-    pub transaction_parts_per_million: Option<u64>,
+    pub ln_base: Option<Amount>,
+    pub ln_ppm: Option<u64>,
+    pub tx_base: Option<Amount>,
+    pub tx_ppm: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

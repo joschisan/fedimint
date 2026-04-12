@@ -185,7 +185,7 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
 
     {
         let invoice_json =
-            gateway_cli(&env.gw2_addr, &["ldk", "invoice-create", "1000000"]).await?;
+            gateway_cli(&env.gw2_addr, &["ldk", "invoice", "create", "1000000"]).await?;
 
         let invoice_str = invoice_json.as_str().expect("invoice must be a string");
 
@@ -210,7 +210,11 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
             )
             .await?;
 
-        gateway_cli(&env.gw2_addr, &["ldk", "invoice-pay", &invoice.to_string()]).await?;
+        gateway_cli(
+            &env.gw2_addr,
+            &["ldk", "invoice", "pay", &invoice.to_string()],
+        )
+        .await?;
 
         let state = lnv2.await_final_receive_operation_state(receive_op).await?;
         assert_eq!(state, FinalReceiveOperationState::Claimed);

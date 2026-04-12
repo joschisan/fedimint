@@ -18,7 +18,7 @@ use fedimint_gwv2_client::GatewayClientInitV2;
 
 use crate::config::DatabaseBackend;
 use crate::db::GatewayDbExt as _;
-use crate::error::AdminGatewayError;
+use crate::error::CliError;
 use crate::{AdminResult, AppState};
 
 #[derive(Debug, Clone)]
@@ -52,7 +52,7 @@ impl GatewayClientBuilder {
     async fn client_plainrootsecret(&self, db: &Database) -> AdminResult<DerivableSecret> {
         let client_secret = Client::load_decodable_client_secret::<[u8; 64]>(db)
             .await
-            .map_err(AdminGatewayError::ClientCreationError)?;
+            .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
         Ok(PlainRootSecretStrategy::to_root_secret(&client_secret))
     }
 
@@ -76,7 +76,7 @@ impl GatewayClientBuilder {
 
         let mut client_builder = Client::builder()
             .await
-            .map_err(AdminGatewayError::ClientCreationError)?
+            .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?
             .with_iroh_enable_dht(true)
             .with_iroh_enable_next(true);
         client_builder.with_module_inits(registry);
@@ -105,11 +105,11 @@ impl GatewayClientBuilder {
             .recover(db, root_secret, None)
             .await
             .map(Arc::new)
-            .map_err(AdminGatewayError::ClientCreationError)?;
+            .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
         client
             .wait_for_all_recoveries()
             .await
-            .map_err(AdminGatewayError::ClientCreationError)?;
+            .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
         Ok(())
     }
 
@@ -131,13 +131,13 @@ impl GatewayClientBuilder {
                     let rocksdb = fedimint_rocksdb::RocksDb::build(db_path.clone())
                         .open()
                         .await
-                        .map_err(AdminGatewayError::ClientCreationError)?;
+                        .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
                     Database::new(rocksdb, ModuleDecoderRegistry::default())
                 }
                 DatabaseBackend::CursedRedb => {
                     let cursed_redb = fedimint_cursed_redb::MemAndRedb::new(db_path.clone())
                         .await
-                        .map_err(AdminGatewayError::ClientCreationError)?;
+                        .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
                     Database::new(cursed_redb, ModuleDecoderRegistry::default())
                 }
             };
@@ -168,7 +168,7 @@ impl GatewayClientBuilder {
                 .await
         }
         .map(Arc::new)
-        .map_err(AdminGatewayError::ClientCreationError)
+        .map_err(|e| CliError::internal(format!("Client creation error: {e}")))
     }
 
     /// Verifies that the saved `ClientConfig` contains the expected
@@ -178,9 +178,9 @@ impl GatewayClientBuilder {
         if let Some(config) = dbtx.get_value(&ClientConfigKey).await
             && config.calculate_federation_id() != federation_id
         {
-            return Err(AdminGatewayError::ClientCreationError(anyhow::anyhow!(
-                "Federation Id did not match saved federation ID".to_string()
-            )));
+            return Err(CliError::internal(
+                "Federation Id did not match saved federation ID",
+            ));
         }
         Ok(())
     }

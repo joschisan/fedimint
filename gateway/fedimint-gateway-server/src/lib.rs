@@ -89,14 +89,14 @@ use tracing::{debug, info, info_span, warn};
 
 use crate::db::GatewayDbtxNcExt as _;
 use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
-use crate::error::{AdminGatewayError, LNv2Error, PublicGatewayError};
+use crate::error::CliError;
 use crate::rpc::run_webserver;
 
 /// Default Bitcoin network for testing purposes.
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
 
-pub type Result<T> = std::result::Result<T, PublicGatewayError>;
-pub type AdminResult<T> = std::result::Result<T, AdminGatewayError>;
+pub type Result<T> = std::result::Result<T, CliError>;
+pub type AdminResult<T> = std::result::Result<T, CliError>;
 
 /// Name of the gateway's database that is used for metadata and configuration
 /// storage.
@@ -280,9 +280,7 @@ pub(crate) async fn withdraw_v2(
     let fee = wallet_module
         .send_fee()
         .await
-        .map_err(|e| AdminGatewayError::WithdrawError {
-            failure_reason: e.to_string(),
-        })?;
+        .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?;
 
     let withdraw_amount = match amount {
         BitcoinAmountOrAll::All => {
@@ -291,7 +289,7 @@ pub(crate) async fn withdraw_v2(
                     .get_balance_for_btc()
                     .await
                     .map_err(|err| {
-                        AdminGatewayError::Unexpected(anyhow!(
+                        CliError::internal(format!(
                             "Balance not available: {}",
                             err.fmt_compact_anyhow()
                         ))
@@ -299,11 +297,9 @@ pub(crate) async fn withdraw_v2(
                     .msats
                     / 1000,
             );
-            balance
-                .checked_sub(fee)
-                .ok_or_else(|| AdminGatewayError::WithdrawError {
-                    failure_reason: format!("Insufficient funds. Balance: {balance} Fee: {fee}"),
-                })?
+            balance.checked_sub(fee).ok_or_else(|| {
+                CliError::internal(format!("Insufficient funds. Balance: {balance} Fee: {fee}"))
+            })?
         }
         BitcoinAmountOrAll::Amount(a) => a,
     };
@@ -311,9 +307,7 @@ pub(crate) async fn withdraw_v2(
     let operation_id = wallet_module
         .send(address.as_unchecked().clone(), withdraw_amount, Some(fee))
         .await
-        .map_err(|e| AdminGatewayError::WithdrawError {
-            failure_reason: e.to_string(),
-        })?;
+        .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?;
 
     let result = wallet_module
         .await_final_send_operation_state(operation_id)
@@ -327,14 +321,10 @@ pub(crate) async fn withdraw_v2(
             Ok(WithdrawResponse { txid, fees })
         }
         fedimint_walletv2_client::FinalSendOperationState::Aborted => {
-            Err(AdminGatewayError::WithdrawError {
-                failure_reason: "Withdrawal transaction was aborted".to_string(),
-            })
+            Err(CliError::internal("Withdrawal transaction was aborted"))
         }
         fedimint_walletv2_client::FinalSendOperationState::Failure => {
-            Err(AdminGatewayError::WithdrawError {
-                failure_reason: "Withdrawal failed".to_string(),
-            })
+            Err(CliError::internal("Withdrawal failed"))
         }
     }
 }
@@ -345,7 +335,7 @@ async fn calculate_max_withdrawable(
     _address: &Address,
 ) -> AdminResult<WithdrawDetails> {
     let balance = client.get_balance_for_btc().await.map_err(|err| {
-        AdminGatewayError::Unexpected(anyhow!(
+        CliError::internal(format!(
             "Balance not available: {}",
             err.fmt_compact_anyhow()
         ))
@@ -353,22 +343,16 @@ async fn calculate_max_withdrawable(
 
     let wallet_module = client
         .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| AdminGatewayError::Unexpected(anyhow!("No wallet module found")))?;
+        .map_err(|_| CliError::internal("No wallet module found"))?;
 
-    let peg_out_fees =
-        wallet_module
-            .send_fee()
-            .await
-            .map_err(|e| AdminGatewayError::WithdrawError {
-                failure_reason: e.to_string(),
-            })?;
+    let peg_out_fees = wallet_module
+        .send_fee()
+        .await
+        .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?;
 
-    let max_withdrawable_before_mint_fees =
-        balance.checked_sub(peg_out_fees.into()).ok_or_else(|| {
-            AdminGatewayError::WithdrawError {
-                failure_reason: "Insufficient balance to cover peg-out fees".to_string(),
-            }
-        })?;
+    let max_withdrawable_before_mint_fees = balance
+        .checked_sub(peg_out_fees.into())
+        .ok_or_else(|| CliError::internal("Insufficient balance to cover peg-out fees"))?;
 
     let mint_fees = Amount::ZERO;
 
@@ -468,11 +452,8 @@ impl AppState {
         if Self::load_mnemonic(&gateway_db).await.is_none() {
             let mnemonic = if let Ok(words) = std::env::var(FM_GATEWAY_MNEMONIC_ENV) {
                 info!(target: LOG_GATEWAY, "Using provided mnemonic from environment variable");
-                Mnemonic::parse_in_normalized(Language::English, words.as_str()).map_err(|e| {
-                    AdminGatewayError::MnemonicError(anyhow!(format!(
-                        "Seed phrase provided in environment was invalid {e:?}"
-                    )))
-                })?
+                Mnemonic::parse_in_normalized(Language::English, words.as_str())
+                    .map_err(|e| anyhow!("Seed phrase provided in environment was invalid {e:?}"))?
             } else {
                 debug!(target: LOG_GATEWAY, "Generating mnemonic and writing entropy to client storage");
                 Bip39RootSecretStrategy::<12>::random(&mut OsRng)
@@ -480,7 +461,7 @@ impl AppState {
 
             Client::store_encodable_client_secret(&gateway_db, mnemonic.to_entropy())
                 .await
-                .map_err(AdminGatewayError::MnemonicError)?;
+                .map_err(|e| anyhow!("Mnemonic error: {e}"))?;
         }
 
         let mnemonic = Self::load_mnemonic(&gateway_db)
@@ -907,7 +888,7 @@ impl AppState {
 
         // Ensure the federation has an LNv2 lightning module
         if lnv2_cfg.is_none() {
-            return Err(AdminGatewayError::ClientCreationError(anyhow!(
+            return Err(CliError::internal(format!(
                 "Federation {federation_id} does not have an LNv2 lightning module"
             )));
         }
@@ -923,10 +904,10 @@ impl AppState {
                     network = %network,
                     "Incorrect LNv2 network for federation",
                 );
-                return Err(AdminGatewayError::ClientCreationError(anyhow!(format!(
+                return Err(CliError::internal(format!(
                     "Unsupported LNv2 network {}",
                     ln_cfg.network
-                ))));
+                )));
             }
         }
 
@@ -987,11 +968,12 @@ impl AppState {
         let context = self.get_lightning_context().await?;
 
         let mut dbtx = self.gateway_db.begin_transaction_nc().await;
-        let fed_config = dbtx.load_federation_config(*federation_id).await.ok_or(
-            PublicGatewayError::FederationNotConnected(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            }),
-        )?;
+        let fed_config =
+            dbtx.load_federation_config(*federation_id)
+                .await
+                .ok_or(CliError::bad_request(FederationNotConnected {
+                    federation_id_prefix: federation_id.to_prefix(),
+                }))?;
 
         let lightning_fee = fed_config.lightning_fee;
         let transaction_fee = fed_config.transaction_fee;
@@ -1037,8 +1019,7 @@ impl AppState {
             .expect("Must have client module")
             .send_payment(payload)
             .await
-            .map_err(LNv2Error::OutgoingPayment)
-            .map_err(PublicGatewayError::LNv2)
+            .map_err(|e| CliError::internal(format!("LNv2 outgoing payment error: {e}")))
     }
 
     /// For the LNv2 protocol, this will create an invoice by fetching it from
@@ -1050,20 +1031,23 @@ impl AppState {
         payload: CreateBolt11InvoicePayload,
     ) -> Result<Bolt11Invoice> {
         if !payload.contract.verify() {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+            return Err(CliError::internal(format!(
+                "LNv2 incoming payment error: {}",
                 "The contract is invalid".to_string(),
             )));
         }
 
-        let payment_info = self.routing_info_v2(&payload.federation_id).await?.ok_or(
-            LNv2Error::IncomingPayment(format!(
-                "Federation {} does not exist",
-                payload.federation_id
-            )),
-        )?;
+        let payment_info =
+            self.routing_info_v2(&payload.federation_id)
+                .await?
+                .ok_or(CliError::internal(format!(
+                    "LNv2 incoming payment error: Federation {} does not exist",
+                    payload.federation_id
+                )))?;
 
         if payload.contract.commitment.refund_pk != payment_info.module_public_key {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+            return Err(CliError::internal(format!(
+                "LNv2 incoming payment error: {}",
                 "The incoming contract is keyed to another gateway".to_string(),
             )));
         }
@@ -1071,19 +1055,22 @@ impl AppState {
         let contract_amount = payment_info.receive_fee.subtract_from(payload.amount.msats);
 
         if contract_amount == Amount::ZERO {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+            return Err(CliError::internal(format!(
+                "LNv2 incoming payment error: {}",
                 "Zero amount incoming contracts are not supported".to_string(),
             )));
         }
 
         if contract_amount != payload.contract.commitment.amount {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+            return Err(CliError::internal(format!(
+                "LNv2 incoming payment error: {}",
                 "The contract amount does not pay the correct amount of fees".to_string(),
             )));
         }
 
         if payload.contract.commitment.expiration <= duration_since_epoch().as_secs() {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+            return Err(CliError::internal(format!(
+                "LNv2 incoming payment error: {}",
                 "The contract has already expired".to_string(),
             )));
         }
@@ -1091,7 +1078,8 @@ impl AppState {
         let payment_hash = match payload.contract.commitment.payment_image {
             PaymentImage::Hash(payment_hash) => payment_hash,
             PaymentImage::Point(..) => {
-                return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+                return Err(CliError::internal(format!(
+                    "LNv2 incoming payment error: {}",
                     "PaymentImage is not a payment hash".to_string(),
                 )));
             }
@@ -1117,13 +1105,15 @@ impl AppState {
             .await
             .is_some()
         {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+            return Err(CliError::internal(format!(
+                "LNv2 incoming payment error: {}",
                 "PaymentHash is already registered".to_string(),
             )));
         }
 
         dbtx.commit_tx_result().await.map_err(|_| {
-            PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+            CliError::internal(format!(
+                "LNv2 incoming payment error: {}",
                 "Payment hash is already registered".to_string(),
             ))
         })?;
@@ -1224,12 +1214,14 @@ impl AppState {
             .await
             .load_registered_incoming_contract(payment_image)
             .await
-            .ok_or(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+            .ok_or(CliError::internal(format!(
+                "LNv2 incoming payment error: {}",
                 "No corresponding decryption contract available".to_string(),
             )))?;
 
         if registered_incoming_contract.incoming_amount_msats != amount_msats {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+            return Err(CliError::internal(format!(
+                "LNv2 incoming payment error: {}",
                 "The available decryption contract's amount is not equal to the requested amount"
                     .to_string(),
             )));

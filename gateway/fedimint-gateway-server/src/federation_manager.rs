@@ -14,7 +14,7 @@ use tracing::{info, warn};
 
 use crate::AdminResult;
 use crate::db::GatewayDbtxNcExt as _;
-use crate::error::{AdminGatewayError, FederationNotConnected};
+use crate::error::CliError;
 
 /// The first index that the gateway will assign to a federation.
 /// Note: This starts at 1 because LNv1 uses the `federation_index` as an SCID.
@@ -134,12 +134,12 @@ impl FederationManager {
         &self,
         federation_id: FederationId,
     ) -> AdminResult<JsonClientConfig> {
-        let client = self
-            .clients
-            .get(&federation_id)
-            .ok_or(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            })?;
+        let client = self.clients.get(&federation_id).ok_or_else(|| {
+            CliError::bad_request(format!(
+                "No federation available for prefix {}",
+                federation_id.to_prefix()
+            ))
+        })?;
         Ok(client
             .borrow()
             .with(|client| client.get_config_json())
@@ -192,9 +192,7 @@ impl FederationManager {
 
         // Check for overflow.
         if next_index == INITIAL_INDEX.wrapping_sub(1) {
-            return Err(AdminGatewayError::GatewayConfigurationError(
-                "Federation Index overflow".to_string(),
-            ));
+            return Err(CliError::internal("Federation Index overflow"));
         }
 
         Ok(next_index)
