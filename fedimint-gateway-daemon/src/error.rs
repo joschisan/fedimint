@@ -3,7 +3,6 @@ use std::fmt::Display;
 use axum::Json;
 use axum::body::Body;
 use axum::response::{IntoResponse, Response};
-use fedimint_core::config::FederationIdPrefix;
 use reqwest::StatusCode;
 use thiserror::Error;
 
@@ -44,12 +43,6 @@ impl IntoResponse for CliError {
     }
 }
 
-impl From<FederationNotConnected> for CliError {
-    fn from(e: FederationNotConnected) -> Self {
-        Self::bad_request(e)
-    }
-}
-
 impl From<fedimint_gateway_common::LightningRpcError> for CliError {
     fn from(e: fedimint_gateway_common::LightningRpcError) -> Self {
         Self::internal(e)
@@ -59,23 +52,6 @@ impl From<fedimint_gateway_common::LightningRpcError> for CliError {
 impl From<anyhow::Error> for CliError {
     fn from(e: anyhow::Error) -> Self {
         Self::internal(e)
-    }
-}
-
-/// Public error that indicates the requested federation is not connected to
-/// this gateway.
-#[derive(Debug, Error)]
-pub struct FederationNotConnected {
-    pub federation_id_prefix: FederationIdPrefix,
-}
-
-impl Display for FederationNotConnected {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "No federation available for prefix {}",
-            self.federation_id_prefix
-        )
     }
 }
 

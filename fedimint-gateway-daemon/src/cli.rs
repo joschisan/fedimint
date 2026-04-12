@@ -612,7 +612,7 @@ async fn module_mint_send(
     let client = state
         .select_client(payload.federation_id)
         .await
-        .map_err(|e| CliError::bad_request(e))?
+        .ok_or(CliError::bad_request("Federation not connected"))?
         .into_value();
 
     let mint_module = client
@@ -646,7 +646,7 @@ async fn module_mint_receive(
     let client = state
         .select_client(federation_id)
         .await
-        .map_err(|e| CliError::bad_request(e))?;
+        .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let mint = client
         .value()
@@ -681,7 +681,7 @@ async fn module_wallet_receive(
     let client = state
         .select_client(payload.federation_id)
         .await
-        .map_err(|e| CliError::bad_request(e))?;
+        .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let wallet_module = client
         .value()

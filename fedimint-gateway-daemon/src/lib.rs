@@ -32,7 +32,6 @@ use async_trait::async_trait;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::{Network, OutPoint, secp256k1};
 use client::GatewayClientFactory;
-use error::FederationNotConnected;
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::ClientHandleArc;
 use fedimint_client_module::secret::RootSecretStrategy;
@@ -136,15 +135,8 @@ impl AppState {
     pub async fn select_client(
         &self,
         federation_id: FederationId,
-    ) -> std::result::Result<Spanned<ClientHandleArc>, FederationNotConnected> {
-        self.clients
-            .read()
-            .await
-            .get(&federation_id)
-            .cloned()
-            .ok_or(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            })
+    ) -> Option<Spanned<ClientHandleArc>> {
+        self.clients.read().await.get(&federation_id).cloned()
     }
 
     /// Load all persisted federation clients on startup.
@@ -319,7 +311,9 @@ impl AppState {
         &self,
         federation_id: &FederationId,
     ) -> Result<Option<RoutingInfo>> {
-        self.select_client(*federation_id).await?;
+        self.select_client(*federation_id)
+            .await
+            .ok_or(CliError::bad_request("Federation not connected"))?;
 
         let context = self.get_lightning_context().await?;
 
@@ -350,7 +344,8 @@ impl AppState {
         payload: SendPaymentPayload,
     ) -> Result<std::result::Result<[u8; 32], Signature>> {
         self.select_client(payload.federation_id)
-            .await?
+            .await
+            .ok_or(CliError::bad_request("Federation not connected"))?
             .value()
             .get_first_module::<GatewayClientModuleV2>()
             .expect("Must have client module")
@@ -495,7 +490,7 @@ impl AppState {
         let client = self
             .select_client(registered_contract.federation_id)
             .await
-            .map_err(|_| "Not connected to federation".to_string())?
+            .ok_or("Not connected to federation".to_string())?
             .into_value();
 
         let operation_id = OperationId::from_encodable(&registered_contract.contract);
@@ -549,7 +544,8 @@ impl AppState {
 
         let client = self
             .select_client(registered_incoming_contract.federation_id)
-            .await?
+            .await
+            .ok_or(CliError::bad_request("Federation not connected"))?
             .into_value();
 
         Ok((registered_incoming_contract.contract, client))
