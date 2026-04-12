@@ -162,8 +162,12 @@ fn main() -> anyhow::Result<()> {
             match GatewayClientFactory::try_load(gateway_db.clone(), registry.clone()).await? {
                 Some(factory) => factory,
                 None => {
-                    let mnemonic = Bip39RootSecretStrategy::<12>::random(&mut OsRng);
-                    GatewayClientFactory::init(gateway_db.clone(), mnemonic, registry).await?
+                    GatewayClientFactory::init(
+                        gateway_db.clone(),
+                        Bip39RootSecretStrategy::<12>::random(&mut OsRng),
+                        registry,
+                    )
+                    .await?
                 }
             };
 
