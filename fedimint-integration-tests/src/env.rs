@@ -13,7 +13,7 @@ use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::Amount;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_gateway_common::{
-    DepositAddressResponse, GatewayInfo, LightningInfo, ListChannelsResponse,
+    DepositAddressResponse, GatewayBalances, GatewayInfo, ListChannelsResponse,
     OnchainReceiveResponse,
 };
 use fedimint_walletv2_client::WalletClientModule;
@@ -241,17 +241,18 @@ impl TestEnv {
             let gw_addr = gw_addr.to_string();
             let fed_id = fed_id.clone();
             async move {
-                let info = gateway_cmd(&gw_addr)
-                    .arg("info")
-                    .run_gateway_cli::<GatewayInfo>()?;
+                let balances = gateway_cmd(&gw_addr)
+                    .arg("ldk")
+                    .arg("balances")
+                    .run_gateway_cli::<GatewayBalances>()?;
 
-                let fed = info
-                    .federations
+                let fed_balance = balances
+                    .ecash_balances
                     .iter()
-                    .find(|f| f.federation_id.to_string() == fed_id)
+                    .find(|b| b.federation_id.to_string() == fed_id)
                     .context("federation not found")?;
 
-                ensure!(fed.balance_msat.msats > 0, "gateway balance is zero");
+                ensure!(fed_balance.ecash_balance_msats.msats > 0, "gateway balance is zero");
                 Ok(())
             }
         })
@@ -520,13 +521,10 @@ async fn open_channel_between_gateways(
                 let info = gateway_cmd(&gw_addr)
                     .arg("info")
                     .run_gateway_cli::<GatewayInfo>()?;
-                let height = match info.lightning_info {
-                    LightningInfo::Connected { block_height, .. } => block_height,
-                    _ => bail!("gateway not connected"),
-                };
                 ensure!(
-                    height >= target_height,
-                    "not synced: {height} < {target_height}"
+                    info.block_height >= target_height,
+                    "not synced: {} < {target_height}",
+                    info.block_height,
                 );
                 Ok(())
             }
@@ -534,10 +532,7 @@ async fn open_channel_between_gateways(
         .await?;
     }
 
-    let gw2_pubkey = match &gw2_info.lightning_info {
-        LightningInfo::Connected { public_key, .. } => public_key.to_string(),
-        _ => bail!("gw2 not connected"),
-    };
+    let gw2_pubkey = gw2_info.public_key.to_string();
 
     let gw2_ln_addr = format!("127.0.0.1:{GW2_LN_PORT}");
 
