@@ -341,7 +341,7 @@ async fn start_gatewayd(
         .env("FM_GATEWAY_API_BIND", format!("0.0.0.0:{gw_port}"))
         .env("FM_GATEWAY_CLI_BIND", format!("127.0.0.1:{}", gw_port + 1))
         .env("FM_GATEWAY_API_ADDR", format!("http://127.0.0.1:{gw_port}"))
-        .env("FM_PORT_LDK", ln_port.to_string())
+        .env("FM_LDK_BIND", format!("0.0.0.0:{ln_port}"))
         .env(
             "FM_GATEWAY_METRICS_LISTEN_ADDR",
             format!("127.0.0.1:{metrics_port}"),
@@ -349,7 +349,6 @@ async fn start_gatewayd(
         .env("FM_GATEWAY_SKIP_WAIT_FOR_SYNC", "1")
         .env("FM_GATEWAY_NETWORK", "regtest")
         .env("FM_DEFAULT_ROUTING_FEES", "0,0")
-        .env("FM_LDK_ALIAS", name)
         .env("FM_GATEWAY_SKIP_SETUP", "true")
         .env(
             "FM_BITCOIND_URL",

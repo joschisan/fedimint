@@ -33,8 +33,6 @@ use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli};
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use fedimint_mintv2_client::MintClientInit;
-use ldk_node::lightning::ln::msgs::SocketAddress;
-use ldk_node::lightning::routing::gossip::NodeAlias;
 use lightning::types::payment::PaymentHash;
 use rand::rngs::OsRng;
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
@@ -113,17 +111,9 @@ pub struct GatewayOpts {
     #[arg(long, env = "FM_ESPLORA_URL")]
     pub esplora_url: Option<SafeUrl>,
 
-    /// LDK lightning node listen port
-    #[arg(
-        long = "ldk-lightning-port",
-        env = "FM_PORT_LDK",
-        default_value_t = 9735
-    )]
-    pub lightning_port: u16,
-
-    /// LDK node alias
-    #[arg(long = "ldk-alias", env = "FM_LDK_ALIAS", default_value = "")]
-    pub ldk_alias: String,
+    /// Network address and port for the lightning P2P interface
+    #[arg(long = "ldk-bind", env = "FM_LDK_BIND", default_value = "0.0.0.0:9735")]
+    pub ldk_bind: SocketAddr,
 
     /// The default routing fees that are applied to new federations
     #[arg(long = "default-routing-fees", env = "FM_DEFAULT_ROUTING_FEES", default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
@@ -177,25 +167,11 @@ fn main() -> anyhow::Result<()> {
         let client_builder = GatewayClientBuilder::new(opts.data_dir.clone(), registry).await?;
 
         // 5. Build LDK node
-        let alias = if opts.ldk_alias.is_empty() {
-            "LDK Gateway".to_string()
-        } else {
-            opts.ldk_alias.clone()
-        };
-        let mut alias_bytes = [0u8; 32];
-        let truncated = &alias.as_bytes()[..alias.len().min(32)];
-        alias_bytes[..truncated.len()].copy_from_slice(truncated);
+        let mut node_builder = ldk_node::Builder::new();
 
-        let mut node_builder = ldk_node::Builder::from_config(ldk_node::config::Config {
-            network: opts.network,
-            listening_addresses: Some(vec![SocketAddress::TcpIpV4 {
-                addr: [0, 0, 0, 0],
-                port: opts.lightning_port,
-            }]),
-            node_alias: Some(NodeAlias(alias_bytes)),
-            ..Default::default()
-        });
-
+        node_builder.set_network(opts.network);
+        node_builder.set_node_alias("fedimint-gateway-daemon".to_string())?;
+        node_builder.set_listening_addresses(vec![opts.ldk_bind.into()])?;
         node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
 
         match (opts.bitcoind_url.clone(), opts.esplora_url.clone()) {
@@ -227,7 +203,7 @@ fn main() -> anyhow::Result<()> {
                 .to_string(),
         );
 
-        info!(target: LOG_LIGHTNING, data_dir = %ldk_data_dir.display(), %alias, "Starting LDK Node...");
+        info!(target: LOG_LIGHTNING, data_dir = %ldk_data_dir.display(), "Starting LDK Node...");
 
         let node = node_builder.build()?;
 
