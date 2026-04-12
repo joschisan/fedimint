@@ -161,18 +161,6 @@ enum FederationCommands {
     },
     /// List connected federations
     List,
-    /// Set routing fees
-    SetFees {
-        federation_id: FederationId,
-        #[arg(long)]
-        ln_base: Option<Amount>,
-        #[arg(long)]
-        ln_ppm: Option<u64>,
-        #[arg(long)]
-        tx_base: Option<Amount>,
-        #[arg(long)]
-        tx_ppm: Option<u64>,
-    },
     /// Get a connected federation's JSON client config
     Config { federation_id: FederationId },
     /// Get invite code for a federation
@@ -366,23 +354,6 @@ fn main() -> Result<()> {
                 },
             )?,
             FederationCommands::List => request(addr, ROUTE_FED_LIST, ())?,
-            FederationCommands::SetFees {
-                federation_id,
-                ln_base,
-                ln_ppm,
-                tx_base,
-                tx_ppm,
-            } => request(
-                addr,
-                ROUTE_FED_SET_FEES,
-                SetFeesPayload {
-                    federation_id: Some(federation_id),
-                    ln_base,
-                    ln_ppm,
-                    tx_base,
-                    tx_ppm,
-                },
-            )?,
             FederationCommands::Config { federation_id } => request(
                 addr,
                 ROUTE_FED_CONFIG,

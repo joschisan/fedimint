@@ -21,14 +21,14 @@ use fedimint_gateway_common::{
     InvoicePayResponse, LightningInfo, ListChannelsResponse, ListFederationsResponse,
     ListPeersResponse, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
     OnchainReceiveResponse, OnchainSendResponse, OpenChannelRequest, PayInvoiceForOperatorPayload,
-    PaymentFee, PeerConnectRequest, PeerDisconnectRequest, Preimage, ROUTE_FED_CONFIG,
-    ROUTE_FED_INVITE, ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_FED_SET_FEES, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
-    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    PeerConnectRequest, PeerDisconnectRequest, Preimage, ROUTE_FED_CONFIG, ROUTE_FED_INVITE,
+    ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
+    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE,
+    ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
+    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND,
     ROUTE_MODULE_WALLET_RECEIVE, ReceiveEcashPayload, ReceiveEcashResponse, SendOnchainRequest,
-    SetFeesPayload, SpendEcashPayload, SpendEcashResponse,
+    SpendEcashPayload, SpendEcashResponse,
 };
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule;
@@ -83,7 +83,6 @@ fn router() -> Router<AppState> {
         // Federation management
         .route(ROUTE_FED_JOIN, post(federation_join))
         .route(ROUTE_FED_LIST, post(federation_list))
-        .route(ROUTE_FED_SET_FEES, post(federation_set_fees))
         .route(ROUTE_FED_CONFIG, post(federation_config))
         .route(ROUTE_FED_INVITE, post(federation_invite))
         // Per-federation module commands
@@ -610,8 +609,8 @@ async fn federation_join(
     let federation_config = FederationConfig {
         invite_code,
         federation_index,
-        lightning_fee: state.default_routing_fees,
-        transaction_fee: state.default_transaction_fees,
+        lightning_fee: state.routing_fees,
+        transaction_fee: state.transaction_fees,
     };
 
     let mnemonic = AppState::load_mnemonic(&state.gateway_db)
@@ -706,113 +705,6 @@ async fn federation_list(
         .federation_info_all_federations(dbtx)
         .await;
     Ok(Json(ListFederationsResponse { federations }))
-}
-
-/// Set fees for one or all federations
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
-async fn federation_set_fees(
-    State(state): State<AppState>,
-    Json(payload): Json<SetFeesPayload>,
-) -> Result<Json<()>, CliError> {
-    let SetFeesPayload {
-        federation_id,
-        ln_base,
-        ln_ppm,
-        tx_base,
-        tx_ppm,
-    } = payload;
-
-    let mut dbtx = state.gateway_db.begin_transaction().await;
-    let mut fed_configs = if let Some(fed_id) = federation_id {
-        dbtx.find_by_prefix(&FederationConfigKeyPrefix)
-            .await
-            .map(
-                |(key, config): (
-                    FederationConfigKey,
-                    fedimint_gateway_common::FederationConfig,
-                )| (key.id, config),
-            )
-            .collect::<std::collections::BTreeMap<_, _>>()
-            .await
-            .into_iter()
-            .filter(|(id, _)| *id == fed_id)
-            .collect::<BTreeMap<_, _>>()
-    } else {
-        dbtx.find_by_prefix(&FederationConfigKeyPrefix)
-            .await
-            .map(
-                |(key, config): (
-                    FederationConfigKey,
-                    fedimint_gateway_common::FederationConfig,
-                )| (key.id, config),
-            )
-            .collect::<std::collections::BTreeMap<_, _>>()
-            .await
-    };
-
-    let federation_manager = state.federation_manager.read().await;
-
-    for (federation_id, config) in &mut fed_configs {
-        let mut lightning_fee = config.lightning_fee;
-        if let Some(ln_base) = ln_base {
-            lightning_fee.base = ln_base;
-        }
-
-        if let Some(ln_ppm) = ln_ppm {
-            lightning_fee.parts_per_million = ln_ppm;
-        }
-
-        let mut transaction_fee = config.transaction_fee;
-        if let Some(tx_base) = tx_base {
-            transaction_fee.base = tx_base;
-        }
-
-        if let Some(tx_ppm) = tx_ppm {
-            transaction_fee.parts_per_million = tx_ppm;
-        }
-
-        let client = federation_manager
-            .client(federation_id)
-            .ok_or(CliError::bad_request(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            }))?;
-        let client_config = client.value().config().await;
-        let contains_lnv2 = client_config
-            .modules
-            .values()
-            .any(|m| fedimint_lnv2_common::LightningCommonInit::KIND == m.kind);
-
-        // Check if the lightning fee + transaction fee is higher than the send limit
-        let send_fees = lightning_fee + transaction_fee;
-        if contains_lnv2 && send_fees.gt(&PaymentFee::SEND_FEE_LIMIT) {
-            return Err(CliError::bad_request(format!(
-                "Total Send fees exceeded {}",
-                PaymentFee::SEND_FEE_LIMIT
-            )));
-        }
-
-        // Check if the transaction fee is higher than the receive limit
-        if contains_lnv2 && transaction_fee.gt(&PaymentFee::RECEIVE_FEE_LIMIT) {
-            return Err(CliError::bad_request(format!(
-                "Transaction fees exceeded RECEIVE LIMIT {}",
-                PaymentFee::RECEIVE_FEE_LIMIT
-            )));
-        }
-
-        config.lightning_fee = lightning_fee;
-        config.transaction_fee = transaction_fee;
-        dbtx.insert_entry(
-            &FederationConfigKey {
-                id: config.invite_code.federation_id(),
-            },
-            config,
-        )
-        .await;
-    }
-
-    dbtx.commit_tx().await;
-
-    Ok(Json(()))
 }
 
 /// Display federation config

@@ -153,10 +153,10 @@ pub struct AppState {
     pub network: Network,
 
     /// The default routing fees for new federations
-    pub default_routing_fees: PaymentFee,
+    pub routing_fees: PaymentFee,
 
     /// The default transaction fees for new federations
-    pub default_transaction_fees: PaymentFee,
+    pub transaction_fees: PaymentFee,
 
     /// A map of the network protocols the gateway supports to the data needed
     /// for registering with a federation.
@@ -198,8 +198,8 @@ impl AppState {
         cli_bind: SocketAddr,
         api_addr: Option<SafeUrl>,
         network: Network,
-        default_routing_fees: PaymentFee,
-        default_transaction_fees: PaymentFee,
+        routing_fees: PaymentFee,
+        transaction_fees: PaymentFee,
     ) -> anyhow::Result<AppState> {
         let mut registrations = BTreeMap::new();
         if let Some(api_addr) = api_addr {
@@ -221,8 +221,8 @@ impl AppState {
             api_bind,
             cli_bind,
             network,
-            default_routing_fees,
-            default_transaction_fees,
+            routing_fees,
+            transaction_fees,
             registrations,
             outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
             pending_channels: Arc::new(RwLock::new(BTreeMap::new())),
@@ -996,9 +996,8 @@ impl AppState {
         #[builder(default = ([127, 0, 0, 1], 8176).into())] cli_bind: SocketAddr,
         api_addr: Option<SafeUrl>,
         #[builder(default = DEFAULT_NETWORK)] network: Network,
-        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] default_routing_fees: PaymentFee,
-        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)]
-        default_transaction_fees: PaymentFee,
+        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] routing_fees: PaymentFee,
+        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] transaction_fees: PaymentFee,
     ) -> anyhow::Result<AppState> {
         AppState::new(
             gateway_db,
@@ -1008,8 +1007,8 @@ impl AppState {
             cli_bind,
             api_addr,
             network,
-            default_routing_fees,
-            default_transaction_fees,
+            routing_fees,
+            transaction_fees,
         )
         .await
     }

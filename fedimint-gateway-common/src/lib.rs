@@ -53,7 +53,6 @@ pub const ROUTE_ECASH_RECEIVE: &str = "/ecash/receive";
 // Federation management
 pub const ROUTE_FED_JOIN: &str = "/federation/join";
 pub const ROUTE_FED_LIST: &str = "/federation/list";
-pub const ROUTE_FED_SET_FEES: &str = "/federation/set-fees";
 pub const ROUTE_FED_CONFIG: &str = "/federation/config";
 pub const ROUTE_FED_INVITE: &str = "/federation/invite";
 
@@ -175,15 +174,6 @@ pub struct GatewayInfo {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct GatewayFedConfig {
     pub federations: BTreeMap<FederationId, JsonClientConfig>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SetFeesPayload {
-    pub federation_id: Option<FederationId>,
-    pub ln_base: Option<Amount>,
-    pub ln_ppm: Option<u64>,
-    pub tx_base: Option<Amount>,
-    pub tx_ppm: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

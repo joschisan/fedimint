@@ -22,11 +22,11 @@ use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
 use fedimint_core::db::Database;
 use fedimint_core::envs::is_env_var_set;
-use fedimint_core::fedimint_build_code_version_env;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::block_in_place;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
+use fedimint_core::{Amount, fedimint_build_code_version_env};
 use fedimint_gateway_common::{InterceptPaymentRequest, PaymentFee};
 use fedimint_gateway_daemon::client::GatewayClientBuilder;
 use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
@@ -89,6 +89,10 @@ pub struct GatewayOpts {
     )]
     pub cli_bind: SocketAddr,
 
+    /// Network address and port for the lightning P2P interface
+    #[arg(long = "ldk-bind", env = "FM_LDK_BIND", default_value = "0.0.0.0:8177")]
+    pub ldk_bind: SocketAddr,
+
     /// Public URL from which the webserver API is reachable
     #[arg(long = "api-addr", env = "FM_GATEWAY_API_ADDR")]
     pub api_addr: Option<SafeUrl>,
@@ -113,17 +117,21 @@ pub struct GatewayOpts {
     #[arg(long, env = "FM_ESPLORA_URL")]
     pub esplora_url: Option<SafeUrl>,
 
-    /// Network address and port for the lightning P2P interface
-    #[arg(long = "ldk-bind", env = "FM_LDK_BIND", default_value = "0.0.0.0:9735")]
-    pub ldk_bind: SocketAddr,
+    /// Base routing fee in millisatoshis for Lightning payments
+    #[arg(long, env = "FM_ROUTING_FEE_BASE_MSAT", default_value_t = 2000)]
+    pub routing_fee_base_msat: u64,
 
-    /// The default routing fees that are applied to new federations
-    #[arg(long = "default-routing-fees", env = "FM_DEFAULT_ROUTING_FEES", default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
-    pub default_routing_fees: PaymentFee,
+    /// Routing fee rate in parts per million for Lightning payments
+    #[arg(long, env = "FM_ROUTING_FEE_PPM", default_value_t = 3000)]
+    pub routing_fee_ppm: u64,
 
-    /// The default transaction fees that are applied to new federations
-    #[arg(long = "default-transaction-fees", env = "FM_DEFAULT_TRANSACTION_FEES", default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
-    pub default_transaction_fees: PaymentFee,
+    /// Base transaction fee in millisatoshis for federation transactions
+    #[arg(long, env = "FM_TRANSACTION_FEE_BASE_MSAT", default_value_t = 2000)]
+    pub transaction_fee_base_msat: u64,
+
+    /// Transaction fee rate in parts per million for federation transactions
+    #[arg(long, env = "FM_TRANSACTION_FEE_PPM", default_value_t = 3000)]
+    pub transaction_fee_ppm: u64,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -228,8 +236,8 @@ fn main() -> anyhow::Result<()> {
             opts.cli_bind,
             opts.api_addr,
             opts.network,
-            opts.default_routing_fees,
-            opts.default_transaction_fees,
+            PaymentFee { base: Amount::from_msats(opts.routing_fee_base_msat), parts_per_million: opts.routing_fee_ppm },
+            PaymentFee { base: Amount::from_msats(opts.transaction_fee_base_msat), parts_per_million: opts.transaction_fee_ppm },
         )
         .await?;
 
