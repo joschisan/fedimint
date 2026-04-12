@@ -200,6 +200,7 @@ fn main() -> anyhow::Result<()> {
         let ldk_data_dir = client_builder.data_dir().join(LDK_NODE_DB_FOLDER) .to_str()
         .expect("Invalid data dir path")
         .to_string();
+
         node_builder.set_storage_dir_path(
             ldk_data_dir
 
@@ -207,15 +208,13 @@ fn main() -> anyhow::Result<()> {
 
         info!(target: LOG_LIGHTNING, "Starting LDK Node...");
 
-        let node = node_builder.build()?;
-
+        let node = Arc::new(node_builder.build()?);
 
         let runtime = Arc::new(tokio::runtime::Runtime::new()?);
 
         node.start_with_runtime(runtime.clone())?;
 
         info!("Successfully started LDK Node");
-        let node = Arc::new(node);
 
         // 6. Wait for chain sync
         install_crypto_provider().await;
