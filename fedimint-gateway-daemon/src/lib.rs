@@ -17,9 +17,7 @@
 
 pub mod cli;
 pub mod client;
-pub mod config;
 pub mod db;
-
 pub mod error;
 mod federation_manager;
 pub mod public;
@@ -36,7 +34,6 @@ use async_trait::async_trait;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::{Network, OutPoint, secp256k1};
 use client::GatewayClientBuilder;
-pub use config::GatewayParameters;
 use error::FederationNotConnected;
 use federation_manager::FederationManager;
 use fedimint_bip39::Mnemonic;
@@ -194,18 +191,24 @@ impl std::fmt::Debug for AppState {
 
 impl AppState {
     pub async fn new(
-        gateway_parameters: GatewayParameters,
         gateway_db: Database,
         client_builder: GatewayClientBuilder,
         node: Arc<ldk_node::Node>,
+        api_bind: SocketAddr,
+        cli_bind: SocketAddr,
+        api_addr: Option<SafeUrl>,
+        network: Network,
+        default_routing_fees: PaymentFee,
+        default_transaction_fees: PaymentFee,
     ) -> anyhow::Result<AppState> {
-        let network = gateway_parameters.network;
-
         let mut registrations = BTreeMap::new();
-        if let Some(http_url) = gateway_parameters.versioned_api {
+        if let Some(api_addr) = api_addr {
+            let versioned_api = api_addr
+                .join(V1_API_ENDPOINT)
+                .expect("Failed to version gateway API address");
             registrations.insert(
                 RegisteredProtocol::Http,
-                Registration::new(&gateway_db, http_url, RegisteredProtocol::Http).await,
+                Registration::new(&gateway_db, versioned_api, RegisteredProtocol::Http).await,
             );
         }
 
@@ -214,12 +217,12 @@ impl AppState {
             node,
             state: Arc::new(RwLock::new(GatewayState::Running)),
             client_builder,
-            gateway_db: gateway_db.clone(),
-            api_bind: gateway_parameters.api_bind,
-            cli_bind: gateway_parameters.cli_bind,
+            gateway_db,
+            api_bind,
+            cli_bind,
             network,
-            default_routing_fees: gateway_parameters.default_routing_fees,
-            default_transaction_fees: gateway_parameters.default_transaction_fees,
+            default_routing_fees,
+            default_transaction_fees,
             registrations,
             outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
             pending_channels: Arc::new(RwLock::new(BTreeMap::new())),
@@ -997,23 +1000,16 @@ impl AppState {
         #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)]
         default_transaction_fees: PaymentFee,
     ) -> anyhow::Result<AppState> {
-        let versioned_api = api_addr.map(|addr| {
-            addr.join(V1_API_ENDPOINT)
-                .expect("Failed to version gateway API address")
-        });
-
         AppState::new(
-            GatewayParameters {
-                api_bind,
-                cli_bind,
-                versioned_api,
-                network,
-                default_routing_fees,
-                default_transaction_fees,
-            },
             gateway_db,
             client_builder,
             node,
+            api_bind,
+            cli_bind,
+            api_addr,
+            network,
+            default_routing_fees,
+            default_transaction_fees,
         )
         .await
     }

@@ -8,13 +8,14 @@
 //! clients to request routing of payments through the Lightning Network.
 //! The API also has endpoints for managing the gateway.
 
-use std::path::Path;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use bitcoin::Network;
 use bitcoin::hashes::Hash;
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use fedimint_bip39::{Bip39RootSecretStrategy, Language, Mnemonic};
 use fedimint_bitcoind::bitcoincore::BitcoindClient;
 use fedimint_client::Client;
@@ -27,9 +28,10 @@ use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::block_in_place;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
-use fedimint_gateway_common::{ChainSource, InterceptPaymentRequest, RegisteredProtocol};
+use fedimint_gateway_common::{
+    ChainSource, InterceptPaymentRequest, PaymentFee, RegisteredProtocol,
+};
 use fedimint_gateway_daemon::client::GatewayClientBuilder;
-use fedimint_gateway_daemon::config::GatewayOpts;
 use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli};
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
@@ -47,6 +49,94 @@ use tracing::{debug, info, warn};
 // rocksdb suffers from memory fragmentation when using standard allocator
 static GLOBAL: Jemalloc = Jemalloc;
 
+/// Command line parameters for starting the gateway.
+#[derive(Parser)]
+#[command(version)]
+#[command(
+    group(
+        ArgGroup::new("bitcoind_password_auth")
+           .args(["bitcoind_password"])
+           .multiple(false)
+    ),
+    group(
+        ArgGroup::new("bitcoind_auth")
+            .args(["bitcoind_url"])
+            .requires("bitcoind_password_auth")
+            .requires_all(["bitcoind_username", "bitcoind_url"])
+    ),
+    group(
+        ArgGroup::new("bitcoin_rpc")
+            .required(true)
+            .multiple(true)
+            .args(["bitcoind_url", "esplora_url"])
+    )
+)]
+pub struct GatewayOpts {
+    /// Path to folder containing gateway config and data files
+    #[arg(long = "data-dir", env = "FM_GATEWAY_DATA_DIR")]
+    pub data_dir: PathBuf,
+
+    /// Public API listen address
+    #[arg(
+        long = "api-bind",
+        env = "FM_GATEWAY_API_BIND",
+        default_value = "0.0.0.0:8175"
+    )]
+    pub api_bind: SocketAddr,
+
+    /// CLI/admin listen address
+    #[arg(
+        long = "cli-bind",
+        env = "FM_GATEWAY_CLI_BIND",
+        default_value = "127.0.0.1:8176"
+    )]
+    pub cli_bind: SocketAddr,
+
+    /// Public URL from which the webserver API is reachable
+    #[arg(long = "api-addr", env = "FM_GATEWAY_API_ADDR")]
+    pub api_addr: Option<SafeUrl>,
+
+    /// Bitcoin network this gateway will be running on
+    #[arg(long = "network", env = "FM_GATEWAY_NETWORK")]
+    pub network: Network,
+
+    /// The username to use when connecting to bitcoind
+    #[arg(long, env = "FM_BITCOIND_USERNAME")]
+    pub bitcoind_username: Option<String>,
+
+    /// The password to use when connecting to bitcoind
+    #[arg(long, env = "FM_BITCOIND_PASSWORD")]
+    pub bitcoind_password: Option<String>,
+
+    /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
+    #[arg(long, env = "FM_BITCOIND_URL")]
+    pub bitcoind_url: Option<SafeUrl>,
+
+    /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
+    #[arg(long, env = "FM_ESPLORA_URL")]
+    pub esplora_url: Option<SafeUrl>,
+
+    /// LDK lightning node listen port
+    #[arg(
+        long = "ldk-lightning-port",
+        env = "FM_PORT_LDK",
+        default_value_t = 9735
+    )]
+    pub lightning_port: u16,
+
+    /// LDK node alias
+    #[arg(long = "ldk-alias", env = "FM_LDK_ALIAS", default_value = "")]
+    pub ldk_alias: String,
+
+    /// The default routing fees that are applied to new federations
+    #[arg(long = "default-routing-fees", env = "FM_DEFAULT_ROUTING_FEES", default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
+    pub default_routing_fees: PaymentFee,
+
+    /// The default transaction fees that are applied to new federations
+    #[arg(long = "default-transaction-fees", env = "FM_DEFAULT_TRANSACTION_FEES", default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
+    pub default_transaction_fees: PaymentFee,
+}
+
 fn main() -> anyhow::Result<()> {
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);
     runtime.block_on(async {
@@ -55,12 +145,11 @@ fn main() -> anyhow::Result<()> {
 
         // 1. Parse CLI args
         let opts = GatewayOpts::parse();
-        let gateway_parameters = opts.to_gateway_parameters()?;
 
         // 2. Open database
-        let db_path = opts.data_dir.join(DB_FILE);
+
         let gateway_db = Database::new(
-            fedimint_rocksdb::RocksDb::build(db_path).open().await?,
+            fedimint_rocksdb::RocksDb::build(opts.data_dir.join(DB_FILE)).open().await?,
             ModuleDecoderRegistry::default(),
         );
 
@@ -95,7 +184,7 @@ fn main() -> anyhow::Result<()> {
         let chain_source = match (opts.bitcoind_url.as_ref(), opts.esplora_url.as_ref()) {
             (Some(_), None) | (Some(_), Some(_)) => {
                 let (_, chain_source) =
-                    get_bitcoind_client(&opts, gateway_parameters.network, &http_id)?;
+                    get_bitcoind_client(&opts, opts.network, &http_id)?;
                 chain_source
             }
             (None, Some(url)) => ChainSource::Esplora {
@@ -121,7 +210,7 @@ fn main() -> anyhow::Result<()> {
         let node = create_ldk_node(
             &client_builder.data_dir().join(LDK_NODE_DB_FOLDER),
             chain_source,
-            gateway_parameters.network,
+            opts.network,
             opts.lightning_port,
             opts.ldk_alias.clone(),
             mnemonic,
@@ -142,7 +231,18 @@ fn main() -> anyhow::Result<()> {
             "Starting gatewayd",
         );
 
-        let state = AppState::new(gateway_parameters, gateway_db, client_builder, node.clone()).await?;
+        let state = AppState::new(
+            gateway_db,
+            client_builder,
+            node.clone(),
+            opts.api_bind,
+            opts.cli_bind,
+            opts.api_addr,
+            opts.network,
+            opts.default_routing_fees,
+            opts.default_transaction_fees,
+        )
+        .await?;
 
         // 8. Load federation clients
         state.load_clients().await?;
