@@ -1,14 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::SocketAddr;
 use std::str::FromStr;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use axum::Router;
-use axum::extract::{Json, Path, Query, State};
-use axum::routing::{get, post};
+use axum::extract::{Json, State};
+use axum::routing::post;
 use bitcoin::FeeRate;
-use bitcoin::hashes::sha256;
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped;
@@ -32,11 +29,6 @@ use fedimint_gateway_common::{
     ROUTE_MODULE_WALLET_RECEIVE, ROUTE_STOP, ReceiveEcashPayload, ReceiveEcashResponse,
     SendOnchainRequest, SetFeesPayload, SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT,
 };
-use fedimint_lnurl::LnurlResponse;
-use fedimint_lnv2_common::endpoint_constants::{
-    CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
-};
-use fedimint_lnv2_common::gateway_api::{CreateBolt11InvoicePayload, SendPaymentPayload};
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule;
 use futures::StreamExt;
@@ -45,90 +37,34 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentDirection, PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
-use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, info_span, instrument, warn};
 
 use crate::db::{FederationConfigKey, FederationConfigKeyPrefix};
-use crate::error::{CliError, FederationNotConnected, LnurlError};
+use crate::error::{CliError, FederationNotConnected};
 use crate::{AppState, GatewayState, UserChannelId, get_preimage_and_payment_hash};
 
-/// Creates two webservers:
-/// - Public: binds to `0.0.0.0:<port>` for LNv2 protocol routes
-/// - Admin: binds to `127.0.0.1:<port>` for all admin/operator routes (no auth
-///   needed)
-pub async fn run_webserver(state: AppState) -> anyhow::Result<()> {
-    let task_group = state.task_group.clone();
-    let listen = state.listen;
-
-    // Public routes: LNv2 protocol endpoints accessible by federation clients
-    let public_routes = public_routes()
+pub async fn run_cli(listener: TcpListener, state: AppState) {
+    let routes = router()
         .with_state(state.clone())
         .layer(CorsLayer::permissive());
 
-    let public_api = Router::new()
-        .nest(&format!("/{V1_API_ENDPOINT}"), public_routes.clone())
-        .merge(public_routes);
+    let api = Router::new()
+        .nest(&format!("/{V1_API_ENDPOINT}"), routes.clone())
+        .merge(routes);
 
-    // Admin routes: all operator endpoints, localhost-only
-    let admin_routes = admin_routes()
-        .with_state(state.clone())
-        .layer(CorsLayer::permissive());
+    let addr = listener.local_addr().expect("valid local addr");
+    info!(target: LOG_GATEWAY, %addr, "Started CLI webserver (localhost-only)");
 
-    let admin_api = Router::new()
-        .nest(&format!("/{V1_API_ENDPOINT}"), admin_routes.clone())
-        .merge(admin_routes);
-
-    // Public listener on 0.0.0.0
-    let public_addr = SocketAddr::new("0.0.0.0".parse().expect("valid addr"), listen.port());
-    let handle = task_group.make_handle();
-    let shutdown_rx = handle.make_shutdown_rx();
-    let public_listener = TcpListener::bind(public_addr).await?;
-    let public_serve = axum::serve(public_listener, public_api.into_make_service());
-    task_group.spawn("Gateway Public Webserver", |_| async {
-        let graceful = public_serve.with_graceful_shutdown(async {
-            shutdown_rx.await;
-        });
-        if let Err(err) = graceful.await {
-            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error shutting down public webserver");
-        }
-    });
-    info!(target: LOG_GATEWAY, %public_addr, "Started public webserver (LNv2 protocol)");
-
-    // Admin listener on 127.0.0.1
-    let admin_addr = SocketAddr::new("127.0.0.1".parse().expect("valid addr"), listen.port() + 1);
-    let handle = task_group.make_handle();
-    let shutdown_rx = handle.make_shutdown_rx();
-    let admin_listener = TcpListener::bind(admin_addr).await?;
-    let admin_serve = axum::serve(admin_listener, admin_api.into_make_service());
-    task_group.spawn("Gateway Admin Webserver", |_| async {
-        let graceful = admin_serve.with_graceful_shutdown(async {
-            shutdown_rx.await;
-        });
-        if let Err(err) = graceful.await {
-            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error shutting down admin webserver");
-        }
-    });
-    info!(target: LOG_GATEWAY, %admin_addr, "Started admin webserver (localhost-only)");
-
-    Ok(())
+    let handle = state.task_group.make_handle();
+    axum::serve(listener, api.into_make_service())
+        .with_graceful_shutdown(handle.make_shutdown_rx())
+        .await
+        .expect("CLI webserver failed");
 }
 
-/// Public routes: LNv2 protocol endpoints called by federation clients.
-fn public_routes() -> Router<AppState> {
-    Router::new()
-        .route(ROUTING_INFO_ENDPOINT, post(routing_info_v2))
-        .route(SEND_PAYMENT_ENDPOINT, post(pay_bolt11_invoice_v2))
-        .route(
-            CREATE_BOLT11_INVOICE_ENDPOINT,
-            post(create_bolt11_invoice_v2),
-        )
-        .route("/verify/{payment_hash}", get(verify_bolt11_preimage_v2_get))
-}
-
-/// Admin routes: operator endpoints, only accessible via localhost.
-fn admin_routes() -> Router<AppState> {
+fn router() -> Router<AppState> {
     Router::new()
         // Top-level
         .route(ROUTE_INFO, post(info))
@@ -218,7 +154,7 @@ async fn info(State(state): State<AppState>) -> Result<Json<GatewayInfo>, CliErr
 
 /// Instructs the gateway to shut down gracefully
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-pub(crate) async fn stop(State(state): State<AppState>) -> Result<Json<()>, CliError> {
+async fn stop(State(state): State<AppState>) -> Result<Json<()>, CliError> {
     let task_group = state.task_group.clone();
 
     // Take the write lock on the state so that no additional payments are processed
@@ -1050,48 +986,4 @@ async fn module_wallet_receive(
     Ok(Json(DepositAddressResponse {
         address: address.to_string(),
     }))
-}
-
-// ---------------------------------------------------------------------------
-// LNv2 protocol handlers (public)
-// ---------------------------------------------------------------------------
-
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn routing_info_v2(
-    State(state): State<AppState>,
-    Json(federation_id): Json<FederationId>,
-) -> Result<Json<serde_json::Value>, CliError> {
-    let routing_info = state.routing_info_v2(&federation_id).await?;
-    Ok(Json(json!(routing_info)))
-}
-
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn pay_bolt11_invoice_v2(
-    State(state): State<AppState>,
-    Json(payload): Json<SendPaymentPayload>,
-) -> Result<Json<serde_json::Value>, CliError> {
-    let payment_result = state.send_payment_v2(payload).await?;
-    Ok(Json(json!(payment_result)))
-}
-
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn create_bolt11_invoice_v2(
-    State(state): State<AppState>,
-    Json(payload): Json<CreateBolt11InvoicePayload>,
-) -> Result<Json<serde_json::Value>, CliError> {
-    let invoice = state.create_bolt11_invoice_v2(payload).await?;
-    Ok(Json(json!(invoice)))
-}
-
-pub(crate) async fn verify_bolt11_preimage_v2_get(
-    State(state): State<AppState>,
-    Path(payment_hash): Path<sha256::Hash>,
-    Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, LnurlError> {
-    let response = state
-        .verify_bolt11_preimage_v2(payment_hash, query.contains_key("wait"))
-        .await
-        .map_err(|e| LnurlError::internal(anyhow!(e)))?;
-
-    Ok(Json(json!(LnurlResponse::Ok(response))))
 }

@@ -13,17 +13,18 @@
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::large_futures)]
 #![allow(clippy::struct_field_names)]
+#![allow(clippy::unused_async)]
 
+pub mod cli;
 pub mod client;
 pub mod config;
 pub mod db;
 pub mod envs;
-mod error;
+pub mod error;
 mod federation_manager;
-pub mod rpc;
+pub mod public;
 
 use std::collections::BTreeMap;
-use std::env;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -34,34 +35,25 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::{Network, OutPoint, secp256k1};
-use clap::Parser;
 use client::GatewayClientBuilder;
-use config::GatewayOpts;
 pub use config::GatewayParameters;
-use envs::FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV;
 use error::FederationNotConnected;
 use federation_manager::FederationManager;
-use fedimint_bip39::{Bip39RootSecretStrategy, Language, Mnemonic};
-use fedimint_bitcoind::bitcoincore::BitcoindClient;
-use fedimint_client::module_init::ClientModuleInitRegistry;
-use fedimint_client::secret::RootSecretStrategy;
+use fedimint_bip39::Mnemonic;
 use fedimint_client::{Client, ClientHandleArc};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
-use fedimint_core::envs::is_env_var_set;
 use fedimint_core::module::CommonModuleInit;
-use fedimint_core::module::registry::ModuleDecoderRegistry;
-use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::secp256k1::schnorr::Signature;
-use fedimint_core::task::{TaskGroup, TaskShutdownToken, block_in_place};
+use fedimint_core::task::TaskGroup;
 use fedimint_core::time::duration_since_epoch;
-use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned};
-use fedimint_core::{Amount, crit, fedimint_build_code_version_env};
+use fedimint_core::util::{FmtCompact, SafeUrl, Spanned};
+use fedimint_core::{Amount, crit};
 use fedimint_gateway_common::{
-    ChainSource, FederationConfig, InterceptPaymentRequest, LightningContext, LightningRpcError,
-    PaymentAction, PaymentFee, Preimage, RegisteredProtocol, V1_API_ENDPOINT,
+    ChainSource, FederationConfig, LightningContext, LightningRpcError, PaymentAction, PaymentFee,
+    Preimage, RegisteredProtocol, V1_API_ENDPOINT,
 };
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -72,28 +64,22 @@ use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::{
     CreateBolt11InvoicePayload, RoutingInfo, SendPaymentPayload,
 };
-use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING};
-use fedimint_mintv2_client::MintClientInit;
+use fedimint_logging::LOG_GATEWAY;
 use futures::StreamExt;
-use ldk_node::lightning::ln::msgs::SocketAddress;
-use ldk_node::lightning::routing::gossip::NodeAlias;
 use ldk_node::payment::{PaymentKind, PaymentStatus, SendingParameters};
 use lightning::ln::channelmanager::PaymentId;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
-use rand::rngs::OsRng;
 use tokio::sync::{RwLock, oneshot};
-use tracing::{debug, info, info_span, warn};
+use tracing::{info, info_span, warn};
 
 use crate::db::{
     FederationConfigKey, FederationConfigKeyPrefix, GatewayPublicKey,
     RegisteredIncomingContract as DbRegisteredIncomingContract, RegisteredIncomingContractKey,
 };
-use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
 use crate::error::CliError;
-use crate::rpc::run_webserver;
 
 /// Default Bitcoin network for testing purposes.
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
@@ -102,11 +88,11 @@ pub type Result<T> = std::result::Result<T, CliError>;
 
 /// Name of the gateway's database that is used for metadata and configuration
 /// storage.
-const DB_FILE: &str = "gatewayd.db";
+pub const DB_FILE: &str = "gatewayd.db";
 
 /// Name of the folder that the gateway uses to store its node database when
 /// running in LDK mode.
-const LDK_NODE_DB_FOLDER: &str = "ldk_node";
+pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 
 /// Simplified gateway state: the node is always available, so we only
 /// track whether we are running normally or shutting down.
@@ -125,15 +111,12 @@ impl Display for GatewayState {
     }
 }
 
-/// Helper struct for storing the registration parameters for LNv1 for each
-/// network protocol.
+/// Helper struct for storing the registration parameters for each network
+/// protocol.
 #[derive(Debug, Clone)]
-pub(crate) struct Registration {
-    /// The url to advertise in the registration that clients can use to connect
-    pub(crate) endpoint_url: SafeUrl,
-
-    /// Keypair that was used to register the gateway registration
-    pub(crate) keypair: secp256k1::Keypair,
+pub struct Registration {
+    pub endpoint_url: SafeUrl,
+    pub keypair: secp256k1::Keypair,
 }
 
 impl Registration {
@@ -146,102 +129,52 @@ impl Registration {
     }
 }
 
-#[bon::bon]
-impl AppState {
-    /// Construct an [`AppState`] using a fluent builder API.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let state = AppState::builder(client_builder, gateway_db)
-    ///     .listen(addr)
-    ///     .api_addr(url)
-    ///     .network(Network::Regtest)
-    ///     .node(node)
-    ///     .build()
-    ///     .await?;
-    /// ```
-    #[builder(start_fn = builder, finish_fn = build)]
-    pub async fn new_with_builder(
-        #[builder(start_fn)] client_builder: GatewayClientBuilder,
-        #[builder(start_fn)] gateway_db: Database,
-        node: Arc<ldk_node::Node>,
-        #[builder(default = ([127, 0, 0, 1], 80).into())] listen: SocketAddr,
-        api_addr: Option<SafeUrl>,
-        #[builder(default = DEFAULT_NETWORK)] network: Network,
-        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] default_routing_fees: PaymentFee,
-        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)]
-        default_transaction_fees: PaymentFee,
-    ) -> anyhow::Result<AppState> {
-        let versioned_api = api_addr.map(|addr| {
-            addr.join(V1_API_ENDPOINT)
-                .expect("Failed to version gateway API address")
-        });
-
-        AppState::new(
-            GatewayParameters {
-                listen,
-                versioned_api,
-                network,
-                default_routing_fees,
-                default_transaction_fees,
-            },
-            gateway_db,
-            client_builder,
-            node,
-        )
-        .await
-    }
-}
-
 #[derive(Clone)]
 pub struct AppState {
     /// The gateway's federation manager.
-    pub(crate) federation_manager: Arc<RwLock<FederationManager>>,
+    pub federation_manager: Arc<RwLock<FederationManager>>,
 
     /// The underlying LDK lightning node, always available.
-    pub(crate) node: Arc<ldk_node::Node>,
+    pub node: Arc<ldk_node::Node>,
 
     /// The current state of the Gateway.
-    pub(crate) state: Arc<RwLock<GatewayState>>,
+    pub state: Arc<RwLock<GatewayState>>,
 
     /// Builder struct that allows the gateway to build a Fedimint client, which
     /// handles the communication with a federation.
-    pub(crate) client_builder: GatewayClientBuilder,
+    pub client_builder: GatewayClientBuilder,
 
     /// Database for Gateway metadata.
-    pub(crate) gateway_db: Database,
+    pub gateway_db: Database,
 
     /// The socket the gateway listens on.
-    pub(crate) listen: SocketAddr,
+    pub listen: SocketAddr,
 
     /// The task group for all tasks related to the gateway.
-    pub(crate) task_group: TaskGroup,
+    pub task_group: TaskGroup,
 
     /// The Bitcoin network that the Lightning network is configured to.
-    pub(crate) network: Network,
+    pub network: Network,
 
     /// The default routing fees for new federations
-    pub(crate) default_routing_fees: PaymentFee,
+    pub default_routing_fees: PaymentFee,
 
     /// The default transaction fees for new federations
-    pub(crate) default_transaction_fees: PaymentFee,
+    pub default_transaction_fees: PaymentFee,
 
     /// A map of the network protocols the gateway supports to the data needed
     /// for registering with a federation.
-    pub(crate) registrations: BTreeMap<RegisteredProtocol, Registration>,
+    pub registrations: BTreeMap<RegisteredProtocol, Registration>,
 
     /// Lock pool used to ensure that `pay` doesn't allow for multiple
     /// simultaneous calls with the same invoice to execute in parallel.
-    pub(crate) outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
-
-    /// Lock pool used to ensure that `pay_offer` doesn't allow for multiple
-    /// simultaneous calls with the same offer to execute in parallel.
+    pub outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
 
     /// A map keyed by the `UserChannelId` of a channel that is currently
     /// opening. The `Sender` is used to communicate the `OutPoint` back to
     /// the API handler from the event handler when the channel has been
     /// opened and is now pending.
-    pub(crate) pending_channels:
+    pub pending_channels:
         Arc<RwLock<BTreeMap<UserChannelId, oneshot::Sender<anyhow::Result<OutPoint>>>>>,
 }
 
@@ -260,131 +193,7 @@ impl std::fmt::Debug for AppState {
 }
 
 impl AppState {
-    /// Returns a bitcoind client using the credentials that were passed in from
-    /// the environment variables.
-    fn get_bitcoind_client(
-        opts: &GatewayOpts,
-        network: bitcoin::Network,
-        gateway_id: &PublicKey,
-    ) -> anyhow::Result<(BitcoindClient, ChainSource)> {
-        let bitcoind_username = opts
-            .bitcoind_username
-            .clone()
-            .expect("FM_BITCOIND_URL is set but FM_BITCOIND_USERNAME is not");
-        let url = opts.bitcoind_url.clone().expect("No bitcoind url set");
-        let password = opts
-            .bitcoind_password
-            .clone()
-            .expect("FM_BITCOIND_URL is set but FM_BITCOIND_PASSWORD is not");
-
-        let chain_source = ChainSource::Bitcoind {
-            username: bitcoind_username.clone(),
-            password: password.clone(),
-            server_url: url.clone(),
-        };
-        let wallet_name = format!("gatewayd-{gateway_id}");
-        let client = BitcoindClient::new(&url, bitcoind_username, password, &wallet_name, network)?;
-        Ok((client, chain_source))
-    }
-
-    /// Default function for creating a gateway with the `Mint`, `Wallet`, and
-    /// `Gateway` modules.
-    pub async fn new_with_default_modules() -> anyhow::Result<AppState> {
-        let opts = GatewayOpts::parse();
-        let gateway_parameters = opts.to_gateway_parameters()?;
-        let decoders = ModuleDecoderRegistry::default();
-
-        let db_path = opts.data_dir.join(DB_FILE);
-        let gateway_db = Database::new(
-            fedimint_rocksdb::RocksDb::build(db_path).open().await?,
-            decoders,
-        );
-
-        // For legacy reasons, we use the http id for the unique identifier of the
-        // bitcoind watch-only wallet
-        let http_id = Self::load_or_create_gateway_keypair(&gateway_db, RegisteredProtocol::Http)
-            .await
-            .public_key();
-        let chain_source = match (opts.bitcoind_url.as_ref(), opts.esplora_url.as_ref()) {
-            (Some(_), None) => {
-                let (_client, chain_source) =
-                    Self::get_bitcoind_client(&opts, gateway_parameters.network, &http_id)?;
-                chain_source
-            }
-            (None, Some(url)) => ChainSource::Esplora {
-                server_url: url.clone(),
-            },
-            (Some(_), Some(_)) => {
-                // Use bitcoind by default if both are set
-                let (_client, chain_source) =
-                    Self::get_bitcoind_client(&opts, gateway_parameters.network, &http_id)?;
-                chain_source
-            }
-            _ => unreachable!("ArgGroup already enforced XOR relation"),
-        };
-
-        // Gateway module will be attached when the federation clients are created
-        let mut registry = ClientModuleInitRegistry::new();
-        registry.attach(MintClientInit);
-        registry.attach(fedimint_walletv2_client::WalletClientInit);
-
-        let client_builder = GatewayClientBuilder::new(opts.data_dir.clone(), registry).await?;
-
-        if Self::load_mnemonic(&gateway_db).await.is_none() {
-            let mnemonic = if let Ok(words) = std::env::var(FM_GATEWAY_MNEMONIC_ENV) {
-                info!(target: LOG_GATEWAY, "Using provided mnemonic from environment variable");
-                Mnemonic::parse_in_normalized(Language::English, words.as_str())
-                    .map_err(|e| anyhow!("Seed phrase provided in environment was invalid {e:?}"))?
-            } else {
-                debug!(target: LOG_GATEWAY, "Generating mnemonic and writing entropy to client storage");
-                Bip39RootSecretStrategy::<12>::random(&mut OsRng)
-            };
-
-            Client::store_encodable_client_secret(&gateway_db, mnemonic.to_entropy())
-                .await
-                .map_err(|e| anyhow!("Mnemonic error: {e}"))?;
-        }
-
-        let mnemonic = Self::load_mnemonic(&gateway_db)
-            .await
-            .expect("mnemonic should be set");
-
-        let lightning_port = env::var("FM_PORT_LDK")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(9735);
-        let alias = env::var("FM_LDK_ALIAS").unwrap_or_default();
-
-        let runtime = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("Failed to build LDK runtime"),
-        );
-
-        let node = create_ldk_node(
-            &client_builder.data_dir().join(LDK_NODE_DB_FOLDER),
-            chain_source.clone(),
-            gateway_parameters.network,
-            lightning_port,
-            alias,
-            mnemonic,
-            runtime,
-        )?;
-        let node = Arc::new(node);
-
-        info!(
-            target: LOG_GATEWAY,
-            version = %fedimint_build_code_version_env!(),
-            "Starting gatewayd",
-        );
-
-        AppState::new(gateway_parameters, gateway_db, client_builder, node).await
-    }
-
-    /// Helper function for creating a gateway from either
-    /// `new_with_default_modules` or `Gateway::builder`.
-    async fn new(
+    pub async fn new(
         gateway_parameters: GatewayParameters,
         gateway_db: Database,
         client_builder: GatewayClientBuilder,
@@ -420,7 +229,7 @@ impl AppState {
         })
     }
 
-    async fn load_or_create_gateway_keypair(
+    pub async fn load_or_create_gateway_keypair(
         gateway_db: &Database,
         protocol: RegisteredProtocol,
     ) -> secp256k1::Keypair {
@@ -450,239 +259,6 @@ impl AppState {
             .public_key()
     }
 
-    /// Main entrypoint into the gateway that starts the client registration
-    /// timer, loads the federation clients from the persisted config,
-    /// begins listening for intercepted payments, and starts the webserver
-    /// to service requests.
-    pub async fn run(
-        self,
-        _runtime: Arc<tokio::runtime::Runtime>,
-    ) -> anyhow::Result<TaskShutdownToken> {
-        install_crypto_provider().await;
-
-        // Wait for chain sync before loading clients
-        if !is_env_var_set(FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV) {
-            self.wait_for_chain_sync().await?;
-        }
-
-        self.load_clients().await?;
-        self.start_ldk_event_loop();
-        // start webserver last to avoid handling requests before fully initialized
-        let handle = self.task_group.make_handle();
-        run_webserver(self.clone()).await?;
-        let shutdown_receiver = handle.make_shutdown_rx();
-        Ok(shutdown_receiver)
-    }
-
-    /// Starts the LDK event loop that processes incoming lightning events.
-    fn start_ldk_event_loop(&self) {
-        let gateway = self.clone();
-        self.task_group.spawn("ldk-events", |handle| async move {
-            loop {
-                let event = tokio::select! {
-                    event = gateway.node.next_event_async() => event,
-                    () = handle.make_shutdown_rx() => break,
-                };
-
-                gateway.process_ldk_event(event).await;
-
-                if let Err(e) = gateway.node.event_handled() {
-                    warn!(
-                        target: LOG_LIGHTNING,
-                        err = %e.fmt_compact(),
-                        "Failed to mark event handled",
-                    );
-                }
-            }
-        });
-    }
-
-    /// Processes a single LDK event.
-    async fn process_ldk_event(&self, event: ldk_node::Event) {
-        match event {
-            ldk_node::Event::PaymentClaimable {
-                payment_id: _,
-                payment_hash,
-                claimable_amount_msat,
-                claim_deadline,
-                custom_records: _,
-            } => {
-                let hash = Hash::from_slice(&payment_hash.0).expect("Failed to create Hash");
-
-                let payment_request = InterceptPaymentRequest {
-                    payment_hash: hash,
-                    amount_msat: claimable_amount_msat,
-                    expiry: claim_deadline.unwrap_or_default(),
-                    short_channel_id: None,
-                    incoming_chan_id: 0,
-                    htlc_id: 0,
-                };
-
-                self.handle_lightning_payment(payment_request).await;
-            }
-            ldk_node::Event::ChannelPending {
-                channel_id,
-                user_channel_id,
-                former_temporary_channel_id: _,
-                counterparty_node_id: _,
-                funding_txo,
-            } => {
-                info!(
-                    target: LOG_LIGHTNING,
-                    %channel_id,
-                    "LDK Channel is pending",
-                );
-                let mut channels = self.pending_channels.write().await;
-                if let Some(sender) = channels.remove(&UserChannelId(user_channel_id)) {
-                    let _ = sender.send(Ok(funding_txo));
-                } else {
-                    debug!(
-                        ?user_channel_id,
-                        "No channel pending channel open for user channel id",
-                    );
-                }
-            }
-            ldk_node::Event::ChannelClosed {
-                channel_id,
-                user_channel_id,
-                counterparty_node_id: _,
-                reason,
-            } => {
-                info!(
-                    target: LOG_LIGHTNING,
-                    %channel_id,
-                    "LDK Channel is closed",
-                );
-                let mut channels = self.pending_channels.write().await;
-                if let Some(sender) = channels.remove(&UserChannelId(user_channel_id)) {
-                    let reason = if let Some(reason) = reason {
-                        reason.to_string()
-                    } else {
-                        "Channel has been closed".to_string()
-                    };
-                    let _ = sender.send(Err(anyhow::anyhow!(reason)));
-                } else {
-                    debug!(
-                        ?user_channel_id,
-                        "No channel pending channel open for user channel id",
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Handles an intercepted lightning payment. If the payment is part of an
-    /// incoming payment to a federation, spawns a state machine and hands the
-    /// payment off to it. Otherwise, fails the HTLC since forwarding is not
-    /// supported.
-    pub async fn handle_lightning_payment(&self, payment_request: InterceptPaymentRequest) {
-        info!(
-            target: LOG_GATEWAY,
-            payment_hash = %payment_request.payment_hash,
-            amount_msat = %payment_request.amount_msat,
-            "Intercepting lightning payment",
-        );
-
-        let lnv2_result = self
-            .try_handle_lightning_payment_lnv2(&payment_request)
-            .await;
-        if lnv2_result.is_ok() {
-            return;
-        }
-
-        // No matching federation contract; fail the HTLC
-        let ph = PaymentHash(*payment_request.payment_hash.as_byte_array());
-        if let Err(err) = self.node.bolt11_payment().fail_for_hash(ph) {
-            warn!(
-                target: LOG_GATEWAY,
-                err = %err.fmt_compact(),
-                "Error failing unmatched HTLC",
-            );
-        }
-    }
-
-    /// Tries to handle a lightning payment using the LNv2 protocol.
-    /// Returns `Ok` if the payment was handled, `Err` otherwise.
-    async fn try_handle_lightning_payment_lnv2(
-        &self,
-        htlc_request: &InterceptPaymentRequest,
-    ) -> Result<()> {
-        // If `payment_hash` has been registered as a LNv2 payment, we try to complete
-        // the payment by getting the preimage from the federation
-        // using the LNv2 protocol. If the `payment_hash` is not registered,
-        // this payment is either a legacy Lightning payment or the end destination is
-        // not a Fedimint.
-        let (contract, client) = self
-            .get_registered_incoming_contract_and_client_v2(
-                PaymentImage::Hash(htlc_request.payment_hash),
-                htlc_request.amount_msat,
-            )
-            .await?;
-
-        if let Err(err) = client
-            .get_first_module::<GatewayClientModuleV2>()
-            .expect("Must have client module")
-            .relay_incoming_htlc(
-                htlc_request.payment_hash,
-                htlc_request.incoming_chan_id,
-                htlc_request.htlc_id,
-                contract,
-                htlc_request.amount_msat,
-            )
-            .await
-        {
-            warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Error relaying incoming lightning payment");
-
-            let ph = PaymentHash(*htlc_request.payment_hash.as_byte_array());
-            if let Err(err) = self.node.bolt11_payment().fail_for_hash(ph) {
-                warn!(
-                    target: LOG_GATEWAY,
-                    err = %err.fmt_compact(),
-                    "Error failing HTLC after relay error",
-                );
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Waits for the Lightning node to be synced to the Bitcoin blockchain.
-    async fn wait_for_chain_sync(&self) -> anyhow::Result<()> {
-        use fedimint_core::envs::{FM_IN_DEVIMINT_ENV, is_env_var_set};
-        use fedimint_core::util::{backoff_util, retry};
-
-        // In devimint, we explicitly sync the onchain wallet to start the sync quicker
-        if is_env_var_set(FM_IN_DEVIMINT_ENV) {
-            block_in_place(|| {
-                let _ = self.node.sync_wallets();
-            });
-        }
-
-        retry(
-            "Wait for chain sync",
-            backoff_util::background_backoff(),
-            || async {
-                let node_status = self.node.status();
-                let block_height = node_status.current_best_block.height;
-                if node_status.latest_lightning_wallet_sync_timestamp.is_some() {
-                    Ok(())
-                } else {
-                    warn!(
-                        target: LOG_LIGHTNING,
-                        block_height = %block_height,
-                        "Lightning node is not synced yet",
-                    );
-                    Err(anyhow::anyhow!("Not synced yet"))
-                }
-            },
-        )
-        .await?;
-
-        info!(target: LOG_LIGHTNING, "Gateway successfully synced with the chain");
-        Ok(())
-    }
-
     /// Retrieves a `ClientHandleArc` from the Gateway's in memory structures
     /// that keep track of available clients, given a `federation_id`.
     pub async fn select_client(
@@ -700,7 +276,7 @@ impl AppState {
             })
     }
 
-    pub(crate) async fn load_mnemonic(gateway_db: &Database) -> Option<Mnemonic> {
+    pub async fn load_mnemonic(gateway_db: &Database) -> Option<Mnemonic> {
         let secret = Client::load_decodable_client_secret::<Vec<u8>>(gateway_db)
             .await
             .ok()?;
@@ -710,7 +286,7 @@ impl AppState {
     /// Reads the connected federation client configs from the Gateway's
     /// database and reconstructs the clients necessary for interacting with
     /// connection federations.
-    async fn load_clients(&self) -> Result<()> {
+    pub async fn load_clients(&self) -> Result<()> {
         let mut federation_manager = self.federation_manager.write().await;
 
         let configs = {
@@ -751,11 +327,9 @@ impl AppState {
         Ok(())
     }
 
-    /// Legacy mechanism for registering the Gateway with connected federations.
-    /// This is a no-op for LDK since it does not use LNv1 registration.
     /// Verifies that the federation has an LNv2 lightning module and that the
     /// network matches the gateway's network.
-    pub(crate) async fn check_federation_network(
+    pub async fn check_federation_network(
         client: &ClientHandleArc,
         network: Network,
     ) -> Result<()> {
@@ -767,14 +341,12 @@ impl AppState {
             .values()
             .find(|m| fedimint_lnv2_common::LightningCommonInit::KIND == m.kind);
 
-        // Ensure the federation has an LNv2 lightning module
         if lnv2_cfg.is_none() {
             return Err(CliError::internal(format!(
                 "Federation {federation_id} does not have an LNv2 lightning module"
             )));
         }
 
-        // Verify the LNv2 network
         if let Some(cfg) = lnv2_cfg {
             let ln_cfg: &fedimint_lnv2_common::config::LightningClientConfig = cfg.cast()?;
 
@@ -852,7 +424,6 @@ impl AppState {
         let lightning_fee = fed_config.lightning_fee;
         let transaction_fee = fed_config.transaction_fee;
 
-        // Convert gateway-common PaymentFee to lnv2-common PaymentFee for RoutingInfo
         let to_lnv2_fee = |fee: PaymentFee| -> fedimint_lnv2_common::gateway_api::PaymentFee {
             fedimint_lnv2_common::gateway_api::PaymentFee {
                 base: fee.base,
@@ -868,21 +439,16 @@ impl AppState {
                 lightning_alias: Some(context.lightning_alias.clone()),
                 module_public_key,
                 send_fee_default: to_lnv2_fee(lightning_fee + transaction_fee),
-                // The base fee ensures that the gateway does not loose sats sending the payment due
-                // to fees paid on the transaction claiming the outgoing contract or
-                // subsequent transactions spending the newly issued ecash
                 send_fee_minimum: to_lnv2_fee(transaction_fee),
                 expiration_delta_default: 1440,
                 expiration_delta_minimum: EXPIRATION_DELTA_MINIMUM_V2,
-                // The base fee ensures that the gateway does not loose sats receiving the payment
-                // due to fees paid on the transaction funding the incoming contract
                 receive_fee: to_lnv2_fee(transaction_fee),
             }))
     }
 
     /// Instructs this gateway to pay a Lightning network invoice via the LNv2
     /// protocol.
-    async fn send_payment_v2(
+    pub async fn send_payment_v2(
         &self,
         payload: SendPaymentPayload,
     ) -> Result<std::result::Result<[u8; 32], Signature>> {
@@ -900,7 +466,7 @@ impl AppState {
     /// the connected Lightning node, then save the payment hash so that
     /// incoming lightning payments can be matched as a receive attempt to a
     /// specific federation.
-    async fn create_bolt11_invoice_v2(
+    pub async fn create_bolt11_invoice_v2(
         &self,
         payload: CreateBolt11InvoicePayload,
     ) -> Result<Bolt11Invoice> {
@@ -1188,8 +754,6 @@ impl IGatewayClientV2 for AppState {
     ) -> std::result::Result<[u8; 32], fedimint_gateway_common::LightningRpcError> {
         let payment_id = PaymentId(*invoice.payment_hash().as_byte_array());
 
-        // Lock by the payment hash to prevent multiple simultaneous calls with the same
-        // invoice from executing.
         let _payment_lock_guard = self
             .outbound_lightning_payment_lock_pool
             .async_lock(payment_id)
@@ -1267,89 +831,9 @@ impl IGatewayClientV2 for AppState {
     }
 }
 
-/// Creates an LDK node instance from the given configuration parameters.
-pub fn create_ldk_node(
-    data_dir: &Path,
-    chain_source: ChainSource,
-    network: Network,
-    lightning_port: u16,
-    alias: String,
-    mnemonic: Mnemonic,
-    runtime: Arc<tokio::runtime::Runtime>,
-) -> anyhow::Result<ldk_node::Node> {
-    let mut bytes = [0u8; 32];
-    let alias = if alias.is_empty() {
-        "LDK Gateway".to_string()
-    } else {
-        alias
-    };
-    let alias_bytes = alias.as_bytes();
-    let truncated = &alias_bytes[..alias_bytes.len().min(32)];
-    bytes[..truncated.len()].copy_from_slice(truncated);
-    let node_alias = Some(NodeAlias(bytes));
-
-    let mut node_builder = ldk_node::Builder::from_config(ldk_node::config::Config {
-        network,
-        listening_addresses: Some(vec![SocketAddress::TcpIpV4 {
-            addr: [0, 0, 0, 0],
-            port: lightning_port,
-        }]),
-        node_alias,
-        ..Default::default()
-    });
-
-    node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
-
-    match chain_source {
-        ChainSource::Bitcoind {
-            username,
-            password,
-            server_url,
-        } => {
-            node_builder.set_chain_source_bitcoind_rpc(
-                server_url
-                    .host_str()
-                    .expect("Could not retrieve host from bitcoind RPC url")
-                    .to_string(),
-                server_url
-                    .port()
-                    .expect("Could not retrieve port from bitcoind RPC url"),
-                username,
-                password,
-            );
-        }
-        ChainSource::Esplora { server_url } => {
-            node_builder.set_chain_source_esplora(get_esplora_url(server_url)?, None);
-        }
-    }
-    let Some(data_dir_str) = data_dir.to_str() else {
-        return Err(anyhow::anyhow!("Invalid data dir path"));
-    };
-    node_builder.set_storage_dir_path(data_dir_str.to_string());
-
-    info!(
-        target: LOG_LIGHTNING,
-        data_dir = %data_dir_str,
-        alias = %alias,
-        "Starting LDK Node...",
-    );
-    let node = node_builder.build()?;
-    node.start_with_runtime(runtime).map_err(|err| {
-        crit!(
-            target: LOG_LIGHTNING,
-            err = %err.fmt_compact(),
-            "Failed to start LDK Node",
-        );
-        anyhow::anyhow!("Failed to start LDK Node: {err}")
-    })?;
-
-    info!("Successfully started LDK Node");
-    Ok(node)
-}
-
 /// Maps LDK's `PaymentKind` to an optional preimage and an optional payment
 /// hash depending on the type of payment.
-pub(crate) fn get_preimage_and_payment_hash(
+pub fn get_preimage_and_payment_hash(
     kind: &PaymentKind,
 ) -> (
     Option<Preimage>,
@@ -1409,18 +893,131 @@ pub(crate) fn get_preimage_and_payment_hash(
     }
 }
 
-/// When a port is specified in the Esplora URL, the esplora client inside LDK
-/// node cannot connect to the lightning node when there is a trailing slash.
-fn get_esplora_url(server_url: SafeUrl) -> anyhow::Result<String> {
-    let host = server_url
-        .host_str()
-        .ok_or(anyhow::anyhow!("Missing esplora host"))?;
-    let server_url = if let Some(port) = server_url.port() {
-        format!("{}://{}:{}", server_url.scheme(), host, port)
+/// Creates an LDK node instance from the given configuration parameters.
+pub fn create_ldk_node(
+    data_dir: &Path,
+    chain_source: ChainSource,
+    network: Network,
+    lightning_port: u16,
+    alias: String,
+    mnemonic: Mnemonic,
+    runtime: Arc<tokio::runtime::Runtime>,
+) -> anyhow::Result<ldk_node::Node> {
+    use ldk_node::lightning::ln::msgs::SocketAddress;
+    use ldk_node::lightning::routing::gossip::NodeAlias;
+
+    let mut bytes = [0u8; 32];
+    let alias = if alias.is_empty() {
+        "LDK Gateway".to_string()
     } else {
-        server_url.to_string()
+        alias
     };
-    Ok(server_url)
+    let alias_bytes = alias.as_bytes();
+    let truncated = &alias_bytes[..alias_bytes.len().min(32)];
+    bytes[..truncated.len()].copy_from_slice(truncated);
+    let node_alias = Some(NodeAlias(bytes));
+
+    let mut node_builder = ldk_node::Builder::from_config(ldk_node::config::Config {
+        network,
+        listening_addresses: Some(vec![SocketAddress::TcpIpV4 {
+            addr: [0, 0, 0, 0],
+            port: lightning_port,
+        }]),
+        node_alias,
+        ..Default::default()
+    });
+
+    node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
+
+    match chain_source {
+        ChainSource::Bitcoind {
+            username,
+            password,
+            server_url,
+        } => {
+            node_builder.set_chain_source_bitcoind_rpc(
+                server_url
+                    .host_str()
+                    .expect("Could not retrieve host from bitcoind RPC url")
+                    .to_string(),
+                server_url
+                    .port()
+                    .expect("Could not retrieve port from bitcoind RPC url"),
+                username,
+                password,
+            );
+        }
+        ChainSource::Esplora { server_url } => {
+            let host = server_url
+                .host_str()
+                .ok_or(anyhow!("Missing esplora host"))?;
+            let url = if let Some(port) = server_url.port() {
+                format!("{}://{}:{}", server_url.scheme(), host, port)
+            } else {
+                server_url.to_string()
+            };
+            node_builder.set_chain_source_esplora(url, None);
+        }
+    }
+    let Some(data_dir_str) = data_dir.to_str() else {
+        return Err(anyhow!("Invalid data dir path"));
+    };
+    node_builder.set_storage_dir_path(data_dir_str.to_string());
+
+    info!(
+        target: fedimint_logging::LOG_LIGHTNING,
+        data_dir = %data_dir_str,
+        alias = %alias,
+        "Starting LDK Node...",
+    );
+    let node = node_builder.build()?;
+    node.start_with_runtime(runtime).map_err(|err| {
+        crit!(
+            target: fedimint_logging::LOG_LIGHTNING,
+            err = %err.fmt_compact(),
+            "Failed to start LDK Node",
+        );
+        anyhow!("Failed to start LDK Node: {err}")
+    })?;
+
+    info!("Successfully started LDK Node");
+    Ok(node)
+}
+
+#[bon::bon]
+impl AppState {
+    /// Construct an [`AppState`] using a fluent builder API (for tests).
+    #[builder(start_fn = builder, finish_fn = build)]
+    pub async fn new_with_builder(
+        #[builder(start_fn)] client_builder: GatewayClientBuilder,
+        #[builder(start_fn)] gateway_db: Database,
+        node: Arc<ldk_node::Node>,
+        #[builder(default = ([127, 0, 0, 1], 80).into())] listen: SocketAddr,
+        api_addr: Option<SafeUrl>,
+        #[builder(default = DEFAULT_NETWORK)] network: Network,
+        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] default_routing_fees: PaymentFee,
+        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)]
+        default_transaction_fees: PaymentFee,
+    ) -> anyhow::Result<AppState> {
+        let versioned_api = api_addr.map(|addr| {
+            addr.join(V1_API_ENDPOINT)
+                .expect("Failed to version gateway API address")
+        });
+
+        AppState::new(
+            GatewayParameters {
+                listen,
+                versioned_api,
+                network,
+                default_routing_fees,
+                default_transaction_fees,
+            },
+            gateway_db,
+            client_builder,
+            node,
+        )
+        .await
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
