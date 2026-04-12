@@ -21,7 +21,6 @@ members = [
     "fedimint-core",
     "fedimint-cursed-redb",
     "fedimint-db-locked",
-    "fedimint-dbtool",
     "fedimint-derive",
     "fedimint-eventlog",
     "fedimint-fountain",
@@ -32,8 +31,6 @@ members = [
     "fedimint-lnurl",
     "fedimint-logging",
     "fedimint-metrics",
-    "fedimint-recoverytool",
-    "fedimint-recurringd",
     "fedimint-recurringdv2",
     "fedimint-rocksdb",
     "fedimint-server",
@@ -46,15 +43,12 @@ members = [
     "fedimintd",
     "fedimintd-envs",
     "fuzz",
-    "gateway/fedimint-gateway-server-db",
-    "gateway/fedimint-lightning",
     "modules/fedimint-dummy-client",
     "modules/fedimint-dummy-common",
     "modules/fedimint-dummy-server",
     "modules/fedimint-empty-client",
     "modules/fedimint-empty-common",
     "modules/fedimint-empty-server",
-    "modules/fedimint-gw-client",
     "modules/fedimint-gwv2-client",
     "modules/fedimint-ln-client",
     "modules/fedimint-ln-common",
@@ -183,10 +177,7 @@ fedimint-empty-common = { path = "./modules/fedimint-empty-common", version = "=
 fedimint-eventlog = { path = "./fedimint-eventlog", version = "=0.11.0-alpha" }
 fedimint-gateway-common = { path = "./fedimint-gateway-common", version = "=0.11.0-alpha" }
 fedimint-gateway-daemon = { path = "./fedimint-gateway-daemon", version = "=0.11.0-alpha" }
-fedimint-gateway-server-db = { package = "fedimint-gateway-server-db", path = "./gateway/fedimint-gateway-server-db", version = "=0.11.0-alpha" }
-fedimint-gw-client = { path = "./modules/fedimint-gw-client", version = "=0.11.0-alpha" }
 fedimint-gwv2-client = { path = "./modules/fedimint-gwv2-client", version = "=0.11.0-alpha" }
-fedimint-lightning = { package = "fedimint-lightning", path = "./gateway/fedimint-lightning", version = "=0.11.0-alpha" }
 fedimint-ln-client = { path = "./modules/fedimint-ln-client", version = "=0.11.0-alpha" }
 fedimint-ln-common = { path = "./modules/fedimint-ln-common", version = "=0.11.0-alpha" }
 fedimint-ln-server = { path = "./modules/fedimint-ln-server", version = "=0.11.0-alpha" }
