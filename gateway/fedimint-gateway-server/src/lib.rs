@@ -154,7 +154,7 @@ struct Registration {
 
 impl Registration {
     pub async fn new(db: &Database, endpoint_url: SafeUrl, protocol: RegisteredProtocol) -> Self {
-        let keypair = Gateway::load_or_create_gateway_keypair(db, protocol).await;
+        let keypair = AppState::load_or_create_gateway_keypair(db, protocol).await;
         Self {
             endpoint_url,
             keypair,
@@ -163,12 +163,12 @@ impl Registration {
 }
 
 #[bon::bon]
-impl Gateway {
-    /// Construct a [`Gateway`] using a fluent builder API.
+impl AppState {
+    /// Construct an [`AppState`] using a fluent builder API.
     ///
     /// # Example
     /// ```ignore
-    /// let gateway = Gateway::builder(client_builder, gateway_db)
+    /// let state = AppState::builder(client_builder, gateway_db)
     ///     .listen(addr)
     ///     .api_addr(url)
     ///     .network(Network::Regtest)
@@ -190,7 +190,7 @@ impl Gateway {
         #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)]
         default_transaction_fees: PaymentFee,
         metrics_listen: Option<SocketAddr>,
-    ) -> anyhow::Result<Gateway> {
+    ) -> anyhow::Result<AppState> {
         let versioned_api = api_addr.map(|addr| {
             addr.join(V1_API_ENDPOINT)
                 .expect("Failed to version gateway API address")
@@ -203,7 +203,7 @@ impl Gateway {
             )
         });
 
-        Gateway::new(
+        AppState::new(
             GatewayParameters {
                 listen,
                 versioned_api,
@@ -222,51 +222,51 @@ impl Gateway {
 }
 
 #[derive(Clone)]
-pub struct Gateway {
+pub struct AppState {
     /// The gateway's federation manager.
-    federation_manager: Arc<RwLock<FederationManager>>,
+    pub(crate) federation_manager: Arc<RwLock<FederationManager>>,
 
     /// The underlying LDK lightning node, always available.
-    node: Arc<ldk_node::Node>,
+    pub(crate) node: Arc<ldk_node::Node>,
 
     /// The current state of the Gateway.
-    state: Arc<RwLock<GatewayState>>,
+    pub(crate) state: Arc<RwLock<GatewayState>>,
 
     /// Builder struct that allows the gateway to build a Fedimint client, which
     /// handles the communication with a federation.
-    client_builder: GatewayClientBuilder,
+    pub(crate) client_builder: GatewayClientBuilder,
 
     /// Database for Gateway metadata.
-    gateway_db: Database,
+    pub(crate) gateway_db: Database,
 
     /// The socket the gateway listens on.
-    listen: SocketAddr,
+    pub(crate) listen: SocketAddr,
 
     /// The socket the gateway's metrics server listens on.
-    metrics_listen: SocketAddr,
+    pub(crate) metrics_listen: SocketAddr,
 
     /// The task group for all tasks related to the gateway.
-    task_group: TaskGroup,
+    pub(crate) task_group: TaskGroup,
 
     /// The Bitcoin network that the Lightning network is configured to.
-    network: Network,
+    pub(crate) network: Network,
 
     /// The source of the Bitcoin blockchain data
-    chain_source: ChainSource,
+    pub(crate) chain_source: ChainSource,
 
     /// The default routing fees for new federations
-    default_routing_fees: PaymentFee,
+    pub(crate) default_routing_fees: PaymentFee,
 
     /// The default transaction fees for new federations
-    default_transaction_fees: PaymentFee,
+    pub(crate) default_transaction_fees: PaymentFee,
 
     /// A map of the network protocols the gateway supports to the data needed
     /// for registering with a federation.
-    registrations: BTreeMap<RegisteredProtocol, Registration>,
+    pub(crate) registrations: BTreeMap<RegisteredProtocol, Registration>,
 
     /// Lock pool used to ensure that `pay` doesn't allow for multiple
     /// simultaneous calls with the same invoice to execute in parallel.
-    outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
+    pub(crate) outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
 
     /// Lock pool used to ensure that `pay_offer` doesn't allow for multiple
     /// simultaneous calls with the same offer to execute in parallel.
@@ -275,13 +275,13 @@ pub struct Gateway {
     /// opening. The `Sender` is used to communicate the `OutPoint` back to
     /// the API handler from the event handler when the channel has been
     /// opened and is now pending.
-    pending_channels:
+    pub(crate) pending_channels:
         Arc<RwLock<BTreeMap<UserChannelId, oneshot::Sender<anyhow::Result<OutPoint>>>>>,
 }
 
-impl std::fmt::Debug for Gateway {
+impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Gateway")
+        f.debug_struct("AppState")
             .field("federation_manager", &self.federation_manager)
             .field("state", &self.state)
             .field("client_builder", &self.client_builder)
@@ -411,7 +411,7 @@ async fn calculate_max_withdrawable(
     })
 }
 
-impl Gateway {
+impl AppState {
     /// Returns a bitcoind client using the credentials that were passed in from
     /// the environment variables.
     fn get_bitcoind_client(
@@ -441,7 +441,7 @@ impl Gateway {
 
     /// Default function for creating a gateway with the `Mint`, `Wallet`, and
     /// `Gateway` modules.
-    pub async fn new_with_default_modules() -> anyhow::Result<Gateway> {
+    pub async fn new_with_default_modules() -> anyhow::Result<AppState> {
         let opts = GatewayOpts::parse();
         let gateway_parameters = opts.to_gateway_parameters()?;
         let decoders = ModuleDecoderRegistry::default();
@@ -547,7 +547,7 @@ impl Gateway {
             "Starting gatewayd",
         );
 
-        Gateway::new(
+        AppState::new(
             gateway_parameters,
             gateway_db,
             client_builder,
@@ -565,7 +565,7 @@ impl Gateway {
         client_builder: GatewayClientBuilder,
         node: Arc<ldk_node::Node>,
         chain_source: ChainSource,
-    ) -> anyhow::Result<Gateway> {
+    ) -> anyhow::Result<AppState> {
         let network = gateway_parameters.network;
 
         let task_group = TaskGroup::new();
@@ -644,7 +644,7 @@ impl Gateway {
         fedimint_metrics::spawn_api_server(self.metrics_listen, self.task_group.clone()).await?;
         // start webserver last to avoid handling requests before fully initialized
         let handle = self.task_group.make_handle();
-        run_webserver(Arc::new(self)).await?;
+        run_webserver(self.clone()).await?;
         let shutdown_receiver = handle.make_shutdown_rx();
         Ok(shutdown_receiver)
     }
@@ -1207,7 +1207,7 @@ impl Gateway {
     }
 }
 
-impl Gateway {
+impl AppState {
     /// Returns information about the Gateway back to the client when requested
     /// via the webserver.
     pub async fn handle_get_info(&self) -> AdminResult<GatewayInfo> {
@@ -2054,7 +2054,7 @@ impl Gateway {
 }
 
 // LNv2 Gateway implementation
-impl Gateway {
+impl AppState {
     /// Retrieves the `PublicKey` of the Gateway module for a given federation
     /// for LNv2. This is NOT the same as the `gateway_id`, it is different
     /// per-connected federation.
@@ -2340,7 +2340,7 @@ impl Gateway {
 }
 
 #[async_trait]
-impl IGatewayClientV2 for Gateway {
+impl IGatewayClientV2 for AppState {
     async fn complete_htlc(
         &self,
         htlc_response: fedimint_gateway_common::InterceptPaymentResponse,

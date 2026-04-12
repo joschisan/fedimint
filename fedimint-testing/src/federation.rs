@@ -20,7 +20,7 @@ use fedimint_core::net::peers::IP2PConnections;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::{TaskGroup, block_in_place, sleep_in_test};
 use fedimint_gateway_common::ConnectFedPayload;
-use fedimint_gateway_server::Gateway;
+use fedimint_gateway_server::AppState;
 use fedimint_logging::LOG_TEST;
 use fedimint_rocksdb::RocksDb;
 use fedimint_server::config::ServerConfig;
@@ -216,7 +216,7 @@ impl FederationTest {
     }
 
     /// Connects a gateway to this `FederationTest`
-    pub async fn connect_gateway(&self, gw: &Gateway) {
+    pub async fn connect_gateway(&self, gw: &AppState) {
         gw.handle_connect_federation(ConnectFedPayload {
             invite_code: self.invite_code().to_string(),
             use_tor: Some(false),

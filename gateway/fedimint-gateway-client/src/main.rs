@@ -1,298 +1,570 @@
 #![deny(clippy::pedantic, clippy::nursery)]
+#![allow(clippy::large_enum_variant)]
 
-mod config_commands;
-mod ecash_commands;
-mod general_commands;
-mod lightning_commands;
-mod onchain_commands;
-
-use std::collections::BTreeMap;
-
-use bitcoin::Txid;
+use anyhow::{Context, Result, ensure};
 use bitcoin::address::NetworkUnchecked;
-use clap::{CommandFactory, Parser, Subcommand};
-use config_commands::ConfigCommands;
-use ecash_commands::EcashCommands;
-use fedimint_connectors::ConnectorRegistry;
-use fedimint_connectors::error::ServerError;
-use fedimint_core::PeerId;
+use bitcoin::hashes::sha256;
+use clap::{Parser, Subcommand};
 use fedimint_core::config::FederationId;
-use fedimint_core::invite_code::InviteCode;
-use fedimint_core::util::SafeUrl;
-use fedimint_gateway_common::{
-    ChannelInfo, CloseChannelsWithPeerResponse, FederationConfig, FederationInfo, GatewayApi,
-    GatewayBalances, GatewayFedConfig, GatewayInfo, GetInvoiceResponse, ListTransactionsResponse,
-    MnemonicResponse, PaymentLogResponse, ReceiveEcashResponse, SpendEcashResponse,
-    WithdrawResponse,
-};
-use fedimint_logging::TracingSetup;
-use general_commands::GeneralCommands;
-use lightning_commands::LightningCommands;
-use onchain_commands::OnchainCommands;
+use fedimint_core::{Amount, BitcoinAmountOrAll};
+use fedimint_gateway_common::*;
 use serde::Serialize;
-
-/// Unified output type for all gateway-cli commands.
-///
-/// This enum uses `#[serde(untagged)]` to serialize each variant directly
-/// as its inner type, maintaining backward compatibility with existing
-/// JSON output formats while providing type safety in the code.
-#[derive(Serialize)]
-#[serde(untagged)]
-pub enum CliOutput {
-    // General commands
-    Info(GatewayInfo),
-    Balances(GatewayBalances),
-    Federation(FederationInfo),
-    Mnemonic(MnemonicResponse),
-    PaymentLog(PaymentLogResponse),
-    InviteCodes(BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>),
-
-    // Lightning commands
-    Invoice {
-        invoice: String,
-    },
-    Preimage {
-        preimage: String,
-    },
-    FundingTxid {
-        funding_txid: Txid,
-    },
-    Channels(Vec<ChannelInfo>),
-    CloseChannels(CloseChannelsWithPeerResponse),
-    InvoiceDetails(Option<GetInvoiceResponse>),
-    Transactions(ListTransactionsResponse),
-    // Ecash commands
-    DepositAddress {
-        address: bitcoin::Address<NetworkUnchecked>,
-    },
-    DepositRecheck(serde_json::Value),
-    PeginTxid {
-        txid: Txid,
-    },
-    Withdraw(WithdrawResponse),
-    SpendEcash(SpendEcashResponse),
-    ReceiveEcash(ReceiveEcashResponse),
-
-    // Onchain commands
-    OnchainAddress {
-        address: String,
-    },
-    SendOnchainTxid {
-        txid: Txid,
-    },
-
-    // Config commands
-    Config(GatewayFedConfig),
-    FederationConfigs(Vec<FederationConfig>),
-
-    // No output (for commands that succeed silently)
-    #[serde(skip)]
-    Empty,
-}
-
-/// Type alias for CLI command results using `ServerError` for precise error
-/// classification
-pub type CliOutputResult = Result<CliOutput, ServerError>;
-
-/// Machine-readable error codes for programmatic error handling.
-///
-/// These codes allow agents and scripts to handle errors programmatically
-/// without parsing error message strings.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ErrorCode {
-    /// Could not connect to gateway server
-    ConnectionFailed,
-    /// Invalid command arguments or request format
-    InvalidInput,
-    /// Requested resource not found (federation, invoice, etc.)
-    NotFound,
-    /// Gateway is not in correct state for operation
-    InvalidState,
-    /// Operation timed out
-    Timeout,
-    /// Internal gateway or client error
-    Internal,
-    /// Unknown/unclassified error
-    Unknown,
-}
-
-/// Exit codes for the CLI process.
-///
-/// These provide semantic meaning to the exit status, allowing scripts
-/// to handle different error categories appropriately.
-#[derive(Debug, Clone, Copy)]
-#[repr(i32)]
-pub enum ExitCode {
-    Success = 0,
-    GeneralError = 1,
-    ConnectionError = 2,
-    InvalidInput = 4,
-    NotFound = 5,
-    Timeout = 6,
-}
-
-impl From<ErrorCode> for ExitCode {
-    fn from(code: ErrorCode) -> Self {
-        match code {
-            ErrorCode::ConnectionFailed => Self::ConnectionError,
-            ErrorCode::InvalidInput => Self::InvalidInput,
-            ErrorCode::NotFound => Self::NotFound,
-            ErrorCode::Timeout => Self::Timeout,
-            ErrorCode::InvalidState | ErrorCode::Internal | ErrorCode::Unknown => {
-                Self::GeneralError
-            }
-        }
-    }
-}
-
-/// Structured error type for CLI output.
-///
-/// This provides machine-readable error information in JSON format,
-/// making it easier for agents and scripts to handle errors programmatically.
-#[derive(Debug, Serialize)]
-pub struct CliError {
-    /// Human-readable error message
-    pub error: String,
-
-    /// Machine-readable error code for programmatic handling
-    pub code: ErrorCode,
-
-    /// The immediate cause of the error, if available
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cause: Option<String>,
-}
-
-impl CliError {
-    /// Create a new `CliError` from a `ServerError`.
-    ///
-    /// This extracts the error message, classifies the error code,
-    /// and captures the immediate cause.
-    fn from_server_error(err: &ServerError) -> Self {
-        let error = err.to_string();
-        let code = Self::classify_server_error(err);
-        let cause = std::error::Error::source(err).map(ToString::to_string);
-
-        Self { error, code, cause }
-    }
-
-    /// Classify a `ServerError` into an appropriate `ErrorCode`.
-    const fn classify_server_error(err: &ServerError) -> ErrorCode {
-        match err {
-            // Connection and transport errors
-            ServerError::Connection(_) | ServerError::Transport(_) => ErrorCode::ConnectionFailed,
-
-            // Invalid input errors
-            ServerError::InvalidPeerId { .. }
-            | ServerError::InvalidPeerUrl { .. }
-            | ServerError::InvalidEndpoint(_)
-            | ServerError::InvalidRpcId(_) => ErrorCode::InvalidInput,
-
-            // Internal errors (response parsing, server errors, client errors)
-            ServerError::InvalidRequest(_)
-            | ServerError::ResponseDeserialization(_)
-            | ServerError::InvalidResponse(_)
-            | ServerError::ServerError(_)
-            | ServerError::InternalClientError(_) => ErrorCode::Internal,
-
-            // Condition failures (often "not found" scenarios)
-            ServerError::ConditionFailed(_) => ErrorCode::NotFound,
-
-            // Catch-all for future ServerError variants (enum is non_exhaustive)
-            _ => ErrorCode::Unknown,
-        }
-    }
-}
+use serde_json::Value;
 
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
-    /// The address of the gateway webserver
-    #[clap(long, short, default_value = "http://127.0.0.1:80")]
-    address: SafeUrl,
+    /// Gateway admin API address
+    #[arg(
+        short,
+        long,
+        env = "FM_GATEWAY_ADDR",
+        default_value = "http://127.0.0.1:80"
+    )]
+    address: String,
 
-    /// The command to execute
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(flatten)]
-    General(GeneralCommands),
+    /// Display gateway info
+    Info,
+    /// Display gateway balances
+    GetBalances,
+    /// Shutdown the gateway
+    Stop,
+    /// Display mnemonic seed words
+    Seed,
+    /// LDK lightning node management
     #[command(subcommand)]
     Lightning(LightningCommands),
+    /// Ecash management
     #[command(subcommand)]
     Ecash(EcashCommands),
+    /// On-chain wallet management
     #[command(subcommand)]
     Onchain(OnchainCommands),
+    /// Federation management
     #[command(subcommand)]
-    Cfg(ConfigCommands),
-    Completion {
-        shell: clap_complete::Shell,
+    Federation(FederationCommands),
+    /// Per-federation module commands
+    Module {
+        /// Federation ID
+        federation_id: FederationId,
+        #[command(subcommand)]
+        module: ModuleCommands,
     },
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(err) = TracingSetup::default().init() {
-        let cli_err = CliError {
-            error: format!("Failed to initialize logging: {err}"),
-            code: ErrorCode::Internal,
-            cause: None,
-        };
-        print_response(&cli_err);
-        std::process::exit(ExitCode::GeneralError as i32);
-    }
+#[derive(Subcommand)]
+enum LightningCommands {
+    /// Create a bolt11 invoice
+    CreateInvoice {
+        amount_msats: u64,
+        #[arg(long)]
+        expiry_secs: Option<u32>,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Pay a bolt11 invoice
+    PayInvoice { invoice: String },
+    /// Open a channel with another lightning node
+    OpenChannel {
+        #[arg(long)]
+        pubkey: bitcoin::secp256k1::PublicKey,
+        #[arg(long)]
+        host: String,
+        #[arg(long)]
+        channel_size_sats: u64,
+        #[arg(long)]
+        push_amount_sats: Option<u64>,
+    },
+    /// Close channels with a peer
+    CloseChannelsWithPeer {
+        #[arg(long)]
+        pubkey: bitcoin::secp256k1::PublicKey,
+        #[arg(long)]
+        force: bool,
+        #[arg(long, required_unless_present = "force")]
+        sats_per_vbyte: Option<u64>,
+    },
+    /// List channels
+    ListChannels,
+    /// List lightning transactions
+    ListTransactions {
+        #[arg(long)]
+        start_secs: u64,
+        #[arg(long)]
+        end_secs: u64,
+    },
+    /// Get details about a specific invoice
+    GetInvoice {
+        #[arg(long)]
+        payment_hash: sha256::Hash,
+    },
+}
 
-    if let Err(err) = run().await {
-        let cli_err = CliError::from_server_error(&err);
-        let exit_code = ExitCode::from(cli_err.code);
-        print_response(&cli_err);
-        std::process::exit(exit_code as i32);
+#[derive(Subcommand)]
+enum EcashCommands {
+    /// Generate a new peg-in address
+    Pegin {
+        #[arg(long)]
+        federation_id: FederationId,
+    },
+    /// Trigger a recheck for deposits on a deposit address
+    PeginRecheck {
+        #[arg(long)]
+        address: bitcoin::Address<NetworkUnchecked>,
+        #[arg(long)]
+        federation_id: FederationId,
+    },
+    /// Send funds from the gateway's onchain wallet to the federation's ecash
+    /// wallet
+    PeginFromOnchain {
+        #[arg(long)]
+        federation_id: FederationId,
+        #[arg(long)]
+        amount: BitcoinAmountOrAll,
+        #[arg(long)]
+        fee_rate_sats_per_vbyte: u64,
+    },
+    /// Claim funds from a gateway federation to an on-chain address
+    Pegout {
+        #[arg(long)]
+        federation_id: FederationId,
+        #[arg(long)]
+        amount: BitcoinAmountOrAll,
+        #[arg(long)]
+        address: bitcoin::Address<NetworkUnchecked>,
+    },
+    /// Claim funds from a gateway federation to the gateway's onchain wallet
+    PegoutToOnchain {
+        #[arg(long)]
+        federation_id: FederationId,
+        #[arg(long)]
+        amount: BitcoinAmountOrAll,
+    },
+    /// Send e-cash out of band
+    Send {
+        #[arg(long)]
+        federation_id: FederationId,
+        amount: Amount,
+    },
+    /// Receive e-cash out of band
+    Receive {
+        #[arg(long)]
+        notes: String,
+        #[arg(long = "no-wait", action = clap::ArgAction::SetFalse)]
+        wait: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum OnchainCommands {
+    /// Get a Bitcoin address from the gateway's lightning node's onchain wallet
+    Address,
+    /// Send funds from the lightning node's on-chain wallet
+    Send {
+        #[arg(long)]
+        address: bitcoin::Address<NetworkUnchecked>,
+        #[arg(long)]
+        amount: BitcoinAmountOrAll,
+        #[arg(long)]
+        fee_rate_sats_per_vbyte: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum FederationCommands {
+    /// Join a federation
+    Join {
+        invite_code: String,
+        #[arg(long)]
+        recover: Option<bool>,
+    },
+    /// List connected federations
+    List,
+    /// Set routing fees
+    SetFees {
+        #[arg(long)]
+        federation_id: Option<FederationId>,
+        #[arg(long)]
+        ln_base: Option<Amount>,
+        #[arg(long)]
+        ln_ppm: Option<u64>,
+        #[arg(long)]
+        tx_base: Option<Amount>,
+        #[arg(long)]
+        tx_ppm: Option<u64>,
+    },
+    /// Gets each connected federation's JSON client config
+    ClientConfig {
+        #[arg(long)]
+        federation_id: Option<FederationId>,
+    },
+    /// Get invite codes for each federation
+    InviteCodes,
+}
+
+#[derive(Subcommand)]
+enum ModuleCommands {
+    /// Mint module commands
+    #[command(subcommand)]
+    Mintv2(MintCommands),
+    /// Wallet module commands
+    #[command(subcommand)]
+    Walletv2(WalletCommands),
+}
+
+#[derive(Subcommand)]
+enum MintCommands {
+    /// Count ecash notes by denomination
+    Count,
+    /// Send ecash
+    Send { amount: Amount },
+    /// Receive ecash
+    Receive { ecash: String },
+}
+
+#[derive(Subcommand)]
+enum WalletCommands {
+    /// Query wallet info
+    Info { subcommand: String },
+    /// Get send fee estimate
+    SendFee,
+    /// Send onchain from federation wallet
+    Send {
+        address: bitcoin::Address<NetworkUnchecked>,
+        amount: bitcoin::Amount,
+        #[arg(long)]
+        fee: Option<bitcoin::Amount>,
+    },
+    /// Get receive address
+    Receive,
+}
+
+fn request<R: Serialize>(addr: &str, route: &str, payload: R) -> Result<Value> {
+    let response = reqwest::blocking::Client::new()
+        .post(format!("{addr}{route}"))
+        .json(&serde_json::to_value(payload)?)
+        .send()
+        .context("Failed to connect to gateway")?;
+
+    ensure!(
+        response.status().is_success(),
+        "API error ({}): {}",
+        response.status().as_u16(),
+        response.text()?
+    );
+
+    let text = response.text()?;
+    if text.trim().is_empty() {
+        Ok(Value::Null)
+    } else {
+        serde_json::from_str(&text).context("Failed to parse gateway response")
     }
 }
 
-async fn run() -> CliOutputResult {
-    let cli = Cli::parse();
-    let connector_registry = ConnectorRegistry::build_from_client_defaults()
-        .with_env_var_overrides()
-        .map_err(ServerError::InternalClientError)?
-        .bind()
-        .await
-        .map_err(ServerError::InternalClientError)?;
-    let client = GatewayApi::new(None, connector_registry);
+fn request_get(addr: &str, route: &str) -> Result<Value> {
+    let response = reqwest::blocking::Client::new()
+        .get(format!("{addr}{route}"))
+        .send()
+        .context("Failed to connect to gateway")?;
 
-    let output = match cli.command {
-        Commands::General(general_command) => general_command.handle(&client, &cli.address).await?,
-        Commands::Lightning(lightning_command) => {
-            lightning_command.handle(&client, &cli.address).await?
-        }
-        Commands::Ecash(ecash_command) => ecash_command.handle(&client, &cli.address).await?,
-        Commands::Onchain(onchain_command) => onchain_command.handle(&client, &cli.address).await?,
-        Commands::Cfg(config_commands) => config_commands.handle(&client, &cli.address).await?,
-        Commands::Completion { shell } => {
-            clap_complete::generate(
-                shell,
-                &mut Cli::command(),
-                "gateway-cli",
-                &mut std::io::stdout(),
-            );
-            return Ok(CliOutput::Empty);
-        }
-    };
+    ensure!(
+        response.status().is_success(),
+        "API error ({}): {}",
+        response.status().as_u16(),
+        response.text()?
+    );
 
-    // Only print output for non-empty results
-    if !matches!(output, CliOutput::Empty) {
-        print_response(&output);
+    let text = response.text()?;
+    if text.trim().is_empty() {
+        Ok(Value::Null)
+    } else {
+        serde_json::from_str(&text).context("Failed to parse gateway response")
     }
-
-    Ok(output)
 }
 
-fn print_response<T: Serialize>(val: T) {
+fn print_json(value: &Value) {
     println!(
         "{}",
-        serde_json::to_string_pretty(&val).expect("Cannot serialize")
+        serde_json::to_string_pretty(value).expect("Cannot serialize")
     );
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let addr = &cli.address;
+
+    let result = match cli.command {
+        Commands::Info => request_get(addr, ROUTE_INFO)?,
+        Commands::GetBalances => request_get(addr, ROUTE_BALANCES)?,
+        Commands::Stop => request_get(addr, ROUTE_STOP)?,
+        Commands::Seed => request_get(addr, ROUTE_MNEMONIC)?,
+
+        Commands::Lightning(cmd) => match cmd {
+            LightningCommands::CreateInvoice {
+                amount_msats,
+                expiry_secs,
+                description,
+            } => request(
+                addr,
+                ROUTE_LDK_INVOICE_CREATE,
+                CreateInvoiceForOperatorPayload {
+                    amount_msats,
+                    expiry_secs,
+                    description,
+                },
+            )?,
+            LightningCommands::PayInvoice { invoice } => {
+                let invoice: lightning_invoice::Bolt11Invoice =
+                    invoice.parse().context("Invalid bolt11 invoice")?;
+                request(
+                    addr,
+                    ROUTE_LDK_INVOICE_PAY,
+                    PayInvoiceForOperatorPayload { invoice },
+                )?
+            }
+            LightningCommands::OpenChannel {
+                pubkey,
+                host,
+                channel_size_sats,
+                push_amount_sats,
+            } => {
+                let payload = OpenChannelRequest {
+                    pubkey,
+                    host,
+                    channel_size_sats,
+                    push_amount_sats: push_amount_sats.unwrap_or(0),
+                };
+                request(addr, ROUTE_LDK_CHANNEL_OPEN, payload)?
+            }
+            LightningCommands::CloseChannelsWithPeer {
+                pubkey,
+                force,
+                sats_per_vbyte,
+            } => request(
+                addr,
+                ROUTE_LDK_CHANNEL_CLOSE,
+                CloseChannelsWithPeerRequest {
+                    pubkey,
+                    force,
+                    sats_per_vbyte,
+                },
+            )?,
+            LightningCommands::ListChannels => request_get(addr, ROUTE_LDK_CHANNEL_LIST)?,
+            LightningCommands::ListTransactions {
+                start_secs,
+                end_secs,
+            } => request(
+                addr,
+                ROUTE_LDK_TRANSACTION_LIST,
+                ListTransactionsPayload {
+                    start_secs,
+                    end_secs,
+                },
+            )?,
+            LightningCommands::GetInvoice { payment_hash } => request(
+                addr,
+                ROUTE_LDK_INVOICE_GET,
+                GetInvoiceRequest { payment_hash },
+            )?,
+        },
+
+        Commands::Ecash(cmd) => match cmd {
+            EcashCommands::Pegin { federation_id } => request(
+                addr,
+                ROUTE_ECASH_PEGIN,
+                DepositAddressPayload { federation_id },
+            )?,
+            EcashCommands::PeginRecheck {
+                address,
+                federation_id,
+            } => request(
+                addr,
+                ROUTE_ECASH_PEGIN_RECHECK,
+                DepositAddressRecheckPayload {
+                    address,
+                    federation_id,
+                },
+            )?,
+            EcashCommands::PeginFromOnchain {
+                federation_id,
+                amount,
+                fee_rate_sats_per_vbyte,
+            } => request(
+                addr,
+                ROUTE_ECASH_PEGIN_FROM_ONCHAIN,
+                PeginFromOnchainPayload {
+                    federation_id,
+                    amount,
+                    fee_rate_sats_per_vbyte,
+                },
+            )?,
+            EcashCommands::Pegout {
+                federation_id,
+                amount,
+                address,
+            } => request(
+                addr,
+                ROUTE_ECASH_PEGOUT,
+                WithdrawPayload {
+                    federation_id,
+                    amount,
+                    address,
+                    quoted_fees: None,
+                },
+            )?,
+            EcashCommands::PegoutToOnchain {
+                federation_id,
+                amount,
+            } => request(
+                addr,
+                ROUTE_ECASH_PEGOUT_TO_ONCHAIN,
+                WithdrawToOnchainPayload {
+                    federation_id,
+                    amount,
+                },
+            )?,
+            EcashCommands::Send {
+                federation_id,
+                amount,
+            } => request(
+                addr,
+                ROUTE_ECASH_SEND,
+                SpendEcashPayload {
+                    federation_id,
+                    amount,
+                },
+            )?,
+            EcashCommands::Receive { notes, wait } => request(
+                addr,
+                ROUTE_ECASH_RECEIVE,
+                ReceiveEcashPayload { notes, wait },
+            )?,
+        },
+
+        Commands::Onchain(cmd) => match cmd {
+            OnchainCommands::Address => request_get(addr, ROUTE_LDK_ONCHAIN_RECEIVE)?,
+            OnchainCommands::Send {
+                address,
+                amount,
+                fee_rate_sats_per_vbyte,
+            } => request(
+                addr,
+                ROUTE_LDK_ONCHAIN_SEND,
+                SendOnchainRequest {
+                    address,
+                    amount,
+                    fee_rate_sats_per_vbyte,
+                },
+            )?,
+        },
+
+        Commands::Federation(cmd) => match cmd {
+            FederationCommands::Join {
+                invite_code,
+                recover,
+            } => request(
+                addr,
+                ROUTE_FED_JOIN,
+                ConnectFedPayload {
+                    invite_code,
+                    use_tor: None,
+                    recover,
+                },
+            )?,
+            FederationCommands::List => request_get(addr, ROUTE_FED_LIST)?,
+            FederationCommands::SetFees {
+                federation_id,
+                ln_base,
+                ln_ppm,
+                tx_base,
+                tx_ppm,
+            } => request(
+                addr,
+                ROUTE_FED_SET_FEES,
+                SetFeesPayload {
+                    federation_id,
+                    lightning_base: ln_base,
+                    lightning_parts_per_million: ln_ppm,
+                    transaction_base: tx_base,
+                    transaction_parts_per_million: tx_ppm,
+                },
+            )?,
+            FederationCommands::ClientConfig { federation_id } => {
+                request(addr, ROUTE_FED_CONFIG, ConfigPayload { federation_id })?
+            }
+            FederationCommands::InviteCodes => request_get(addr, ROUTE_FED_INVITE)?,
+        },
+
+        Commands::Module {
+            federation_id,
+            module,
+        } => match module {
+            ModuleCommands::Mintv2(cmd) => match cmd {
+                MintCommands::Count => request(
+                    addr,
+                    ROUTE_MODULE_MINT_COUNT,
+                    ModuleMintCountRequest { federation_id },
+                )?,
+                MintCommands::Send { amount } => request(
+                    addr,
+                    ROUTE_MODULE_MINT_SEND,
+                    ModuleMintSendRequest {
+                        federation_id,
+                        amount,
+                    },
+                )?,
+                MintCommands::Receive { ecash } => request(
+                    addr,
+                    ROUTE_MODULE_MINT_RECEIVE,
+                    ModuleMintReceiveRequest {
+                        federation_id,
+                        ecash,
+                    },
+                )?,
+            },
+            ModuleCommands::Walletv2(cmd) => match cmd {
+                WalletCommands::Info { subcommand } => request(
+                    addr,
+                    ROUTE_MODULE_WALLET_INFO,
+                    ModuleWalletInfoRequest {
+                        federation_id,
+                        subcommand,
+                    },
+                )?,
+                WalletCommands::SendFee => request(
+                    addr,
+                    ROUTE_MODULE_WALLET_SEND_FEE,
+                    ModuleWalletSendFeeRequest { federation_id },
+                )?,
+                WalletCommands::Send {
+                    address,
+                    amount,
+                    fee,
+                } => request(
+                    addr,
+                    ROUTE_MODULE_WALLET_SEND,
+                    ModuleWalletSendRequest {
+                        federation_id,
+                        address,
+                        amount,
+                        fee,
+                    },
+                )?,
+                WalletCommands::Receive => request(
+                    addr,
+                    ROUTE_MODULE_WALLET_RECEIVE,
+                    ModuleWalletReceiveRequest { federation_id },
+                )?,
+            },
+        },
+    };
+
+    print_json(&result);
+    Ok(())
 }

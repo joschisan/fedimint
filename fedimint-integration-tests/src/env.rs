@@ -98,8 +98,8 @@ impl TestEnv {
         info!("Gateways ready");
 
         info!("Connecting gateways to federation...");
-        gateway_cli(&gw1_addr, &["join", invite_code_str.trim()]).await?;
-        gateway_cli(&gw2_addr, &["join", invite_code_str.trim()]).await?;
+        gateway_cli(&gw1_addr, &["federation", "join", invite_code_str.trim()]).await?;
+        gateway_cli(&gw2_addr, &["federation", "join", invite_code_str.trim()]).await?;
         info!("Gateways connected");
 
         info!("Funding gateways and opening channel...");
@@ -203,10 +203,8 @@ impl TestEnv {
         )
         .await?;
 
-        let pegin_addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = value["address"]
-            .as_str()
-            .context("missing address field")?
-            .parse()?;
+        let pegin_addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> =
+            value.as_str().context("expected address string")?.parse()?;
         let pegin_addr = pegin_addr.assume_checked();
 
         tokio::task::block_in_place(|| self.bitcoind.generate_to_address(1, &pegin_addr))?;
@@ -506,9 +504,7 @@ async fn open_channel_between_gateways(
 
     for gw_addr in [gw1_addr, gw2_addr] {
         let addr_json = gateway_cli(gw_addr, &["onchain", "address"]).await?;
-        let funding_addr = addr_json["address"]
-            .as_str()
-            .context("missing address field")?;
+        let funding_addr = addr_json.as_str().context("missing address string")?;
 
         let addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = funding_addr.parse()?;
         let addr = addr.assume_checked();

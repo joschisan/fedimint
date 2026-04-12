@@ -3350,21 +3350,14 @@ version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
  "bitcoin",
- "chrono",
  "clap",
- "clap_complete",
  "fedimint-build",
- "fedimint-connectors",
  "fedimint-core",
- "fedimint-eventlog",
  "fedimint-gateway-common",
- "fedimint-logging",
  "lightning-invoice",
+ "reqwest 0.12.22",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
 ]
 
 [[package]]

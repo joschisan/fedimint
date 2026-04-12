@@ -19,7 +19,7 @@ use fedimint_gwv2_client::GatewayClientInitV2;
 use crate::config::DatabaseBackend;
 use crate::db::GatewayDbExt as _;
 use crate::error::AdminGatewayError;
-use crate::{AdminResult, Gateway};
+use crate::{AdminResult, AppState};
 
 #[derive(Debug, Clone)]
 pub struct GatewayClientBuilder {
@@ -61,7 +61,7 @@ impl GatewayClientBuilder {
     async fn create_client_builder(
         &self,
         federation_config: &FederationConfig,
-        gateway: Arc<Gateway>,
+        gateway: Arc<AppState>,
     ) -> AdminResult<ClientBuilder> {
         let FederationConfig {
             federation_index: _,
@@ -90,7 +90,7 @@ impl GatewayClientBuilder {
     pub async fn recover(
         &self,
         config: FederationConfig,
-        gateway: Arc<Gateway>,
+        gateway: Arc<AppState>,
         mnemonic: &Mnemonic,
     ) -> AdminResult<()> {
         let federation_id = config.invite_code.federation_id();
@@ -118,7 +118,7 @@ impl GatewayClientBuilder {
     pub async fn build(
         &self,
         config: FederationConfig,
-        gateway: Arc<Gateway>,
+        gateway: Arc<AppState>,
         mnemonic: &Mnemonic,
     ) -> AdminResult<fedimint_client::ClientHandleArc> {
         let invite_code = config.invite_code.clone();

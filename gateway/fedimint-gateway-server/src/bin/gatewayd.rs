@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use fedimint_core::fedimint_build_code_version_env;
 use fedimint_core::util::handle_version_hash_command;
-use fedimint_gateway_server::Gateway;
+use fedimint_gateway_server::AppState;
 use fedimint_logging::{LOG_GATEWAY, TracingSetup};
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
 use tikv_jemallocator::Jemalloc;
@@ -28,7 +28,7 @@ fn main() -> Result<(), anyhow::Error> {
     runtime.block_on(async {
         handle_version_hash_command(fedimint_build_code_version_env!());
         TracingSetup::default().init()?;
-        let gatewayd = Gateway::new_with_default_modules().await?;
+        let gatewayd = AppState::new_with_default_modules().await?;
         let shutdown_receiver = gatewayd.clone().run(runtime.clone()).await?;
         shutdown_receiver.await;
         gatewayd.unannounce_from_all_federations().await;

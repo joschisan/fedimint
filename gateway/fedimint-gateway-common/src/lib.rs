@@ -1,14 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 
 use anyhow::Context as _;
 use bitcoin::Address;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::hashes::sha256;
-use fedimint_connectors::error::ServerError;
-use fedimint_connectors::{
-    ConnectionPool, ConnectorRegistry, DynGatewayConnection, IGatewayConnection, ServerResult,
-};
 use fedimint_core::config::{FederationId, JsonClientConfig};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::hex::ToHex;
@@ -18,41 +14,58 @@ use fedimint_core::{Amount, BitcoinAmountOrAll, secp256k1};
 use fedimint_eventlog::{EventKind, EventLogId, PersistedLogEntry};
 use lightning_invoice::{Bolt11Invoice, RoutingFees};
 pub use reqwest::Method;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::watch;
 
 pub mod envs;
 
 pub const V1_API_ENDPOINT: &str = "v1";
 
-pub const ADDRESS_ENDPOINT: &str = "/address";
-pub const ADDRESS_RECHECK_ENDPOINT: &str = "/address_recheck";
-pub const CONFIGURATION_ENDPOINT: &str = "/config";
-pub const JOIN_ENDPOINT: &str = "/join";
-pub const CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT: &str = "/create_bolt11_invoice_for_operator";
-pub const GATEWAY_INFO_ENDPOINT: &str = "/info";
-pub const INVITE_CODES_ENDPOINT: &str = "/invite_codes";
-pub const GET_BALANCES_ENDPOINT: &str = "/balances";
-pub const GET_INVOICE_ENDPOINT: &str = "/get_invoice";
-pub const GET_LN_ONCHAIN_ADDRESS_ENDPOINT: &str = "/get_ln_onchain_address";
-pub const LIST_CHANNELS_ENDPOINT: &str = "/list_channels";
-pub const LIST_TRANSACTIONS_ENDPOINT: &str = "/list_transactions";
-pub const MNEMONIC_ENDPOINT: &str = "/mnemonic";
-pub const OPEN_CHANNEL_ENDPOINT: &str = "/open_channel";
-pub const OPEN_CHANNEL_WITH_PUSH_ENDPOINT: &str = "/open_channel_with_push";
-pub const CLOSE_CHANNELS_WITH_PEER_ENDPOINT: &str = "/close_channels_with_peer";
-pub const PAY_INVOICE_FOR_OPERATOR_ENDPOINT: &str = "/pay_invoice_for_operator";
-pub const PAYMENT_LOG_ENDPOINT: &str = "/payment_log";
-pub const PEGIN_FROM_ONCHAIN_ENDPOINT: &str = "/pegin_from_onchain";
-pub const RECEIVE_ECASH_ENDPOINT: &str = "/receive_ecash";
-pub const SET_FEES_ENDPOINT: &str = "/set_fees";
-pub const STOP_ENDPOINT: &str = "/stop";
-pub const SEND_ONCHAIN_ENDPOINT: &str = "/send_onchain";
-pub const SPEND_ECASH_ENDPOINT: &str = "/spend_ecash";
-pub const WITHDRAW_ENDPOINT: &str = "/withdraw";
-pub const WITHDRAW_TO_ONCHAIN_ENDPOINT: &str = "/withdraw_to_onchain";
+// Top-level
+pub const ROUTE_INFO: &str = "/info";
+pub const ROUTE_BALANCES: &str = "/balances";
+pub const ROUTE_STOP: &str = "/stop";
+pub const ROUTE_MNEMONIC: &str = "/mnemonic";
+
+// LDK node management
+pub const ROUTE_LDK_BALANCES: &str = "/ldk/balances";
+pub const ROUTE_LDK_CHANNEL_OPEN: &str = "/ldk/channel/open";
+pub const ROUTE_LDK_CHANNEL_CLOSE: &str = "/ldk/channel/close";
+pub const ROUTE_LDK_CHANNEL_LIST: &str = "/ldk/channel/list";
+pub const ROUTE_LDK_ONCHAIN_RECEIVE: &str = "/ldk/onchain/receive";
+pub const ROUTE_LDK_ONCHAIN_SEND: &str = "/ldk/onchain/send";
+pub const ROUTE_LDK_INVOICE_CREATE: &str = "/ldk/invoice/create";
+pub const ROUTE_LDK_INVOICE_PAY: &str = "/ldk/invoice/pay";
+pub const ROUTE_LDK_INVOICE_GET: &str = "/ldk/invoice/get";
+pub const ROUTE_LDK_PEER_CONNECT: &str = "/ldk/peer/connect";
+pub const ROUTE_LDK_PEER_DISCONNECT: &str = "/ldk/peer/disconnect";
+pub const ROUTE_LDK_PEER_LIST: &str = "/ldk/peer/list";
+pub const ROUTE_LDK_TRANSACTION_LIST: &str = "/ldk/transaction/list";
+
+// Ecash management
+pub const ROUTE_ECASH_PEGIN: &str = "/ecash/pegin";
+pub const ROUTE_ECASH_PEGIN_RECHECK: &str = "/ecash/pegin-recheck";
+pub const ROUTE_ECASH_PEGIN_FROM_ONCHAIN: &str = "/ecash/pegin-from-onchain";
+pub const ROUTE_ECASH_PEGOUT: &str = "/ecash/pegout";
+pub const ROUTE_ECASH_PEGOUT_TO_ONCHAIN: &str = "/ecash/pegout-to-onchain";
+pub const ROUTE_ECASH_SEND: &str = "/ecash/send";
+pub const ROUTE_ECASH_RECEIVE: &str = "/ecash/receive";
+
+// Federation management
+pub const ROUTE_FED_JOIN: &str = "/federation/join";
+pub const ROUTE_FED_LIST: &str = "/federation/list";
+pub const ROUTE_FED_SET_FEES: &str = "/federation/set-fees";
+pub const ROUTE_FED_CONFIG: &str = "/federation/config";
+pub const ROUTE_FED_INVITE: &str = "/federation/invite";
+
+// Per-federation module commands
+pub const ROUTE_MODULE_MINT_COUNT: &str = "/module/mintv2/count";
+pub const ROUTE_MODULE_MINT_SEND: &str = "/module/mintv2/send";
+pub const ROUTE_MODULE_MINT_RECEIVE: &str = "/module/mintv2/receive";
+pub const ROUTE_MODULE_WALLET_INFO: &str = "/module/walletv2/info";
+pub const ROUTE_MODULE_WALLET_SEND_FEE: &str = "/module/walletv2/send-fee";
+pub const ROUTE_MODULE_WALLET_SEND: &str = "/module/walletv2/send";
+pub const ROUTE_MODULE_WALLET_RECEIVE: &str = "/module/walletv2/receive";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ConnectFedPayload {
@@ -825,60 +838,65 @@ impl TryFrom<Bolt11Invoice> for PrunedInvoice {
     }
 }
 
-// --- Types moved from fedimint-ln-common/src/client.rs ---
+// --- New request types for module commands ---
 
-#[derive(Clone, Debug)]
-pub struct GatewayApi {
-    password: Option<String>,
-    connection_pool: ConnectionPool<dyn IGatewayConnection>,
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModuleMintCountRequest {
+    pub federation_id: FederationId,
 }
 
-impl GatewayApi {
-    pub fn new(password: Option<String>, connectors: ConnectorRegistry) -> Self {
-        Self {
-            password,
-            connection_pool: ConnectionPool::new(connectors),
-        }
-    }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModuleMintSendRequest {
+    pub federation_id: FederationId,
+    pub amount: Amount,
+}
 
-    async fn get_or_create_connection(&self, url: &SafeUrl) -> ServerResult<DynGatewayConnection> {
-        self.connection_pool
-            .get_or_create_connection(url, None, |url, _api_secret, connectors| async move {
-                let conn = connectors
-                    .connect_gateway(&url)
-                    .await
-                    .map_err(ServerError::Connection)?;
-                Ok(conn)
-            })
-            .await
-    }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModuleMintReceiveRequest {
+    pub federation_id: FederationId,
+    pub ecash: String,
+}
 
-    pub async fn request<P: Serialize, T: DeserializeOwned>(
-        &self,
-        base_url: &SafeUrl,
-        method: Method,
-        route: &str,
-        payload: Option<P>,
-    ) -> ServerResult<T> {
-        let conn = self
-            .get_or_create_connection(base_url)
-            .await
-            .context("Failed to connect to gateway")
-            .map_err(ServerError::Connection)?;
-        let payload = payload.map(|p| serde_json::to_value(p).expect("Could not serialize"));
-        let res = conn
-            .request(self.password.clone(), method, route, payload)
-            .await?;
-        let response = serde_json::from_value::<T>(res).map_err(|e| {
-            ServerError::InvalidResponse(anyhow::anyhow!("Received invalid response: {e}"))
-        })?;
-        Ok(response)
-    }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModuleWalletInfoRequest {
+    pub federation_id: FederationId,
+    pub subcommand: String,
+}
 
-    /// Get receiver for changes in the active connections
-    ///
-    /// This allows real-time monitoring of connection status.
-    pub fn get_active_connection_receiver(&self) -> watch::Receiver<BTreeSet<SafeUrl>> {
-        self.connection_pool.get_active_connection_receiver()
-    }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModuleWalletSendFeeRequest {
+    pub federation_id: FederationId,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModuleWalletSendRequest {
+    pub federation_id: FederationId,
+    pub address: bitcoin::Address<bitcoin::address::NetworkUnchecked>,
+    pub amount: bitcoin::Amount,
+    pub fee: Option<bitcoin::Amount>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModuleWalletReceiveRequest {
+    pub federation_id: FederationId,
+}
+
+// --- Peer management types ---
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PeerConnectRequest {
+    pub pubkey: secp256k1::PublicKey,
+    pub host: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PeerDisconnectRequest {
+    pub pubkey: secp256k1::PublicKey,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PeerInfo {
+    pub node_id: secp256k1::PublicKey,
+    pub address: String,
+    pub is_connected: bool,
 }

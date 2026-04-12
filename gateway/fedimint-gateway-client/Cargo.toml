@@ -12,35 +12,20 @@ version = { workspace = true }
 [package.metadata.docs.rs]
 rustc-args = ["--cfg", "tokio_unstable"]
 
-[features]
-default = ["tor"]
-tor = ["fedimint-gateway-common/tor"]
-
 [[bin]]
 name = "gateway-cli"
 path = "src/main.rs"
 
-[lib]
-name = "fedimint_gateway_client"
-path = "src/lib.rs"
-
 [dependencies]
 anyhow = { workspace = true }
 bitcoin = { workspace = true }
-chrono = { workspace = true }
 clap = { workspace = true }
-clap_complete = { workspace = true }
-fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
-fedimint-eventlog = { workspace = true }
 fedimint-gateway-common = { workspace = true }
-fedimint-logging = { workspace = true }
 lightning-invoice = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true, features = ["log"] }
 
 [build-dependencies]
 fedimint-build = { workspace = true }

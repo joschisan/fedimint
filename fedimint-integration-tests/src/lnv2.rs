@@ -187,9 +187,7 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
         let invoice_json =
             gateway_cli(&env.gw2_addr, &["lightning", "create-invoice", "1000000"]).await?;
 
-        let invoice_str = invoice_json["invoice"]
-            .as_str()
-            .expect("invoice must be a string");
+        let invoice_str = invoice_json.as_str().expect("invoice must be a string");
 
         let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
 

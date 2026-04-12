@@ -19,7 +19,7 @@ use fedimint_core::util::SafeUrl;
 use fedimint_gateway_common::ChainSource;
 use fedimint_gateway_server::client::GatewayClientBuilder;
 use fedimint_gateway_server::config::DatabaseBackend;
-use fedimint_gateway_server::{Gateway, create_ldk_node};
+use fedimint_gateway_server::{AppState, create_ldk_node};
 use fedimint_logging::TracingSetup;
 use fedimint_server::core::{DynServerModuleInit, IServerModuleInit, ServerModuleInitRegistry};
 use fedimint_server_bitcoin_rpc::bitcoind::BitcoindClient;
@@ -188,7 +188,7 @@ impl Fixtures {
     }
 
     /// Creates a new Gateway that can be used for module tests.
-    pub async fn new_gateway(&self) -> Gateway {
+    pub async fn new_gateway(&self) -> AppState {
         // Use server_gens.iter() to match the alphabetical order used by the server
         // when assigning module instance IDs (BTreeMap iteration order)
         let module_kinds: Vec<_> = self
@@ -272,7 +272,7 @@ impl Fixtures {
         .expect("Failed to create LDK node");
         let node = Arc::new(node);
 
-        Gateway::builder(client_builder, gateway_db)
+        AppState::builder(client_builder, gateway_db)
             .listen(listen)
             .api_addr(address)
             .network(bitcoin::Network::Regtest)
