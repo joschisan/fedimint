@@ -159,12 +159,11 @@ pub struct FederationInfo {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct GatewayInfo {
-    pub version_hash: String,
-    pub federations: Vec<FederationInfo>,
-    pub lightning_info: LightningInfo,
-    pub gateway_state: String,
-    pub gateway_id: secp256k1::PublicKey,
-    pub api_addr: Option<SafeUrl>,
+    pub public_key: secp256k1::PublicKey,
+    pub alias: String,
+    pub network: String,
+    pub block_height: u64,
+    pub synced_to_chain: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

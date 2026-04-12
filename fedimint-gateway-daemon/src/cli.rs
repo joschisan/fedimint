@@ -9,20 +9,19 @@ use bitcoin::FeeRate;
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::task::TaskHandle;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
-use fedimint_core::{Amount, BitcoinAmountOrAll, fedimint_build_code_version_env};
+use fedimint_core::{Amount, BitcoinAmountOrAll};
 use fedimint_gateway_common::{
     ChannelOpenResponse, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
     ConfigPayload, ConnectFedPayload, CreateInvoiceForOperatorPayload, DepositAddressPayload,
     DepositAddressResponse, ExportInviteCodesResponse, FederationBalanceInfo, FederationInfo,
     GatewayBalances, GatewayFedConfig, GatewayInfo, InvoiceCreateResponse, InvoicePayResponse,
-    LightningInfo, ListChannelsResponse, ListFederationsResponse, ListPeersResponse,
-    ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse, OnchainReceiveResponse,
-    OnchainSendResponse, OpenChannelRequest, PayInvoiceForOperatorPayload, PeerConnectRequest,
-    PeerDisconnectRequest, Preimage, ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN,
-    ROUTE_FED_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
-    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE,
-    ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
-    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    ListChannelsResponse, ListFederationsResponse, ListPeersResponse, ListTransactionsPayload,
+    ListTransactionsResponse, MnemonicResponse, OnchainReceiveResponse, OnchainSendResponse,
+    OpenChannelRequest, PayInvoiceForOperatorPayload, PeerConnectRequest, PeerDisconnectRequest,
+    Preimage, ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
+    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND,
     ROUTE_MODULE_WALLET_RECEIVE, ReceiveEcashPayload, ReceiveEcashResponse, SendOnchainRequest,
     SpendEcashPayload, SpendEcashResponse,
@@ -93,36 +92,17 @@ fn router() -> Router<AppState> {
 /// Display high-level information about the Gateway
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn info(State(state): State<AppState>) -> Result<Json<GatewayInfo>, CliError> {
-    let federations = state
-        .federation_manager
-        .read()
-        .await
-        .federation_info_all_federations()
-        .await;
-
     let node_status = state.node.status();
-    let synced_to_chain = node_status.latest_lightning_wallet_sync_timestamp.is_some();
-    let block_height = u64::from(node_status.current_best_block.height);
-    let alias = match state.node.node_alias() {
-        Some(alias) => alias.to_string(),
-        None => format!("LDK Fedimint Gateway Node {}", state.node.node_id()),
-    };
-
-    let lightning_info = LightningInfo::Connected {
-        public_key: state.node.node_id(),
-        alias,
-        network: state.node.config().network.to_string(),
-        block_height,
-        synced_to_chain,
-    };
 
     Ok(Json(GatewayInfo {
-        federations,
-        version_hash: fedimint_build_code_version_env!().to_string(),
-        gateway_state: state.state.read().await.to_string(),
-        lightning_info,
-        gateway_id: state.gateway_id(),
-        api_addr: state.api_addr.clone(),
+        public_key: state.node.node_id(),
+        alias: state.node.node_alias().map_or_else(
+            || format!("LDK Fedimint Gateway Node {}", state.node.node_id()),
+            |a| a.to_string(),
+        ),
+        network: state.node.config().network.to_string(),
+        block_height: u64::from(node_status.current_best_block.height),
+        synced_to_chain: node_status.latest_lightning_wallet_sync_timestamp.is_some(),
     }))
 }
 
