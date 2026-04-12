@@ -222,7 +222,7 @@ fn main() -> anyhow::Result<()> {
             node: node.clone(),
             state: Arc::new(RwLock::new(GatewayState::Running)),
             client_factory,
-            gateway_db: gateway_db.clone(),
+            gateway_db,
             api_bind: opts.api_bind,
             cli_bind: opts.cli_bind,
             network: opts.network,
