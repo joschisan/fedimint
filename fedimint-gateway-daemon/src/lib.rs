@@ -29,7 +29,7 @@ use std::time::Duration;
 use anyhow::{Context as _, anyhow};
 use async_trait::async_trait;
 use bitcoin::hashes::{Hash, sha256};
-use bitcoin::{Network, OutPoint, secp256k1};
+use bitcoin::{Network, secp256k1};
 use client::GatewayClientFactory;
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::ClientHandleArc;
@@ -64,7 +64,7 @@ use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::RwLock;
 use tracing::{info_span, warn};
 pub use {ldk_node, lockable};
 
@@ -95,8 +95,6 @@ pub struct AppState {
     pub gateway_keypair: secp256k1::Keypair,
     pub api_addr: Option<SafeUrl>,
     pub outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
-    pub pending_channels:
-        Arc<RwLock<BTreeMap<UserChannelId, oneshot::Sender<anyhow::Result<OutPoint>>>>>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -766,19 +764,4 @@ pub fn derive_gateway_keypair(mnemonic: &Mnemonic) -> secp256k1::Keypair {
     let secret_key =
         secp256k1::SecretKey::from_slice(&secret_bytes).expect("32 bytes is a valid secret key");
     secp256k1::Keypair::from_secret_key(&secp256k1::Secp256k1::new(), &secret_key)
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct UserChannelId(pub ldk_node::UserChannelId);
-
-impl PartialOrd for UserChannelId {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for UserChannelId {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.0.cmp(&other.0.0)
-    }
 }

@@ -278,7 +278,6 @@ impl Fixtures {
             outbound_lightning_payment_lock_pool: Arc::new(
                 fedimint_gateway_daemon::lockable::LockPool::new(),
             ),
-            pending_channels: Arc::new(tokio::sync::RwLock::new(std::collections::BTreeMap::new())),
         }
     }
 

@@ -12,14 +12,14 @@ use fedimint_core::task::TaskHandle;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
 use fedimint_core::{Amount, BitcoinAmountOrAll};
 use fedimint_gateway_common::{
-    ChannelOpenResponse, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
-    ConfigPayload, ConnectFedPayload, CreateInvoiceForOperatorPayload, DepositAddressPayload,
-    DepositAddressResponse, ExportInviteCodesResponse, FederationBalanceInfo, FederationInfo,
-    GatewayBalances, GatewayFedConfig, GatewayInfo, InvoiceCreateResponse, InvoicePayResponse,
-    ListChannelsResponse, ListFederationsResponse, ListPeersResponse, ListTransactionsPayload,
-    ListTransactionsResponse, MnemonicResponse, OnchainReceiveResponse, OnchainSendResponse,
-    OpenChannelRequest, PayInvoiceForOperatorPayload, PeerConnectRequest, PeerDisconnectRequest,
-    Preimage, ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_INFO,
+    CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConfigPayload, ConnectFedPayload,
+    CreateInvoiceForOperatorPayload, DepositAddressPayload, DepositAddressResponse,
+    ExportInviteCodesResponse, FederationBalanceInfo, FederationInfo, GatewayBalances,
+    GatewayFedConfig, GatewayInfo, InvoiceCreateResponse, InvoicePayResponse, ListChannelsResponse,
+    ListFederationsResponse, ListPeersResponse, ListTransactionsPayload, ListTransactionsResponse,
+    MnemonicResponse, OnchainReceiveResponse, OnchainSendResponse, OpenChannelRequest,
+    PayInvoiceForOperatorPayload, PeerConnectRequest, PeerDisconnectRequest, Preimage,
+    ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
@@ -39,7 +39,7 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, info_span, instrument, warn};
 
-use crate::{AppState, UserChannelId, get_preimage_and_payment_hash};
+use crate::{AppState, get_preimage_and_payment_hash};
 
 /// Simple error type for CLI/admin endpoints.
 #[derive(Debug)]
@@ -213,51 +213,27 @@ async fn ldk_balances(State(state): State<AppState>) -> Result<Json<GatewayBalan
 async fn ldk_channel_open(
     State(state): State<AppState>,
     Json(payload): Json<OpenChannelRequest>,
-) -> Result<Json<ChannelOpenResponse>, CliError> {
-    info!(
-        target: LOG_GATEWAY,
-        pubkey = %payload.pubkey,
-        host = %payload.host,
-        amount = %payload.channel_size_sats,
-        "Opening Lightning channel...",
-    );
-
-    let push_amount_msats_or = if payload.push_amount_sats == 0 {
+) -> Result<Json<()>, CliError> {
+    let push_amount_msats = if payload.push_amount_sats == 0 {
         None
     } else {
         Some(payload.push_amount_sats * 1000)
     };
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<anyhow::Result<bitcoin::OutPoint>>();
+    state
+        .node
+        .open_announced_channel(
+            payload.pubkey,
+            SocketAddress::from_str(&payload.host)
+                .map_err(|e| CliError::internal(format!("Invalid address: {e}")))?,
+            payload.channel_size_sats,
+            push_amount_msats,
+            None,
+        )
+        .map_err(|e| CliError::internal(format!("Failed to open channel: {e}")))?;
 
-    {
-        let mut channels = state.pending_channels.write().await;
-        let user_channel_id = state
-            .node
-            .open_announced_channel(
-                payload.pubkey,
-                SocketAddress::from_str(&payload.host)
-                    .map_err(|e| CliError::internal(format!("Failed to connect to peer: {e}")))?,
-                payload.channel_size_sats,
-                push_amount_msats_or,
-                None,
-            )
-            .map_err(|e| CliError::internal(format!("Failed to open channel: {e}")))?;
-
-        channels.insert(UserChannelId(user_channel_id), tx);
-    }
-
-    match rx
-        .await
-        .map_err(|err| CliError::internal(format!("Failed to open channel: {err}")))?
-    {
-        Ok(outpoint) => {
-            let funding_txid = outpoint.txid;
-            info!(target: LOG_GATEWAY, txid = %funding_txid, "Initiated channel open");
-            Ok(Json(ChannelOpenResponse { txid: funding_txid }))
-        }
-        Err(err) => Err(CliError::internal(format!("Failed to open channel: {err}"))),
-    }
+    info!(target: LOG_GATEWAY, pubkey = %payload.pubkey, "Initiated channel open");
+    Ok(Json(()))
 }
 
 /// Closes all channels with a peer

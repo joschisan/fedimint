@@ -181,6 +181,7 @@ fn main() -> anyhow::Result<()> {
             .to_string();
 
         let mut node_builder = ldk_node::Builder::new();
+
         node_builder.set_network(opts.network);
         node_builder.set_node_alias("fedimint-gateway-daemon".to_string())?;
         node_builder.set_listening_addresses(vec![opts.ldk_bind.into()])?;
@@ -209,7 +210,9 @@ fn main() -> anyhow::Result<()> {
         info!(target: LOG_LIGHTNING, "Starting LDK Node...");
 
         let node = Arc::new(node_builder.build()?);
+
         let ldk_runtime = Arc::new(tokio::runtime::Runtime::new()?);
+
         node.start_with_runtime(ldk_runtime.clone())?;
 
         info!("Successfully started LDK Node");
@@ -234,7 +237,6 @@ fn main() -> anyhow::Result<()> {
             gateway_keypair,
             api_addr: opts.api_addr,
             outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
-            pending_channels: Arc::new(RwLock::new(BTreeMap::new())),
         };
 
         // 8. Load federation clients
@@ -315,57 +317,6 @@ async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
             ..
         } => {
             handle_lightning_payment(state, payment_hash.0, claimable_amount_msat).await;
-        }
-        ldk_node::Event::ChannelPending {
-            channel_id,
-            user_channel_id,
-            funding_txo,
-            ..
-        } => {
-            info!(
-                target: LOG_LIGHTNING,
-                %channel_id,
-                "LDK Channel is pending",
-            );
-            let mut channels = state.pending_channels.write().await;
-            if let Some(sender) =
-                channels.remove(&fedimint_gateway_daemon::UserChannelId(user_channel_id))
-            {
-                let _ = sender.send(Ok(funding_txo));
-            } else {
-                debug!(
-                    ?user_channel_id,
-                    "No channel pending channel open for user channel id",
-                );
-            }
-        }
-        ldk_node::Event::ChannelClosed {
-            channel_id,
-            user_channel_id,
-            reason,
-            ..
-        } => {
-            info!(
-                target: LOG_LIGHTNING,
-                %channel_id,
-                "LDK Channel is closed",
-            );
-            let mut channels = state.pending_channels.write().await;
-            if let Some(sender) =
-                channels.remove(&fedimint_gateway_daemon::UserChannelId(user_channel_id))
-            {
-                let reason = if let Some(reason) = reason {
-                    reason.to_string()
-                } else {
-                    "Channel has been closed".to_string()
-                };
-                let _ = sender.send(Err(anyhow::anyhow!(reason)));
-            } else {
-                debug!(
-                    ?user_channel_id,
-                    "No channel pending channel open for user channel id",
-                );
-            }
         }
         _ => {}
     }
