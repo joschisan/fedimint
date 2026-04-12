@@ -7,8 +7,8 @@ use anyhow::anyhow;
 use axum::Router;
 use axum::extract::{Json, Path, Query, State};
 use axum::routing::{get, post};
+use bitcoin::FeeRate;
 use bitcoin::hashes::sha256;
-use bitcoin::{Address, FeeRate};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::module::CommonModuleInit;
@@ -22,18 +22,14 @@ use fedimint_gateway_common::{
     InvoicePayResponse, LightningInfo, ListChannelsResponse, ListFederationsResponse,
     ListPeersResponse, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
     OnchainReceiveResponse, OnchainSendResponse, OpenChannelRequest, PayInvoiceForOperatorPayload,
-    PaymentFee, PeerConnectRequest, PeerDisconnectRequest, PeginFromOnchainPayload,
-    PeginFromOnchainResponse, Preimage, ROUTE_BALANCES, ROUTE_ECASH_PEGIN,
-    ROUTE_ECASH_PEGIN_FROM_ONCHAIN, ROUTE_ECASH_PEGOUT, ROUTE_ECASH_PEGOUT_TO_ONCHAIN,
-    ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN,
-    ROUTE_FED_LIST, ROUTE_FED_SET_FEES, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
-    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE,
-    ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
-    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    PaymentFee, PeerConnectRequest, PeerDisconnectRequest, Preimage, ROUTE_FED_CONFIG,
+    ROUTE_FED_INVITE, ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_FED_SET_FEES, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
+    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND,
     ROUTE_MODULE_WALLET_RECEIVE, ROUTE_STOP, ReceiveEcashPayload, ReceiveEcashResponse,
     SendOnchainRequest, SetFeesPayload, SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT,
-    WithdrawPayload, WithdrawResponse, WithdrawToOnchainPayload,
 };
 use fedimint_lnurl::LnurlResponse;
 use fedimint_lnv2_common::endpoint_constants::{
@@ -54,7 +50,7 @@ use tracing::{debug, error, info, info_span, instrument, warn};
 
 use crate::db::GatewayDbtxNcExt as _;
 use crate::error::{CliError, FederationNotConnected, LnurlError};
-use crate::{AppState, GatewayState, UserChannelId, get_preimage_and_payment_hash, withdraw_v2};
+use crate::{AppState, GatewayState, UserChannelId, get_preimage_and_payment_hash};
 
 /// Creates two webservers:
 /// - Public: binds to `0.0.0.0:<port>` for LNv2 protocol routes
@@ -134,7 +130,6 @@ fn admin_routes() -> Router<AppState> {
     Router::new()
         // Top-level
         .route(ROUTE_INFO, post(info))
-        .route(ROUTE_BALANCES, post(balances))
         .route(ROUTE_STOP, post(stop))
         .route(ROUTE_MNEMONIC, post(mnemonic))
         // LDK node management
@@ -150,16 +145,6 @@ fn admin_routes() -> Router<AppState> {
         .route(ROUTE_LDK_PEER_DISCONNECT, post(ldk_peer_disconnect))
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
         .route(ROUTE_LDK_TRANSACTION_LIST, post(ldk_transaction_list))
-        // Ecash / peg-in / peg-out
-        .route(ROUTE_ECASH_PEGIN, post(ecash_pegin))
-        .route(
-            ROUTE_ECASH_PEGIN_FROM_ONCHAIN,
-            post(ecash_pegin_from_onchain),
-        )
-        .route(ROUTE_ECASH_PEGOUT, post(ecash_pegout))
-        .route(ROUTE_ECASH_PEGOUT_TO_ONCHAIN, post(ecash_pegout_to_onchain))
-        .route(ROUTE_ECASH_SEND, post(ecash_send))
-        .route(ROUTE_ECASH_RECEIVE, post(ecash_receive))
         // Federation management
         .route(ROUTE_FED_JOIN, post(federation_join))
         .route(ROUTE_FED_LIST, post(federation_list))
@@ -284,46 +269,6 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse
     };
 
     Ok(Json(mnemonic_response))
-}
-
-/// Returns the combined ecash, lightning, and onchain balances
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn balances(State(state): State<AppState>) -> Result<Json<GatewayBalances>, CliError> {
-    let dbtx = state.gateway_db.begin_transaction_nc().await;
-    let federation_infos = state
-        .federation_manager
-        .read()
-        .await
-        .federation_info_all_federations(dbtx)
-        .await;
-
-    let ecash_balances: Vec<FederationBalanceInfo> = federation_infos
-        .iter()
-        .map(|federation_info| FederationBalanceInfo {
-            federation_id: federation_info.federation_id,
-            ecash_balance_msats: Amount {
-                msats: federation_info.balance_msat.msats,
-            },
-        })
-        .collect();
-
-    let node_balances = state.node.list_balances();
-    let total_inbound_liquidity_msats: u64 = state
-        .node
-        .list_channels()
-        .iter()
-        .filter(|chan| chan.is_usable)
-        .map(|channel| channel.inbound_capacity_msat)
-        .sum();
-
-    let balances = GatewayBalances {
-        onchain_balance_sats: node_balances.total_onchain_balance_sats,
-        lightning_balance_msats: node_balances.total_lightning_balance_sats * 1000,
-        ecash_balances,
-        inbound_lightning_liquidity_msats: total_inbound_liquidity_msats,
-    };
-
-    Ok(Json(balances))
 }
 
 // ---------------------------------------------------------------------------
@@ -1074,241 +1019,6 @@ async fn module_wallet_receive(
     Ok(Json(DepositAddressResponse {
         address: address.to_string(),
     }))
-}
-
-// ---------------------------------------------------------------------------
-// Ecash / peg-in / peg-out handlers
-// ---------------------------------------------------------------------------
-
-/// Generate a deposit address for pegging in to a federation
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
-async fn ecash_pegin(
-    State(state): State<AppState>,
-    Json(payload): Json<DepositAddressPayload>,
-) -> Result<Json<DepositAddressResponse>, CliError> {
-    let client = state
-        .select_client(payload.federation_id)
-        .await
-        .map_err(|e| CliError::bad_request(e))?;
-
-    let wallet_module = client
-        .value()
-        .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| CliError::internal("No wallet module found"))?;
-
-    let address = wallet_module.receive().await;
-    Ok(Json(DepositAddressResponse {
-        address: address.to_string(),
-    }))
-}
-
-/// Peg in from the gateway's onchain wallet into a federation
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
-async fn ecash_pegin_from_onchain(
-    State(state): State<AppState>,
-    Json(payload): Json<PeginFromOnchainPayload>,
-) -> Result<Json<PeginFromOnchainResponse>, CliError> {
-    // Inline handle_address_msg: get deposit address for the federation
-    let client = state
-        .select_client(payload.federation_id)
-        .await
-        .map_err(|e| CliError::bad_request(e))?;
-
-    let wallet_module = client
-        .value()
-        .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| CliError::internal("No wallet module found"))?;
-
-    let address: Address = wallet_module.receive().await;
-
-    // Inline handle_send_onchain_msg: send from LDK onchain wallet to that address
-    let send_onchain = SendOnchainRequest {
-        address: address.into_unchecked(),
-        amount: payload.amount,
-        fee_rate_sats_per_vbyte: payload.fee_rate_sats_per_vbyte,
-    };
-
-    let onchain = state.node.onchain_payment();
-    let retain_reserves = false;
-    let checked_address = send_onchain.address.clone().assume_checked();
-    let txid = match send_onchain.amount {
-        BitcoinAmountOrAll::All => onchain
-            .send_all_to_address(
-                &checked_address,
-                retain_reserves,
-                FeeRate::from_sat_per_vb(send_onchain.fee_rate_sats_per_vbyte),
-            )
-            .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
-        BitcoinAmountOrAll::Amount(amount_sats) => onchain
-            .send_to_address(
-                &checked_address,
-                amount_sats.to_sat(),
-                FeeRate::from_sat_per_vb(send_onchain.fee_rate_sats_per_vbyte),
-            )
-            .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
-    };
-    info!(onchain_request = %send_onchain, txid = %txid, "Sent onchain transaction");
-
-    Ok(Json(PeginFromOnchainResponse { txid }))
-}
-
-/// Withdraw from a federation to an on-chain address
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
-async fn ecash_pegout(
-    State(state): State<AppState>,
-    Json(payload): Json<WithdrawPayload>,
-) -> Result<Json<WithdrawResponse>, CliError> {
-    let WithdrawPayload {
-        amount,
-        address,
-        federation_id,
-        quoted_fees: _,
-    } = payload;
-
-    let address_network = fedimint_core::get_network_for_address(&address);
-    let gateway_network = state.network;
-    let Ok(address) = address.require_network(gateway_network) else {
-        return Err(CliError::bad_request(format!(
-            "Gateway is running on network {gateway_network}, but provided withdraw address is for network {address_network}"
-        )));
-    };
-
-    let client = state
-        .select_client(federation_id)
-        .await
-        .map_err(|e| CliError::bad_request(e))?;
-
-    let wallet_module = client
-        .value()
-        .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| CliError::internal("No wallet module found"))?;
-
-    let response = withdraw_v2(client.value(), &wallet_module, &address, amount).await?;
-    Ok(Json(response))
-}
-
-/// Withdraw from a federation to the gateway's onchain wallet
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
-async fn ecash_pegout_to_onchain(
-    State(state): State<AppState>,
-    Json(payload): Json<WithdrawToOnchainPayload>,
-) -> Result<Json<WithdrawResponse>, CliError> {
-    // Inline handle_get_ln_onchain_address_msg: get LDK onchain address
-    let address = state
-        .node
-        .onchain_payment()
-        .new_address()
-        .map_err(|e| CliError::internal(format!("Failed to get onchain address: {e}")))?;
-
-    // Inline handle_withdraw_msg: withdraw from federation to that address
-    let withdraw_payload = WithdrawPayload {
-        address: address.into_unchecked(),
-        federation_id: payload.federation_id,
-        amount: payload.amount,
-        quoted_fees: None,
-    };
-
-    let WithdrawPayload {
-        amount,
-        address,
-        federation_id,
-        quoted_fees: _,
-    } = withdraw_payload;
-
-    let address_network = fedimint_core::get_network_for_address(&address);
-    let gateway_network = state.network;
-    let Ok(address) = address.require_network(gateway_network) else {
-        return Err(CliError::bad_request(format!(
-            "Gateway is running on network {gateway_network}, but provided withdraw address is for network {address_network}"
-        )));
-    };
-
-    let client = state
-        .select_client(federation_id)
-        .await
-        .map_err(|e| CliError::bad_request(e))?;
-
-    let wallet_module = client
-        .value()
-        .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| CliError::internal("No wallet module found"))?;
-
-    let response = withdraw_v2(client.value(), &wallet_module, &address, amount).await?;
-    Ok(Json(response))
-}
-
-/// Spend ecash from a federation
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn ecash_send(
-    State(state): State<AppState>,
-    Json(payload): Json<SpendEcashPayload>,
-) -> Result<Json<SpendEcashResponse>, CliError> {
-    let client = state
-        .select_client(payload.federation_id)
-        .await
-        .map_err(|e| CliError::bad_request(e))?
-        .into_value();
-
-    let mint_module = client
-        .get_first_module::<MintClientModule>()
-        .map_err(|e| CliError::internal(e))?;
-    let ecash = mint_module
-        .send(payload.amount, serde_json::Value::Null)
-        .await
-        .map_err(|e| CliError::internal(e))?;
-
-    let response = SpendEcashResponse {
-        notes: base32::encode_prefixed(FEDIMINT_PREFIX, &ecash),
-    };
-    Ok(Json(response))
-}
-
-/// Receive ecash into the gateway
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn ecash_receive(
-    State(state): State<AppState>,
-    Json(payload): Json<ReceiveEcashPayload>,
-) -> Result<Json<ReceiveEcashResponse>, CliError> {
-    let ecash: fedimint_mintv2_client::ECash =
-        base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes)
-            .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
-
-    let federation_id_prefix = ecash
-        .mint()
-        .map(|id| id.to_prefix())
-        .ok_or_else(|| CliError::bad_request("ECash does not contain federation id"))?;
-
-    let client = state
-        .federation_manager
-        .read()
-        .await
-        .get_client_for_federation_id_prefix(federation_id_prefix)
-        .ok_or(CliError::bad_request(FederationNotConnected {
-            federation_id_prefix,
-        }))?;
-
-    let mint = client
-        .value()
-        .get_first_module::<MintClientModule>()
-        .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
-    let amount = ecash.amount();
-
-    let operation_id = mint
-        .receive(ecash, serde_json::Value::Null)
-        .await
-        .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
-
-    if payload.wait {
-        match mint.await_final_receive_operation_state(operation_id).await {
-            fedimint_mintv2_client::FinalReceiveOperationState::Success => {}
-            fedimint_mintv2_client::FinalReceiveOperationState::Rejected => {
-                return Err(CliError::internal("ECash receive was rejected"));
-            }
-        }
-    }
-
-    let response = ReceiveEcashResponse { amount };
-    Ok(Json(response))
 }
 
 // ---------------------------------------------------------------------------

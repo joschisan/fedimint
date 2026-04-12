@@ -3403,7 +3403,6 @@ dependencies = [
  "fedimint-client-module",
  "fedimint-connectors",
  "fedimint-core",
- "fedimint-cursed-redb",
  "fedimint-derive-secret",
  "fedimint-dummy-client",
  "fedimint-dummy-common",

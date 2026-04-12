@@ -31,7 +31,6 @@ fn main() -> Result<(), anyhow::Error> {
         let gatewayd = AppState::new_with_default_modules().await?;
         let shutdown_receiver = gatewayd.clone().run(runtime.clone()).await?;
         shutdown_receiver.await;
-        gatewayd.unannounce_from_all_federations().await;
         info!(target: LOG_GATEWAY, "Gatewayd exiting...");
         Ok(())
     })

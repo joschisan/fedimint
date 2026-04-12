@@ -33,11 +33,11 @@ use std::time::Duration;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bitcoin::hashes::{Hash, sha256};
-use bitcoin::{Address, Network, OutPoint, secp256k1};
+use bitcoin::{Network, OutPoint, secp256k1};
 use clap::Parser;
 use client::GatewayClientBuilder;
+use config::GatewayOpts;
 pub use config::GatewayParameters;
-use config::{DatabaseBackend, GatewayOpts};
 use envs::FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV;
 use error::FederationNotConnected;
 use federation_manager::FederationManager;
@@ -58,10 +58,10 @@ use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_core::task::{TaskGroup, TaskShutdownToken, block_in_place};
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned};
-use fedimint_core::{Amount, BitcoinAmountOrAll, crit, fedimint_build_code_version_env};
+use fedimint_core::{Amount, crit, fedimint_build_code_version_env};
 use fedimint_gateway_common::{
     ChainSource, InterceptPaymentRequest, LightningContext, LightningRpcError, PaymentAction,
-    PaymentFee, Preimage, RegisteredProtocol, V1_API_ENDPOINT, WithdrawResponse,
+    PaymentFee, Preimage, RegisteredProtocol, V1_API_ENDPOINT,
 };
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -95,7 +95,6 @@ use crate::rpc::run_webserver;
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
 
 pub type Result<T> = std::result::Result<T, CliError>;
-pub type AdminResult<T> = std::result::Result<T, CliError>;
 
 /// Name of the gateway's database that is used for metadata and configuration
 /// storage.
@@ -256,65 +255,6 @@ impl std::fmt::Debug for AppState {
     }
 }
 
-/// Executes a withdrawal using the walletv2 module
-pub(crate) async fn withdraw_v2(
-    client: &ClientHandleArc,
-    wallet_module: &fedimint_walletv2_client::WalletClientModule,
-    address: &Address,
-    amount: BitcoinAmountOrAll,
-) -> AdminResult<WithdrawResponse> {
-    let fee = wallet_module
-        .send_fee()
-        .await
-        .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?;
-
-    let withdraw_amount = match amount {
-        BitcoinAmountOrAll::All => {
-            let balance = bitcoin::Amount::from_sat(
-                client
-                    .get_balance_for_btc()
-                    .await
-                    .map_err(|err| {
-                        CliError::internal(format!(
-                            "Balance not available: {}",
-                            err.fmt_compact_anyhow()
-                        ))
-                    })?
-                    .msats
-                    / 1000,
-            );
-            balance.checked_sub(fee).ok_or_else(|| {
-                CliError::internal(format!("Insufficient funds. Balance: {balance} Fee: {fee}"))
-            })?
-        }
-        BitcoinAmountOrAll::Amount(a) => a,
-    };
-
-    let operation_id = wallet_module
-        .send(address.as_unchecked().clone(), withdraw_amount, Some(fee))
-        .await
-        .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?;
-
-    let result = wallet_module
-        .await_final_send_operation_state(operation_id)
-        .await;
-
-    let fees = fee;
-
-    match result {
-        fedimint_walletv2_client::FinalSendOperationState::Success(txid) => {
-            info!(target: LOG_GATEWAY, amount = %withdraw_amount, address = %address, "Sent funds via walletv2");
-            Ok(WithdrawResponse { txid, fees })
-        }
-        fedimint_walletv2_client::FinalSendOperationState::Aborted => {
-            Err(CliError::internal("Withdrawal transaction was aborted"))
-        }
-        fedimint_walletv2_client::FinalSendOperationState::Failure => {
-            Err(CliError::internal("Withdrawal failed"))
-        }
-    }
-}
-
 impl AppState {
     /// Returns a bitcoind client using the credentials that were passed in from
     /// the environment variables.
@@ -351,22 +291,10 @@ impl AppState {
         let decoders = ModuleDecoderRegistry::default();
 
         let db_path = opts.data_dir.join(DB_FILE);
-        let gateway_db = match opts.db_backend {
-            DatabaseBackend::RocksDb => {
-                debug!(target: LOG_GATEWAY, "Using RocksDB database backend");
-                Database::new(
-                    fedimint_rocksdb::RocksDb::build(db_path).open().await?,
-                    decoders,
-                )
-            }
-            DatabaseBackend::CursedRedb => {
-                debug!(target: LOG_GATEWAY, "Using CursedRedb database backend");
-                Database::new(
-                    fedimint_cursed_redb::MemAndRedb::new(db_path).await?,
-                    decoders,
-                )
-            }
-        };
+        let gateway_db = Database::new(
+            fedimint_rocksdb::RocksDb::build(db_path).open().await?,
+            decoders,
+        );
 
         // For legacy reasons, we use the http id for the unique identifier of the
         // bitcoind watch-only wallet
@@ -396,8 +324,7 @@ impl AppState {
         registry.attach(MintClientInit);
         registry.attach(fedimint_walletv2_client::WalletClientInit);
 
-        let client_builder =
-            GatewayClientBuilder::new(opts.data_dir.clone(), registry, opts.db_backend).await?;
+        let client_builder = GatewayClientBuilder::new(opts.data_dir.clone(), registry).await?;
 
         if Self::load_mnemonic(&gateway_db).await.is_none() {
             let mnemonic = if let Ok(words) = std::env::var(FM_GATEWAY_MNEMONIC_ENV) {
@@ -774,7 +701,7 @@ impl AppState {
     /// Reads the connected federation client configs from the Gateway's
     /// database and reconstructs the clients necessary for interacting with
     /// connection federations.
-    async fn load_clients(&self) -> AdminResult<()> {
+    async fn load_clients(&self) -> Result<()> {
         let mut federation_manager = self.federation_manager.write().await;
 
         let configs = {
@@ -818,7 +745,7 @@ impl AppState {
     pub(crate) async fn check_federation_network(
         client: &ClientHandleArc,
         network: Network,
-    ) -> AdminResult<()> {
+    ) -> Result<()> {
         let federation_id = client.federation_id();
         let config = client.config().await;
 
@@ -870,13 +797,6 @@ impl AppState {
             lightning_network: self.node.config().network,
             supports_private_payments: false,
         })
-    }
-
-    /// Iterates through all of the federations the gateway is registered with
-    /// and requests to remove the registration record.
-    /// This is a no-op for LDK since it does not use LNv1 registration.
-    pub async fn unannounce_from_all_federations(&self) {
-        // LDK does not use LNv1 gateway registration
     }
 }
 

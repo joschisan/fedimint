@@ -18,7 +18,6 @@ use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_common::ChainSource;
 use fedimint_gateway_daemon::client::GatewayClientBuilder;
-use fedimint_gateway_daemon::config::DatabaseBackend;
 use fedimint_gateway_daemon::{AppState, create_ldk_node};
 use fedimint_logging::TracingSetup;
 use fedimint_server::core::{DynServerModuleInit, IServerModuleInit, ServerModuleInitRegistry};
@@ -226,7 +225,7 @@ impl Fixtures {
 
         // Create federation client builder for the gateway
         let client_builder: GatewayClientBuilder =
-            GatewayClientBuilder::new(path.clone(), registry, DatabaseBackend::RocksDb)
+            GatewayClientBuilder::new(path.clone(), registry)
                 .await
                 .expect("Failed to initialize gateway");
 

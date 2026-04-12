@@ -12,7 +12,7 @@ use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::LOG_GATEWAY;
 use tracing::{info, warn};
 
-use crate::AdminResult;
+use crate::Result;
 use crate::db::GatewayDbtxNcExt as _;
 use crate::error::CliError;
 
@@ -49,7 +49,7 @@ impl FederationManager {
 
     /// Waits for ongoing incoming LNv1 and LNv2 payments to complete before
     /// returning.
-    pub async fn wait_for_incoming_payments(&self) -> AdminResult<()> {
+    pub async fn wait_for_incoming_payments(&self) -> Result<()> {
         for client in self.clients.values() {
             let active_operations = client.value().get_active_operations().await;
             let operation_log = client.value().operation_log();
@@ -133,7 +133,7 @@ impl FederationManager {
     pub async fn get_federation_config(
         &self,
         federation_id: FederationId,
-    ) -> AdminResult<JsonClientConfig> {
+    ) -> Result<JsonClientConfig> {
         let client = self.clients.get(&federation_id).ok_or_else(|| {
             CliError::bad_request(format!(
                 "No federation available for prefix {}",
@@ -187,7 +187,7 @@ impl FederationManager {
         self.next_index.store(next_index, Ordering::SeqCst);
     }
 
-    pub fn pop_next_index(&self) -> AdminResult<u64> {
+    pub fn pop_next_index(&self) -> Result<u64> {
         let next_index = self.next_index.fetch_add(1, Ordering::Relaxed);
 
         // Check for overflow.

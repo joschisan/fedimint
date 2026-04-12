@@ -16,16 +16,14 @@ use fedimint_derive_secret::DerivableSecret;
 use fedimint_gateway_common::FederationConfig;
 use fedimint_gwv2_client::GatewayClientInitV2;
 
-use crate::config::DatabaseBackend;
 use crate::db::GatewayDbExt as _;
 use crate::error::CliError;
-use crate::{AdminResult, AppState};
+use crate::{AppState, Result};
 
 #[derive(Debug, Clone)]
 pub struct GatewayClientBuilder {
     work_dir: PathBuf,
     registry: ClientModuleInitRegistry,
-    db_backend: DatabaseBackend,
     connectors: ConnectorRegistry,
 }
 
@@ -33,13 +31,11 @@ impl GatewayClientBuilder {
     pub async fn new(
         work_dir: PathBuf,
         registry: ClientModuleInitRegistry,
-        db_backend: DatabaseBackend,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             connectors: ConnectorRegistry::build_from_client_env()?.bind().await?,
             work_dir,
             registry,
-            db_backend,
         })
     }
 
@@ -49,7 +45,7 @@ impl GatewayClientBuilder {
 
     /// Reads a plain root secret from a database to construct a database.
     /// Only used for "legacy" federations before v0.5.0
-    async fn client_plainrootsecret(&self, db: &Database) -> AdminResult<DerivableSecret> {
+    async fn client_plainrootsecret(&self, db: &Database) -> Result<DerivableSecret> {
         let client_secret = Client::load_decodable_client_secret::<[u8; 64]>(db)
             .await
             .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
@@ -62,7 +58,7 @@ impl GatewayClientBuilder {
         &self,
         federation_config: &FederationConfig,
         gateway: Arc<AppState>,
-    ) -> AdminResult<ClientBuilder> {
+    ) -> Result<ClientBuilder> {
         let FederationConfig {
             federation_index: _,
             ..
@@ -92,7 +88,7 @@ impl GatewayClientBuilder {
         config: FederationConfig,
         gateway: Arc<AppState>,
         mnemonic: &Mnemonic,
-    ) -> AdminResult<()> {
+    ) -> Result<()> {
         let federation_id = config.invite_code.federation_id();
         let db = gateway.gateway_db.get_client_database(&federation_id);
         let client_builder = self.create_client_builder(&config, gateway.clone()).await?;
@@ -120,27 +116,17 @@ impl GatewayClientBuilder {
         config: FederationConfig,
         gateway: Arc<AppState>,
         mnemonic: &Mnemonic,
-    ) -> AdminResult<fedimint_client::ClientHandleArc> {
+    ) -> Result<fedimint_client::ClientHandleArc> {
         let invite_code = config.invite_code.clone();
         let federation_id = invite_code.federation_id();
         let db_path = self.work_dir.join(format!("{federation_id}.db"));
 
         let (db, root_secret) = if db_path.exists() {
-            let db = match self.db_backend {
-                DatabaseBackend::RocksDb => {
-                    let rocksdb = fedimint_rocksdb::RocksDb::build(db_path.clone())
-                        .open()
-                        .await
-                        .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
-                    Database::new(rocksdb, ModuleDecoderRegistry::default())
-                }
-                DatabaseBackend::CursedRedb => {
-                    let cursed_redb = fedimint_cursed_redb::MemAndRedb::new(db_path.clone())
-                        .await
-                        .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
-                    Database::new(cursed_redb, ModuleDecoderRegistry::default())
-                }
-            };
+            let rocksdb = fedimint_rocksdb::RocksDb::build(db_path.clone())
+                .open()
+                .await
+                .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
+            let db = Database::new(rocksdb, ModuleDecoderRegistry::default());
             let root_secret = RootSecret::Custom(self.client_plainrootsecret(&db).await?);
             (db, root_secret)
         } else {
@@ -173,7 +159,7 @@ impl GatewayClientBuilder {
 
     /// Verifies that the saved `ClientConfig` contains the expected
     /// federation's config.
-    async fn verify_client_config(db: &Database, federation_id: FederationId) -> AdminResult<()> {
+    async fn verify_client_config(db: &Database, federation_id: FederationId) -> Result<()> {
         let mut dbtx = db.begin_transaction_nc().await;
         if let Some(config) = dbtx.get_value(&ClientConfigKey).await
             && config.calculate_federation_id() != federation_id

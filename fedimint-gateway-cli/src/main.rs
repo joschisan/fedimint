@@ -31,8 +31,6 @@ struct Cli {
 enum Commands {
     /// Display gateway info
     Info,
-    /// Display gateway balances
-    Balances,
     /// Shutdown the gateway
     Stop,
     /// Display mnemonic seed words
@@ -255,7 +253,6 @@ fn main() -> Result<()> {
 
     let result = match cli.command {
         Commands::Info => request(addr, ROUTE_INFO, ())?,
-        Commands::Balances => request(addr, ROUTE_BALANCES, ())?,
         Commands::Stop => request(addr, ROUTE_STOP, ())?,
         Commands::Mnemonic => request(addr, ROUTE_MNEMONIC, ())?,
         Commands::Ldk(cmd) => match cmd {
@@ -368,7 +365,6 @@ fn main() -> Result<()> {
                 ROUTE_FED_JOIN,
                 ConnectFedPayload {
                     invite_code,
-                    use_tor: None,
                     recover,
                 },
             )?,
