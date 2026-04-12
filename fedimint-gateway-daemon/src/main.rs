@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use fedimint_core::fedimint_build_code_version_env;
 use fedimint_core::util::handle_version_hash_command;
-use fedimint_gateway_server::AppState;
+use fedimint_gateway_daemon::AppState;
 use fedimint_logging::{LOG_GATEWAY, TracingSetup};
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
 use tikv_jemallocator::Jemalloc;

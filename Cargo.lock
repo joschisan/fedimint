@@ -3345,7 +3345,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-gateway-client"
+name = "fedimint-gateway-cli"
 version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
@@ -3381,7 +3381,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-gateway-server"
+name = "fedimint-gateway-daemon"
 version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
@@ -4501,7 +4501,7 @@ dependencies = [
  "fedimint-connectors",
  "fedimint-core",
  "fedimint-gateway-common",
- "fedimint-gateway-server",
+ "fedimint-gateway-daemon",
  "fedimint-lightning",
  "fedimint-ln-common",
  "fedimint-logging",

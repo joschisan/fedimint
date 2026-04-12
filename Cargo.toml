@@ -49,9 +49,9 @@ members = [
     "fedimintd",
     "fedimintd-envs",
     "fuzz",
-    "gateway/fedimint-gateway-client",
-    "gateway/fedimint-gateway-common",
-    "gateway/fedimint-gateway-server",
+    "fedimint-gateway-cli",
+    "fedimint-gateway-common",
+    "fedimint-gateway-daemon",
     "gateway/fedimint-gateway-server-db",
     "gateway/fedimint-lightning",
     "modules/fedimint-dummy-client",
@@ -195,8 +195,8 @@ fedimint-dummy-common = { path = "./modules/fedimint-dummy-common", version = "=
 fedimint-dummy-server = { path = "./modules/fedimint-dummy-server", version = "=0.11.0-alpha" }
 fedimint-empty-common = { path = "./modules/fedimint-empty-common", version = "=0.11.0-alpha" }
 fedimint-eventlog = { path = "./fedimint-eventlog", version = "=0.11.0-alpha" }
-fedimint-gateway-common = { package = "fedimint-gateway-common", path = "./gateway/fedimint-gateway-common", version = "=0.11.0-alpha" }
-fedimint-gateway-server = { package = "fedimint-gateway-server", path = "./gateway/fedimint-gateway-server", version = "=0.11.0-alpha" }
+fedimint-gateway-common = { path = "./fedimint-gateway-common", version = "=0.11.0-alpha" }
+fedimint-gateway-daemon = { path = "./fedimint-gateway-daemon", version = "=0.11.0-alpha" }
 fedimint-gateway-server-db = { package = "fedimint-gateway-server-db", path = "./gateway/fedimint-gateway-server-db", version = "=0.11.0-alpha" }
 fedimint-gw-client = { path = "./modules/fedimint-gw-client", version = "=0.11.0-alpha" }
 fedimint-gwv2-client = { path = "./modules/fedimint-gwv2-client", version = "=0.11.0-alpha" }

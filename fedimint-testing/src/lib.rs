@@ -12,5 +12,5 @@ pub mod btc;
 pub mod federation;
 pub mod fixtures;
 pub mod ln;
-pub use fedimint_gateway_server::AppState;
+pub use fedimint_gateway_daemon::AppState;
 pub use fedimint_testing_core::{db, envs};

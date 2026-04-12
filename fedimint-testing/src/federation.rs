@@ -19,7 +19,7 @@ use fedimint_core::module::{ApiAuth, ApiRequestErased};
 use fedimint_core::net::peers::IP2PConnections;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::{TaskGroup, block_in_place, sleep_in_test};
-use fedimint_gateway_server::AppState;
+use fedimint_gateway_daemon::AppState;
 use fedimint_logging::LOG_TEST;
 use fedimint_rocksdb::RocksDb;
 use fedimint_server::config::ServerConfig;

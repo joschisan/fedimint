@@ -12,7 +12,7 @@ version = { workspace = true }
 rustc-args = ["--cfg", "tokio_unstable"]
 
 [features]
-tor = ["fedimint-gateway-server/tor", "fedimint-gateway-common/tor"]
+tor = ["fedimint-gateway-daemon/tor", "fedimint-gateway-common/tor"]
 
 [lib]
 name = "fedimint_testing"
@@ -34,7 +34,7 @@ fedimint-client-module = { workspace = true }
 fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-gateway-common = { workspace = true }
-fedimint-gateway-server = { workspace = true }
+fedimint-gateway-daemon = { workspace = true }
 fedimint-lightning = { workspace = true }
 fedimint-ln-common = { workspace = true }
 fedimint-logging = { workspace = true }

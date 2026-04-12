@@ -4,7 +4,7 @@ edition = { workspace = true }
 homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
-name = "fedimint-gateway-client"
+name = "fedimint-gateway-cli"
 readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
