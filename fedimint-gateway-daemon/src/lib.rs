@@ -19,12 +19,9 @@ pub mod cli;
 pub mod client;
 pub mod db;
 pub mod error;
-
-// Re-exports for test fixtures
-pub use {ldk_node, lockable};
-pub mod federation_manager;
 pub mod public;
 
+// Re-exports for test fixtures
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -36,21 +33,22 @@ use bitcoin::hashes::{Hash, sha256};
 use bitcoin::{Network, OutPoint, secp256k1};
 use client::GatewayClientFactory;
 use error::FederationNotConnected;
-use federation_manager::FederationManager;
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::ClientHandleArc;
 use fedimint_client_module::secret::RootSecretStrategy;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::CommonModuleInit;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_core::time::duration_since_epoch;
-use fedimint_core::util::{FmtCompact, SafeUrl, Spanned};
-use fedimint_core::{Amount, crit};
+use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned};
+use fedimint_core::{Amount, PeerId, crit};
 use fedimint_gateway_common::{
-    LightningContext, LightningRpcError, PaymentAction, PaymentFee, Preimage, V1_API_ENDPOINT,
+    FederationInfo, LightningContext, LightningRpcError, PaymentAction, PaymentFee, Preimage,
+    V1_API_ENDPOINT,
 };
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -70,6 +68,7 @@ use lightning_invoice::{
 };
 use tokio::sync::{RwLock, oneshot};
 use tracing::{info_span, warn};
+pub use {ldk_node, lockable};
 
 use crate::db::{
     RegisteredIncomingContract as DbRegisteredIncomingContract, RegisteredIncomingContractKey,
@@ -89,7 +88,7 @@ pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 
 #[derive(Clone)]
 pub struct AppState {
-    pub federation_manager: Arc<RwLock<FederationManager>>,
+    pub clients: Arc<RwLock<BTreeMap<FederationId, Spanned<ClientHandleArc>>>>,
     pub node: Arc<ldk_node::Node>,
     pub client_factory: GatewayClientFactory,
     pub gateway_db: Database,
@@ -98,7 +97,6 @@ pub struct AppState {
     pub network: Network,
     pub routing_fees: PaymentFee,
     pub transaction_fees: PaymentFee,
-    /// Optional public API URL + gateway keypair for federation registration.
     pub gateway_keypair: secp256k1::Keypair,
     pub api_addr: Option<SafeUrl>,
     pub outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
@@ -109,7 +107,6 @@ pub struct AppState {
 impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppState")
-            .field("federation_manager", &self.federation_manager)
             .field("gateway_db", &self.gateway_db)
             .field("api_bind", &self.api_bind)
             .field("cli_bind", &self.cli_bind)
@@ -140,10 +137,10 @@ impl AppState {
         &self,
         federation_id: FederationId,
     ) -> std::result::Result<Spanned<ClientHandleArc>, FederationNotConnected> {
-        self.federation_manager
+        self.clients
             .read()
             .await
-            .client(&federation_id)
+            .get(&federation_id)
             .cloned()
             .ok_or(FederationNotConnected {
                 federation_id_prefix: federation_id.to_prefix(),
@@ -152,7 +149,7 @@ impl AppState {
 
     /// Load all persisted federation clients on startup.
     pub async fn load_clients(&self) -> Result<()> {
-        let mut federation_manager = self.federation_manager.write().await;
+        let mut clients = self.clients.write().await;
 
         let federations = self.client_factory.list_federations().await;
 
@@ -162,7 +159,8 @@ impl AppState {
             match self.client_factory.load(&federation_id, gateway).await {
                 Ok(Some(client)) => {
                     let spanned = Spanned::new(span, async { client }).await;
-                    federation_manager.add_client(spanned);
+                    let fid = spanned.borrow().with_sync(|c| c.federation_id());
+                    clients.insert(fid, spanned);
                 }
                 Ok(None) => {
                     warn!(target: LOG_GATEWAY, %federation_id, "Client DB not initialized, skipping");
@@ -233,30 +231,94 @@ impl AppState {
             supports_private_payments: false,
         })
     }
+
+    /// Get the name of a federation from its client config.
+    pub async fn federation_name(client: &ClientHandleArc) -> Option<String> {
+        client
+            .config()
+            .await
+            .global
+            .federation_name()
+            .map(String::from)
+    }
+
+    /// Get info for all connected federations.
+    pub async fn federation_info_all(&self) -> Vec<FederationInfo> {
+        let clients = self.clients.read().await;
+        let mut infos = Vec::new();
+        for (federation_id, client) in clients.iter() {
+            let balance_msat = match client.borrow().with(|c| c.get_balance_for_btc()).await {
+                Ok(balance) => balance,
+                Err(err) => {
+                    warn!(
+                        target: LOG_GATEWAY,
+                        err = %err.fmt_compact_anyhow(),
+                        "Skipped federation due to lack of primary module"
+                    );
+                    continue;
+                }
+            };
+            infos.push(FederationInfo {
+                federation_id: *federation_id,
+                federation_name: Self::federation_name(client.value()).await,
+                balance_msat,
+            });
+        }
+        infos
+    }
+
+    /// Get JSON client configs for all connected federations.
+    pub async fn all_federation_configs(
+        &self,
+    ) -> BTreeMap<FederationId, fedimint_core::config::JsonClientConfig> {
+        let clients = self.clients.read().await;
+        let mut configs = BTreeMap::new();
+        for (federation_id, client) in clients.iter() {
+            configs.insert(
+                *federation_id,
+                client.borrow().with(|c| c.get_config_json()).await,
+            );
+        }
+        configs
+    }
+
+    /// Get invite codes for all connected federations.
+    pub async fn all_invite_codes(
+        &self,
+    ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>> {
+        let clients = self.clients.read().await;
+        let mut invite_codes = BTreeMap::new();
+        for (federation_id, client) in clients.iter() {
+            let config = client.value().config().await;
+            let mut fed_codes = BTreeMap::new();
+            for (peer_id, peer_url) in &config.global.api_endpoints {
+                if let Some(code) = client.value().invite_code(*peer_id).await {
+                    fed_codes.insert(*peer_id, (peer_url.name.clone(), code));
+                }
+            }
+            invite_codes.insert(*federation_id, fed_codes);
+        }
+        invite_codes
+    }
 }
 
 // LNv2 Gateway implementation
 impl AppState {
     async fn public_key_v2(&self, federation_id: &FederationId) -> Option<PublicKey> {
-        self.federation_manager
-            .read()
-            .await
-            .client(federation_id)
-            .map(|client| {
-                client
-                    .value()
-                    .get_first_module::<GatewayClientModuleV2>()
-                    .expect("Must have client module")
-                    .keypair
-                    .public_key()
-            })
+        self.clients.read().await.get(federation_id).map(|client| {
+            client
+                .value()
+                .get_first_module::<GatewayClientModuleV2>()
+                .expect("Must have client module")
+                .keypair
+                .public_key()
+        })
     }
 
     pub async fn routing_info_v2(
         &self,
         federation_id: &FederationId,
     ) -> Result<Option<RoutingInfo>> {
-        // Verify federation is connected
         self.select_client(*federation_id).await?;
 
         let context = self.get_lightning_context().await?;

@@ -17,7 +17,6 @@ use fedimint_core::envs::BitcoinRpcConfig;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_daemon::client::GatewayClientFactory;
-use fedimint_gateway_daemon::federation_manager::FederationManager;
 use fedimint_gateway_daemon::{AppState, derive_gateway_keypair};
 use fedimint_logging::TracingSetup;
 use fedimint_server::core::{DynServerModuleInit, IServerModuleInit, ServerModuleInitRegistry};
@@ -265,7 +264,7 @@ impl Fixtures {
         let listen: SocketAddr = "127.0.0.1:9000".parse().unwrap();
 
         AppState {
-            federation_manager: Arc::new(tokio::sync::RwLock::new(FederationManager::new())),
+            clients: Arc::new(tokio::sync::RwLock::new(std::collections::BTreeMap::new())),
             node,
             client_factory,
             gateway_db,

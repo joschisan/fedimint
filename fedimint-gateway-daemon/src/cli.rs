@@ -127,12 +127,7 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse
 /// Returns the ecash, lightning, and onchain balances (LDK-specific)
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_balances(State(state): State<AppState>) -> Result<Json<GatewayBalances>, CliError> {
-    let federation_infos = state
-        .federation_manager
-        .read()
-        .await
-        .federation_info_all_federations()
-        .await;
+    let federation_infos = state.federation_info_all().await;
 
     let ecash_balances: Vec<FederationBalanceInfo> = federation_infos
         .iter()
@@ -536,9 +531,7 @@ async fn federation_join(
 
     let federation_id = invite_code.federation_id();
 
-    let mut federation_manager = state.federation_manager.write().await;
-
-    if federation_manager.has_federation(federation_id) {
+    if state.clients.read().await.contains_key(&federation_id) {
         return Err(CliError::bad_request(
             "Federation has already been registered",
         ));
@@ -553,7 +546,7 @@ async fn federation_join(
 
     let federation_info = FederationInfo {
         federation_id,
-        federation_name: federation_manager.federation_name(&client).await,
+        federation_name: AppState::federation_name(&client).await,
         balance_msat: client.get_balance_for_btc().await.unwrap_or_else(|err| {
             warn!(
                 target: LOG_GATEWAY,
@@ -565,13 +558,12 @@ async fn federation_join(
         }),
     };
 
-    federation_manager.add_client(
-        fedimint_core::util::Spanned::new(
-            info_span!(target: LOG_GATEWAY, "client", %federation_id),
-            async { client },
-        )
-        .await,
-    );
+    let spanned = fedimint_core::util::Spanned::new(
+        info_span!(target: LOG_GATEWAY, "client", %federation_id),
+        async { client },
+    )
+    .await;
+    state.clients.write().await.insert(federation_id, spanned);
 
     debug!(target: LOG_GATEWAY, %federation_id, "Federation connected");
 
@@ -583,12 +575,7 @@ async fn federation_join(
 async fn federation_list(
     State(state): State<AppState>,
 ) -> Result<Json<ListFederationsResponse>, CliError> {
-    let federations = state
-        .federation_manager
-        .read()
-        .await
-        .federation_info_all_federations()
-        .await;
+    let federations = state.federation_info_all().await;
     Ok(Json(ListFederationsResponse { federations }))
 }
 
@@ -598,13 +585,7 @@ async fn federation_config(
     State(state): State<AppState>,
     Json(payload): Json<ConfigPayload>,
 ) -> Result<Json<GatewayFedConfig>, CliError> {
-    let federations = state
-        .federation_manager
-        .read()
-        .await
-        .get_all_federation_configs()
-        .await;
-
+    let federations = state.all_federation_configs().await;
     let gateway_fed_config = GatewayFedConfig { federations };
     Ok(Json(gateway_fed_config))
 }
@@ -614,8 +595,7 @@ async fn federation_config(
 async fn federation_invite(
     State(state): State<AppState>,
 ) -> Result<Json<ExportInviteCodesResponse>, CliError> {
-    let fed_manager = state.federation_manager.read().await;
-    let invite_codes = fed_manager.all_invite_codes().await;
+    let invite_codes = state.all_invite_codes().await;
     Ok(Json(ExportInviteCodesResponse { invite_codes }))
 }
 

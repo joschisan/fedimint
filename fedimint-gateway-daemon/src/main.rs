@@ -26,7 +26,6 @@ use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
 use fedimint_core::{Amount, fedimint_build_code_version_env};
 use fedimint_gateway_common::{InterceptPaymentRequest, PaymentFee};
 use fedimint_gateway_daemon::client::GatewayClientFactory;
-use fedimint_gateway_daemon::federation_manager::FederationManager;
 use fedimint_gateway_daemon::{
     AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, derive_gateway_keypair, public,
 };
@@ -217,7 +216,7 @@ fn main() -> anyhow::Result<()> {
 
         // 5. Construct AppState
         let state = AppState {
-            federation_manager: Arc::new(RwLock::new(FederationManager::new())),
+            clients: Arc::new(RwLock::new(BTreeMap::new())),
             node: node.clone(),
             client_factory,
             gateway_db,
