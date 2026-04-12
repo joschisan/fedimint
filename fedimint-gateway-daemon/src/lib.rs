@@ -239,10 +239,7 @@ impl AppState {
     pub async fn get_lightning_context(
         &self,
     ) -> std::result::Result<LightningContext, LightningRpcError> {
-        let alias = match self.node.node_alias() {
-            Some(alias) => alias.to_string(),
-            None => format!("LDK Fedimint Gateway Node {}", self.node.node_id()),
-        };
+        let alias = self.node.node_alias().expect("node alias is set").to_string();
 
         Ok(LightningContext {
             lightning_public_key: self.node.node_id(),

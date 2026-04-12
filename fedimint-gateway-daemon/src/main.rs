@@ -13,11 +13,10 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use bitcoin::Network;
 use bitcoin::hashes::Hash;
 use clap::{ArgGroup, Parser};
-use fedimint_bip39::{Bip39RootSecretStrategy, Language, Mnemonic};
+use fedimint_bip39::Bip39RootSecretStrategy;
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
 use fedimint_core::db::Database;

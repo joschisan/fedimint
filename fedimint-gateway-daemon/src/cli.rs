@@ -96,10 +96,7 @@ async fn info(State(state): State<AppState>) -> Result<Json<GatewayInfo>, CliErr
 
     Ok(Json(GatewayInfo {
         public_key: state.node.node_id(),
-        alias: state.node.node_alias().map_or_else(
-            || format!("LDK Fedimint Gateway Node {}", state.node.node_id()),
-            |a| a.to_string(),
-        ),
+        alias: state.node.node_alias().expect("node alias is set").to_string(),
         network: state.node.config().network.to_string(),
         block_height: u64::from(node_status.current_best_block.height),
         synced_to_chain: node_status.latest_lightning_wallet_sync_timestamp.is_some(),
