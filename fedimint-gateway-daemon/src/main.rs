@@ -9,7 +9,7 @@
 //! The API also has endpoints for managing the gateway.
 
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -17,7 +17,6 @@ use bitcoin::Network;
 use bitcoin::hashes::Hash;
 use clap::{ArgGroup, Parser};
 use fedimint_bip39::{Bip39RootSecretStrategy, Language, Mnemonic};
-use fedimint_bitcoind::bitcoincore::BitcoindClient;
 use fedimint_client::Client;
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
@@ -28,9 +27,7 @@ use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::block_in_place;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
-use fedimint_gateway_common::{
-    ChainSource, InterceptPaymentRequest, PaymentFee, RegisteredProtocol,
-};
+use fedimint_gateway_common::{InterceptPaymentRequest, PaymentFee};
 use fedimint_gateway_daemon::client::GatewayClientBuilder;
 use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli};
 use fedimint_gwv2_client::GatewayClientModuleV2;
@@ -147,7 +144,6 @@ fn main() -> anyhow::Result<()> {
         let opts = GatewayOpts::parse();
 
         // 2. Open database
-
         let gateway_db = Database::new(
             fedimint_rocksdb::RocksDb::build(opts.data_dir.join(DB_FILE)).open().await?,
             ModuleDecoderRegistry::default(),
@@ -173,27 +169,68 @@ fn main() -> anyhow::Result<()> {
             .await
             .expect("mnemonic should be set");
 
-        // 4. Build chain source
-        let http_id = AppState::load_or_create_gateway_keypair(
-            &gateway_db,
-            RegisteredProtocol::Http,
-        )
-        .await
-        .public_key();
+        // 4. Build client module registry
+        let mut registry = ClientModuleInitRegistry::new();
+        registry.attach(MintClientInit);
+        registry.attach(fedimint_walletv2_client::WalletClientInit);
 
-        let chain_source = match (opts.bitcoind_url.as_ref(), opts.esplora_url.as_ref()) {
-            (Some(_), None) | (Some(_), Some(_)) => {
-                let (_, chain_source) =
-                    get_bitcoind_client(&opts, opts.network, &http_id)?;
-                chain_source
-            }
-            (None, Some(url)) => ChainSource::Esplora {
-                server_url: url.clone(),
-            },
-            _ => unreachable!("ArgGroup already enforced XOR relation"),
-        };
+        let client_builder = GatewayClientBuilder::new(opts.data_dir.clone(), registry).await?;
 
         // 5. Build LDK node
+        let alias = if opts.ldk_alias.is_empty() {
+            "LDK Gateway".to_string()
+        } else {
+            opts.ldk_alias.clone()
+        };
+        let mut alias_bytes = [0u8; 32];
+        let truncated = &alias.as_bytes()[..alias.len().min(32)];
+        alias_bytes[..truncated.len()].copy_from_slice(truncated);
+
+        let mut node_builder = ldk_node::Builder::from_config(ldk_node::config::Config {
+            network: opts.network,
+            listening_addresses: Some(vec![SocketAddress::TcpIpV4 {
+                addr: [0, 0, 0, 0],
+                port: opts.lightning_port,
+            }]),
+            node_alias: Some(NodeAlias(alias_bytes)),
+            ..Default::default()
+        });
+
+        node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
+
+        match (opts.bitcoind_url.clone(), opts.esplora_url.clone()) {
+            (Some(url), _) => {
+                node_builder.set_chain_source_bitcoind_rpc(
+                    url.host_str()
+                        .expect("Missing bitcoind host")
+                        .to_string(),
+                    url.port().expect("Missing bitcoind port"),
+                    opts.bitcoind_username
+                        .clone()
+                        .expect("FM_BITCOIND_USERNAME is required"),
+                    opts.bitcoind_password
+                        .clone()
+                        .expect("FM_BITCOIND_PASSWORD is required"),
+                );
+            }
+            (None, Some(url)) => {
+                node_builder.set_chain_source_esplora(url.to_string(), None);
+            }
+            _ => unreachable!("ArgGroup enforces at least one chain source"),
+        }
+
+        let ldk_data_dir = client_builder.data_dir().join(LDK_NODE_DB_FOLDER);
+        node_builder.set_storage_dir_path(
+            ldk_data_dir
+                .to_str()
+                .expect("Invalid data dir path")
+                .to_string(),
+        );
+
+        info!(target: LOG_LIGHTNING, data_dir = %ldk_data_dir.display(), %alias, "Starting LDK Node...");
+
+        let node = node_builder.build()?;
+
         let ldk_runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -201,21 +238,10 @@ fn main() -> anyhow::Result<()> {
                 .expect("Failed to build LDK runtime"),
         );
 
-        let mut registry = ClientModuleInitRegistry::new();
-        registry.attach(MintClientInit);
-        registry.attach(fedimint_walletv2_client::WalletClientInit);
+        node.start_with_runtime(ldk_runtime)
+            .map_err(|err| anyhow!("Failed to start LDK Node: {err}"))?;
 
-        let client_builder = GatewayClientBuilder::new(opts.data_dir.clone(), registry).await?;
-
-        let node = create_ldk_node(
-            &client_builder.data_dir().join(LDK_NODE_DB_FOLDER),
-            chain_source,
-            opts.network,
-            opts.lightning_port,
-            opts.ldk_alias.clone(),
-            mnemonic,
-            ldk_runtime,
-        )?;
+        info!("Successfully started LDK Node");
         let node = Arc::new(node);
 
         // 6. Wait for chain sync
@@ -287,129 +313,6 @@ async fn shutdown_signal() {
         .expect("Failed to install SIGTERM handler")
         .recv()
         .await;
-}
-
-// ---------------------------------------------------------------------------
-// LDK helpers
-// ---------------------------------------------------------------------------
-
-fn get_bitcoind_client(
-    opts: &GatewayOpts,
-    network: Network,
-    gateway_id: &fedimint_core::secp256k1::PublicKey,
-) -> anyhow::Result<(BitcoindClient, ChainSource)> {
-    let bitcoind_username = opts
-        .bitcoind_username
-        .clone()
-        .expect("FM_BITCOIND_URL is set but FM_BITCOIND_USERNAME is not");
-    let url = opts.bitcoind_url.clone().expect("No bitcoind url set");
-    let password = opts
-        .bitcoind_password
-        .clone()
-        .expect("FM_BITCOIND_URL is set but FM_BITCOIND_PASSWORD is not");
-
-    let chain_source = ChainSource::Bitcoind {
-        username: bitcoind_username.clone(),
-        password: password.clone(),
-        server_url: url.clone(),
-    };
-    let wallet_name = format!("gatewayd-{gateway_id}");
-    let client = BitcoindClient::new(&url, bitcoind_username, password, &wallet_name, network)?;
-    Ok((client, chain_source))
-}
-
-/// Creates an LDK node instance from the given configuration parameters.
-fn create_ldk_node(
-    data_dir: &Path,
-    chain_source: ChainSource,
-    network: Network,
-    lightning_port: u16,
-    alias: String,
-    mnemonic: Mnemonic,
-    runtime: Arc<tokio::runtime::Runtime>,
-) -> anyhow::Result<ldk_node::Node> {
-    let mut bytes = [0u8; 32];
-    let alias = if alias.is_empty() {
-        "LDK Gateway".to_string()
-    } else {
-        alias
-    };
-    let alias_bytes = alias.as_bytes();
-    let truncated = &alias_bytes[..alias_bytes.len().min(32)];
-    bytes[..truncated.len()].copy_from_slice(truncated);
-    let node_alias = Some(NodeAlias(bytes));
-
-    let mut node_builder = ldk_node::Builder::from_config(ldk_node::config::Config {
-        network,
-        listening_addresses: Some(vec![SocketAddress::TcpIpV4 {
-            addr: [0, 0, 0, 0],
-            port: lightning_port,
-        }]),
-        node_alias,
-        ..Default::default()
-    });
-
-    node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
-
-    match chain_source {
-        ChainSource::Bitcoind {
-            username,
-            password,
-            server_url,
-        } => {
-            node_builder.set_chain_source_bitcoind_rpc(
-                server_url
-                    .host_str()
-                    .expect("Could not retrieve host from bitcoind RPC url")
-                    .to_string(),
-                server_url
-                    .port()
-                    .expect("Could not retrieve port from bitcoind RPC url"),
-                username,
-                password,
-            );
-        }
-        ChainSource::Esplora { server_url } => {
-            node_builder.set_chain_source_esplora(get_esplora_url(server_url)?, None);
-        }
-    }
-    let Some(data_dir_str) = data_dir.to_str() else {
-        return Err(anyhow::anyhow!("Invalid data dir path"));
-    };
-    node_builder.set_storage_dir_path(data_dir_str.to_string());
-
-    info!(
-        target: LOG_LIGHTNING,
-        data_dir = %data_dir_str,
-        alias = %alias,
-        "Starting LDK Node...",
-    );
-    let node = node_builder.build()?;
-    node.start_with_runtime(runtime).map_err(|err| {
-        fedimint_core::crit!(
-            target: LOG_LIGHTNING,
-            err = %err.fmt_compact(),
-            "Failed to start LDK Node",
-        );
-        anyhow::anyhow!("Failed to start LDK Node: {err}")
-    })?;
-
-    info!("Successfully started LDK Node");
-    Ok(node)
-}
-
-/// When a port is specified in the Esplora URL, the esplora client inside LDK
-/// node cannot connect to the lightning node when there is a trailing slash.
-fn get_esplora_url(server_url: SafeUrl) -> anyhow::Result<String> {
-    let host = server_url
-        .host_str()
-        .ok_or(anyhow::anyhow!("Missing esplora host"))?;
-    let server_url = if let Some(port) = server_url.port() {
-        format!("{}://{}:{}", server_url.scheme(), host, port)
-    } else {
-        server_url.to_string()
-    };
-    Ok(server_url)
 }
 
 async fn wait_for_chain_sync(node: &ldk_node::Node) -> anyhow::Result<()> {
