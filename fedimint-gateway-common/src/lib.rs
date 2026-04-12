@@ -155,20 +155,16 @@ pub struct FederationInfo {
     pub federation_id: FederationId,
     pub federation_name: Option<String>,
     pub balance_msat: Amount,
-    pub config: FederationConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct GatewayInfo {
     pub version_hash: String,
     pub federations: Vec<FederationInfo>,
-    /// Mapping from short channel id to the federation id that it belongs to.
-    // TODO: Remove this alias once it no longer breaks backwards compatibility.
-    #[serde(alias = "channels")]
-    pub federation_fake_scids: Option<BTreeMap<u64, FederationId>>,
     pub lightning_info: LightningInfo,
     pub gateway_state: String,
-    pub registrations: BTreeMap<RegisteredProtocol, (SafeUrl, secp256k1::PublicKey)>,
+    pub gateway_id: secp256k1::PublicKey,
+    pub api_addr: Option<SafeUrl>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -232,11 +228,6 @@ pub struct FederationBalanceInfo {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MnemonicResponse {
     pub mnemonic: Vec<String>,
-
-    // Legacy federations are federations that the gateway joined prior to v0.5.0
-    // and do not derive their secrets from the gateway's mnemonic. They also use
-    // a separate database from the gateway's db.
-    pub legacy_federations: Vec<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

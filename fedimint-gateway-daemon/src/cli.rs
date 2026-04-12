@@ -1,5 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -7,22 +7,19 @@ use axum::extract::{Json, State};
 use axum::routing::post;
 use bitcoin::FeeRate;
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
-use fedimint_core::config::FederationId;
-use fedimint_core::db::IDatabaseTransactionOpsCoreTyped;
-use fedimint_core::module::CommonModuleInit;
 use fedimint_core::task::TaskHandle;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
 use fedimint_core::{Amount, BitcoinAmountOrAll, fedimint_build_code_version_env};
 use fedimint_gateway_common::{
     ChannelOpenResponse, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
     ConfigPayload, ConnectFedPayload, CreateInvoiceForOperatorPayload, DepositAddressPayload,
-    DepositAddressResponse, ExportInviteCodesResponse, FederationBalanceInfo, FederationConfig,
-    FederationInfo, GatewayBalances, GatewayFedConfig, GatewayInfo, InvoiceCreateResponse,
-    InvoicePayResponse, LightningInfo, ListChannelsResponse, ListFederationsResponse,
-    ListPeersResponse, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
-    OnchainReceiveResponse, OnchainSendResponse, OpenChannelRequest, PayInvoiceForOperatorPayload,
-    PeerConnectRequest, PeerDisconnectRequest, Preimage, ROUTE_FED_CONFIG, ROUTE_FED_INVITE,
-    ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
+    DepositAddressResponse, ExportInviteCodesResponse, FederationBalanceInfo, FederationInfo,
+    GatewayBalances, GatewayFedConfig, GatewayInfo, InvoiceCreateResponse, InvoicePayResponse,
+    LightningInfo, ListChannelsResponse, ListFederationsResponse, ListPeersResponse,
+    ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse, OnchainReceiveResponse,
+    OnchainSendResponse, OpenChannelRequest, PayInvoiceForOperatorPayload, PeerConnectRequest,
+    PeerDisconnectRequest, Preimage, ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN,
+    ROUTE_FED_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
     ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE,
     ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
     ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
@@ -32,7 +29,6 @@ use fedimint_gateway_common::{
 };
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule;
-use futures::StreamExt;
 use hex::ToHex;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
@@ -42,7 +38,6 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, info_span, instrument, warn};
 
-use crate::db::{FederationConfigKey, FederationConfigKeyPrefix};
 use crate::error::{CliError, FederationNotConnected};
 use crate::{AppState, UserChannelId, get_preimage_and_payment_hash};
 
@@ -98,23 +93,12 @@ fn router() -> Router<AppState> {
 /// Display high-level information about the Gateway
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn info(State(state): State<AppState>) -> Result<Json<GatewayInfo>, CliError> {
-    let dbtx = state.gateway_db.begin_transaction_nc().await;
     let federations = state
         .federation_manager
         .read()
         .await
-        .federation_info_all_federations(dbtx)
+        .federation_info_all_federations()
         .await;
-
-    let channels: BTreeMap<u64, FederationId> = federations
-        .iter()
-        .map(|federation_info| {
-            (
-                federation_info.config.federation_index,
-                federation_info.federation_id,
-            )
-        })
-        .collect();
 
     let node_status = state.node.status();
     let synced_to_chain = node_status.latest_lightning_wallet_sync_timestamp.is_some();
@@ -132,48 +116,27 @@ async fn info(State(state): State<AppState>) -> Result<Json<GatewayInfo>, CliErr
         synced_to_chain,
     };
 
-    let info = GatewayInfo {
+    Ok(Json(GatewayInfo {
         federations,
-        federation_fake_scids: Some(channels),
         version_hash: fedimint_build_code_version_env!().to_string(),
         gateway_state: state.state.read().await.to_string(),
         lightning_info,
-        registrations: state
-            .registrations
-            .iter()
-            .map(|(k, v)| (k.clone(), (v.endpoint_url.clone(), v.keypair.public_key())))
-            .collect(),
-    };
-
-    Ok(Json(info))
+        gateway_id: state.gateway_id(),
+        api_addr: state.api_addr.clone(),
+    }))
 }
 
 /// Returns the gateway's mnemonic words
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse>, CliError> {
-    let mnemonic = AppState::load_mnemonic(&state.gateway_db)
-        .await
-        .expect("mnemonic should be set");
-    let words = mnemonic
+    let words = state
+        .client_factory
+        .mnemonic()
         .words()
         .map(std::string::ToString::to_string)
         .collect::<Vec<_>>();
-    let all_federations = state
-        .federation_manager
-        .read()
-        .await
-        .get_all_federation_configs()
-        .await
-        .keys()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let legacy_federations = state.client_builder.legacy_federations(all_federations);
-    let mnemonic_response = MnemonicResponse {
-        mnemonic: words,
-        legacy_federations,
-    };
 
-    Ok(Json(mnemonic_response))
+    Ok(Json(MnemonicResponse { mnemonic: words }))
 }
 
 // ---------------------------------------------------------------------------
@@ -183,12 +146,11 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse
 /// Returns the ecash, lightning, and onchain balances (LDK-specific)
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_balances(State(state): State<AppState>) -> Result<Json<GatewayBalances>, CliError> {
-    let dbtx = state.gateway_db.begin_transaction_nc().await;
     let federation_infos = state
         .federation_manager
         .read()
         .await
-        .federation_info_all_federations(dbtx)
+        .federation_info_all_federations()
         .await;
 
     let ecash_balances: Vec<FederationBalanceInfo> = federation_infos
@@ -595,57 +557,19 @@ async fn federation_join(
 
     let mut federation_manager = state.federation_manager.write().await;
 
-    // Check if this federation has already been registered
     if federation_manager.has_federation(federation_id) {
         return Err(CliError::bad_request(
             "Federation has already been registered",
         ));
     }
 
-    // The gateway deterministically assigns a unique identifier (u64) to each
-    // federation connected.
-    let federation_index = federation_manager.pop_next_index()?;
-
-    let federation_config = FederationConfig {
-        invite_code,
-        federation_index,
-        lightning_fee: state.routing_fees,
-        transaction_fee: state.transaction_fees,
-    };
-
-    let mnemonic = AppState::load_mnemonic(&state.gateway_db)
-        .await
-        .expect("mnemonic should be set");
-    let recover = payload.recover.unwrap_or(false);
-    if recover {
-        state
-            .client_builder
-            .recover(
-                federation_config.clone(),
-                std::sync::Arc::new(state.clone()),
-                &mnemonic,
-            )
-            .await?;
-    }
-
     let client = state
-        .client_builder
-        .build(
-            federation_config.clone(),
-            std::sync::Arc::new(state.clone()),
-            &mnemonic,
-        )
+        .client_factory
+        .join(&invite_code, Arc::new(state.clone()))
         .await?;
 
-    if recover {
-        client
-            .wait_for_all_active_state_machines()
-            .await
-            .map_err(|e| CliError::internal(e))?;
-    }
+    AppState::check_federation_network(&client, state.network).await?;
 
-    // Instead of using `FederationManager::federation_info`, we manually create
-    // federation info here because short channel id is not yet persisted.
     let federation_info = FederationInfo {
         federation_id,
         federation_name: federation_manager.federation_name(&client).await,
@@ -654,40 +578,21 @@ async fn federation_join(
                 target: LOG_GATEWAY,
                 err = %err.fmt_compact_anyhow(),
                 %federation_id,
-                "Balance not immediately available after joining/recovering."
+                "Balance not immediately available after joining."
             );
             Amount::default()
         }),
-        config: federation_config.clone(),
     };
 
-    AppState::check_federation_network(&client, state.network).await?;
-
-    // no need to enter span earlier, because join has a span
     federation_manager.add_client(
-        federation_index,
         fedimint_core::util::Spanned::new(
-            info_span!(target: LOG_GATEWAY, "client", federation_id=%federation_id.clone()),
+            info_span!(target: LOG_GATEWAY, "client", %federation_id),
             async { client },
         )
         .await,
     );
 
-    let mut dbtx = state.gateway_db.begin_transaction().await;
-    dbtx.insert_entry(
-        &FederationConfigKey {
-            id: federation_config.invite_code.federation_id(),
-        },
-        &federation_config,
-    )
-    .await;
-    dbtx.commit_tx().await;
-    debug!(
-        target: LOG_GATEWAY,
-        federation_id = %federation_id,
-        federation_index = %federation_index,
-        "Federation connected"
-    );
+    debug!(target: LOG_GATEWAY, %federation_id, "Federation connected");
 
     Ok(Json(federation_info))
 }
@@ -697,12 +602,11 @@ async fn federation_join(
 async fn federation_list(
     State(state): State<AppState>,
 ) -> Result<Json<ListFederationsResponse>, CliError> {
-    let dbtx = state.gateway_db.begin_transaction_nc().await;
     let federations = state
         .federation_manager
         .read()
         .await
-        .federation_info_all_federations(dbtx)
+        .federation_info_all_federations()
         .await;
     Ok(Json(ListFederationsResponse { federations }))
 }
@@ -713,26 +617,12 @@ async fn federation_config(
     State(state): State<AppState>,
     Json(payload): Json<ConfigPayload>,
 ) -> Result<Json<GatewayFedConfig>, CliError> {
-    let federations = if let Some(federation_id) = payload.federation_id {
-        let mut federations = BTreeMap::new();
-        federations.insert(
-            federation_id,
-            state
-                .federation_manager
-                .read()
-                .await
-                .get_federation_config(federation_id)
-                .await?,
-        );
-        federations
-    } else {
-        state
-            .federation_manager
-            .read()
-            .await
-            .get_all_federation_configs()
-            .await
-    };
+    let federations = state
+        .federation_manager
+        .read()
+        .await
+        .get_all_federation_configs()
+        .await;
 
     let gateway_fed_config = GatewayFedConfig { federations };
     Ok(Json(gateway_fed_config))

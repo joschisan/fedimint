@@ -8,6 +8,7 @@
 //! clients to request routing of payments through the Lightning Network.
 //! The API also has endpoints for managing the gateway.
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,19 +18,19 @@ use bitcoin::Network;
 use bitcoin::hashes::Hash;
 use clap::{ArgGroup, Parser};
 use fedimint_bip39::{Bip39RootSecretStrategy, Language, Mnemonic};
-use fedimint_client::Client;
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
 use fedimint_core::db::Database;
-use fedimint_core::envs::is_env_var_set;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
-use fedimint_core::task::block_in_place;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
 use fedimint_core::{Amount, fedimint_build_code_version_env};
 use fedimint_gateway_common::{InterceptPaymentRequest, PaymentFee};
-use fedimint_gateway_daemon::client::GatewayClientBuilder;
-use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
+use fedimint_gateway_daemon::client::GatewayClientFactory;
+use fedimint_gateway_daemon::federation_manager::FederationManager;
+use fedimint_gateway_daemon::{
+    AppState, DB_FILE, GatewayState, LDK_NODE_DB_FOLDER, cli, derive_gateway_keypair, public,
+};
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use fedimint_mintv2_client::MintClientInit;
@@ -39,6 +40,7 @@ use lightning::types::payment::PaymentHash;
 use rand::rngs::OsRng;
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
 use tikv_jemallocator::Jemalloc;
+use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
@@ -144,52 +146,57 @@ fn main() -> anyhow::Result<()> {
         let opts = GatewayOpts::parse();
 
         // 2. Open database
+        install_crypto_provider().await;
+
         let gateway_db = Database::new(
             RocksDb::build(opts.data_dir.join(DB_FILE)).open().await?,
             ModuleDecoderRegistry::default(),
         );
 
-        // 3. Load or generate mnemonic
-        if AppState::load_mnemonic(&gateway_db).await.is_none() {
+        // 3. Load or init client factory (mnemonic)
+        let mut registry = ClientModuleInitRegistry::new();
+        registry.attach(MintClientInit);
+        registry.attach(WalletClientInit);
+
+        let client_factory = if let Some(factory) =
+            GatewayClientFactory::try_load(gateway_db.clone(), registry.clone()).await?
+        {
+            factory
+        } else {
             let mnemonic = if let Ok(words) = std::env::var("FM_GATEWAY_MNEMONIC") {
                 info!(target: LOG_GATEWAY, "Using provided mnemonic from environment variable");
                 Mnemonic::parse_in_normalized(Language::English, words.as_str())
                     .map_err(|e| anyhow!("Seed phrase provided in environment was invalid {e:?}"))?
             } else {
-                debug!(target: LOG_GATEWAY, "Generating mnemonic and writing entropy to client storage");
+                debug!(target: LOG_GATEWAY, "Generating new mnemonic");
                 Bip39RootSecretStrategy::<12>::random(&mut OsRng)
             };
 
-            Client::store_encodable_client_secret(&gateway_db, mnemonic.to_entropy())
-                .await
-                .map_err(|e| anyhow!("Mnemonic error: {e}"))?;
-        }
+            GatewayClientFactory::init(gateway_db.clone(), mnemonic, registry).await?
+        };
 
-        let mnemonic = AppState::load_mnemonic(&gateway_db)
-            .await
-            .expect("mnemonic should be set");
+        let mnemonic = client_factory.mnemonic().clone();
+        let gateway_keypair = derive_gateway_keypair(&mnemonic);
 
-        // 4. Build client module registry
-        let mut registry = ClientModuleInitRegistry::new();
-        registry.attach(MintClientInit);
-        registry.attach(WalletClientInit);
+        // 4. Build LDK node
+        let ldk_data_dir = opts
+            .data_dir
+            .join(LDK_NODE_DB_FOLDER)
+            .to_str()
+            .expect("Invalid data dir path")
+            .to_string();
 
-        let client_builder = GatewayClientBuilder::new(opts.data_dir.clone(), registry).await?;
-
-        // 5. Build LDK node
         let mut node_builder = ldk_node::Builder::new();
-
         node_builder.set_network(opts.network);
         node_builder.set_node_alias("fedimint-gateway-daemon".to_string())?;
         node_builder.set_listening_addresses(vec![opts.ldk_bind.into()])?;
         node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
+        node_builder.set_storage_dir_path(ldk_data_dir);
 
         match (opts.bitcoind_url.clone(), opts.esplora_url.clone()) {
             (Some(url), _) => {
                 node_builder.set_chain_source_bitcoind_rpc(
-                    url.host_str()
-                        .expect("Missing bitcoind host")
-                        .to_string(),
+                    url.host_str().expect("Missing bitcoind host").to_string(),
                     url.port().expect("Missing bitcoind port"),
                     opts.bitcoind_username
                         .clone()
@@ -205,41 +212,37 @@ fn main() -> anyhow::Result<()> {
             _ => unreachable!("ArgGroup enforces at least one chain source"),
         }
 
-        let ldk_data_dir = client_builder.data_dir().join(LDK_NODE_DB_FOLDER) .to_str()
-        .expect("Invalid data dir path")
-        .to_string();
-
-        node_builder.set_storage_dir_path(
-            ldk_data_dir
-
-        );
-
         info!(target: LOG_LIGHTNING, "Starting LDK Node...");
 
         let node = Arc::new(node_builder.build()?);
-
-        let runtime = Arc::new(tokio::runtime::Runtime::new()?);
-
-        node.start_with_runtime(runtime.clone())?;
+        let ldk_runtime = Arc::new(tokio::runtime::Runtime::new()?);
+        node.start_with_runtime(ldk_runtime.clone())?;
 
         info!("Successfully started LDK Node");
 
-        // 6. Wait for chain sync
-        install_crypto_provider().await;
-
-        // 7. Construct AppState
-        let state = AppState::new(
-            gateway_db,
-            client_builder,
-            node.clone(),
-            opts.api_bind,
-            opts.cli_bind,
-            opts.api_addr,
-            opts.network,
-            PaymentFee { base: Amount::from_msats(opts.routing_fee_base_msat), parts_per_million: opts.routing_fee_ppm },
-            PaymentFee { base: Amount::from_msats(opts.transaction_fee_base_msat), parts_per_million: opts.transaction_fee_ppm },
-        )
-        .await?;
+        // 5. Construct AppState
+        let state = AppState {
+            federation_manager: Arc::new(RwLock::new(FederationManager::new())),
+            node: node.clone(),
+            state: Arc::new(RwLock::new(GatewayState::Running)),
+            client_factory,
+            gateway_db: gateway_db.clone(),
+            api_bind: opts.api_bind,
+            cli_bind: opts.cli_bind,
+            network: opts.network,
+            routing_fees: PaymentFee {
+                base: Amount::from_msats(opts.routing_fee_base_msat),
+                parts_per_million: opts.routing_fee_ppm,
+            },
+            transaction_fees: PaymentFee {
+                base: Amount::from_msats(opts.transaction_fee_base_msat),
+                parts_per_million: opts.transaction_fee_ppm,
+            },
+            gateway_keypair,
+            api_addr: opts.api_addr,
+            outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
+            pending_channels: Arc::new(RwLock::new(BTreeMap::new())),
+        };
 
         // 8. Load federation clients
         state.load_clients().await?;
@@ -248,14 +251,13 @@ fn main() -> anyhow::Result<()> {
         let task_group = fedimint_core::task::TaskGroup::new();
 
         // 10. Spawn tasks
-        let public_task = runtime.spawn(public::run_public(
-            state.clone(),
-            task_group.make_handle(),
-        ));
+        let public_task =
+            runtime.spawn(public::run_public(state.clone(), task_group.make_handle()));
 
         let cli_task = runtime.spawn(cli::run_cli(state.clone(), task_group.make_handle()));
 
-        let events_task = runtime.spawn(process_ldk_events(state.clone(), task_group.make_handle()));
+        let events_task =
+            runtime.spawn(process_ldk_events(state.clone(), task_group.make_handle()));
 
         // 11. Wait for shutdown signal
         shutdown_signal().await;

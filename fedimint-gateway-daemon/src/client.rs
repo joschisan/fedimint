@@ -1,194 +1,182 @@
-use std::collections::BTreeSet;
-use std::fmt::Debug;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
-use fedimint_client::db::ClientConfigKey;
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::{Client, ClientBuilder, RootSecret};
-use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy};
+use fedimint_client_module::secret::RootSecretStrategy;
 use fedimint_connectors::ConnectorRegistry;
-use fedimint_core::config::FederationId;
+use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
-use fedimint_core::encoding::Encodable;
-use fedimint_core::module::registry::ModuleDecoderRegistry;
-use fedimint_derive_secret::DerivableSecret;
-use fedimint_gateway_common::FederationConfig;
+use fedimint_core::invite_code::InviteCode;
 use fedimint_gwv2_client::GatewayClientInitV2;
 
-use crate::db::DbKeyPrefix;
+use crate::db::{ClientConfigKey, DbKeyPrefix, RootEntropyKey};
 use crate::error::CliError;
 use crate::{AppState, Result};
 
 #[derive(Debug, Clone)]
-pub struct GatewayClientBuilder {
-    work_dir: PathBuf,
+pub struct GatewayClientFactory {
+    db: Database,
+    mnemonic: Mnemonic,
     registry: ClientModuleInitRegistry,
     connectors: ConnectorRegistry,
 }
 
-impl GatewayClientBuilder {
-    pub async fn new(
-        work_dir: PathBuf,
+impl GatewayClientFactory {
+    /// Initialize a new factory, storing the mnemonic entropy in the database.
+    pub async fn init(
+        db: Database,
+        mnemonic: Mnemonic,
         registry: ClientModuleInitRegistry,
     ) -> anyhow::Result<Self> {
+        let mut dbtx = db.begin_transaction().await;
+        dbtx.insert_new_entry(&RootEntropyKey, &mnemonic.to_entropy())
+            .await;
+        dbtx.commit_tx_result()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to store mnemonic: {e}"))?;
+
         Ok(Self {
             connectors: ConnectorRegistry::build_from_client_env()?.bind().await?,
-            work_dir,
+            db,
+            mnemonic,
             registry,
         })
     }
 
-    pub fn data_dir(&self) -> PathBuf {
-        self.work_dir.clone()
-    }
-
-    /// Reads a plain root secret from a database to construct a database.
-    /// Only used for "legacy" federations before v0.5.0
-    async fn client_plainrootsecret(&self, db: &Database) -> Result<DerivableSecret> {
-        let client_secret = Client::load_decodable_client_secret::<[u8; 64]>(db)
+    /// Try to load an existing factory from the database.
+    pub async fn try_load(
+        db: Database,
+        registry: ClientModuleInitRegistry,
+    ) -> anyhow::Result<Option<Self>> {
+        let entropy = db
+            .begin_transaction_nc()
             .await
-            .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
-        Ok(PlainRootSecretStrategy::to_root_secret(&client_secret))
+            .get_value(&RootEntropyKey)
+            .await;
+
+        match entropy {
+            Some(entropy) => {
+                let mnemonic = Mnemonic::from_entropy(&entropy)
+                    .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {e}"))?;
+                Ok(Some(Self {
+                    connectors: ConnectorRegistry::build_from_client_env()?.bind().await?,
+                    db,
+                    mnemonic,
+                    registry,
+                }))
+            }
+            None => Ok(None),
+        }
     }
 
-    /// Constructs the client builder with the modules, database, and connector
-    /// used to create clients for connected federations.
-    async fn create_client_builder(
-        &self,
-        federation_config: &FederationConfig,
-        gateway: Arc<AppState>,
-    ) -> Result<ClientBuilder> {
-        let FederationConfig {
-            federation_index: _,
-            ..
-        } = federation_config.to_owned();
+    pub fn mnemonic(&self) -> &Mnemonic {
+        &self.mnemonic
+    }
 
+    fn root_secret(&self) -> RootSecret {
+        RootSecret::StandardDoubleDerive(Bip39RootSecretStrategy::<12>::to_root_secret(
+            &self.mnemonic,
+        ))
+    }
+
+    fn client_database(&self, federation_id: FederationId) -> Database {
+        self.db.with_prefix(
+            std::iter::once(DbKeyPrefix::ClientDatabase as u8)
+                .chain(federation_id.consensus_encode_to_vec())
+                .collect::<Vec<u8>>(),
+        )
+    }
+
+    async fn client_builder(&self, gateway: Arc<AppState>) -> Result<ClientBuilder> {
         let mut registry = self.registry.clone();
+        registry.attach(GatewayClientInitV2 { gateway });
 
-        registry.attach(GatewayClientInitV2 {
-            gateway: gateway.clone(),
-        });
-
-        let mut client_builder = Client::builder()
+        let mut builder = Client::builder()
             .await
             .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?
             .with_iroh_enable_dht(true)
             .with_iroh_enable_next(true);
-        client_builder.with_module_inits(registry);
-        Ok(client_builder)
+        builder.with_module_inits(registry);
+        Ok(builder)
     }
 
-    /// Recovers a client with the provided mnemonic. This function will wait
-    /// for the recoveries to finish, but a new client must be created
-    /// afterwards and waited on until the state machines have finished
-    /// for a balance to be present.
-    pub async fn recover(
+    async fn save_config(&self, config: &ClientConfig) {
+        let mut dbtx = self.db.begin_transaction().await;
+        dbtx.insert_entry(&ClientConfigKey(config.calculate_federation_id()), config)
+            .await;
+        dbtx.commit_tx().await;
+    }
+
+    /// Join a federation for the first time.
+    pub async fn join(
         &self,
-        config: FederationConfig,
+        invite: &InviteCode,
         gateway: Arc<AppState>,
-        mnemonic: &Mnemonic,
-    ) -> Result<()> {
-        let federation_id = config.invite_code.federation_id();
-        let db = {
-            let mut prefix = vec![DbKeyPrefix::ClientDatabase as u8];
-            prefix.append(&mut federation_id.consensus_encode_to_vec());
-            gateway.gateway_db.with_prefix(prefix)
-        };
-        let client_builder = self.create_client_builder(&config, gateway.clone()).await?;
-        let root_secret = RootSecret::StandardDoubleDerive(
-            Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic),
-        );
-        let client = client_builder
-            .preview(self.connectors.clone(), &config.invite_code)
+    ) -> Result<fedimint_client::ClientHandleArc> {
+        let federation_id = invite.federation_id();
+
+        // Idempotent: if already joined, just load
+        if let Some(client) = self.load(&federation_id, gateway.clone()).await? {
+            return Ok(client);
+        }
+
+        let builder = self.client_builder(gateway).await?;
+
+        let client = builder
+            .preview(self.connectors.clone(), invite)
             .await?
-            .recover(db, root_secret, None)
+            .join(self.client_database(federation_id), self.root_secret())
             .await
             .map(Arc::new)
             .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
-        client
-            .wait_for_all_recoveries()
-            .await
-            .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
-        Ok(())
+
+        self.save_config(&client.config().await).await;
+
+        Ok(client)
     }
 
-    /// Builds a new client with the provided `FederationConfig` and `Mnemonic`.
-    /// Only used for newly joined federations.
-    pub async fn build(
+    /// Load an existing client for a federation.
+    pub async fn load(
         &self,
-        config: FederationConfig,
+        federation_id: &FederationId,
         gateway: Arc<AppState>,
-        mnemonic: &Mnemonic,
-    ) -> Result<fedimint_client::ClientHandleArc> {
-        let invite_code = config.invite_code.clone();
-        let federation_id = invite_code.federation_id();
-        let db_path = self.work_dir.join(format!("{federation_id}.db"));
+    ) -> Result<Option<fedimint_client::ClientHandleArc>> {
+        let db = self.client_database(*federation_id);
 
-        let (db, root_secret) = if db_path.exists() {
-            let rocksdb = fedimint_rocksdb::RocksDb::build(db_path.clone())
-                .open()
-                .await
-                .map_err(|e| CliError::internal(format!("Client creation error: {e}")))?;
-            let db = Database::new(rocksdb, ModuleDecoderRegistry::default());
-            let root_secret = RootSecret::Custom(self.client_plainrootsecret(&db).await?);
-            (db, root_secret)
-        } else {
-            let db = {
-                let mut prefix = vec![DbKeyPrefix::ClientDatabase as u8];
-                prefix.append(&mut federation_id.consensus_encode_to_vec());
-                gateway.gateway_db.with_prefix(prefix)
-            };
-
-            let root_secret = RootSecret::StandardDoubleDerive(
-                Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic),
-            );
-            (db, root_secret)
-        };
-
-        Self::verify_client_config(&db, federation_id).await?;
-
-        let client_builder = self.create_client_builder(&config, gateway).await?;
-
-        if Client::is_initialized(&db).await {
-            client_builder
-                .open(self.connectors.clone(), db, root_secret)
-                .await
-        } else {
-            client_builder
-                .preview(self.connectors.clone(), &invite_code)
-                .await?
-                .join(db, root_secret)
-                .await
+        if !Client::is_initialized(&db).await {
+            return Ok(None);
         }
-        .map(Arc::new)
-        .map_err(|e| CliError::internal(format!("Client creation error: {e}")))
+
+        let builder = self.client_builder(gateway).await?;
+
+        let client = builder
+            .open(self.connectors.clone(), db, self.root_secret())
+            .await
+            .map(Arc::new)
+            .map_err(|e| CliError::internal(format!("Client open error: {e}")))?;
+
+        self.save_config(&client.config().await).await;
+
+        Ok(Some(client))
     }
 
-    /// Verifies that the saved `ClientConfig` contains the expected
-    /// federation's config.
-    async fn verify_client_config(db: &Database, federation_id: FederationId) -> Result<()> {
-        let mut dbtx = db.begin_transaction_nc().await;
-        if let Some(config) = dbtx.get_value(&ClientConfigKey).await
-            && config.calculate_federation_id() != federation_id
-        {
-            return Err(CliError::internal(
-                "Federation Id did not match saved federation ID",
-            ));
-        }
-        Ok(())
-    }
+    /// List all federation configs stored in the database.
+    pub async fn list_federations(&self) -> Vec<(FederationId, ClientConfig)> {
+        use futures::StreamExt;
 
-    /// Returns a vector of "legacy" federations which did not derive their
-    /// client secret's from the gateway's mnemonic.
-    pub fn legacy_federations(&self, all_federations: BTreeSet<FederationId>) -> Vec<FederationId> {
-        all_federations
-            .into_iter()
-            .filter(|federation_id| {
-                let db_path = self.work_dir.join(format!("{federation_id}.db"));
-                db_path.exists()
-            })
-            .collect::<Vec<FederationId>>()
+        use crate::db::ClientConfigPrefix;
+
+        self.db
+            .begin_transaction_nc()
+            .await
+            .find_by_prefix(&ClientConfigPrefix)
+            .await
+            .map(|(key, config)| (key.0, config))
+            .collect()
+            .await
     }
 }
+
+// Need this for consensus_encode_to_vec
+use fedimint_core::encoding::Encodable;
