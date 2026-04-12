@@ -338,7 +338,8 @@ async fn start_gatewayd(
 
     Command::new(find_binary("gatewayd"))
         .env("FM_GATEWAY_DATA_DIR", data_dir.to_str().unwrap())
-        .env("FM_GATEWAY_LISTEN_ADDR", format!("127.0.0.1:{gw_port}"))
+        .env("FM_GATEWAY_API_BIND", format!("0.0.0.0:{gw_port}"))
+        .env("FM_GATEWAY_CLI_BIND", format!("127.0.0.1:{}", gw_port + 1))
         .env("FM_GATEWAY_API_ADDR", format!("http://127.0.0.1:{gw_port}"))
         .env("FM_PORT_LDK", ln_port.to_string())
         .env(
