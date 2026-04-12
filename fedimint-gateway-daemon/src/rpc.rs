@@ -11,6 +11,7 @@ use bitcoin::FeeRate;
 use bitcoin::hashes::sha256;
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
+use fedimint_core::db::IDatabaseTransactionOpsCoreTyped;
 use fedimint_core::module::CommonModuleInit;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
 use fedimint_core::{Amount, BitcoinAmountOrAll, fedimint_build_code_version_env};
@@ -38,6 +39,7 @@ use fedimint_lnv2_common::endpoint_constants::{
 use fedimint_lnv2_common::gateway_api::{CreateBolt11InvoicePayload, SendPaymentPayload};
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule;
+use futures::StreamExt;
 use hex::ToHex;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
@@ -48,7 +50,7 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, info_span, instrument, warn};
 
-use crate::db::GatewayDbtxNcExt as _;
+use crate::db::{FederationConfigKey, FederationConfigKeyPrefix};
 use crate::error::{CliError, FederationNotConnected, LnurlError};
 use crate::{AppState, GatewayState, UserChannelId, get_preimage_and_payment_hash};
 
@@ -769,7 +771,13 @@ async fn federation_join(
     );
 
     let mut dbtx = state.gateway_db.begin_transaction().await;
-    dbtx.save_federation_config(&federation_config).await;
+    dbtx.insert_entry(
+        &FederationConfigKey {
+            id: federation_config.invite_code.federation_id(),
+        },
+        &federation_config,
+    )
+    .await;
     dbtx.commit_tx().await;
     debug!(
         target: LOG_GATEWAY,
@@ -812,13 +820,30 @@ async fn federation_set_fees(
 
     let mut dbtx = state.gateway_db.begin_transaction().await;
     let mut fed_configs = if let Some(fed_id) = federation_id {
-        dbtx.load_federation_configs()
+        dbtx.find_by_prefix(&FederationConfigKeyPrefix)
+            .await
+            .map(
+                |(key, config): (
+                    FederationConfigKey,
+                    fedimint_gateway_common::FederationConfig,
+                )| (key.id, config),
+            )
+            .collect::<std::collections::BTreeMap<_, _>>()
             .await
             .into_iter()
             .filter(|(id, _)| *id == fed_id)
             .collect::<BTreeMap<_, _>>()
     } else {
-        dbtx.load_federation_configs().await
+        dbtx.find_by_prefix(&FederationConfigKeyPrefix)
+            .await
+            .map(
+                |(key, config): (
+                    FederationConfigKey,
+                    fedimint_gateway_common::FederationConfig,
+                )| (key.id, config),
+            )
+            .collect::<std::collections::BTreeMap<_, _>>()
+            .await
     };
 
     let federation_manager = state.federation_manager.read().await;
@@ -872,7 +897,13 @@ async fn federation_set_fees(
 
         config.lightning_fee = lightning_fee;
         config.transaction_fee = transaction_fee;
-        dbtx.save_federation_config(config).await;
+        dbtx.insert_entry(
+            &FederationConfigKey {
+                id: config.invite_code.federation_id(),
+            },
+            config,
+        )
+        .await;
     }
 
     dbtx.commit_tx().await;

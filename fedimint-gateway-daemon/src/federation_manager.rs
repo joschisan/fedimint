@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use fedimint_client::ClientHandleArc;
 use fedimint_core::PeerId;
 use fedimint_core::config::{FederationId, FederationIdPrefix, JsonClientConfig};
-use fedimint_core::db::{DatabaseTransaction, NonCommittable};
+use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped, NonCommittable};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::{FmtCompactAnyhow as _, Spanned};
 use fedimint_gateway_common::FederationInfo;
@@ -13,7 +13,7 @@ use fedimint_logging::LOG_GATEWAY;
 use tracing::{info, warn};
 
 use crate::Result;
-use crate::db::GatewayDbtxNcExt as _;
+use crate::db::FederationConfigKey;
 use crate::error::CliError;
 
 /// The first index that the gateway will assign to a federation.
@@ -117,7 +117,9 @@ impl FederationManager {
                 }
             };
 
-            let config = dbtx.load_federation_config(*federation_id).await;
+            let config = dbtx
+                .get_value(&FederationConfigKey { id: *federation_id })
+                .await;
             if let Some(config) = config {
                 federation_infos.push(FederationInfo {
                     federation_id: *federation_id,

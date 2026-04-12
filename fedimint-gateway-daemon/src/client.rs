@@ -11,12 +11,13 @@ use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy
 use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::config::FederationId;
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::encoding::Encodable;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_derive_secret::DerivableSecret;
 use fedimint_gateway_common::FederationConfig;
 use fedimint_gwv2_client::GatewayClientInitV2;
 
-use crate::db::GatewayDbExt as _;
+use crate::db::DbKeyPrefix;
 use crate::error::CliError;
 use crate::{AppState, Result};
 
@@ -90,7 +91,11 @@ impl GatewayClientBuilder {
         mnemonic: &Mnemonic,
     ) -> Result<()> {
         let federation_id = config.invite_code.federation_id();
-        let db = gateway.gateway_db.get_client_database(&federation_id);
+        let db = {
+            let mut prefix = vec![DbKeyPrefix::ClientDatabase as u8];
+            prefix.append(&mut federation_id.consensus_encode_to_vec());
+            gateway.gateway_db.with_prefix(prefix)
+        };
         let client_builder = self.create_client_builder(&config, gateway.clone()).await?;
         let root_secret = RootSecret::StandardDoubleDerive(
             Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic),
@@ -130,7 +135,11 @@ impl GatewayClientBuilder {
             let root_secret = RootSecret::Custom(self.client_plainrootsecret(&db).await?);
             (db, root_secret)
         } else {
-            let db = gateway.gateway_db.get_client_database(&federation_id);
+            let db = {
+                let mut prefix = vec![DbKeyPrefix::ClientDatabase as u8];
+                prefix.append(&mut federation_id.consensus_encode_to_vec());
+                gateway.gateway_db.with_prefix(prefix)
+            };
 
             let root_secret = RootSecret::StandardDoubleDerive(
                 Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic),

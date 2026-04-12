@@ -48,7 +48,7 @@ use fedimint_client::secret::RootSecretStrategy;
 use fedimint_client::{Client, ClientHandleArc};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{Database, DatabaseTransaction};
+use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::envs::is_env_var_set;
 use fedimint_core::module::CommonModuleInit;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -60,8 +60,8 @@ use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned};
 use fedimint_core::{Amount, crit, fedimint_build_code_version_env};
 use fedimint_gateway_common::{
-    ChainSource, InterceptPaymentRequest, LightningContext, LightningRpcError, PaymentAction,
-    PaymentFee, Preimage, RegisteredProtocol, V1_API_ENDPOINT,
+    ChainSource, FederationConfig, InterceptPaymentRequest, LightningContext, LightningRpcError,
+    PaymentAction, PaymentFee, Preimage, RegisteredProtocol, V1_API_ENDPOINT,
 };
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -74,6 +74,7 @@ use fedimint_lnv2_common::gateway_api::{
 };
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING};
 use fedimint_mintv2_client::MintClientInit;
+use futures::StreamExt;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeAlias;
 use ldk_node::payment::{PaymentKind, PaymentStatus, SendingParameters};
@@ -86,7 +87,10 @@ use rand::rngs::OsRng;
 use tokio::sync::{RwLock, oneshot};
 use tracing::{debug, info, info_span, warn};
 
-use crate::db::GatewayDbtxNcExt as _;
+use crate::db::{
+    FederationConfigKey, FederationConfigKeyPrefix, GatewayPublicKey,
+    RegisteredIncomingContract as DbRegisteredIncomingContract, RegisteredIncomingContractKey,
+};
 use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
 use crate::error::CliError;
 use crate::rpc::run_webserver;
@@ -421,7 +425,21 @@ impl AppState {
         protocol: RegisteredProtocol,
     ) -> secp256k1::Keypair {
         let mut dbtx = gateway_db.begin_transaction().await;
-        let keypair = dbtx.load_or_create_gateway_keypair(protocol).await;
+        let keypair = if let Some(kp) = dbtx
+            .get_value(&GatewayPublicKey {
+                protocol: protocol.clone(),
+            })
+            .await
+        {
+            kp
+        } else {
+            let context = secp256k1::Secp256k1::new();
+            let (secret_key, _) = context.generate_keypair(&mut rand::rngs::OsRng);
+            let kp = secp256k1::Keypair::from_secret_key(&context, &secret_key);
+            dbtx.insert_new_entry(&GatewayPublicKey { protocol }, &kp)
+                .await;
+            kp
+        };
         dbtx.commit_tx().await;
         keypair
     }
@@ -430,15 +448,6 @@ impl AppState {
         Self::load_or_create_gateway_keypair(&self.gateway_db, RegisteredProtocol::Http)
             .await
             .public_key()
-    }
-
-    /// Reads and serializes structures from the Gateway's database for the
-    /// purpose for serializing to JSON for inspection.
-    pub async fn dump_database(
-        dbtx: &mut DatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> {
-        dbtx.dump_database(prefix_names).await
     }
 
     /// Main entrypoint into the gateway that starts the client registration
@@ -706,7 +715,11 @@ impl AppState {
 
         let configs = {
             let mut dbtx = self.gateway_db.begin_transaction_nc().await;
-            dbtx.load_federation_configs().await
+            dbtx.find_by_prefix(&FederationConfigKeyPrefix)
+                .await
+                .map(|(key, config): (FederationConfigKey, FederationConfig)| (key.id, config))
+                .collect::<BTreeMap<FederationId, FederationConfig>>()
+                .await
         };
 
         if let Some(max_federation_index) = configs.values().map(|cfg| cfg.federation_index).max() {
@@ -829,12 +842,12 @@ impl AppState {
         let context = self.get_lightning_context().await?;
 
         let mut dbtx = self.gateway_db.begin_transaction_nc().await;
-        let fed_config =
-            dbtx.load_federation_config(*federation_id)
-                .await
-                .ok_or(CliError::bad_request(FederationNotConnected {
-                    federation_id_prefix: federation_id.to_prefix(),
-                }))?;
+        let fed_config = dbtx
+            .get_value(&FederationConfigKey { id: *federation_id })
+            .await
+            .ok_or(CliError::bad_request(FederationNotConnected {
+                federation_id_prefix: federation_id.to_prefix(),
+            }))?;
 
         let lightning_fee = fed_config.lightning_fee;
         let transaction_fee = fed_config.transaction_fee;
@@ -958,10 +971,13 @@ impl AppState {
         let mut dbtx = self.gateway_db.begin_transaction().await;
 
         if dbtx
-            .save_registered_incoming_contract(
-                payload.federation_id,
-                payload.amount,
-                payload.contract,
+            .insert_entry(
+                &RegisteredIncomingContractKey(payload.contract.commitment.payment_image.clone()),
+                &DbRegisteredIncomingContract {
+                    federation_id: payload.federation_id,
+                    incoming_amount_msats: payload.amount.msats,
+                    contract: payload.contract,
+                },
             )
             .await
             .is_some()
@@ -1023,7 +1039,9 @@ impl AppState {
             .gateway_db
             .begin_transaction_nc()
             .await
-            .load_registered_incoming_contract(PaymentImage::Hash(payment_hash))
+            .get_value(&RegisteredIncomingContractKey(PaymentImage::Hash(
+                payment_hash,
+            )))
             .await
             .ok_or("Unknown payment hash".to_string())?;
 
@@ -1073,7 +1091,7 @@ impl AppState {
             .gateway_db
             .begin_transaction_nc()
             .await
-            .load_registered_incoming_contract(payment_image)
+            .get_value(&RegisteredIncomingContractKey(payment_image))
             .await
             .ok_or(CliError::internal(format!(
                 "LNv2 incoming payment error: {}",
