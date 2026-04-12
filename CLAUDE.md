@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Additional agent-specific instructions (e.g. for CI-driven code review) can be found in `.github/agents/`.
+
 ## Project Overview
 
 Fedimint is a modular framework for building federated financial applications. It provides a trust-minimized, censorship-resistant, and private alternative to centralized applications. The core implementation focuses on a federated Chaumian e-cash mint that's natively compatible with Bitcoin and the Lightning Network.
