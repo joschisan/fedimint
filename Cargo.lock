@@ -3113,54 +3113,6 @@ name = "fedimint-docs"
 version = "0.11.0-alpha"
 
 [[package]]
-name = "fedimint-dummy-client"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "erased-serde",
- "fedimint-api-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-dummy-common",
- "futures",
- "rand 0.8.5",
- "serde",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-dummy-common"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "fedimint-core",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "fedimint-dummy-server"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "erased-serde",
- "fedimint-core",
- "fedimint-dummy-common",
- "fedimint-server-core",
- "futures",
- "serde",
- "strum 0.27.1",
- "strum_macros 0.27.1",
-]
-
-[[package]]
 name = "fedimint-empty-client"
 version = "0.11.0-alpha"
 dependencies = [
@@ -3306,9 +3258,6 @@ dependencies = [
  "fedimint-connectors",
  "fedimint-core",
  "fedimint-derive-secret",
- "fedimint-dummy-client",
- "fedimint-dummy-common",
- "fedimint-dummy-server",
  "fedimint-eventlog",
  "fedimint-gateway-common",
  "fedimint-gwv2-client",
