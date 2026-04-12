@@ -30,7 +30,6 @@ use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
 use fedimint_gateway_common::{ChainSource, InterceptPaymentRequest, RegisteredProtocol};
 use fedimint_gateway_daemon::client::GatewayClientBuilder;
 use fedimint_gateway_daemon::config::GatewayOpts;
-use fedimint_gateway_daemon::envs::{FM_GATEWAY_MNEMONIC_ENV, FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV};
 use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli};
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
@@ -67,7 +66,7 @@ fn main() -> anyhow::Result<()> {
 
         // 3. Load or generate mnemonic
         if AppState::load_mnemonic(&gateway_db).await.is_none() {
-            let mnemonic = if let Ok(words) = std::env::var(FM_GATEWAY_MNEMONIC_ENV) {
+            let mnemonic = if let Ok(words) = std::env::var("FM_GATEWAY_MNEMONIC") {
                 info!(target: LOG_GATEWAY, "Using provided mnemonic from environment variable");
                 Mnemonic::parse_in_normalized(Language::English, words.as_str())
                     .map_err(|e| anyhow!("Seed phrase provided in environment was invalid {e:?}"))?
@@ -132,7 +131,7 @@ fn main() -> anyhow::Result<()> {
 
         // 6. Wait for chain sync
         install_crypto_provider().await;
-        if !is_env_var_set(FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV) {
+        if !is_env_var_set("FM_GATEWAY_SKIP_WAIT_FOR_SYNC") {
             wait_for_chain_sync(&node).await?;
         }
 
