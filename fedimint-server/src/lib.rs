@@ -82,6 +82,7 @@ pub mod config;
 
 /// A function/closure type for handling dashboard UI
 pub type DashboardUiRouter = Box<dyn Fn(DynDashboardApi) -> axum::Router + Send>;
+pub type DashboardCliRouter = Box<dyn Fn(DynDashboardApi) -> axum::Router + Send>;
 
 /// A function/closure type for handling setup UI
 pub type SetupUiRouter = Box<dyn Fn(DynSetupApi) -> axum::Router + Send>;
@@ -98,9 +99,10 @@ pub async fn run(
     bitcoin_rpc: DynServerBitcoinRpc,
     setup_ui_router: SetupUiRouter,
     dashboard_ui_router: DashboardUiRouter,
+    module_cli_router: DashboardCliRouter,
     db_checkpoint_retention: u64,
     iroh_api_limits: ConnectionLimits,
-    cli_bind: Option<std::net::SocketAddr>,
+    cli_bind: std::net::SocketAddr,
 ) -> anyhow::Result<()> {
     let (cfg, connections, p2p_status_receivers) = match get_config(&data_dir)? {
         Some(cfg) => {
@@ -195,8 +197,10 @@ pub async fn run(
         bitcoin_rpc,
         settings.ui_bind,
         dashboard_ui_router,
+        module_cli_router,
         db_checkpoint_retention,
         iroh_api_limits,
+        cli_bind,
     ))
     .await?;
 
@@ -244,7 +248,7 @@ pub async fn run_config_gen(
     api_secrets: ApiSecrets,
     setup_ui_handler: SetupUiRouter,
     module_init_registry: ServerModuleInitRegistry,
-    cli_bind: Option<std::net::SocketAddr>,
+    cli_bind: std::net::SocketAddr,
 ) -> anyhow::Result<(
     ServerConfig,
     DynP2PConnections<P2PMessage>,
@@ -289,16 +293,13 @@ pub async fn run_config_gen(
 
     info!(target: LOG_CONSENSUS, "Setup UI running at http://{} 🚀", settings.ui_bind);
 
-    // Spawn CLI admin server if cli_bind is configured
     let cli_task_group = TaskGroup::new();
-    if let Some(cli_addr) = cli_bind {
-        let cli_state = cli::CliState {
-            setup_api: setup_api.clone().into_dyn(),
-        };
-        cli_task_group.spawn("setup-cli", move |handle| async move {
-            cli::run_cli(cli_addr, cli_state, handle).await;
-        });
-    }
+    let cli_state = cli::CliState {
+        setup_api: setup_api.clone().into_dyn(),
+    };
+    cli_task_group.spawn("setup-cli", move |handle| async move {
+        cli::run_cli(cli_bind, cli_state, handle).await;
+    });
 
     let cg_params = cgp_receiver
         .recv()
@@ -320,6 +321,11 @@ pub async fn run_config_gen(
         .shutdown_join_all(None)
         .await
         .context("Failed to shutdown UI server after config gen")?;
+
+    cli_task_group
+        .shutdown_join_all(None)
+        .await
+        .context("Failed to shutdown CLI server after config gen")?;
 
     let connector = if cg_params.iroh_endpoints().is_empty() {
         TlsTcpConnector::new(

@@ -4251,6 +4251,7 @@ name = "fedimintd"
 version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
+ "axum 0.8.8",
  "bitcoin",
  "clap",
  "fedimint-build",
@@ -4268,6 +4269,7 @@ dependencies = [
  "fedimint-rocksdb",
  "fedimint-server",
  "fedimint-server-bitcoin-rpc",
+ "fedimint-server-cli-core",
  "fedimint-server-core",
  "fedimint-server-ui",
  "fedimint-unknown-common",

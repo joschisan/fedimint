@@ -78,8 +78,10 @@ pub async fn run(
     dyn_server_bitcoin_rpc: DynServerBitcoinRpc,
     ui_bind: SocketAddr,
     dashboard_ui_router: DashboardUiRouter,
+    dashboard_cli_router: crate::DashboardCliRouter,
     db_checkpoint_retention: u64,
     iroh_api_limits: ConnectionLimits,
+    cli_bind: SocketAddr,
 ) -> anyhow::Result<()> {
     cfg.validate_config(&cfg.local.identity, &module_init_registry)?;
 
@@ -264,6 +266,13 @@ pub async fn run(
     });
 
     info!(target: LOG_CONSENSUS, "Dashboard UI running at http://{ui_bind} 🚀");
+
+    {
+        let dashboard_router = dashboard_cli_router(consensus_api.clone().into_dyn());
+        task_group.spawn("consensus-cli", move |handle| async move {
+            crate::cli::run_dashboard_cli(cli_bind, dashboard_router, handle).await;
+        });
+    }
 
     loop {
         match bitcoin_rpc_connection.status() {

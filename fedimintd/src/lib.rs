@@ -244,7 +244,62 @@ impl ServerOpts {
 ///   is being built from. This is used mostly for information purposes
 ///   (`fedimintd version-hash`). See `fedimint-build` crate for easy way to
 ///   obtain it.
-///
+fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi) -> axum::Router {
+    use axum::Json;
+    use axum::extract::State;
+    use axum::routing::post;
+    use fedimint_lnv2_server::Lightning;
+    use fedimint_server::cli::CliError;
+    use fedimint_server_cli_core::{
+        GatewayUrlRequest, ROUTE_MODULE_LNV2_GATEWAY_ADD, ROUTE_MODULE_LNV2_GATEWAY_LIST,
+        ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
+    };
+    use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi};
+
+    async fn lnv2_gateway_add(
+        State(api): State<DynDashboardApi>,
+        Json(payload): Json<GatewayUrlRequest>,
+    ) -> Result<Json<bool>, CliError> {
+        let lnv2 = api
+            .get_module::<Lightning>()
+            .ok_or_else(|| CliError::internal("LNv2 module not found"))?;
+        let url: fedimint_core::util::SafeUrl = payload
+            .url
+            .parse()
+            .map_err(|e| CliError::internal(format!("Invalid URL: {e}")))?;
+        Ok(Json(lnv2.add_gateway_ui(url).await))
+    }
+
+    async fn lnv2_gateway_remove(
+        State(api): State<DynDashboardApi>,
+        Json(payload): Json<GatewayUrlRequest>,
+    ) -> Result<Json<bool>, CliError> {
+        let lnv2 = api
+            .get_module::<Lightning>()
+            .ok_or_else(|| CliError::internal("LNv2 module not found"))?;
+        let url: fedimint_core::util::SafeUrl = payload
+            .url
+            .parse()
+            .map_err(|e| CliError::internal(format!("Invalid URL: {e}")))?;
+        Ok(Json(lnv2.remove_gateway_ui(url).await))
+    }
+
+    async fn lnv2_gateway_list(
+        State(api): State<DynDashboardApi>,
+    ) -> Result<Json<Vec<fedimint_core::util::SafeUrl>>, CliError> {
+        let lnv2 = api
+            .get_module::<Lightning>()
+            .ok_or_else(|| CliError::internal("LNv2 module not found"))?;
+        Ok(Json(lnv2.gateways_ui().await))
+    }
+
+    axum::Router::new()
+        .route(ROUTE_MODULE_LNV2_GATEWAY_ADD, post(lnv2_gateway_add))
+        .route(ROUTE_MODULE_LNV2_GATEWAY_REMOVE, post(lnv2_gateway_remove))
+        .route(ROUTE_MODULE_LNV2_GATEWAY_LIST, post(lnv2_gateway_list))
+        .with_state(api)
+}
+
 /// * `code_version_vendor_suffix` - An optional suffix that will be appended to
 ///   the internal fedimint release version, to distinguish binaries built by
 ///   different vendors, usually with a different set of modules. Currently DKG
@@ -378,12 +433,13 @@ pub async fn run(
             dyn_server_bitcoin_rpc,
             Box::new(fedimint_server_ui::setup::router),
             Box::new(fedimint_server_ui::dashboard::router),
+            Box::new(dashboard_cli_router),
             server_opts.db_checkpoint_retention,
             fedimint_server::ConnectionLimits::new(
                 server_opts.iroh_api_max_connections,
                 server_opts.iroh_api_max_requests_per_connection,
             ),
-            Some(server_opts.bind_cli),
+            server_opts.bind_cli,
         )
         .await
         .unwrap_or_else(|err| panic!("Main task returned error: {}", err.fmt_compact_anyhow()));

@@ -14,9 +14,6 @@ use fedimint_server_cli_core::{
 };
 use fedimint_server_core::setup_ui::DynSetupApi;
 use tokio::net::TcpListener;
-use tracing::info;
-
-use crate::LOG_CONSENSUS;
 
 #[derive(Clone)]
 pub struct CliState {
@@ -58,12 +55,11 @@ impl From<anyhow::Error> for CliError {
     }
 }
 
+/// Setup CLI server — runs during DKG phase.
 pub async fn run_cli(addr: SocketAddr, state: CliState, handle: TaskHandle) {
     let listener = TcpListener::bind(addr)
         .await
         .expect("Failed to bind CLI server");
-
-    info!(target: LOG_CONSENSUS, %addr, "Started CLI admin server (localhost-only)");
 
     let router = Router::new()
         .route(ROUTE_SETUP_STATUS, post(setup_status))
@@ -79,9 +75,21 @@ pub async fn run_cli(addr: SocketAddr, state: CliState, handle: TaskHandle) {
         .expect("CLI admin server failed");
 }
 
-async fn setup_status(
-    State(state): State<CliState>,
-) -> Result<Json<SetupStatus>, CliError> {
+/// Dashboard CLI server — runs during consensus phase.
+pub async fn run_dashboard_cli(addr: SocketAddr, router: Router, handle: TaskHandle) {
+    let listener = TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind module CLI server");
+
+    axum::serve(listener, router.into_make_service())
+        .with_graceful_shutdown(handle.make_shutdown_rx())
+        .await
+        .expect("Module CLI admin server failed");
+}
+
+// Setup handlers
+
+async fn setup_status(State(state): State<CliState>) -> Result<Json<SetupStatus>, CliError> {
     let status = if state.setup_api.setup_code().await.is_some() {
         SetupStatus::SharingConnectionCodes
     } else {

@@ -1,7 +1,6 @@
-use serde::{Deserialize, Serialize};
-
 // Re-export from fedimint-core
 pub use fedimint_core::admin_client::SetupStatus;
+use serde::{Deserialize, Serialize};
 
 // Setup routes
 pub const ROUTE_SETUP_STATUS: &str = "/setup/status";
@@ -15,9 +14,9 @@ pub const ROUTE_MODULE_WALLET_BLOCK_COUNT: &str = "/module/walletv2/block-count"
 pub const ROUTE_MODULE_WALLET_FEERATE: &str = "/module/walletv2/feerate";
 pub const ROUTE_MODULE_WALLET_PENDING_TX_CHAIN: &str = "/module/walletv2/pending-tx-chain";
 pub const ROUTE_MODULE_WALLET_TX_CHAIN: &str = "/module/walletv2/tx-chain";
-pub const ROUTE_MODULE_LN_GATEWAY_ADD: &str = "/module/lnv2/gateway/add";
-pub const ROUTE_MODULE_LN_GATEWAY_REMOVE: &str = "/module/lnv2/gateway/remove";
-pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/lnv2/gateway/list";
+pub const ROUTE_MODULE_LNV2_GATEWAY_ADD: &str = "/module/lnv2/gateway/add";
+pub const ROUTE_MODULE_LNV2_GATEWAY_REMOVE: &str = "/module/lnv2/gateway/remove";
+pub const ROUTE_MODULE_LNV2_GATEWAY_LIST: &str = "/module/lnv2/gateway/list";
 
 // Request/response types
 
