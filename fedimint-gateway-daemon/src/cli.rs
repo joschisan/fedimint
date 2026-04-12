@@ -10,6 +10,7 @@ use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped;
 use fedimint_core::module::CommonModuleInit;
+use fedimint_core::task::TaskHandle;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
 use fedimint_core::{Amount, BitcoinAmountOrAll, fedimint_build_code_version_env};
 use fedimint_gateway_common::{
@@ -26,8 +27,8 @@ use fedimint_gateway_common::{
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND,
-    ROUTE_MODULE_WALLET_RECEIVE, ROUTE_STOP, ReceiveEcashPayload, ReceiveEcashResponse,
-    SendOnchainRequest, SetFeesPayload, SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT,
+    ROUTE_MODULE_WALLET_RECEIVE, ReceiveEcashPayload, ReceiveEcashResponse, SendOnchainRequest,
+    SetFeesPayload, SpendEcashPayload, SpendEcashResponse,
 };
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule;
@@ -43,22 +44,19 @@ use tracing::{debug, error, info, info_span, instrument, warn};
 
 use crate::db::{FederationConfigKey, FederationConfigKeyPrefix};
 use crate::error::{CliError, FederationNotConnected};
-use crate::{AppState, GatewayState, UserChannelId, get_preimage_and_payment_hash};
+use crate::{AppState, UserChannelId, get_preimage_and_payment_hash};
 
-pub async fn run_cli(listener: TcpListener, state: AppState) {
-    let routes = router()
-        .with_state(state.clone())
-        .layer(CorsLayer::permissive());
+pub async fn run_cli(state: AppState, handle: TaskHandle) {
+    let listener = TcpListener::bind(state.cli_bind)
+        .await
+        .expect("Failed to bind CLI server");
 
-    let api = Router::new()
-        .nest(&format!("/{V1_API_ENDPOINT}"), routes.clone())
-        .merge(routes);
+    let router = router()
+        .with_state(state)
+        .layer(CorsLayer::permissive())
+        .into_make_service();
 
-    let addr = listener.local_addr().expect("valid local addr");
-    info!(target: LOG_GATEWAY, %addr, "Started CLI webserver (localhost-only)");
-
-    let handle = state.task_group.make_handle();
-    axum::serve(listener, api.into_make_service())
+    axum::serve(listener, router)
         .with_graceful_shutdown(handle.make_shutdown_rx())
         .await
         .expect("CLI webserver failed");
@@ -68,7 +66,6 @@ fn router() -> Router<AppState> {
     Router::new()
         // Top-level
         .route(ROUTE_INFO, post(info))
-        .route(ROUTE_STOP, post(stop))
         .route(ROUTE_MNEMONIC, post(mnemonic))
         // LDK node management
         .route(ROUTE_LDK_BALANCES, post(ldk_balances))
@@ -150,35 +147,6 @@ async fn info(State(state): State<AppState>) -> Result<Json<GatewayInfo>, CliErr
     };
 
     Ok(Json(info))
-}
-
-/// Instructs the gateway to shut down gracefully
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn stop(State(state): State<AppState>) -> Result<Json<()>, CliError> {
-    let task_group = state.task_group.clone();
-
-    // Take the write lock on the state so that no additional payments are processed
-    let mut state_guard = state.state.write().await;
-    if let GatewayState::Running = *state_guard {
-        *state_guard = GatewayState::ShuttingDown;
-
-        state
-            .federation_manager
-            .read()
-            .await
-            .wait_for_incoming_payments()
-            .await?;
-    }
-    drop(state_guard);
-
-    let tg = task_group.clone();
-    tg.spawn("Kill Gateway", |_task_handle| async {
-        if let Err(err) = task_group.shutdown_join_all(Duration::from_mins(3)).await {
-            warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Error shutting down gateway");
-        }
-    });
-
-    Ok(Json(()))
 }
 
 /// Returns the gateway's mnemonic words

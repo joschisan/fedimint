@@ -6,13 +6,7 @@ use clap::{ArgGroup, Parser};
 use fedimint_core::util::SafeUrl;
 use fedimint_gateway_common::{PaymentFee, V1_API_ENDPOINT};
 
-use super::envs;
-use crate::envs::{
-    FM_BITCOIND_PASSWORD_ENV, FM_BITCOIND_URL_ENV, FM_BITCOIND_USERNAME_ENV, FM_ESPLORA_URL_ENV,
-};
-
-/// Command line parameters for starting the gateway. `mode`, `data_dir`,
-/// `listen`, and `api_addr` are all required.
+/// Command line parameters for starting the gateway.
 #[derive(Parser)]
 #[command(version)]
 #[command(
@@ -36,37 +30,47 @@ use crate::envs::{
 )]
 pub struct GatewayOpts {
     /// Path to folder containing gateway config and data files
-    #[arg(long = "data-dir", env = envs::FM_GATEWAY_DATA_DIR_ENV)]
+    #[arg(long = "data-dir", env = "FM_GATEWAY_DATA_DIR")]
     pub data_dir: PathBuf,
 
-    /// Gateway webserver listen address
-    #[arg(long = "listen", env = envs::FM_GATEWAY_LISTEN_ADDR_ENV)]
-    listen: SocketAddr,
+    /// Public API listen address
+    #[arg(
+        long = "api-bind",
+        env = "FM_GATEWAY_API_BIND",
+        default_value = "0.0.0.0:8175"
+    )]
+    pub api_bind: SocketAddr,
+
+    /// CLI/admin listen address
+    #[arg(
+        long = "cli-bind",
+        env = "FM_GATEWAY_CLI_BIND",
+        default_value = "127.0.0.1:8176"
+    )]
+    pub cli_bind: SocketAddr,
 
     /// Public URL from which the webserver API is reachable
-    #[arg(long = "api-addr", env = envs::FM_GATEWAY_API_ADDR_ENV)]
-    api_addr: Option<SafeUrl>,
+    #[arg(long = "api-addr", env = "FM_GATEWAY_API_ADDR")]
+    pub api_addr: Option<SafeUrl>,
 
     /// Bitcoin network this gateway will be running on
-    #[arg(long = "network", env = envs::FM_GATEWAY_NETWORK_ENV)]
-    network: Network,
+    #[arg(long = "network", env = "FM_GATEWAY_NETWORK")]
+    pub network: Network,
 
     /// The username to use when connecting to bitcoind
-    #[arg(long, env = FM_BITCOIND_USERNAME_ENV)]
+    #[arg(long, env = "FM_BITCOIND_USERNAME")]
     pub bitcoind_username: Option<String>,
 
     /// The password to use when connecting to bitcoind
-    #[arg(long, env = FM_BITCOIND_PASSWORD_ENV)]
+    #[arg(long, env = "FM_BITCOIND_PASSWORD")]
     pub bitcoind_password: Option<String>,
 
     /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
-    /// This should not include authentication parameters, they should be
-    /// included in `FM_BITCOIND_USERNAME` and `FM_BITCOIND_PASSWORD`
-    #[arg(long, env = FM_BITCOIND_URL_ENV)]
+    #[arg(long, env = "FM_BITCOIND_URL")]
     pub bitcoind_url: Option<SafeUrl>,
 
     /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
-    #[arg(long, env = FM_ESPLORA_URL_ENV)]
+    #[arg(long, env = "FM_ESPLORA_URL")]
     pub esplora_url: Option<SafeUrl>,
 
     /// LDK lightning node listen port
@@ -82,17 +86,15 @@ pub struct GatewayOpts {
     pub ldk_alias: String,
 
     /// The default routing fees that are applied to new federations
-    #[arg(long = "default-routing-fees", env = envs::FM_DEFAULT_ROUTING_FEES_ENV, default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
-    default_routing_fees: PaymentFee,
+    #[arg(long = "default-routing-fees", env = "FM_DEFAULT_ROUTING_FEES", default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
+    pub default_routing_fees: PaymentFee,
 
     /// The default transaction fees that are applied to new federations
-    #[arg(long = "default-transaction-fees", env = envs::FM_DEFAULT_TRANSACTION_FEES_ENV, default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
-    default_transaction_fees: PaymentFee,
+    #[arg(long = "default-transaction-fees", env = "FM_DEFAULT_TRANSACTION_FEES", default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
+    pub default_transaction_fees: PaymentFee,
 }
 
 impl GatewayOpts {
-    /// Converts the command line parameters into a helper struct the Gateway
-    /// uses to store runtime parameters.
     pub fn to_gateway_parameters(&self) -> anyhow::Result<GatewayParameters> {
         let versioned_api = self.api_addr.clone().map(|api_addr| {
             api_addr
@@ -101,7 +103,8 @@ impl GatewayOpts {
         });
 
         Ok(GatewayParameters {
-            listen: self.listen,
+            api_bind: self.api_bind,
+            cli_bind: self.cli_bind,
             versioned_api,
             network: self.network,
             default_routing_fees: self.default_routing_fees,
@@ -110,15 +113,11 @@ impl GatewayOpts {
     }
 }
 
-/// `GatewayParameters` is a helper struct that can be derived from
-/// `GatewayOpts` that holds the CLI or environment variables that are specified
-/// by the user.
-///
-/// If `GatewayConfiguration is set in the database, that takes precedence and
-/// the optional parameters will have no affect.
+/// Runtime parameters derived from CLI args / environment variables.
 #[derive(Debug)]
 pub struct GatewayParameters {
-    pub listen: SocketAddr,
+    pub api_bind: SocketAddr,
+    pub cli_bind: SocketAddr,
     pub versioned_api: Option<SafeUrl>,
     pub network: Network,
     pub default_routing_fees: PaymentFee,

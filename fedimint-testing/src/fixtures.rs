@@ -272,7 +272,7 @@ impl Fixtures {
         let node = Arc::new(node);
 
         AppState::builder(client_builder, gateway_db)
-            .listen(listen)
+            .api_bind(listen)
             .api_addr(address)
             .network(bitcoin::Network::Regtest)
             .node(node)

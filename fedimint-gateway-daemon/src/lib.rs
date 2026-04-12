@@ -47,7 +47,6 @@ use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::module::CommonModuleInit;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::secp256k1::schnorr::Signature;
-use fedimint_core::task::TaskGroup;
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::{FmtCompact, SafeUrl, Spanned};
 use fedimint_core::{Amount, crit};
@@ -147,11 +146,11 @@ pub struct AppState {
     /// Database for Gateway metadata.
     pub gateway_db: Database,
 
-    /// The socket the gateway listens on.
-    pub listen: SocketAddr,
+    /// Public API listen address.
+    pub api_bind: SocketAddr,
 
-    /// The task group for all tasks related to the gateway.
-    pub task_group: TaskGroup,
+    /// CLI/admin listen address.
+    pub cli_bind: SocketAddr,
 
     /// The Bitcoin network that the Lightning network is configured to.
     pub network: Network,
@@ -185,7 +184,8 @@ impl std::fmt::Debug for AppState {
             .field("state", &self.state)
             .field("client_builder", &self.client_builder)
             .field("gateway_db", &self.gateway_db)
-            .field("listen", &self.listen)
+            .field("api_bind", &self.api_bind)
+            .field("cli_bind", &self.cli_bind)
             .field("node_id", &self.node.node_id())
             .field("registrations", &self.registrations)
             .finish_non_exhaustive()
@@ -201,9 +201,6 @@ impl AppState {
     ) -> anyhow::Result<AppState> {
         let network = gateway_parameters.network;
 
-        let task_group = TaskGroup::new();
-        task_group.install_kill_handler();
-
         let mut registrations = BTreeMap::new();
         if let Some(http_url) = gateway_parameters.versioned_api {
             registrations.insert(
@@ -218,8 +215,8 @@ impl AppState {
             state: Arc::new(RwLock::new(GatewayState::Running)),
             client_builder,
             gateway_db: gateway_db.clone(),
-            listen: gateway_parameters.listen,
-            task_group,
+            api_bind: gateway_parameters.api_bind,
+            cli_bind: gateway_parameters.cli_bind,
             network,
             default_routing_fees: gateway_parameters.default_routing_fees,
             default_transaction_fees: gateway_parameters.default_transaction_fees,
@@ -992,7 +989,8 @@ impl AppState {
         #[builder(start_fn)] client_builder: GatewayClientBuilder,
         #[builder(start_fn)] gateway_db: Database,
         node: Arc<ldk_node::Node>,
-        #[builder(default = ([127, 0, 0, 1], 80).into())] listen: SocketAddr,
+        #[builder(default = ([0, 0, 0, 0], 8175).into())] api_bind: SocketAddr,
+        #[builder(default = ([127, 0, 0, 1], 8176).into())] cli_bind: SocketAddr,
         api_addr: Option<SafeUrl>,
         #[builder(default = DEFAULT_NETWORK)] network: Network,
         #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] default_routing_fees: PaymentFee,
@@ -1006,7 +1004,8 @@ impl AppState {
 
         AppState::new(
             GatewayParameters {
-                listen,
+                api_bind,
+                cli_bind,
                 versioned_api,
                 network,
                 default_routing_fees,

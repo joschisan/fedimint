@@ -8,7 +8,6 @@
 //! clients to request routing of payments through the Lightning Network.
 //! The API also has endpoints for managing the gateway.
 
-use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -42,7 +41,6 @@ use lightning::types::payment::PaymentHash;
 use rand::rngs::OsRng;
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
 use tikv_jemallocator::Jemalloc;
-use tokio::net::TcpListener;
 use tracing::{debug, info, warn};
 
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
@@ -150,28 +148,25 @@ fn main() -> anyhow::Result<()> {
         // 8. Load federation clients
         state.load_clients().await?;
 
-        // 9. Bind listeners before spawning tasks
-        let listen = state.listen;
-        let public_addr = SocketAddr::new("0.0.0.0".parse().expect("valid addr"), listen.port());
-        let cli_addr = SocketAddr::new("127.0.0.1".parse().expect("valid addr"), listen.port() + 1);
-        let public_listener = TcpListener::bind(public_addr).await?;
-        let cli_listener = TcpListener::bind(cli_addr).await?;
+        // 9. Create task group for graceful shutdown
+        let task_group = fedimint_core::task::TaskGroup::new();
+        task_group.install_kill_handler();
 
         // 10. Spawn tasks
         let public_task = runtime.spawn(fedimint_gateway_daemon::public::run_public(
-            public_listener,
             state.clone(),
+            task_group.make_handle(),
         ));
 
-        let cli_task = runtime.spawn(cli::run_cli(cli_listener, state.clone()));
+        let cli_task = runtime.spawn(cli::run_cli(state.clone(), task_group.make_handle()));
 
-        let events_task = runtime.spawn(process_ldk_events(state.clone()));
+        let events_task = runtime.spawn(process_ldk_events(state.clone(), task_group.make_handle()));
 
         // 11. Wait for shutdown signal
         shutdown_signal().await;
 
         info!(target: LOG_GATEWAY, "Gatewayd shutting down...");
-        state.task_group.shutdown_join_all(None).await?;
+        task_group.shutdown_join_all(None).await?;
 
         if let Err(e) = public_task.await {
             warn!(target: LOG_GATEWAY, err = %e, "Failed to join public webserver task");
@@ -356,8 +351,7 @@ async fn wait_for_chain_sync(node: &ldk_node::Node) -> anyhow::Result<()> {
 // LDK event loop
 // ---------------------------------------------------------------------------
 
-async fn process_ldk_events(state: AppState) {
-    let handle = state.task_group.make_handle();
+async fn process_ldk_events(state: AppState, handle: fedimint_core::task::TaskHandle) {
     loop {
         let event = tokio::select! {
             event = state.node.next_event_async() => event,

@@ -4,7 +4,7 @@ use axum::extract::{Json, Path, Query, State};
 use axum::routing::{get, post};
 use bitcoin::hashes::sha256;
 use fedimint_core::config::FederationId;
-use fedimint_gateway_common::V1_API_ENDPOINT;
+use fedimint_core::task::TaskHandle;
 use fedimint_lnurl::LnurlResponse;
 use fedimint_lnv2_common::endpoint_constants::{
     CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
@@ -14,25 +14,22 @@ use fedimint_logging::LOG_GATEWAY;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
-use tracing::{info, instrument};
+use tracing::instrument;
 
 use crate::AppState;
 use crate::error::{CliError, LnurlError};
 
-pub async fn run_public(listener: TcpListener, state: AppState) {
-    let routes = router()
-        .with_state(state.clone())
-        .layer(CorsLayer::permissive());
+pub async fn run_public(state: AppState, handle: TaskHandle) {
+    let listener = TcpListener::bind(state.api_bind)
+        .await
+        .expect("Failed to bind public API server");
 
-    let api = Router::new()
-        .nest(&format!("/{V1_API_ENDPOINT}"), routes.clone())
-        .merge(routes);
+    let router = router()
+        .with_state(state)
+        .layer(CorsLayer::permissive())
+        .into_make_service();
 
-    let addr = listener.local_addr().expect("valid local addr");
-    info!(target: LOG_GATEWAY, %addr, "Started public webserver (LNv2 protocol)");
-
-    let handle = state.task_group.make_handle();
-    axum::serve(listener, api.into_make_service())
+    axum::serve(listener, router)
         .with_graceful_shutdown(handle.make_shutdown_rx())
         .await
         .expect("Public webserver failed");
