@@ -9,7 +9,8 @@ use fedimint_lnv2_common::Bolt11InvoiceDescription;
 use serde_json::Value;
 use tracing::info;
 
-use crate::env::{NUM_GUARDIANS, PASSWORD, TestEnv, fedimint_cli_raw, gateway_cli};
+use crate::cli::RunGatewayCli;
+use crate::env::{NUM_GUARDIANS, PASSWORD, TestEnv, fedimint_cli_raw};
 
 async fn add_gateway(cli_client_dir: &Path, peer: usize, gateway: &str) -> anyhow::Result<bool> {
     let result = fedimint_cli_raw(&[
@@ -184,10 +185,10 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
     info!("Testing payment from client to gateway...");
 
     {
-        let invoice_json =
-            gateway_cli(&env.gw2_addr, &["ldk", "invoice", "create", "1000000"]).await?;
-
-        let invoice_str = invoice_json.as_str().expect("invoice must be a string");
+        let invoice_str = crate::cli::gateway_cmd(&env.gw2_addr)
+            .args(["ldk", "invoice", "create", "1000000"])
+            .run_gateway_cli::<fedimint_gateway_common::InvoiceCreateResponse>()?
+            .invoice;
 
         let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
 
@@ -210,11 +211,9 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
             )
             .await?;
 
-        gateway_cli(
-            &env.gw2_addr,
-            &["ldk", "invoice", "pay", &invoice.to_string()],
-        )
-        .await?;
+        crate::cli::gateway_cmd(&env.gw2_addr)
+            .args(["ldk", "invoice", "pay", &invoice.to_string()])
+            .run_gateway_cli::<serde_json::Value>()?;
 
         let state = lnv2.await_final_receive_operation_state(receive_op).await?;
         assert_eq!(state, FinalReceiveOperationState::Claimed);

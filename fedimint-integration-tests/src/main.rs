@@ -1,3 +1,4 @@
+mod cli;
 mod env;
 mod lnv2;
 mod mintv2;

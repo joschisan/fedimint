@@ -19,7 +19,6 @@ pub mod config;
 pub mod db;
 pub mod envs;
 mod error;
-mod events;
 mod federation_manager;
 pub mod rpc;
 
@@ -155,7 +154,6 @@ impl AppState {
     ///     .api_addr(url)
     ///     .network(Network::Regtest)
     ///     .node(node)
-    ///     .chain_source(chain_source)
     ///     .build()
     ///     .await?;
     /// ```
@@ -164,7 +162,6 @@ impl AppState {
         #[builder(start_fn)] client_builder: GatewayClientBuilder,
         #[builder(start_fn)] gateway_db: Database,
         node: Arc<ldk_node::Node>,
-        chain_source: ChainSource,
         #[builder(default = ([127, 0, 0, 1], 80).into())] listen: SocketAddr,
         api_addr: Option<SafeUrl>,
         #[builder(default = DEFAULT_NETWORK)] network: Network,
@@ -188,7 +185,6 @@ impl AppState {
             gateway_db,
             client_builder,
             node,
-            chain_source,
         )
         .await
     }
@@ -220,9 +216,6 @@ pub struct AppState {
 
     /// The Bitcoin network that the Lightning network is configured to.
     pub(crate) network: Network,
-
-    /// The source of the Bitcoin blockchain data
-    pub(crate) chain_source: ChainSource,
 
     /// The default routing fees for new federations
     pub(crate) default_routing_fees: PaymentFee,
@@ -261,13 +254,6 @@ impl std::fmt::Debug for AppState {
             .field("registrations", &self.registrations)
             .finish_non_exhaustive()
     }
-}
-
-/// Internal helper for on-chain withdrawal calculations
-struct WithdrawDetails {
-    amount: Amount,
-    mint_fees: Option<Amount>,
-    peg_out_fees: bitcoin::Amount,
 }
 
 /// Executes a withdrawal using the walletv2 module
@@ -327,42 +313,6 @@ pub(crate) async fn withdraw_v2(
             Err(CliError::internal("Withdrawal failed"))
         }
     }
-}
-
-/// Calculates an estimated max withdrawable amount on-chain
-async fn calculate_max_withdrawable(
-    client: &ClientHandleArc,
-    _address: &Address,
-) -> AdminResult<WithdrawDetails> {
-    let balance = client.get_balance_for_btc().await.map_err(|err| {
-        CliError::internal(format!(
-            "Balance not available: {}",
-            err.fmt_compact_anyhow()
-        ))
-    })?;
-
-    let wallet_module = client
-        .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(|_| CliError::internal("No wallet module found"))?;
-
-    let peg_out_fees = wallet_module
-        .send_fee()
-        .await
-        .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?;
-
-    let max_withdrawable_before_mint_fees = balance
-        .checked_sub(peg_out_fees.into())
-        .ok_or_else(|| CliError::internal("Insufficient balance to cover peg-out fees"))?;
-
-    let mint_fees = Amount::ZERO;
-
-    let max_withdrawable = max_withdrawable_before_mint_fees.saturating_sub(mint_fees);
-
-    Ok(WithdrawDetails {
-        amount: max_withdrawable,
-        mint_fees: Some(mint_fees),
-        peg_out_fees,
-    })
 }
 
 impl AppState {
@@ -498,14 +448,7 @@ impl AppState {
             "Starting gatewayd",
         );
 
-        AppState::new(
-            gateway_parameters,
-            gateway_db,
-            client_builder,
-            node,
-            chain_source,
-        )
-        .await
+        AppState::new(gateway_parameters, gateway_db, client_builder, node).await
     }
 
     /// Helper function for creating a gateway from either
@@ -515,7 +458,6 @@ impl AppState {
         gateway_db: Database,
         client_builder: GatewayClientBuilder,
         node: Arc<ldk_node::Node>,
-        chain_source: ChainSource,
     ) -> anyhow::Result<AppState> {
         let network = gateway_parameters.network;
 
@@ -539,7 +481,6 @@ impl AppState {
             listen: gateway_parameters.listen,
             task_group,
             network,
-            chain_source,
             default_routing_fees: gateway_parameters.default_routing_fees,
             default_transaction_fees: gateway_parameters.default_transaction_fees,
             registrations,

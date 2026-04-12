@@ -277,7 +277,6 @@ impl Fixtures {
             .api_addr(address)
             .network(bitcoin::Network::Regtest)
             .node(node)
-            .chain_source(chain_source)
             .build()
             .await
             .expect("Failed to create gateway")

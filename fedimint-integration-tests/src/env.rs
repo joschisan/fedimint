@@ -12,11 +12,17 @@ use fedimint_client::{Client, ClientHandleArc, RootSecret};
 use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::Amount;
 use fedimint_core::invite_code::InviteCode;
+use fedimint_gateway_common::{
+    DepositAddressResponse, GatewayInfo, LightningInfo, ListChannelsResponse,
+    OnchainReceiveResponse,
+};
 use fedimint_walletv2_client::WalletClientModule;
 use tokio::process::Command;
 use tracing::info;
 
-fn find_binary(name: &str) -> PathBuf {
+use crate::cli::{RunGatewayCli, gateway_cmd};
+
+pub fn find_binary(name: &str) -> PathBuf {
     let target_dir =
         std::env::var("CARGO_BUILD_TARGET_DIR").unwrap_or_else(|_| "target".to_string());
     let profile = std::env::var("CARGO_PROFILE_DIR").unwrap_or_else(|_| "debug".to_string());
@@ -93,13 +99,33 @@ impl TestEnv {
         let gw2_public = format!("http://127.0.0.1:{GW2_PORT}");
 
         info!("Waiting for gateways...");
-        retry("gw1 ready", || gateway_cli(&gw1_addr, &["info"])).await?;
-        retry("gw2 ready", || gateway_cli(&gw2_addr, &["info"])).await?;
+        retry("gw1 ready", || async {
+            gateway_cmd(&gw1_addr)
+                .arg("info")
+                .run_gateway_cli::<GatewayInfo>()
+                .map(|_| ())
+        })
+        .await?;
+        retry("gw2 ready", || async {
+            gateway_cmd(&gw2_addr)
+                .arg("info")
+                .run_gateway_cli::<GatewayInfo>()
+                .map(|_| ())
+        })
+        .await?;
         info!("Gateways ready");
 
         info!("Connecting gateways to federation...");
-        gateway_cli(&gw1_addr, &["federation", "join", invite_code_str.trim()]).await?;
-        gateway_cli(&gw2_addr, &["federation", "join", invite_code_str.trim()]).await?;
+        gateway_cmd(&gw1_addr)
+            .arg("federation")
+            .arg("join")
+            .arg(invite_code_str.trim())
+            .run_gateway_cli::<serde_json::Value>()?;
+        gateway_cmd(&gw2_addr)
+            .arg("federation")
+            .arg("join")
+            .arg(invite_code_str.trim())
+            .run_gateway_cli::<serde_json::Value>()?;
         info!("Gateways connected");
 
         info!("Funding gateways and opening channel...");
@@ -197,10 +223,12 @@ impl TestEnv {
     pub async fn pegin_gateway(&self, gw_addr: &str) -> anyhow::Result<()> {
         let fed_id = self.invite_code.federation_id().to_string();
 
-        let value = gateway_cli(gw_addr, &["module", &fed_id, "walletv2", "receive"]).await?;
+        let addr = gateway_cmd(gw_addr)
+            .args(["module", &fed_id, "walletv2", "receive"])
+            .run_gateway_cli::<DepositAddressResponse>()?
+            .address;
 
-        let pegin_addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> =
-            value.as_str().context("expected address string")?.parse()?;
+        let pegin_addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = addr.parse()?;
         let pegin_addr = pegin_addr.assume_checked();
 
         tokio::task::block_in_place(|| self.bitcoind.generate_to_address(1, &pegin_addr))?;
@@ -213,20 +241,17 @@ impl TestEnv {
             let gw_addr = gw_addr.to_string();
             let fed_id = fed_id.clone();
             async move {
-                let info = gateway_cli(&gw_addr, &["info"]).await?;
+                let info = gateway_cmd(&gw_addr)
+                    .arg("info")
+                    .run_gateway_cli::<GatewayInfo>()?;
 
-                let feds = info["federations"]
-                    .as_array()
-                    .context("missing federations")?;
-
-                let fed = feds
+                let fed = info
+                    .federations
                     .iter()
-                    .find(|f| f["federation_id"].as_str() == Some(&fed_id))
+                    .find(|f| f.federation_id.to_string() == fed_id)
                     .context("federation not found")?;
 
-                let balance = fed["balance_msat"].as_u64().context("missing balance")?;
-
-                ensure!(balance > 0, "gateway balance is zero");
+                ensure!(fed.balance_msat.msats > 0, "gateway balance is zero");
                 Ok(())
             }
         })
@@ -464,72 +489,22 @@ pub async fn fedimint_cli_raw(args: &[&str]) -> anyhow::Result<String> {
     Ok(String::from_utf8(output.stdout)?)
 }
 
-pub async fn gateway_cli(gw_addr: &str, args: &[&str]) -> anyhow::Result<serde_json::Value> {
-    let mut full_args = vec!["-a", gw_addr];
-    full_args.extend(args);
-
-    let output = Command::new(find_binary("gateway-cli"))
-        .args(&full_args)
-        .output()
-        .await
-        .context("Failed to run gateway-cli")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        bail!(
-            "gateway-cli {} failed:\nstdout: {stdout}\nstderr: {stderr}",
-            args.join(" ")
-        );
-    }
-
-    let stdout = String::from_utf8(output.stdout)?;
-    if stdout.trim().is_empty() {
-        Ok(serde_json::Value::Null)
-    } else {
-        serde_json::from_str(stdout.trim()).context("Failed to parse gateway-cli JSON output")
-    }
-}
-
-pub async fn gateway_cli_typed<T: serde::de::DeserializeOwned>(
-    gw_addr: &str,
-    args: &[&str],
-) -> anyhow::Result<T> {
-    let mut full_args = vec!["-a", gw_addr];
-    full_args.extend(args);
-
-    let output = Command::new(find_binary("gateway-cli"))
-        .args(&full_args)
-        .output()
-        .await
-        .context("Failed to run gateway-cli")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        bail!(
-            "gateway-cli {} failed:\nstdout: {stdout}\nstderr: {stderr}",
-            args.join(" ")
-        );
-    }
-
-    let stdout = String::from_utf8(output.stdout)?;
-    serde_json::from_str(stdout.trim())
-        .context(format!("Failed to parse gateway-cli output: {stdout}"))
-}
-
 async fn open_channel_between_gateways(
     bitcoind: &bitcoincore_rpc::Client,
     gw1_addr: &str,
     gw2_addr: &str,
 ) -> anyhow::Result<()> {
-    let gw2_info = gateway_cli(gw2_addr, &["info"]).await?;
+    let gw2_info = gateway_cmd(gw2_addr)
+        .arg("info")
+        .run_gateway_cli::<GatewayInfo>()?;
 
     for gw_addr in [gw1_addr, gw2_addr] {
-        let addr_json = gateway_cli(gw_addr, &["ldk", "onchain", "receive"]).await?;
-        let funding_addr = addr_json.as_str().context("missing address string")?;
+        let addr = gateway_cmd(gw_addr)
+            .args(["ldk", "onchain", "receive"])
+            .run_gateway_cli::<OnchainReceiveResponse>()?
+            .address;
 
-        let addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = funding_addr.parse()?;
+        let addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = addr.parse()?;
         let addr = addr.assume_checked();
         tokio::task::block_in_place(|| bitcoind.generate_to_address(1, &addr))?;
         tokio::task::block_in_place(|| {
@@ -542,10 +517,13 @@ async fn open_channel_between_gateways(
         retry("gateway sync", || {
             let gw_addr = gw_addr.to_string();
             async move {
-                let info = gateway_cli(&gw_addr, &["info"]).await?;
-                let height = info["lightning_info"]["connected"]["block_height"]
-                    .as_u64()
-                    .context("missing block_height")?;
+                let info = gateway_cmd(&gw_addr)
+                    .arg("info")
+                    .run_gateway_cli::<GatewayInfo>()?;
+                let height = match info.lightning_info {
+                    LightningInfo::Connected { block_height, .. } => block_height,
+                    _ => bail!("gateway not connected"),
+                };
                 ensure!(
                     height >= target_height,
                     "not synced: {height} < {target_height}"
@@ -556,26 +534,25 @@ async fn open_channel_between_gateways(
         .await?;
     }
 
-    let gw2_pubkey = gw2_info["lightning_info"]["connected"]["public_key"]
-        .as_str()
-        .context("missing gw2 public_key")?;
+    let gw2_pubkey = match &gw2_info.lightning_info {
+        LightningInfo::Connected { public_key, .. } => public_key.to_string(),
+        _ => bail!("gw2 not connected"),
+    };
 
     let gw2_ln_addr = format!("127.0.0.1:{GW2_LN_PORT}");
 
-    gateway_cli(
-        gw1_addr,
-        &[
+    gateway_cmd(gw1_addr)
+        .args([
             "ldk",
             "channel",
             "open",
-            gw2_pubkey,
+            &gw2_pubkey,
             &gw2_ln_addr,
             "10000000",
             "--push-amount-sats",
             "5000000",
-        ],
-    )
-    .await?;
+        ])
+        .run_gateway_cli::<serde_json::Value>()?;
 
     // Mine to confirm channel
     tokio::task::block_in_place(|| bitcoind.generate_to_address(10, &dummy_regtest_address()))?;
@@ -585,12 +562,12 @@ async fn open_channel_between_gateways(
         retry("channel active", || {
             let gw_addr = gw_addr.to_string();
             async move {
-                let channels = gateway_cli(&gw_addr, &["ldk", "channel", "list"]).await?;
-                let channels = channels.as_array().context("channels not an array")?;
+                let channels = gateway_cmd(&gw_addr)
+                    .args(["ldk", "channel", "list"])
+                    .run_gateway_cli::<ListChannelsResponse>()?
+                    .channels;
                 ensure!(
-                    channels
-                        .iter()
-                        .any(|c| c["is_usable"].as_bool() == Some(true)),
+                    channels.iter().any(|c| c.is_usable),
                     "no active channels yet"
                 );
                 Ok(())

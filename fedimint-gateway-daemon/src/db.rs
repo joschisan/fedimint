@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use bitcoin::hashes::{Hash, sha256};
+use bitcoin::hashes::sha256;
 use fedimint_core::config::FederationId;
 use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
