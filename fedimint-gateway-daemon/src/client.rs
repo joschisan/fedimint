@@ -37,10 +37,7 @@ impl GatewayClientFactory {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to store mnemonic: {e}"))?;
 
-        let endpoint = Endpoint::builder(N0DisableRelay)
-            .relay_mode(iroh::RelayMode::Disabled)
-            .bind()
-            .await?;
+        let endpoint = Endpoint::builder(N0DisableRelay).bind().await?;
 
         Ok(Self {
             connectors: ConnectionPool::new(endpoint),
@@ -66,10 +63,7 @@ impl GatewayClientFactory {
                 let mnemonic = Mnemonic::from_entropy(&entropy)
                     .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {e}"))?;
 
-                let endpoint = Endpoint::builder(N0DisableRelay)
-                    .relay_mode(iroh::RelayMode::Disabled)
-                    .bind()
-                    .await?;
+                let endpoint = Endpoint::builder(N0DisableRelay).bind().await?;
 
                 Ok(Some(Self {
                     connectors: ConnectionPool::new(endpoint),

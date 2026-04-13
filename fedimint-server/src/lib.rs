@@ -45,6 +45,7 @@ use fedimint_server_core::bitcoin_rpc::DynServerBitcoinRpc;
 use fedimint_server_core::dashboard_ui::DynDashboardApi;
 use fedimint_server_core::setup_ui::{DynSetupApi, ISetupApi};
 use iroh::Endpoint;
+use iroh::endpoint::presets::N0;
 use net::p2p::P2PStatusReceivers;
 use net::p2p_connector::IrohConnector;
 use tokio::net::TcpListener;
@@ -143,9 +144,7 @@ pub async fn run(
 
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 
-    let client_endpoint = Endpoint::builder(iroh::endpoint::presets::N0DisableRelay)
-        .bind()
-        .await?;
+    let client_endpoint = Endpoint::builder(N0).bind().await?;
     let connectors = ConnectionPool::new(client_endpoint);
 
     Box::pin(consensus::run(
