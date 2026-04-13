@@ -64,7 +64,6 @@ use crate::config::{ServerConfig, legacy_consensus_config_hash};
 use crate::consensus::db::{AcceptedItemPrefix, AcceptedTransactionKey, SignedSessionOutcomeKey};
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::transaction::{TxProcessingMode, process_transaction_with_dbtx};
-use crate::metrics::{BACKUP_WRITE_SIZE_BYTES, STORED_BACKUPS_COUNT};
 use crate::net::api::HasApiContext;
 use crate::net::p2p::P2PStatusReceivers;
 
@@ -385,21 +384,14 @@ impl ConsensusApi {
         }
 
         info!(target: LOG_NET_API, id = %request.id, len = request.payload.len(), "Storing new client backup");
-        let overwritten = dbtx
-            .insert_entry(
-                &ClientBackupKey(request.id),
-                &ClientBackupSnapshot {
-                    timestamp: request.timestamp,
-                    data: request.payload.clone(),
-                },
-            )
-            .await
-            .is_some();
-        BACKUP_WRITE_SIZE_BYTES.observe(request.payload.len() as f64);
-        if !overwritten {
-            dbtx.on_commit(|| STORED_BACKUPS_COUNT.inc());
-        }
-
+        dbtx.insert_entry(
+            &ClientBackupKey(request.id),
+            &ClientBackupSnapshot {
+                timestamp: request.timestamp,
+                data: request.payload.clone(),
+            },
+        )
+        .await;
         Ok(())
     }
 

@@ -7,7 +7,6 @@ pub mod transaction;
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -48,10 +47,6 @@ use crate::connection_limits::ConnectionLimits;
 use crate::consensus::api::{ConsensusApi, server_endpoints};
 use crate::consensus::engine::ConsensusEngine;
 use crate::db::verify_server_db_integrity_dbtx;
-use crate::metrics::{
-    IROH_API_CONNECTION_DURATION_SECONDS, IROH_API_CONNECTIONS_ACTIVE,
-    IROH_API_REQUEST_DURATION_SECONDS,
-};
 use crate::net::api::HasApiContext;
 use crate::net::p2p::P2PStatusReceivers;
 use crate::{DashboardUiRouter, update_server_info_version_dbtx};
@@ -71,13 +66,11 @@ pub async fn run(
     db: Database,
     module_init_registry: ServerModuleInitRegistry,
     task_group: &TaskGroup,
-    data_dir: PathBuf,
     code_version_str: String,
     dyn_server_bitcoin_rpc: DynServerBitcoinRpc,
     ui_bind: SocketAddr,
     dashboard_ui_router: DashboardUiRouter,
     dashboard_cli_router: crate::DashboardCliRouter,
-    db_checkpoint_retention: u64,
     iroh_api_limits: ConnectionLimits,
     cli_bind: SocketAddr,
 ) -> anyhow::Result<()> {
@@ -289,8 +282,6 @@ pub async fn run(
         shutdown_receiver,
         modules: module_registry,
         task_group: task_group.clone(),
-        data_dir,
-        db_checkpoint_retention,
     }
     .run()
     .await?;
@@ -468,13 +459,6 @@ async fn handle_incoming(
     let connection = incoming.accept()?.await?;
     let parallel_requests_limit = Arc::new(Semaphore::new(iroh_api_max_requests_per_connection));
 
-    IROH_API_CONNECTIONS_ACTIVE.inc();
-    let connection_timer = IROH_API_CONNECTION_DURATION_SECONDS.start_timer();
-    scopeguard::defer! {
-        IROH_API_CONNECTIONS_ACTIVE.dec();
-        connection_timer.observe_duration();
-    }
-
     loop {
         let (send_stream, recv_stream) = connection.accept_bi().await?;
 
@@ -521,14 +505,7 @@ async fn handle_request(
 
     let request = serde_json::from_slice::<IrohApiRequest>(&request)?;
 
-    let method = request.method.to_string();
-    let timer = IROH_API_REQUEST_DURATION_SECONDS
-        .with_label_values(&[&method])
-        .start_timer();
-
     let response = await_response(consensus_api, core_api, module_api, request).await;
-
-    timer.observe_duration();
 
     let response = serde_json::to_vec(&response)?;
 

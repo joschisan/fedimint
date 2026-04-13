@@ -1,13 +1,11 @@
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail};
 use async_channel::Receiver;
 use fedimint_core::config::P2PMessage;
-use fedimint_core::core::{DynOutput, MODULE_INSTANCE_ID_GLOBAL};
+use fedimint_core::core::DynOutput;
 use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::Decodable;
 use fedimint_core::epoch::ConsensusItem;
@@ -42,15 +40,6 @@ use crate::consensus::db::{
 };
 use crate::consensus::debug::DebugConsensusItem;
 use crate::consensus::transaction::{TxProcessingMode, process_transaction_with_dbtx};
-use crate::metrics::{
-    CONSENSUS_ITEM_PROCESSING_DURATION_SECONDS,
-    CONSENSUS_ITEM_PROCESSING_MODULE_AUDIT_DURATION_SECONDS, CONSENSUS_ITEMS_PROCESSED_TOTAL,
-    CONSENSUS_ORDERING_LATENCY_SECONDS, CONSENSUS_PEER_CONTRIBUTION_SESSION_IDX,
-    CONSENSUS_SESSION_COUNT,
-};
-
-// The name of the directory where the database checkpoints are stored.
-const DB_CHECKPOINTS_DIR: &str = "db_checkpoints";
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
@@ -63,8 +52,6 @@ pub struct ConsensusEngine {
     pub ci_status_senders: BTreeMap<PeerId, watch::Sender<Option<u64>>>,
     pub ord_latency_sender: watch::Sender<Option<Duration>>,
     pub task_group: TaskGroup,
-    pub data_dir: PathBuf,
-    pub db_checkpoint_retention: u64,
 }
 
 impl ConsensusEngine {
@@ -85,12 +72,8 @@ impl ConsensusEngine {
         // We need four peers to run the atomic broadcast
         assert!(self.num_peers().total() >= 4);
 
-        self.initialize_checkpoint_directory(self.get_finished_session_count().await)?;
-
         while !task_handle.is_shutting_down() {
             let session_index = self.get_finished_session_count().await;
-
-            CONSENSUS_SESSION_COUNT.set(session_index as i64);
 
             let is_recovery = self.is_recovery().await;
 
@@ -248,8 +231,6 @@ impl ConsensusEngine {
         self.complete_session(session_index, signed_session_outcome)
             .await;
 
-        self.checkpoint_database(session_index);
-
         Some(())
     }
 
@@ -307,8 +288,6 @@ impl ConsensusEngine {
                                     };
 
                                     self.ord_latency_sender.send_replace(Some(latency));
-
-                                    CONSENSUS_ORDERING_LATENCY_SECONDS.observe(timestamp.elapsed().as_secs_f64());
                                 }
                                 Err(err) => {
                                     debug!(target: LOG_CONSENSUS, err = %err.fmt_compact(), "Missing submission timestamp. This is normal in recovery");
@@ -587,95 +566,6 @@ impl ConsensusEngine {
             .expect("This is the only place where we write to this key");
     }
 
-    /// Returns the full path where the database checkpoints are stored.
-    fn db_checkpoints_dir(&self) -> PathBuf {
-        self.data_dir.join(DB_CHECKPOINTS_DIR)
-    }
-
-    /// Creates the directory within the data directory for storing the database
-    /// checkpoints or deletes checkpoints before `current_session` -
-    /// `checkpoint_retention`.
-    fn initialize_checkpoint_directory(&self, current_session: u64) -> anyhow::Result<()> {
-        let checkpoint_dir = self.db_checkpoints_dir();
-
-        if checkpoint_dir.exists() {
-            debug!(
-                target: LOG_CONSENSUS,
-                ?current_session,
-                "Removing database checkpoints up to `current_session`"
-            );
-
-            for checkpoint in fs::read_dir(checkpoint_dir)?.flatten() {
-                // Validate that the directory is a session index
-                if let Ok(file_name) = checkpoint.file_name().into_string()
-                    && let Ok(session) = file_name.parse::<u64>()
-                    && current_session >= self.db_checkpoint_retention
-                    && session < current_session - self.db_checkpoint_retention
-                {
-                    fs::remove_dir_all(checkpoint.path())?;
-                }
-            }
-        } else {
-            fs::create_dir_all(&checkpoint_dir)?;
-        }
-
-        Ok(())
-    }
-
-    /// Creates a backup of the database in the checkpoint directory. These
-    /// checkpoints can be used to restore the database in case the
-    /// federation falls out of consensus (recommended for experts only).
-    fn checkpoint_database(&self, session_index: u64) {
-        // If `checkpoint_retention` has been turned off, don't checkpoint the database
-        // at all.
-        if self.db_checkpoint_retention == 0 {
-            return;
-        }
-
-        let checkpoint_dir = self.db_checkpoints_dir();
-        let session_checkpoint_dir = checkpoint_dir.join(format!("{session_index}"));
-
-        {
-            let _timing /* logs on drop */ = timing::TimeReporter::new("database-checkpoint").level(Level::TRACE);
-            match self.db.checkpoint(&session_checkpoint_dir) {
-                Ok(()) => {
-                    debug!(target: LOG_CONSENSUS, ?session_checkpoint_dir, ?session_index, "Created db checkpoint");
-                }
-                Err(err) => {
-                    warn!(target: LOG_CONSENSUS, ?session_checkpoint_dir, ?session_index, err = %err.fmt_compact(), "Could not create db checkpoint");
-                }
-            }
-        }
-
-        {
-            // Check if any old checkpoint need to be cleaned up
-            let _timing /* logs on drop */ = timing::TimeReporter::new("remove-database-checkpoint").level(Level::TRACE);
-            if let Err(err) = self.delete_old_database_checkpoint(session_index, &checkpoint_dir) {
-                warn!(target: LOG_CONSENSUS, err = %err.fmt_compact_anyhow(), "Could not delete old checkpoints");
-            }
-        }
-    }
-
-    /// Deletes the database checkpoint directory equal to `session_index` -
-    /// `checkpoint_retention`
-    fn delete_old_database_checkpoint(
-        &self,
-        session_index: u64,
-        checkpoint_dir: &Path,
-    ) -> anyhow::Result<()> {
-        if self.db_checkpoint_retention > session_index {
-            return Ok(());
-        }
-
-        let delete_session_index = session_index - self.db_checkpoint_retention;
-        let checkpoint_to_delete = checkpoint_dir.join(delete_session_index.to_string());
-        if checkpoint_to_delete.exists() {
-            fs::remove_dir_all(checkpoint_to_delete)?;
-        }
-
-        Ok(())
-    }
-
     #[instrument(target = LOG_CONSENSUS, skip(self, item), level = "info")]
     pub async fn process_consensus_item(
         &self,
@@ -685,10 +575,6 @@ impl ConsensusEngine {
         peer: PeerId,
     ) -> anyhow::Result<()> {
         let _timing /* logs on drop */ = timing::TimeReporter::new("process_consensus_item").level(Level::TRACE);
-
-        let timing_prom = CONSENSUS_ITEM_PROCESSING_DURATION_SECONDS
-            .with_label_values(&[&peer.to_usize().to_string()])
-            .start_timer();
 
         trace!(
             target: LOG_CONSENSUS,
@@ -701,13 +587,6 @@ impl ConsensusEngine {
             .get(&peer)
             .expect("No ci status sender for peer")
             .send_replace(Some(session_index));
-
-        CONSENSUS_PEER_CONTRIBUTION_SESSION_IDX
-            .with_label_values(&[
-                &self.cfg.local.identity.to_usize().to_string(),
-                &peer.to_usize().to_string(),
-            ])
-            .set(session_index as i64);
 
         let mut dbtx = self.db.begin_transaction().await;
 
@@ -764,16 +643,9 @@ impl ConsensusEngine {
         );
         let mut audit = Audit::default();
 
-        for (module_instance_id, kind, module) in self.modules.iter_modules() {
+        for (module_instance_id, _kind, module) in self.modules.iter_modules() {
             let _module_audit_timing =
                 TimeReporter::new(format!("audit module {module_instance_id}")).level(Level::TRACE);
-
-            let timing_prom = CONSENSUS_ITEM_PROCESSING_MODULE_AUDIT_DURATION_SECONDS
-                .with_label_values(&[
-                    MODULE_INSTANCE_ID_GLOBAL.to_string().as_str(),
-                    kind.as_str(),
-                ])
-                .start_timer();
 
             module
                 .audit(
@@ -785,8 +657,6 @@ impl ConsensusEngine {
                     module_instance_id,
                 )
                 .await;
-
-            timing_prom.observe_duration();
         }
 
         assert!(
@@ -801,12 +671,6 @@ impl ConsensusEngine {
         dbtx.commit_tx_result()
             .await
             .expect("Committing consensus epoch failed");
-
-        CONSENSUS_ITEMS_PROCESSED_TOTAL
-            .with_label_values(&[&peer.to_usize().to_string()])
-            .inc();
-
-        timing_prom.observe_duration();
 
         Ok(())
     }

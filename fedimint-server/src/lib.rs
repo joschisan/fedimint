@@ -54,11 +54,8 @@ use crate::config::io::write_server_config;
 use crate::config::setup::SetupApi;
 use crate::db::{ServerInfo, ServerInfoKey};
 use crate::fedimint_core::net::peers::IP2PConnections;
-use crate::metrics::initialize_gauge_metrics;
 use crate::net::p2p::{ReconnectP2PConnections, p2p_status_channels};
 use crate::net::p2p_connector::IP2PConnector;
-
-pub mod metrics;
 
 /// The actual implementation of consensus
 pub mod consensus;
@@ -89,7 +86,6 @@ pub async fn run(
     setup_ui_router: SetupUiRouter,
     dashboard_ui_router: DashboardUiRouter,
     module_cli_router: DashboardCliRouter,
-    db_checkpoint_retention: u64,
     iroh_api_limits: ConnectionLimits,
     cli_bind: std::net::SocketAddr,
 ) -> anyhow::Result<()> {
@@ -146,8 +142,6 @@ pub async fn run(
 
     let db = db.with_decoders(decoders);
 
-    initialize_gauge_metrics(&task_group, &db).await;
-
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 
     let connectors = ConnectorRegistry::build_from_server_defaults()
@@ -165,13 +159,11 @@ pub async fn run(
         db,
         module_init_registry.clone(),
         &task_group,
-        data_dir,
         code_version_str,
         bitcoin_rpc,
         settings.ui_bind,
         dashboard_ui_router,
         module_cli_router,
-        db_checkpoint_retention,
         iroh_api_limits,
         cli_bind,
     ))
@@ -221,8 +213,6 @@ pub async fn run_config_gen(
     P2PStatusReceivers,
 )> {
     info!(target: LOG_CONSENSUS, "Starting config gen");
-
-    initialize_gauge_metrics(task_group, &db).await;
 
     let (cgp_sender, mut cgp_receiver) = tokio::sync::mpsc::channel(1);
 

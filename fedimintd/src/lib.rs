@@ -6,8 +6,6 @@
 #![allow(clippy::return_self_not_must_use)]
 #![allow(clippy::large_futures)]
 
-mod metrics;
-
 use std::convert::Infallible;
 use std::env;
 use std::net::SocketAddr;
@@ -41,13 +39,11 @@ use fedimintd_envs::{
     FM_BIND_METRICS_ENV, FM_BIND_P2P_ENV, FM_BIND_TOKIO_CONSOLE_ENV, FM_BIND_UI_ENV,
     FM_BITCOIN_NETWORK_ENV, FM_BITCOIND_PASSWORD_ENV, FM_BITCOIND_URL_ENV,
     FM_BITCOIND_URL_PASSWORD_FILE_ENV, FM_BITCOIND_USERNAME_ENV, FM_DATA_DIR_ENV,
-    FM_DB_CHECKPOINT_RETENTION_ENV, FM_ESPLORA_URL_ENV, FM_IROH_API_MAX_CONNECTIONS_ENV,
+    FM_ESPLORA_URL_ENV, FM_IROH_API_MAX_CONNECTIONS_ENV,
     FM_IROH_API_MAX_REQUESTS_PER_CONNECTION_ENV, FM_UI_PASSWORD_ENV,
 };
 use futures::FutureExt as _;
 use tracing::{debug, error, info};
-
-use crate::metrics::APP_START_TS;
 
 /// Time we will wait before forcefully shutting down tasks
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -140,10 +136,6 @@ struct ServerOpts {
     /// Optional URLs of the Iroh relays to use for registering
     #[arg(long, env = FM_IROH_RELAY_ENV, value_delimiter = ',')]
     iroh_relays: Vec<SafeUrl>,
-
-    /// Number of checkpoints from the current session to retain on disk
-    #[arg(long, env = FM_DB_CHECKPOINT_RETENTION_ENV, default_value = "1")]
-    db_checkpoint_retention: u64,
 
     /// Enable tokio console logging
     #[arg(long, env = FM_BIND_TOKIO_CONSOLE_ENV)]
@@ -283,10 +275,6 @@ pub async fn run(
 
     let fedimint_version = env!("CARGO_PKG_VERSION");
 
-    APP_START_TS
-        .with_label_values(&[fedimint_version, code_version_hash])
-        .set(fedimint_core::time::duration_since_epoch().as_secs() as i64);
-
     let server_opts = ServerOpts::parse();
 
     let mut tracing_builder = TracingSetup::default();
@@ -394,7 +382,6 @@ pub async fn run(
             Box::new(fedimint_server_ui::setup::router),
             Box::new(fedimint_server_ui::dashboard::router),
             Box::new(dashboard_cli_router),
-            server_opts.db_checkpoint_retention,
             fedimint_server::ConnectionLimits::new(
                 server_opts.iroh_api_max_connections,
                 server_opts.iroh_api_max_requests_per_connection,

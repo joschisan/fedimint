@@ -21,7 +21,6 @@ use futures::future::select_all;
 use tokio::sync::watch;
 use tracing::{Instrument, debug, info, info_span, warn};
 
-use crate::metrics::{PEER_CONNECT_COUNT, PEER_DISCONNECT_COUNT, PEER_MESSAGES_COUNT};
 use crate::net::p2p_connection::DynP2PConnection;
 use crate::net::p2p_connector::DynP2PConnector;
 
@@ -177,9 +176,7 @@ impl<M: Send + 'static> P2PConnection<M> {
                     common: P2PConnectionSMCommon {
                         incoming_sender,
                         outgoing_receiver,
-                        our_id_str: our_id.to_string(),
                         our_id,
-                        peer_id_str: peer_id.to_string(),
                         peer_id,
                         connector,
                         incoming_connections,
@@ -223,9 +220,7 @@ struct P2PConnectionSMCommon<M> {
     incoming_sender: async_channel::Sender<M>,
     outgoing_receiver: async_channel::Receiver<M>,
     our_id: PeerId,
-    our_id_str: String,
     peer_id: PeerId,
-    peer_id_str: String,
     connector: DynP2PConnector<M>,
     incoming_connections: Receiver<DynP2PConnection<M>>,
     status_sender: watch::Sender<Option<P2PConnectionStatus>>,
@@ -284,10 +279,6 @@ impl<M: Send + 'static> P2PConnectionSMCommon<M> {
 
                 match message.read_to_end().await {
                     Ok(message) => {
-                        PEER_MESSAGES_COUNT
-                            .with_label_values(&[self.our_id_str.as_str(), self.peer_id_str.as_str(), "incoming"])
-                            .inc();
-
                         if self.incoming_sender.try_send(message).is_err() {
                             debug!(target: LOG_NET_PEER, "Incoming message channel is full");
                         }
@@ -303,10 +294,6 @@ impl<M: Send + 'static> P2PConnectionSMCommon<M> {
     fn disconnect(&self, error: anyhow::Error) -> P2PConnectionSMState<M> {
         info!(target: LOG_NET_PEER, "Disconnected from peer: {}",  error);
 
-        PEER_DISCONNECT_COUNT
-            .with_label_values(&[&self.our_id_str, &self.peer_id_str])
-            .inc();
-
         P2PConnectionSMState::Disconnected(api_networking_backoff())
     }
 
@@ -315,14 +302,6 @@ impl<M: Send + 'static> P2PConnectionSMCommon<M> {
         mut connection: DynP2PConnection<M>,
         peer_message: M,
     ) -> P2PConnectionSMState<M> {
-        PEER_MESSAGES_COUNT
-            .with_label_values(&[
-                self.our_id_str.as_str(),
-                self.peer_id_str.as_str(),
-                "outgoing",
-            ])
-            .inc();
-
         if let Err(e) = connection.send(peer_message).await {
             return self.disconnect(e);
         }
@@ -336,10 +315,6 @@ impl<M: Send + 'static> P2PConnectionSMCommon<M> {
     ) -> Option<P2PConnectionSMState<M>> {
         tokio::select! {
             connection = self.incoming_connections.recv() => {
-                PEER_CONNECT_COUNT
-                    .with_label_values(&[self.our_id_str.as_str(), self.peer_id_str.as_str(), "incoming"])
-                    .inc();
-
                 info!(target: LOG_NET_PEER, "Connected to peer");
 
                 Some(P2PConnectionSMState::Connected(connection.ok()?))
@@ -352,10 +327,6 @@ impl<M: Send + 'static> P2PConnectionSMCommon<M> {
 
                 match  self.connector.connect(self.peer_id).await {
                     Ok(connection) => {
-                        PEER_CONNECT_COUNT
-                            .with_label_values(&[self.our_id_str.as_str(), self.peer_id_str.as_str(), "outgoing"])
-                            .inc();
-
                         info!(target: LOG_NET_PEER, "Connected to peer");
 
                         return Some(P2PConnectionSMState::Connected(connection));

@@ -5,8 +5,6 @@ use fedimint_core::{InPoint, OutPoint};
 use fedimint_server_core::ServerModuleRegistry;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-use crate::metrics::{CONSENSUS_TX_PROCESSED_INPUTS, CONSENSUS_TX_PROCESSED_OUTPUTS};
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum TxProcessingMode {
     Submission,
@@ -20,14 +18,6 @@ pub async fn process_transaction_with_dbtx(
     version: CoreConsensusVersion,
     mode: TxProcessingMode,
 ) -> Result<(), TransactionError> {
-    let in_count = transaction.inputs.len();
-    let out_count = transaction.outputs.len();
-
-    dbtx.on_commit(move || {
-        CONSENSUS_TX_PROCESSED_INPUTS.observe(in_count as f64);
-        CONSENSUS_TX_PROCESSED_OUTPUTS.observe(out_count as f64);
-    });
-
     // We can not return the error here as errors are not returned in a specified
     // order and the client still expects consensus on the error. Since the
     // error is not extensible at the moment we need to incorrectly return the
