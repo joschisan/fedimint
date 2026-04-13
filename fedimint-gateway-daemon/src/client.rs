@@ -10,7 +10,7 @@ use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_gwv2_client::GatewayClientInitV2;
 use iroh::Endpoint;
-use iroh::endpoint::presets::N0DisableRelay;
+use iroh::endpoint::presets::N0;
 
 use crate::AppState;
 use crate::db::{ClientConfigKey, DbKeyPrefix, RootEntropyKey};
@@ -37,7 +37,7 @@ impl GatewayClientFactory {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to store mnemonic: {e}"))?;
 
-        let endpoint = Endpoint::builder(N0DisableRelay).bind().await?;
+        let endpoint = Endpoint::builder(N0).bind().await?;
 
         Ok(Self {
             connectors: ConnectionPool::new(endpoint),
@@ -63,7 +63,7 @@ impl GatewayClientFactory {
                 let mnemonic = Mnemonic::from_entropy(&entropy)
                     .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {e}"))?;
 
-                let endpoint = Endpoint::builder(N0DisableRelay).bind().await?;
+                let endpoint = Endpoint::builder(N0).bind().await?;
 
                 Ok(Some(Self {
                     connectors: ConnectionPool::new(endpoint),

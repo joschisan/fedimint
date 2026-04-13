@@ -18,7 +18,7 @@ use fedimint_gateway_common::{
 };
 use fedimint_walletv2_client::WalletClientModule;
 use iroh::Endpoint;
-use iroh::endpoint::presets::N0DisableRelay;
+use iroh::endpoint::presets::N0;
 use tokio::process::Command;
 use tracing::info;
 
@@ -177,7 +177,7 @@ impl TestEnv {
         builder.with_module(fedimint_walletv2_client::WalletClientInit);
         builder.with_module(fedimint_lnv2_client::LightningClientInit::default());
 
-        let endpoint = Endpoint::builder(N0DisableRelay).bind().await?;
+        let endpoint = Endpoint::builder(N0).bind().await?;
         let connectors = ConnectionPool::new(endpoint);
 
         let mnemonic = Mnemonic::generate(12)?;

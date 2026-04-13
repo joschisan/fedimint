@@ -18,7 +18,6 @@ use fedimint_core::{PeerId, base32};
 use fedimint_server_core::dashboard_ui::SetupStatus;
 use fedimint_server_core::setup_ui::ISetupApi;
 use iroh::SecretKey;
-use rand::rngs::OsRng;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 

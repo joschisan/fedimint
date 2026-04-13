@@ -8,10 +8,8 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::net::STANDARD_FEDIMINT_P2P_PORT;
 use fedimint_core::net::iroh::build_iroh_endpoint;
 use fedimint_core::util::SafeUrl;
-use fedimint_logging::LOG_NET_IROH;
 use fedimint_server_core::dashboard_ui::ConnectionType;
 use iroh::{Endpoint, PublicKey, SecretKey};
-use tracing::trace;
 
 use super::IP2PConnector;
 use crate::net::p2p_connection::{DynP2PConnection, IP2PConnection as _};
