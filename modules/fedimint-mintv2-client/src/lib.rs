@@ -734,7 +734,7 @@ impl MintClientModule {
 
         self.client_ctx
             .global_api()
-            .chain_id()
+            .liveness()
             .await
             .map_err(|_| SendECashError::Offline)?;
 

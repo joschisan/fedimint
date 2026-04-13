@@ -74,12 +74,7 @@ impl WalletConfigConsensus {
     /// | 18        | 530  | 920     |
     /// | 19        | 539  | 937     |
     /// | 20        | 565  | 991     |
-    pub fn new(
-        bitcoin_pks: BTreeMap<PeerId, PublicKey>,
-        input_fee: Amount,
-        output_fee: Amount,
-        network: Network,
-    ) -> Self {
+    pub fn new(bitcoin_pks: BTreeMap<PeerId, PublicKey>, network: Network) -> Self {
         let tx_overhead_weight = 4 * 4 // nVersion
             + 1 // SegWit marker
             + 1 // SegWit flag
@@ -126,8 +121,10 @@ impl WalletConfigConsensus {
             // doubling kicks in.
             feerate_base: 250,
             dust_limit: bitcoin::Amount::from_sat(10_000),
-            input_fee,
-            output_fee,
+
+            input_fee: fedimint_core::Amount::from_sats(1),
+            output_fee: fedimint_core::Amount::from_sats(1),
+
             network,
         }
     }

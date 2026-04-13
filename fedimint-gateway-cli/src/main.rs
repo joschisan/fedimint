@@ -328,12 +328,16 @@ fn main() -> Result<()> {
                 }
             },
             LdkCommands::Peer { command } => match command {
-                LdkPeerCommands::Connect { pubkey, host } => {
-                    request(addr, ROUTE_LDK_PEER_CONNECT, LdkPeerConnectRequest { pubkey, host })?
-                }
-                LdkPeerCommands::Disconnect { pubkey } => {
-                    request(addr, ROUTE_LDK_PEER_DISCONNECT, LdkPeerDisconnectRequest { pubkey })?
-                }
+                LdkPeerCommands::Connect { pubkey, host } => request(
+                    addr,
+                    ROUTE_LDK_PEER_CONNECT,
+                    LdkPeerConnectRequest { pubkey, host },
+                )?,
+                LdkPeerCommands::Disconnect { pubkey } => request(
+                    addr,
+                    ROUTE_LDK_PEER_DISCONNECT,
+                    LdkPeerDisconnectRequest { pubkey },
+                )?,
                 LdkPeerCommands::List => request(addr, ROUTE_LDK_PEER_LIST, ())?,
             },
             LdkCommands::Transaction { command } => match command {

@@ -157,19 +157,17 @@ fn main() -> Result<()> {
                     federation_size,
                 },
             )?,
-            SetupCommands::AddPeer { setup_code } => {
-                request(addr, ROUTE_SETUP_ADD_PEER, SetupAddPeerRequest { setup_code })?
-            }
+            SetupCommands::AddPeer { setup_code } => request(
+                addr,
+                ROUTE_SETUP_ADD_PEER,
+                SetupAddPeerRequest { setup_code },
+            )?,
             SetupCommands::StartDkg => request(addr, ROUTE_SETUP_START_DKG, ())?,
         },
         Commands::Module(cmd) => match cmd {
             ModuleCommands::Walletv2(cmd) => match cmd {
-                WalletCommands::TotalValue => {
-                    request(addr, ROUTE_MODULE_WALLET_TOTAL_VALUE, ())?
-                }
-                WalletCommands::BlockCount => {
-                    request(addr, ROUTE_MODULE_WALLET_BLOCK_COUNT, ())?
-                }
+                WalletCommands::TotalValue => request(addr, ROUTE_MODULE_WALLET_TOTAL_VALUE, ())?,
+                WalletCommands::BlockCount => request(addr, ROUTE_MODULE_WALLET_BLOCK_COUNT, ())?,
                 WalletCommands::Feerate => request(addr, ROUTE_MODULE_WALLET_FEERATE, ())?,
                 WalletCommands::PendingTxChain => {
                     request(addr, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ())?
@@ -188,9 +186,7 @@ fn main() -> Result<()> {
                         ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
                         Lnv2GatewayRequest { url },
                     )?,
-                    Lnv2GatewayCommands::List => {
-                        request(addr, ROUTE_MODULE_LNV2_GATEWAY_LIST, ())?
-                    }
+                    Lnv2GatewayCommands::List => request(addr, ROUTE_MODULE_LNV2_GATEWAY_LIST, ())?,
                 },
             },
         },

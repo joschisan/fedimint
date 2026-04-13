@@ -3,12 +3,12 @@ use std::fmt::Debug;
 
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::endpoint_constants::{
-    AWAIT_TRANSACTION_ENDPOINT, CHAIN_ID_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
+    AWAIT_TRANSACTION_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };
 use fedimint_core::module::{ApiRequestErased, SerdeModuleEncoding};
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::transaction::{SerdeTransaction, Transaction, TransactionSubmissionOutcome};
-use fedimint_core::{ChainId, PeerId, TransactionId, apply, async_trait_maybe_send};
+use fedimint_core::{PeerId, TransactionId, apply, async_trait_maybe_send};
 use futures::stream::BoxStream;
 use serde_json::Value;
 
@@ -113,8 +113,8 @@ where
         .await
     }
 
-    async fn chain_id(&self) -> FederationResult<ChainId> {
-        self.request_current_consensus(CHAIN_ID_ENDPOINT.to_owned(), ApiRequestErased::default())
+    async fn liveness(&self) -> FederationResult<()> {
+        self.request_current_consensus(LIVENESS_ENDPOINT.to_owned(), ApiRequestErased::default())
             .await
     }
 }

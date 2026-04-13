@@ -46,12 +46,11 @@ use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
     LightningRpcError, PaymentAction, Preimage,
 };
-use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_lnurl::VerifyResponse;
 use fedimint_lnv2_common::Bolt11InvoiceDescription;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::{
-    CreateBolt11InvoicePayload, RoutingInfo, SendPaymentPayload,
+    CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
 use fedimint_logging::LOG_GATEWAY;
 use ldk_node::payment::{PaymentKind, PaymentStatus, SendingParameters};
@@ -528,10 +527,7 @@ impl AppState {
 
 #[async_trait]
 impl IGatewayClientV2 for AppState {
-    async fn complete_htlc(
-        &self,
-        htlc_response: fedimint_gwv2_client::InterceptPaymentResponse,
-    ) {
+    async fn complete_htlc(&self, htlc_response: fedimint_gwv2_client::InterceptPaymentResponse) {
         let ph = PaymentHash(*htlc_response.payment_hash.as_byte_array());
         let claimable_amount_msat = 999_999_999_999_999;
         let ph_hex_str = hex::encode(htlc_response.payment_hash);
@@ -726,6 +722,8 @@ pub fn get_preimage_and_payment_hash(
             Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
             fedimint_gateway_cli_core::PaymentKind::Bolt11,
         ),
-        PaymentKind::Onchain { .. } => (None, None, fedimint_gateway_cli_core::PaymentKind::Onchain),
+        PaymentKind::Onchain { .. } => {
+            (None, None, fedimint_gateway_cli_core::PaymentKind::Onchain)
+        }
     }
 }

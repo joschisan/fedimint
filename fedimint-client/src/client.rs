@@ -392,35 +392,6 @@ impl Client {
     /// This reads from the cached version stored during client initialization.
     /// If no cache is available (e.g., during initial setup), returns a default
     /// version (0, 0).
-    /// Returns the chain ID (bitcoin block hash at height 1) from the
-    /// federation
-    ///
-    /// This is cached in the database after the first successful fetch.
-    /// The chain ID uniquely identifies which bitcoin network the federation
-    /// operates on (mainnet, testnet, signet, regtest).
-    pub async fn chain_id(&self) -> anyhow::Result<ChainId> {
-        // Check cache first
-        if let Some(chain_id) = self
-            .db
-            .begin_transaction_nc()
-            .await
-            .get_value(&ChainIdKey)
-            .await
-        {
-            return Ok(chain_id);
-        }
-
-        // Fetch from federation with consensus
-        let chain_id = self.api.chain_id().await?;
-
-        // Cache the result
-        let mut dbtx = self.db.begin_transaction().await;
-        dbtx.insert_entry(&ChainIdKey, &chain_id).await;
-        dbtx.commit_tx().await;
-
-        Ok(chain_id)
-    }
-
     pub fn decoders(&self) -> &ModuleDecoderRegistry {
         &self.decoders
     }

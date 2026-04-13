@@ -288,12 +288,9 @@ impl ServerModuleInit for WalletInit {
             .into_iter()
             .collect();
 
-        let input_fee = fedimint_core::Amount::from_sats(1);
-        let output_fee = fedimint_core::Amount::from_sats(1);
-
         let config = WalletConfig {
             private: WalletConfigPrivate { bitcoin_sk },
-            consensus: WalletConfigConsensus::new(bitcoin_pks, input_fee, output_fee, args.network),
+            consensus: WalletConfigConsensus::new(bitcoin_pks, args.network),
         };
 
         Ok(config.to_erased())

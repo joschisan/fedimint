@@ -12,7 +12,7 @@ use fedimint_core::db::{
     Committable, Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped,
 };
 use fedimint_core::endpoint_constants::{
-    AWAIT_TRANSACTION_ENDPOINT, CHAIN_ID_ENDPOINT, CLIENT_CONFIG_ENDPOINT,
+    AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT,
 };
 use fedimint_core::epoch::ConsensusItem;
@@ -39,8 +39,8 @@ use futures::StreamExt;
 use tokio::sync::watch::{self, Receiver, Sender};
 use tracing::{debug, warn};
 
-use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG};
 use crate::config::ServerConfig;
+use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG};
 use crate::consensus::db::{AcceptedItemPrefix, AcceptedTransactionKey, SignedSessionOutcomeKey};
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::transaction::process_transaction_with_dbtx;
@@ -217,7 +217,6 @@ impl ConsensusApi {
 
         GuardianConfigBackup { tar_archive_bytes }
     }
-
 }
 
 #[async_trait]
@@ -383,14 +382,10 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
             }
         },
         api_endpoint! {
-            CHAIN_ID_ENDPOINT,
-            ApiVersion::new(0, 9),
-            async |fedimint: &ConsensusApi, _context, _v: ()| -> ChainId {
-                fedimint
-                    .bitcoin_rpc_connection
-                    .get_chain_id()
-                    .await
-                    .map_err(|e| ApiError::server_error(e.to_string()))
+            LIVENESS_ENDPOINT,
+            ApiVersion::new(0, 0),
+            async |_fedimint: &ConsensusApi, _context, _v: ()| -> () {
+                Ok(())
             }
         },
     ]

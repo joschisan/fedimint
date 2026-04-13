@@ -198,28 +198,23 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
     use fedimint_lnv2_server::Lightning;
     use fedimint_server::cli::CliError;
     use fedimint_server_cli_core::{
-        InviteResponse, Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_INVITE,
-        ROUTE_MODULE_LNV2_GATEWAY_ADD,
-        ROUTE_MODULE_LNV2_GATEWAY_LIST, ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
-        ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
-        ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
-        ROUTE_MODULE_WALLET_TX_CHAIN, AuditResponse, WalletBlockCountResponse,
+        AuditResponse, InviteResponse, Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_INVITE,
+        ROUTE_MODULE_LNV2_GATEWAY_ADD, ROUTE_MODULE_LNV2_GATEWAY_LIST,
+        ROUTE_MODULE_LNV2_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT,
+        ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
+        ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TX_CHAIN, WalletBlockCountResponse,
         WalletFeerateResponse, WalletTotalValueResponse,
     };
     use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi};
     use fedimint_walletv2_server::Wallet;
 
-    async fn invite(
-        State(api): State<DynDashboardApi>,
-    ) -> Result<Json<InviteResponse>, CliError> {
+    async fn invite(State(api): State<DynDashboardApi>) -> Result<Json<InviteResponse>, CliError> {
         Ok(Json(InviteResponse {
             invite_code: api.federation_invite_code().await,
         }))
     }
 
-    async fn audit(
-        State(api): State<DynDashboardApi>,
-    ) -> Result<Json<AuditResponse>, CliError> {
+    async fn audit(State(api): State<DynDashboardApi>) -> Result<Json<AuditResponse>, CliError> {
         Ok(Json(AuditResponse {
             audit: api.federation_audit().await,
         }))
@@ -322,7 +317,10 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         .route(ROUTE_MODULE_WALLET_TOTAL_VALUE, post(wallet_total_value))
         .route(ROUTE_MODULE_WALLET_BLOCK_COUNT, post(wallet_block_count))
         .route(ROUTE_MODULE_WALLET_FEERATE, post(wallet_feerate))
-        .route(ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, post(wallet_pending_tx_chain))
+        .route(
+            ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
+            post(wallet_pending_tx_chain),
+        )
         .route(ROUTE_MODULE_WALLET_TX_CHAIN, post(wallet_tx_chain))
         .route(ROUTE_MODULE_LNV2_GATEWAY_ADD, post(lnv2_gateway_add))
         .route(ROUTE_MODULE_LNV2_GATEWAY_REMOVE, post(lnv2_gateway_remove))

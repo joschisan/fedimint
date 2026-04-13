@@ -4,12 +4,11 @@ use fedimint_client::DynGlobalClientContext;
 use fedimint_client_module::sm::{ClientSMDatabaseTransaction, State, StateTransition};
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use crate::{InterceptPaymentResponse, PaymentAction, Preimage};
 use fedimint_lnv2_common::contracts::PaymentImage;
 
 use super::FinalReceiveState;
 use super::events::CompleteLightningPaymentSucceeded;
-use crate::GatewayClientContextV2;
+use crate::{GatewayClientContextV2, InterceptPaymentResponse, PaymentAction, Preimage};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// State machine that completes the incoming payment by contacting the

@@ -19,15 +19,15 @@ use fedimint_gateway_cli_core::{
     LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
     LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse,
-    LdkTransactionListRequest, LdkTransactionListResponse, MintReceiveRequest,
-    MintReceiveResponse, MintSendRequest, MintSendResponse, MnemonicResponse, PaymentDetails,
-    PeerInfo, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN,
-    ROUTE_FEDERATION_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
-    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE,
-    ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
-    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND,
-    ROUTE_MODULE_WALLET_RECEIVE, WalletReceiveRequest, WalletReceiveResponse,
+    LdkTransactionListRequest, LdkTransactionListResponse, MintReceiveRequest, MintReceiveResponse,
+    MintSendRequest, MintSendResponse, MnemonicResponse, PaymentDetails, PeerInfo,
+    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
+    ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST,
+    ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY,
+    ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT,
+    ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC,
+    ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_RECEIVE,
+    WalletReceiveRequest, WalletReceiveResponse,
 };
 use fedimint_gwv2_client::Preimage;
 use fedimint_logging::LOG_GATEWAY;
@@ -179,7 +179,9 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse
 
 /// Returns the ecash, lightning, and onchain balances (LDK-specific)
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn ldk_balances(State(state): State<AppState>) -> Result<Json<LdkBalancesResponse>, CliError> {
+async fn ldk_balances(
+    State(state): State<AppState>,
+) -> Result<Json<LdkBalancesResponse>, CliError> {
     let federation_infos = state.federation_info_all().await;
 
     let ecash_balances: Vec<FederationBalanceInfo> = federation_infos
@@ -483,7 +485,9 @@ async fn ldk_peer_disconnect(
 
 /// Lists all Lightning peers
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn ldk_peer_list(State(state): State<AppState>) -> Result<Json<LdkPeerListResponse>, CliError> {
+async fn ldk_peer_list(
+    State(state): State<AppState>,
+) -> Result<Json<LdkPeerListResponse>, CliError> {
     let peers = state
         .node
         .list_peers()

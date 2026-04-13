@@ -413,9 +413,9 @@ pub trait IGlobalFederationApi: IRawFederationApi {
 
     async fn await_transaction(&self, txid: TransactionId) -> TransactionId;
 
-    /// Returns the chain ID (bitcoin block hash at height 1) from the
-    /// federation
-    async fn chain_id(&self) -> FederationResult<ChainId>;
+    /// Lightweight liveness check — returns Ok(()) if the federation is
+    /// reachable
+    async fn liveness(&self) -> FederationResult<()>;
 }
 
 pub fn deserialize_outcome<R>(
