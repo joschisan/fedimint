@@ -2524,6 +2524,7 @@ dependencies = [
  "fedimint-bip39",
  "fedimint-client",
  "fedimint-core",
+ "fedimint-gateway-cli-core",
  "fedimint-gateway-common",
  "fedimint-lnv2-client",
  "fedimint-lnv2-common",

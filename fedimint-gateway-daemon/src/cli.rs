@@ -12,23 +12,24 @@ use fedimint_core::task::TaskHandle;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
 use fedimint_core::{Amount, BitcoinAmountOrAll};
 use fedimint_gateway_cli_core::{
-    CloseChannelsWithPeerRequest, ConfigPayload, ConnectFedPayload,
-    CreateInvoiceForOperatorPayload, DepositAddressPayload, ListTransactionsPayload,
-    OpenChannelRequest, PayInvoiceForOperatorPayload, PeerConnectRequest, PeerDisconnectRequest,
-    ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
-    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    ChannelInfo, FederationBalanceInfo, FederationConfigRequest, FederationConfigResponse,
+    FederationInfo, FederationInviteResponse, FederationJoinRequest, FederationListResponse,
+    InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelCloseResponse,
+    LdkChannelListResponse, LdkChannelOpenRequest, LdkInvoiceCreateRequest,
+    LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
+    LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse,
+    LdkTransactionListRequest, LdkTransactionListResponse, MintReceiveRequest,
+    MintReceiveResponse, MintSendRequest, MintSendResponse, MnemonicResponse, PaymentDetails,
+    PeerInfo, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN,
+    ROUTE_FEDERATION_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
+    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE,
+    ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
+    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND,
-    ROUTE_MODULE_WALLET_RECEIVE, ReceiveEcashPayload, SendOnchainRequest, SpendEcashPayload,
+    ROUTE_MODULE_WALLET_RECEIVE, WalletReceiveRequest, WalletReceiveResponse,
 };
-use fedimint_gateway_common::{
-    CloseChannelsWithPeerResponse, DepositAddressResponse, ExportInviteCodesResponse,
-    FederationBalanceInfo, FederationInfo, GatewayBalances, GatewayFedConfig, GatewayInfo,
-    InvoiceCreateResponse, InvoicePayResponse, ListChannelsResponse, ListFederationsResponse,
-    ListPeersResponse, ListTransactionsResponse, MnemonicResponse, OnchainReceiveResponse,
-    OnchainSendResponse, Preimage, ReceiveEcashResponse, SpendEcashResponse,
-};
+use fedimint_gateway_common::Preimage;
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule;
 use hex::ToHex;
@@ -127,10 +128,10 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
         .route(ROUTE_LDK_TRANSACTION_LIST, post(ldk_transaction_list))
         // Federation management
-        .route(ROUTE_FED_JOIN, post(federation_join))
-        .route(ROUTE_FED_LIST, post(federation_list))
-        .route(ROUTE_FED_CONFIG, post(federation_config))
-        .route(ROUTE_FED_INVITE, post(federation_invite))
+        .route(ROUTE_FEDERATION_JOIN, post(federation_join))
+        .route(ROUTE_FEDERATION_LIST, post(federation_list))
+        .route(ROUTE_FEDERATION_CONFIG, post(federation_config))
+        .route(ROUTE_FEDERATION_INVITE, post(federation_invite))
         // Per-federation module commands
         .route(ROUTE_MODULE_MINT_SEND, post(module_mint_send))
         .route(ROUTE_MODULE_MINT_RECEIVE, post(module_mint_receive))
@@ -143,10 +144,10 @@ fn router() -> Router<AppState> {
 
 /// Display high-level information about the Gateway
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn info(State(state): State<AppState>) -> Result<Json<GatewayInfo>, CliError> {
+async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, CliError> {
     let node_status = state.node.status();
 
-    Ok(Json(GatewayInfo {
+    Ok(Json(InfoResponse {
         public_key: state.node.node_id(),
         alias: state
             .node
@@ -178,7 +179,7 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse
 
 /// Returns the ecash, lightning, and onchain balances (LDK-specific)
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn ldk_balances(State(state): State<AppState>) -> Result<Json<GatewayBalances>, CliError> {
+async fn ldk_balances(State(state): State<AppState>) -> Result<Json<LdkBalancesResponse>, CliError> {
     let federation_infos = state.federation_info_all().await;
 
     let ecash_balances: Vec<FederationBalanceInfo> = federation_infos
@@ -200,7 +201,7 @@ async fn ldk_balances(State(state): State<AppState>) -> Result<Json<GatewayBalan
         .map(|channel| channel.inbound_capacity_msat)
         .sum();
 
-    let balances = GatewayBalances {
+    let balances = LdkBalancesResponse {
         onchain_balance_sats: node_balances.total_onchain_balance_sats,
         lightning_balance_msats: node_balances.total_lightning_balance_sats * 1000,
         ecash_balances,
@@ -211,10 +212,10 @@ async fn ldk_balances(State(state): State<AppState>) -> Result<Json<GatewayBalan
 }
 
 /// Opens a Lightning channel to a peer
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_channel_open(
     State(state): State<AppState>,
-    Json(payload): Json<OpenChannelRequest>,
+    Json(payload): Json<LdkChannelOpenRequest>,
 ) -> Result<Json<()>, CliError> {
     let push_amount_msats = if payload.push_amount_sats == 0 {
         None
@@ -239,13 +240,11 @@ async fn ldk_channel_open(
 }
 
 /// Closes all channels with a peer
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_channel_close(
     State(state): State<AppState>,
-    Json(payload): Json<CloseChannelsWithPeerRequest>,
-) -> Result<Json<CloseChannelsWithPeerResponse>, CliError> {
-    info!(target: LOG_GATEWAY, close_channel_request = %payload, "Closing lightning channel...");
-
+    Json(payload): Json<LdkChannelCloseRequest>,
+) -> Result<Json<LdkChannelCloseResponse>, CliError> {
     let mut num_channels_closed = 0;
     for channel_with_peer in state
         .node
@@ -285,8 +284,8 @@ async fn ldk_channel_close(
         }
     }
 
-    info!(target: LOG_GATEWAY, close_channel_request = %payload, "Initiated channel closure");
-    let response = CloseChannelsWithPeerResponse {
+    info!(target: LOG_GATEWAY, pubkey = %payload.pubkey, "Initiated channel closure");
+    let response = LdkChannelCloseResponse {
         num_channels_closed,
     };
     Ok(Json(response))
@@ -296,7 +295,7 @@ async fn ldk_channel_close(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_channel_list(
     State(state): State<AppState>,
-) -> Result<Json<ListChannelsResponse>, CliError> {
+) -> Result<Json<LdkChannelListResponse>, CliError> {
     let mut channels = Vec::new();
     let network_graph = state.node.network_graph();
 
@@ -322,7 +321,7 @@ async fn ldk_channel_list(
             .get(&channel_details.counterparty_node_id)
             .cloned();
 
-        channels.push(fedimint_gateway_common::ChannelInfo {
+        channels.push(ChannelInfo {
             remote_pubkey: channel_details.counterparty_node_id,
             remote_alias: remote_node_alias,
             remote_address,
@@ -335,21 +334,21 @@ async fn ldk_channel_list(
         });
     }
 
-    Ok(Json(ListChannelsResponse { channels }))
+    Ok(Json(LdkChannelListResponse { channels }))
 }
 
 /// Generates an onchain address to fund the gateway's lightning node
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_onchain_receive(
     State(state): State<AppState>,
-) -> Result<Json<OnchainReceiveResponse>, CliError> {
+) -> Result<Json<LdkOnchainReceiveResponse>, CliError> {
     let address = state
         .node
         .onchain_payment()
         .new_address()
         .map_err(|e| CliError::internal(format!("Failed to get onchain address: {e}")))?;
 
-    Ok(Json(OnchainReceiveResponse {
+    Ok(Json(LdkOnchainReceiveResponse {
         address: address.to_string(),
     }))
 }
@@ -358,8 +357,8 @@ async fn ldk_onchain_receive(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_onchain_send(
     State(state): State<AppState>,
-    Json(payload): Json<SendOnchainRequest>,
-) -> Result<Json<OnchainSendResponse>, CliError> {
+    Json(payload): Json<LdkOnchainSendRequest>,
+) -> Result<Json<LdkOnchainSendResponse>, CliError> {
     let onchain = state.node.onchain_payment();
     let retain_reserves = false;
     let checked_address = payload.address.clone().assume_checked();
@@ -379,16 +378,16 @@ async fn ldk_onchain_send(
             )
             .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
     };
-    info!(onchain_request = %payload, txid = %txid, "Sent onchain transaction");
-    Ok(Json(OnchainSendResponse { txid }))
+    info!(target: LOG_GATEWAY, txid = %txid, "Sent onchain transaction");
+    Ok(Json(LdkOnchainSendResponse { txid }))
 }
 
 /// Creates an invoice directly payable to the gateway's lightning node
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_invoice_create(
     State(state): State<AppState>,
-    Json(payload): Json<CreateInvoiceForOperatorPayload>,
-) -> Result<Json<InvoiceCreateResponse>, CliError> {
+    Json(payload): Json<LdkInvoiceCreateRequest>,
+) -> Result<Json<LdkInvoiceCreateResponse>, CliError> {
     let expiry_secs = payload.expiry_secs.unwrap_or(3600);
     let description = match payload.description {
         Some(desc) => LdkBolt11InvoiceDescription::Direct(
@@ -404,7 +403,7 @@ async fn ldk_invoice_create(
         .receive(payload.amount_msats, &description, expiry_secs)
         .map_err(|e| CliError::internal(format!("Failed to get invoice: {e}")))?;
 
-    Ok(Json(InvoiceCreateResponse {
+    Ok(Json(LdkInvoiceCreateResponse {
         invoice: invoice.to_string(),
     }))
 }
@@ -413,8 +412,8 @@ async fn ldk_invoice_create(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_invoice_pay(
     State(state): State<AppState>,
-    Json(payload): Json<PayInvoiceForOperatorPayload>,
-) -> Result<Json<InvoicePayResponse>, CliError> {
+    Json(payload): Json<LdkInvoicePayRequest>,
+) -> Result<Json<LdkInvoicePayResponse>, CliError> {
     let payment_id = state
         .node
         .bolt11_payment()
@@ -442,7 +441,7 @@ async fn ldk_invoice_pay(
         fedimint_core::runtime::sleep(Duration::from_millis(100)).await;
     };
 
-    Ok(Json(InvoicePayResponse {
+    Ok(Json(LdkInvoicePayResponse {
         preimage: preimage.0.encode_hex::<String>(),
     }))
 }
@@ -451,7 +450,7 @@ async fn ldk_invoice_pay(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_peer_connect(
     State(state): State<AppState>,
-    Json(payload): Json<PeerConnectRequest>,
+    Json(payload): Json<LdkPeerConnectRequest>,
 ) -> Result<Json<()>, CliError> {
     let address: SocketAddress = payload
         .host
@@ -471,7 +470,7 @@ async fn ldk_peer_connect(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_peer_disconnect(
     State(state): State<AppState>,
-    Json(payload): Json<PeerDisconnectRequest>,
+    Json(payload): Json<LdkPeerDisconnectRequest>,
 ) -> Result<Json<()>, CliError> {
     state
         .node
@@ -484,27 +483,27 @@ async fn ldk_peer_disconnect(
 
 /// Lists all Lightning peers
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn ldk_peer_list(State(state): State<AppState>) -> Result<Json<ListPeersResponse>, CliError> {
+async fn ldk_peer_list(State(state): State<AppState>) -> Result<Json<LdkPeerListResponse>, CliError> {
     let peers = state
         .node
         .list_peers()
         .into_iter()
-        .map(|peer| fedimint_gateway_common::PeerInfo {
+        .map(|peer| PeerInfo {
             node_id: peer.node_id,
             address: peer.address.to_string(),
             is_connected: peer.is_connected,
         })
         .collect();
 
-    Ok(Json(ListPeersResponse { peers }))
+    Ok(Json(LdkPeerListResponse { peers }))
 }
 
 /// Lists LN payment transactions
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_transaction_list(
     State(state): State<AppState>,
-    Json(payload): Json<ListTransactionsPayload>,
-) -> Result<Json<ListTransactionsResponse>, CliError> {
+    Json(payload): Json<LdkTransactionListRequest>,
+) -> Result<Json<LdkTransactionListResponse>, CliError> {
     let transactions = state
         .node
         .list_payments_with_filter(|details| {
@@ -517,15 +516,15 @@ async fn ldk_transaction_list(
             let (preimage, payment_hash, payment_kind) =
                 get_preimage_and_payment_hash(&details.kind);
             let direction = match details.direction {
-                PaymentDirection::Outbound => fedimint_gateway_common::PaymentDirection::Outbound,
-                PaymentDirection::Inbound => fedimint_gateway_common::PaymentDirection::Inbound,
+                PaymentDirection::Outbound => fedimint_gateway_cli_core::PaymentDirection::Outbound,
+                PaymentDirection::Inbound => fedimint_gateway_cli_core::PaymentDirection::Inbound,
             };
             let status = match details.status {
-                PaymentStatus::Failed => fedimint_gateway_common::PaymentStatus::Failed,
-                PaymentStatus::Succeeded => fedimint_gateway_common::PaymentStatus::Succeeded,
-                PaymentStatus::Pending => fedimint_gateway_common::PaymentStatus::Pending,
+                PaymentStatus::Failed => fedimint_gateway_cli_core::PaymentStatus::Failed,
+                PaymentStatus::Succeeded => fedimint_gateway_cli_core::PaymentStatus::Succeeded,
+                PaymentStatus::Pending => fedimint_gateway_cli_core::PaymentStatus::Pending,
             };
-            fedimint_gateway_common::PaymentDetails {
+            PaymentDetails {
                 payment_hash,
                 preimage: preimage.map(|p| p.to_string()),
                 payment_kind,
@@ -540,7 +539,7 @@ async fn ldk_transaction_list(
             }
         })
         .collect::<Vec<_>>();
-    let response = ListTransactionsResponse { transactions };
+    let response = LdkTransactionListResponse { transactions };
     Ok(Json(response))
 }
 
@@ -549,10 +548,10 @@ async fn ldk_transaction_list(
 // ---------------------------------------------------------------------------
 
 /// Join a new federation
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_join(
     State(state): State<AppState>,
-    Json(payload): Json<ConnectFedPayload>,
+    Json(payload): Json<FederationJoinRequest>,
 ) -> Result<Json<FederationInfo>, CliError> {
     let invite_code = fedimint_core::invite_code::InviteCode::from_str(&payload.invite_code)
         .map_err(|e| CliError::bad_request(format!("Invalid federation member string {e:?}")))?;
@@ -602,29 +601,28 @@ async fn federation_join(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_list(
     State(state): State<AppState>,
-) -> Result<Json<ListFederationsResponse>, CliError> {
+) -> Result<Json<FederationListResponse>, CliError> {
     let federations = state.federation_info_all().await;
-    Ok(Json(ListFederationsResponse { federations }))
+    Ok(Json(FederationListResponse { federations }))
 }
 
 /// Display federation config
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_config(
     State(state): State<AppState>,
-    Json(payload): Json<ConfigPayload>,
-) -> Result<Json<GatewayFedConfig>, CliError> {
+    Json(_payload): Json<FederationConfigRequest>,
+) -> Result<Json<FederationConfigResponse>, CliError> {
     let federations = state.all_federation_configs().await;
-    let gateway_fed_config = GatewayFedConfig { federations };
-    Ok(Json(gateway_fed_config))
+    Ok(Json(FederationConfigResponse { federations }))
 }
 
 /// Export invite codes for all connected federations
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_invite(
     State(state): State<AppState>,
-) -> Result<Json<ExportInviteCodesResponse>, CliError> {
+) -> Result<Json<FederationInviteResponse>, CliError> {
     let invite_codes = state.all_invite_codes().await;
-    Ok(Json(ExportInviteCodesResponse { invite_codes }))
+    Ok(Json(FederationInviteResponse { invite_codes }))
 }
 
 // ---------------------------------------------------------------------------
@@ -635,8 +633,8 @@ async fn federation_invite(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn module_mint_send(
     State(state): State<AppState>,
-    Json(payload): Json<SpendEcashPayload>,
-) -> Result<Json<SpendEcashResponse>, CliError> {
+    Json(payload): Json<MintSendRequest>,
+) -> Result<Json<MintSendResponse>, CliError> {
     let client = state
         .select_client(payload.federation_id)
         .await
@@ -651,7 +649,7 @@ async fn module_mint_send(
         .await
         .map_err(|e| CliError::internal(e))?;
 
-    let response = SpendEcashResponse {
+    let response = MintSendResponse {
         notes: base32::encode_prefixed(FEDIMINT_PREFIX, &ecash),
     };
     Ok(Json(response))
@@ -661,8 +659,8 @@ async fn module_mint_send(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn module_mint_receive(
     State(state): State<AppState>,
-    Json(payload): Json<ReceiveEcashPayload>,
-) -> Result<Json<ReceiveEcashResponse>, CliError> {
+    Json(payload): Json<MintReceiveRequest>,
+) -> Result<Json<MintReceiveResponse>, CliError> {
     let ecash: fedimint_mintv2_client::ECash =
         base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes)
             .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
@@ -696,16 +694,16 @@ async fn module_mint_receive(
         }
     }
 
-    let response = ReceiveEcashResponse { amount };
+    let response = MintReceiveResponse { amount };
     Ok(Json(response))
 }
 
 /// Generate deposit address for a federation
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn module_wallet_receive(
     State(state): State<AppState>,
-    Json(payload): Json<DepositAddressPayload>,
-) -> Result<Json<DepositAddressResponse>, CliError> {
+    Json(payload): Json<WalletReceiveRequest>,
+) -> Result<Json<WalletReceiveResponse>, CliError> {
     let client = state
         .select_client(payload.federation_id)
         .await
@@ -717,7 +715,7 @@ async fn module_wallet_receive(
         .map_err(|_| CliError::internal("No wallet module found"))?;
 
     let address = wallet_module.receive().await;
-    Ok(Json(DepositAddressResponse {
+    Ok(Json(WalletReceiveResponse {
         address: address.to_string(),
     }))
 }

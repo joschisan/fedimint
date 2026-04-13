@@ -8,18 +8,18 @@ use clap::{Parser, Subcommand};
 use fedimint_core::config::FederationId;
 use fedimint_core::{Amount, BitcoinAmountOrAll};
 use fedimint_gateway_cli_core::{
-    CloseChannelsWithPeerRequest, ConfigPayload, ConnectFedPayload,
-    CreateInvoiceForOperatorPayload, ListTransactionsPayload, ModuleMintCountRequest,
-    ModuleMintReceiveRequest, ModuleMintSendRequest, ModuleWalletInfoRequest,
-    ModuleWalletReceiveRequest, ModuleWalletSendFeeRequest, ModuleWalletSendRequest,
-    OpenChannelRequest, PayInvoiceForOperatorPayload, PeerConnectRequest, PeerDisconnectRequest,
-    ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
-    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    FederationConfigRequest, FederationJoinRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
+    LdkInvoiceCreateRequest, LdkInvoicePayRequest, LdkOnchainSendRequest, LdkPeerConnectRequest,
+    LdkPeerDisconnectRequest, LdkTransactionListRequest, MintCountRequest, MintReceiveRequest,
+    MintSendRequest, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN,
+    ROUTE_FEDERATION_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
+    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE,
+    ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
+    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_COUNT, ROUTE_MODULE_MINT_RECEIVE,
     ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_INFO, ROUTE_MODULE_WALLET_RECEIVE,
-    ROUTE_MODULE_WALLET_SEND, ROUTE_MODULE_WALLET_SEND_FEE, SendOnchainRequest,
+    ROUTE_MODULE_WALLET_SEND, ROUTE_MODULE_WALLET_SEND_FEE, WalletInfoRequest,
+    WalletReceiveRequest, WalletSendFeeRequest, WalletSendRequest,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -265,7 +265,7 @@ fn main() -> Result<()> {
                 } => request(
                     addr,
                     ROUTE_LDK_ONCHAIN_SEND,
-                    SendOnchainRequest {
+                    LdkOnchainSendRequest {
                         address,
                         amount,
                         fee_rate_sats_per_vbyte,
@@ -281,7 +281,7 @@ fn main() -> Result<()> {
                 } => request(
                     addr,
                     ROUTE_LDK_CHANNEL_OPEN,
-                    OpenChannelRequest {
+                    LdkChannelOpenRequest {
                         pubkey,
                         host,
                         channel_size_sats,
@@ -295,7 +295,7 @@ fn main() -> Result<()> {
                 } => request(
                     addr,
                     ROUTE_LDK_CHANNEL_CLOSE,
-                    CloseChannelsWithPeerRequest {
+                    LdkChannelCloseRequest {
                         pubkey,
                         force,
                         sats_per_vbyte,
@@ -311,7 +311,7 @@ fn main() -> Result<()> {
                 } => request(
                     addr,
                     ROUTE_LDK_INVOICE_CREATE,
-                    CreateInvoiceForOperatorPayload {
+                    LdkInvoiceCreateRequest {
                         amount_msats,
                         expiry_secs,
                         description,
@@ -323,21 +323,17 @@ fn main() -> Result<()> {
                     request(
                         addr,
                         ROUTE_LDK_INVOICE_PAY,
-                        PayInvoiceForOperatorPayload { invoice },
+                        LdkInvoicePayRequest { invoice },
                     )?
                 }
             },
             LdkCommands::Peer { command } => match command {
-                LdkPeerCommands::Connect { pubkey, host } => request(
-                    addr,
-                    ROUTE_LDK_PEER_CONNECT,
-                    PeerConnectRequest { pubkey, host },
-                )?,
-                LdkPeerCommands::Disconnect { pubkey } => request(
-                    addr,
-                    ROUTE_LDK_PEER_DISCONNECT,
-                    PeerDisconnectRequest { pubkey },
-                )?,
+                LdkPeerCommands::Connect { pubkey, host } => {
+                    request(addr, ROUTE_LDK_PEER_CONNECT, LdkPeerConnectRequest { pubkey, host })?
+                }
+                LdkPeerCommands::Disconnect { pubkey } => {
+                    request(addr, ROUTE_LDK_PEER_DISCONNECT, LdkPeerDisconnectRequest { pubkey })?
+                }
                 LdkPeerCommands::List => request(addr, ROUTE_LDK_PEER_LIST, ())?,
             },
             LdkCommands::Transaction { command } => match command {
@@ -347,7 +343,7 @@ fn main() -> Result<()> {
                 } => request(
                     addr,
                     ROUTE_LDK_TRANSACTION_LIST,
-                    ListTransactionsPayload {
+                    LdkTransactionListRequest {
                         start_secs,
                         end_secs,
                     },
@@ -361,23 +357,23 @@ fn main() -> Result<()> {
                 recover,
             } => request(
                 addr,
-                ROUTE_FED_JOIN,
-                ConnectFedPayload {
+                ROUTE_FEDERATION_JOIN,
+                FederationJoinRequest {
                     invite_code,
                     recover,
                 },
             )?,
-            FederationCommands::List => request(addr, ROUTE_FED_LIST, ())?,
+            FederationCommands::List => request(addr, ROUTE_FEDERATION_LIST, ())?,
             FederationCommands::Config { federation_id } => request(
                 addr,
-                ROUTE_FED_CONFIG,
-                ConfigPayload {
+                ROUTE_FEDERATION_CONFIG,
+                FederationConfigRequest {
                     federation_id: Some(federation_id),
                 },
             )?,
             FederationCommands::Invite { federation_id } => request(
                 addr,
-                ROUTE_FED_INVITE,
+                ROUTE_FEDERATION_INVITE,
                 serde_json::json!({ "federation_id": federation_id }),
             )?,
         },
@@ -390,12 +386,12 @@ fn main() -> Result<()> {
                 MintCommands::Count => request(
                     addr,
                     ROUTE_MODULE_MINT_COUNT,
-                    ModuleMintCountRequest { federation_id },
+                    MintCountRequest { federation_id },
                 )?,
                 MintCommands::Send { amount } => request(
                     addr,
                     ROUTE_MODULE_MINT_SEND,
-                    ModuleMintSendRequest {
+                    MintSendRequest {
                         federation_id,
                         amount,
                     },
@@ -403,9 +399,9 @@ fn main() -> Result<()> {
                 MintCommands::Receive { ecash } => request(
                     addr,
                     ROUTE_MODULE_MINT_RECEIVE,
-                    ModuleMintReceiveRequest {
-                        federation_id,
-                        ecash,
+                    MintReceiveRequest {
+                        notes: ecash,
+                        wait: false,
                     },
                 )?,
             },
@@ -413,7 +409,7 @@ fn main() -> Result<()> {
                 WalletCommands::Info { subcommand } => request(
                     addr,
                     ROUTE_MODULE_WALLET_INFO,
-                    ModuleWalletInfoRequest {
+                    WalletInfoRequest {
                         federation_id,
                         subcommand,
                     },
@@ -421,7 +417,7 @@ fn main() -> Result<()> {
                 WalletCommands::SendFee => request(
                     addr,
                     ROUTE_MODULE_WALLET_SEND_FEE,
-                    ModuleWalletSendFeeRequest { federation_id },
+                    WalletSendFeeRequest { federation_id },
                 )?,
                 WalletCommands::Send {
                     address,
@@ -430,7 +426,7 @@ fn main() -> Result<()> {
                 } => request(
                     addr,
                     ROUTE_MODULE_WALLET_SEND,
-                    ModuleWalletSendRequest {
+                    WalletSendRequest {
                         federation_id,
                         address,
                         amount,
@@ -440,7 +436,7 @@ fn main() -> Result<()> {
                 WalletCommands::Receive => request(
                     addr,
                     ROUTE_MODULE_WALLET_RECEIVE,
-                    ModuleWalletReceiveRequest { federation_id },
+                    WalletReceiveRequest { federation_id },
                 )?,
             },
         },

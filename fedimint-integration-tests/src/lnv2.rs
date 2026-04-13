@@ -173,7 +173,7 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
     {
         let invoice_str = crate::cli::gateway_cmd(&env.gw2_addr)
             .args(["ldk", "invoice", "create", "1000000"])
-            .run_gateway_cli::<fedimint_gateway_common::InvoiceCreateResponse>()?
+            .run_gateway_cli::<fedimint_gateway_cli_core::LdkInvoiceCreateResponse>()?
             .invoice;
 
         let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;

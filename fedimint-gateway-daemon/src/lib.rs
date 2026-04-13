@@ -41,8 +41,9 @@ use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, Spanned};
 use fedimint_core::{Amount, PeerId, crit};
+use fedimint_gateway_cli_core::FederationInfo;
 use fedimint_gateway_common::{
-    FederationInfo, LightningContext, LightningRpcError, PaymentAction, PaymentFee, Preimage,
+    LightningContext, LightningRpcError, PaymentAction, PaymentFee, Preimage,
 };
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -674,7 +675,7 @@ pub fn get_preimage_and_payment_hash(
 ) -> (
     Option<Preimage>,
     Option<sha256::Hash>,
-    fedimint_gateway_common::PaymentKind,
+    fedimint_gateway_cli_core::PaymentKind,
 ) {
     match kind {
         PaymentKind::Bolt11 {
@@ -684,7 +685,7 @@ pub fn get_preimage_and_payment_hash(
         } => (
             preimage.map(|p| Preimage(p.0)),
             Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_common::PaymentKind::Bolt11,
+            fedimint_gateway_cli_core::PaymentKind::Bolt11,
         ),
         PaymentKind::Bolt11Jit {
             hash,
@@ -695,7 +696,7 @@ pub fn get_preimage_and_payment_hash(
         } => (
             preimage.map(|p| Preimage(p.0)),
             Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_common::PaymentKind::Bolt11,
+            fedimint_gateway_cli_core::PaymentKind::Bolt11,
         ),
         PaymentKind::Bolt12Offer {
             hash,
@@ -707,7 +708,7 @@ pub fn get_preimage_and_payment_hash(
         } => (
             preimage.map(|p| Preimage(p.0)),
             hash.map(|h| sha256::Hash::from_slice(&h.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_common::PaymentKind::Bolt12Offer,
+            fedimint_gateway_cli_core::PaymentKind::Bolt12Offer,
         ),
         PaymentKind::Bolt12Refund {
             hash,
@@ -718,13 +719,13 @@ pub fn get_preimage_and_payment_hash(
         } => (
             preimage.map(|p| Preimage(p.0)),
             hash.map(|h| sha256::Hash::from_slice(&h.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_common::PaymentKind::Bolt12Refund,
+            fedimint_gateway_cli_core::PaymentKind::Bolt12Refund,
         ),
         PaymentKind::Spontaneous { hash, preimage } => (
             preimage.map(|p| Preimage(p.0)),
             Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_common::PaymentKind::Bolt11,
+            fedimint_gateway_cli_core::PaymentKind::Bolt11,
         ),
-        PaymentKind::Onchain { .. } => (None, None, fedimint_gateway_common::PaymentKind::Onchain),
+        PaymentKind::Onchain { .. } => (None, None, fedimint_gateway_cli_core::PaymentKind::Onchain),
     }
 }

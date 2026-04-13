@@ -100,57 +100,6 @@ pub struct FederationConfig {
     pub transaction_fee: PaymentFee,
 }
 
-/// Information about one of the feds we are connected to
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FederationInfo {
-    pub federation_id: FederationId,
-    pub federation_name: Option<String>,
-    pub balance_msat: Amount,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GatewayInfo {
-    pub public_key: secp256k1::PublicKey,
-    pub alias: String,
-    pub network: String,
-    pub block_height: u64,
-    pub synced_to_chain: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct GatewayFedConfig {
-    pub federations: BTreeMap<FederationId, JsonClientConfig>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SpendEcashResponse {
-    /// OOBNotes.to_string() for v1, base32::encode_prefixed() for v2
-    pub notes: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ReceiveEcashResponse {
-    pub amount: Amount,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
-pub struct GatewayBalances {
-    pub onchain_balance_sats: u64,
-    pub lightning_balance_msats: u64,
-    pub ecash_balances: Vec<FederationBalanceInfo>,
-    pub inbound_lightning_liquidity_msats: u64,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
-pub struct FederationBalanceInfo {
-    pub federation_id: FederationId,
-    pub ecash_balance_msats: Amount,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MnemonicResponse {
-    pub mnemonic: Vec<String>,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PaymentLogPayload {
@@ -168,74 +117,8 @@ pub struct PaymentLogPayload {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PaymentLogResponse(pub Vec<PersistedLogEntry>);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CloseChannelsWithPeerResponse {
-    pub num_channels_closed: u32,
-}
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PaymentDetails {
-    pub payment_hash: Option<sha256::Hash>,
-    pub preimage: Option<String>,
-    pub payment_kind: PaymentKind,
-    pub amount: Amount,
-    pub direction: PaymentDirection,
-    pub status: PaymentStatus,
-    pub timestamp_secs: u64,
-}
 
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
-pub enum PaymentKind {
-    Bolt11,
-    Bolt12Offer,
-    Bolt12Refund,
-    Onchain,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
-pub enum PaymentDirection {
-    Outbound,
-    Inbound,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
-pub enum PaymentStatus {
-    Pending,
-    Succeeded,
-    Failed,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GetInvoiceRequest {
-    pub payment_hash: sha256::Hash,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GetInvoiceResponse {
-    pub preimage: Option<String>,
-    pub payment_hash: Option<sha256::Hash>,
-    pub amount: Amount,
-    pub created_at: std::time::SystemTime,
-    pub status: PaymentStatus,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ListTransactionsResponse {
-    pub transactions: Vec<PaymentDetails>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ChannelInfo {
-    pub remote_pubkey: secp256k1::PublicKey,
-    pub remote_alias: Option<String>,
-    pub remote_address: Option<String>,
-    pub channel_size_sats: u64,
-    pub outbound_liquidity_sats: u64,
-    pub inbound_liquidity_sats: u64,
-    pub is_usable: bool,
-    pub is_outbound: bool,
-    pub funding_txid: Option<bitcoin::Txid>,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -683,66 +566,7 @@ impl TryFrom<Bolt11Invoice> for PrunedInvoice {
     }
 }
 
-// --- Peer management types ---
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PeerInfo {
-    pub node_id: secp256k1::PublicKey,
-    pub address: String,
-    pub is_connected: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ListChannelsResponse {
-    pub channels: Vec<ChannelInfo>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ListPeersResponse {
-    pub peers: Vec<PeerInfo>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OnchainReceiveResponse {
-    pub address: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OnchainSendResponse {
-    pub txid: bitcoin::Txid,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ChannelOpenResponse {
-    pub txid: bitcoin::Txid,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct InvoiceCreateResponse {
-    pub invoice: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct InvoicePayResponse {
-    pub preimage: String,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PeginFromOnchainResponse {
     pub txid: bitcoin::Txid,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ListFederationsResponse {
-    pub federations: Vec<FederationInfo>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DepositAddressResponse {
-    pub address: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ExportInviteCodesResponse {
-    pub invite_codes: BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>,
 }
