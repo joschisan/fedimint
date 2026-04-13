@@ -11,8 +11,47 @@ use crate::cli;
 use crate::env::{NUM_GUARDIANS, TestEnv};
 
 pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
-    test_gateway_registration(env).await?;
+    test_direct_ln_payments(env).await?;
     test_payments(env).await?;
+    test_gateway_registration(env).await?;
+
+    Ok(())
+}
+
+async fn test_direct_ln_payments(env: &TestEnv) -> anyhow::Result<()> {
+    info!("lnv2: test_direct_ln_payments");
+
+    info!("Gateway pays LDK node invoice...");
+    {
+        let invoice = env.ldk_node.bolt11_payment().receive(
+            1_000_000,
+            &lightning_invoice::Bolt11InvoiceDescription::Direct(
+                lightning_invoice::Description::new(String::new())?,
+            ),
+            3600,
+        )?;
+
+        cli::gatewayd_ldk_invoice_pay(&env.gw_addr, &invoice.to_string())?;
+    }
+
+    info!("LDK node pays gateway invoice...");
+    {
+        let invoice_str = cli::gatewayd_ldk_invoice_create(&env.gw_addr, 1_000_000)?.invoice;
+        let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
+
+        // The freestanding node may need a moment to consider the channel ready
+        // for outbound payments after the gateway-initiated handshake.
+        crate::env::retry("ldk node pays gateway", || async {
+            env.ldk_node
+                .bolt11_payment()
+                .send(&invoice, None)
+                .map(|_| ())
+                .map_err(|e| anyhow::anyhow!("send failed: {e:?}"))
+        })
+        .await?;
+    }
+
+    info!("lnv2: test_direct_ln_payments passed");
 
     Ok(())
 }
