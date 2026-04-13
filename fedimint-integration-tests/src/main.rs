@@ -33,5 +33,7 @@ fn main() -> anyhow::Result<()> {
     runtime.block_on(walletv2::run_tests(&env))?;
 
     info!("All integration tests passed!");
+
+    runtime.block_on(env.shutdown());
     Ok(())
 }

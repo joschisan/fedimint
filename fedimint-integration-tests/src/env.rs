@@ -51,6 +51,7 @@ pub struct TestEnv {
     pub invite_code: InviteCode,
     pub gw_addr: String,
     pub gw_public: String,
+    endpoint: Endpoint,
     client_counter: AtomicU64,
 }
 
@@ -126,6 +127,8 @@ impl TestEnv {
         runtime.block_on(open_channel(&bitcoind, &gw_addr, &ldk_node))?;
         info!("Channel opened");
 
+        let endpoint = runtime.block_on(async { Endpoint::builder(N0).bind().await })?;
+
         Ok(Self {
             ldk_node,
             data_dir,
@@ -133,8 +136,15 @@ impl TestEnv {
             invite_code,
             gw_addr,
             gw_public,
+            endpoint,
             client_counter: AtomicU64::new(0),
         })
+    }
+
+    /// Gracefully close the shared iroh Endpoint. iroh logs loud errors if
+    /// endpoints are dropped without being closed first.
+    pub async fn shutdown(&self) {
+        self.endpoint.close().await;
     }
 
     fn connect_bitcoind(
@@ -170,8 +180,7 @@ impl TestEnv {
         builder.with_module(fedimint_walletv2_client::WalletClientInit);
         builder.with_module(fedimint_lnv2_client::LightningClientInit::default());
 
-        let endpoint = Endpoint::builder(N0).bind().await?;
-        let connectors = ConnectionPool::new(endpoint);
+        let connectors = ConnectionPool::new(self.endpoint.clone());
 
         let mnemonic = Mnemonic::generate(12)?;
         let root_secret = RootSecret::StandardDoubleDerive(
