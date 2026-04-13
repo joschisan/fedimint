@@ -1,18 +1,9 @@
-use std::io::Cursor;
 use std::time::Duration;
 
-use anyhow::Context;
 use async_trait::async_trait;
-use bytes::{Bytes, BytesMut};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
-use futures::{SinkExt, StreamExt};
 use iroh::endpoint::{Connection, RecvStream};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use tokio::net::TcpStream;
-use tokio_rustls::TlsStream;
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 /// Maximum size of a p2p message in bytes. The largest message we expect to
 /// receive is a signed session outcome.
@@ -57,86 +48,29 @@ pub trait IP2PConnection<M>: Send + 'static {
     }
 }
 
-/// Implementations of the IP2PFrame and IP2PConnection traits for TLS
-
-#[async_trait]
-impl<M> IP2PFrame<M> for BytesMut
-where
-    M: Decodable + DeserializeOwned + Send + 'static,
-{
-    async fn read_to_end(&mut self) -> anyhow::Result<M> {
-        if let Ok(message) = M::consensus_decode_whole(self, &ModuleDecoderRegistry::default()) {
-            return Ok(message);
-        }
-
-        Ok(bincode::deserialize_from(Cursor::new(&**self))?)
-    }
-}
-
-#[async_trait]
-impl<M> IP2PConnection<M> for Framed<TlsStream<TcpStream>, LengthDelimitedCodec>
-where
-    M: Encodable + Decodable + Serialize + DeserializeOwned + Send + 'static,
-{
-    async fn send(&mut self, message: M) -> anyhow::Result<()> {
-        let mut bytes = Vec::new();
-
-        bincode::serialize_into(&mut bytes, &message)?;
-
-        SinkExt::send(self, Bytes::from_owner(bytes)).await?;
-
-        Ok(())
-    }
-
-    async fn receive(&mut self) -> anyhow::Result<DynIP2PFrame<M>> {
-        let message = self
-            .next()
-            .await
-            .context("Framed stream is closed")??
-            .into_dyn();
-
-        Ok(message)
-    }
-
-    fn rtt(&self) -> Option<Duration> {
-        None
-    }
-}
-
-/// Implementations of the IP2PFrame and IP2PConnection traits for Iroh
-
 #[async_trait]
 impl<M> IP2PFrame<M> for RecvStream
 where
-    M: Decodable + DeserializeOwned + Send + 'static,
+    M: Decodable + Send + 'static,
 {
     async fn read_to_end(&mut self) -> anyhow::Result<M> {
         let bytes = self.read_to_end(MAX_P2P_MESSAGE_SIZE).await?;
-
-        if let Ok(message) = M::consensus_decode_whole(&bytes, &ModuleDecoderRegistry::default()) {
-            return Ok(message);
-        }
-
-        Ok(bincode::deserialize_from(Cursor::new(&bytes))?)
+        Ok(M::consensus_decode_whole(
+            &bytes,
+            &ModuleDecoderRegistry::default(),
+        )?)
     }
 }
 
 #[async_trait]
 impl<M> IP2PConnection<M> for Connection
 where
-    M: Encodable + Decodable + Serialize + DeserializeOwned + Send + 'static,
+    M: Encodable + Decodable + Send + 'static,
 {
     async fn send(&mut self, message: M) -> anyhow::Result<()> {
-        let mut bytes = Vec::new();
-
-        bincode::serialize_into(&mut bytes, &message)?;
-
         let mut sink = self.open_uni().await?;
-
-        sink.write_all(&bytes).await?;
-
+        sink.write_all(&message.consensus_encode_to_vec()).await?;
         sink.finish()?;
-
         Ok(())
     }
 

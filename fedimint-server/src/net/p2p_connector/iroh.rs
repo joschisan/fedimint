@@ -13,8 +13,6 @@ use fedimint_logging::LOG_NET_IROH;
 use fedimint_server_core::dashboard_ui::ConnectionType;
 use iroh::{Endpoint, NodeAddr, NodeId, SecretKey};
 use iroh_base::ticket::NodeTicket;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use tracing::trace;
 
 use super::IP2PConnector;
@@ -105,7 +103,7 @@ impl IrohConnector {
 #[async_trait]
 impl<M> IP2PConnector<M> for IrohConnector
 where
-    M: Encodable + Decodable + Serialize + DeserializeOwned + Send + 'static,
+    M: Encodable + Decodable + Send + 'static,
 {
     fn peers(&self) -> Vec<PeerId> {
         self.node_ids.keys().copied().collect()

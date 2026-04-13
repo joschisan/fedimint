@@ -279,16 +279,8 @@ pub async fn run(
 
     info!(target: LOG_CONSENSUS, "Starting Consensus Engine...");
 
-    let api_urls = cfg
-        .consensus
-        .api_endpoints()
-        .iter()
-        .map(|(&peer_id, url)| (peer_id, url.url.clone()))
-        .collect();
-
     ConsensusEngine {
         db,
-        federation_api: DynGlobalApi::new(connectors, api_urls, None)?,
         cfg: cfg.clone(),
         connections,
         ord_latency_sender,

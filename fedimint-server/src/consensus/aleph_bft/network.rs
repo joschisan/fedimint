@@ -4,8 +4,6 @@ use fedimint_core::PeerId;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::Encodable;
-use fedimint_core::module::SerdeModuleEncoding;
-use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::net::peers::{DynP2PConnections, Recipient};
 use fedimint_core::secp256k1::schnorr;
 use fedimint_core::session_outcome::SignedSessionOutcome;
@@ -117,26 +115,14 @@ impl aleph_bft::Network<NetworkData> for Network {
                     {
                         self.connections.send(
                             Recipient::Peer(peer_id),
-                            P2PMessage::SignedSessionOutcome(SerdeModuleEncoding::from(&outcome)),
+                            P2PMessage::SignedSessionOutcome(outcome),
                         );
                     }
                 }
-                P2PMessage::SignedSessionOutcome(encoded_outcome) => {
-                    match encoded_outcome.try_into_inner(&ModuleRegistry::default()) {
-                        Ok(outcome) => {
-                            self.signed_outcomes_sender
-                                .try_send((peer_id, outcome))
-                                .ok();
-                        }
-                        Err(err) => {
-                            error!(
-                                target: LOG_CONSENSUS,
-                                %peer_id,
-                                err = %err.fmt_compact(),
-                                "Failed to decode SignedSessionOutcome"
-                            );
-                        }
-                    }
+                P2PMessage::SignedSessionOutcome(outcome) => {
+                    self.signed_outcomes_sender
+                        .try_send((peer_id, outcome))
+                        .ok();
                 }
                 message => {
                     error!(

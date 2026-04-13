@@ -17,7 +17,7 @@ use fedimint_logging::LOG_CORE;
 use hex::FromHex;
 use secp256k1::PublicKey;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use threshold_crypto::{G1Projective, G2Projective};
 use tracing::warn;
@@ -26,7 +26,6 @@ use crate::core::DynClientConfig;
 use crate::encoding::Decodable;
 use crate::module::{
     CoreConsensusVersion, DynCommonModuleInit, IDynCommonModuleInit, ModuleConsensusVersion,
-    SerdeModuleEncoding,
 };
 use crate::session_outcome::SignedSessionOutcome;
 use crate::{PeerId, maybe_add_send_sync, secp256k1};
@@ -731,12 +730,12 @@ pub trait TypedServerModuleConfig: DeserializeOwned + Serialize {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable)]
+#[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub enum P2PMessage {
     Aleph(Vec<u8>),
     SessionSignature(secp256k1::schnorr::Signature),
     SessionIndex(u64),
-    SignedSessionOutcome(SerdeModuleEncoding<SignedSessionOutcome>),
+    SignedSessionOutcome(SignedSessionOutcome),
     Checksum(sha256::Hash),
     DkgG1(DkgMessageG1),
     DkgG2(DkgMessageG2),
@@ -760,54 +759,6 @@ pub enum DkgMessageG2 {
     Hash(sha256::Hash),
     Commitment(Vec<G2Projective>),
     Share(Scalar),
-}
-
-// TODO: Remove the Serde encoding as soon as the p2p layer drops it as
-// requirement
-impl Serialize for DkgMessageG1 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.consensus_encode_to_hex().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for DkgMessageG1 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Self::consensus_decode_hex(
-            &String::deserialize(deserializer)?,
-            &ModuleDecoderRegistry::default(),
-        )
-        .map_err(serde::de::Error::custom)
-    }
-}
-
-// TODO: Remove the Serde encoding as soon as the p2p layer drops it as
-// requirement
-impl Serialize for DkgMessageG2 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.consensus_encode_to_hex().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for DkgMessageG2 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Self::consensus_decode_hex(
-            &String::deserialize(deserializer)?,
-            &ModuleDecoderRegistry::default(),
-        )
-        .map_err(serde::de::Error::custom)
-    }
 }
 
 /// Key under which the federation name can be sent to client in the `meta` part
