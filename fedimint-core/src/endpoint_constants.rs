@@ -1,6 +1,3 @@
-#[deprecated(note = "https://github.com/fedimint/fedimint/issues/6671")]
-pub const AWAIT_OUTPUT_OUTCOME_ENDPOINT: &str = "await_output_outcome";
-pub const AWAIT_OUTPUTS_OUTCOMES_ENDPOINT: &str = "await_outputs_outcomes";
 pub const BACKUP_ENDPOINT: &str = "backup";
 pub const CLIENT_CONFIG_ENDPOINT: &str = "client_config";
 pub const CLIENT_CONFIG_JSON_ENDPOINT: &str = "client_config_json";

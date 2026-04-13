@@ -38,8 +38,7 @@ use fedimint_mintv2_common::endpoint_constants::{
 };
 use fedimint_mintv2_common::{
     Denomination, MODULE_CONSENSUS_VERSION, MintCommonInit, MintConsensusItem, MintInput,
-    MintInputError, MintModuleTypes, MintOutput, MintOutputError, MintOutputOutcome, RecoveryItem,
-    verify_note,
+    MintInputError, MintModuleTypes, MintOutput, MintOutputError, RecoveryItem, verify_note,
 };
 use fedimint_server_core::config::{PeerHandleOps, eval_poly_g2};
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
@@ -385,14 +384,6 @@ impl ServerModule for Mint {
             amount,
             fee: self.cfg.consensus.output_fee,
         })
-    }
-
-    async fn output_status(
-        &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
-        _outpoint: OutPoint,
-    ) -> Option<MintOutputOutcome> {
-        None
     }
 
     async fn audit(

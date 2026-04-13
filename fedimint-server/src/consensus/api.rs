@@ -4,27 +4,24 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
 use fedimint_core::backup::{ClientBackupKey, ClientBackupSnapshot};
 use fedimint_core::config::{ClientConfig, JsonClientConfig, META_FEDERATION_NAME_KEY};
 use fedimint_core::core::backup::{BACKUP_REQUEST_MAX_PAYLOAD_SIZE_BYTES, SignedBackupRequest};
-use fedimint_core::core::{DynOutputOutcome, ModuleInstanceId, ModuleKind};
+use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::{
     Committable, Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped,
 };
-#[allow(deprecated)]
-use fedimint_core::endpoint_constants::AWAIT_OUTPUT_OUTCOME_ENDPOINT;
 use fedimint_core::endpoint_constants::{
-    AWAIT_OUTPUTS_OUTCOMES_ENDPOINT, AWAIT_SESSION_OUTCOME_ENDPOINT,
-    AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT, AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT,
-    CHAIN_ID_ENDPOINT, CLIENT_CONFIG_ENDPOINT, CLIENT_CONFIG_JSON_ENDPOINT,
-    CONSENSUS_ORD_LATENCY_ENDPOINT, FEDERATION_ID_ENDPOINT, FEDIMINTD_VERSION_ENDPOINT,
-    INVITE_CODE_ENDPOINT, P2P_CONNECTION_STATUS_ENDPOINT, RECOVER_ENDPOINT,
-    SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT,
-    SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
-    VERSION_ENDPOINT,
+    AWAIT_SESSION_OUTCOME_ENDPOINT, AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT,
+    AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT, CHAIN_ID_ENDPOINT, CLIENT_CONFIG_ENDPOINT,
+    CLIENT_CONFIG_JSON_ENDPOINT, CONSENSUS_ORD_LATENCY_ENDPOINT, FEDERATION_ID_ENDPOINT,
+    FEDIMINTD_VERSION_ENDPOINT, INVITE_CODE_ENDPOINT, P2P_CONNECTION_STATUS_ENDPOINT,
+    RECOVER_ENDPOINT, SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SESSION_COUNT_ENDPOINT,
+    SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT,
+    SUBMIT_TRANSACTION_ENDPOINT, VERSION_ENDPOINT,
 };
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::{Audit, AuditSummary};
@@ -42,7 +39,7 @@ use fedimint_core::transaction::{
     SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
 };
 use fedimint_core::util::{FmtCompact, SafeUrl};
-use fedimint_core::{ChainId, OutPoint, OutPointRange, PeerId, TransactionId};
+use fedimint_core::{ChainId, PeerId, TransactionId};
 use fedimint_logging::LOG_NET_API;
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::dashboard_ui::{
@@ -147,65 +144,6 @@ impl ConsensusApi {
         self.db
             .wait_key_check(&AcceptedTransactionKey(txid), std::convert::identity)
             .await
-    }
-
-    pub async fn await_output_outcome(
-        &self,
-        outpoint: OutPoint,
-    ) -> Result<SerdeModuleEncoding<DynOutputOutcome>> {
-        debug!(target: LOG_NET_API, %outpoint, "Awaiting output outcome");
-        let (module_ids, mut dbtx) = self.await_transaction(outpoint.txid).await;
-
-        let module_id = module_ids
-            .into_iter()
-            .nth(outpoint.out_idx as usize)
-            .with_context(|| format!("Outpoint index out of bounds {outpoint:?}"))?;
-
-        #[allow(deprecated)]
-        let outcome = self
-            .modules
-            .get_expect(module_id)
-            .output_status(
-                &mut dbtx.to_ref_with_prefix_module_id(module_id).0.into_nc(),
-                outpoint,
-                module_id,
-            )
-            .await
-            .context("No output outcome for outpoint")?;
-
-        Ok((&outcome).into())
-    }
-
-    pub async fn await_outputs_outcomes(
-        &self,
-        outpoint_range: OutPointRange,
-    ) -> Result<Vec<Option<SerdeModuleEncoding<DynOutputOutcome>>>> {
-        // Wait for the transaction to be accepted first
-        let (module_ids, mut dbtx) = self.await_transaction(outpoint_range.txid()).await;
-
-        let mut outcomes = Vec::with_capacity(outpoint_range.count());
-
-        for outpoint in outpoint_range {
-            let module_id = module_ids
-                .get(outpoint.out_idx as usize)
-                .with_context(|| format!("Outpoint index out of bounds {outpoint:?}"))?;
-
-            #[allow(deprecated)]
-            let outcome = self
-                .modules
-                .get_expect(*module_id)
-                .output_status(
-                    &mut dbtx.to_ref_with_prefix_module_id(*module_id).0.into_nc(),
-                    outpoint,
-                    *module_id,
-                )
-                .await
-                .map(|outcome| (&outcome).into());
-
-            outcomes.push(outcome);
-        }
-
-        Ok(outcomes)
     }
 
     pub async fn session_count(&self) -> u64 {
@@ -509,30 +447,6 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
                 fedimint.await_transaction(tx_hash).await;
 
                 Ok(tx_hash)
-            }
-        },
-        api_endpoint! {
-            AWAIT_OUTPUT_OUTCOME_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, _context, outpoint: OutPoint| -> SerdeModuleEncoding<DynOutputOutcome> {
-                let outcome = fedimint
-                    .await_output_outcome(outpoint)
-                    .await
-                    .map_err(|e| ApiError::bad_request(e.to_string()))?;
-
-                Ok(outcome)
-            }
-        },
-        api_endpoint! {
-            AWAIT_OUTPUTS_OUTCOMES_ENDPOINT,
-            ApiVersion::new(0, 8),
-            async |fedimint: &ConsensusApi, _context, outpoint_range: OutPointRange| -> Vec<Option<SerdeModuleEncoding<DynOutputOutcome>>> {
-                let outcomes = fedimint
-                    .await_outputs_outcomes(outpoint_range)
-                    .await
-                    .map_err(|e| ApiError::bad_request(e.to_string()))?;
-
-                Ok(outcomes)
             }
         },
         api_endpoint! {

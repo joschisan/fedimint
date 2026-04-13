@@ -24,7 +24,7 @@ use fedimint_empty_common::config::{
 };
 use fedimint_empty_common::{
     EmptyCommonInit, EmptyConsensusItem, EmptyInput, EmptyInputError, EmptyModuleTypes,
-    EmptyOutput, EmptyOutputError, EmptyOutputOutcome, MODULE_CONSENSUS_VERSION,
+    EmptyOutput, EmptyOutputError, MODULE_CONSENSUS_VERSION,
 };
 use fedimint_server_core::config::PeerHandleOps;
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
@@ -190,14 +190,6 @@ impl ServerModule for Empty {
         _out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, EmptyOutputError> {
         Err(EmptyOutputError::NotSupported)
-    }
-
-    async fn output_status(
-        &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
-        _out_point: OutPoint,
-    ) -> Option<EmptyOutputOutcome> {
-        None
     }
 
     async fn audit(

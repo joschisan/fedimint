@@ -29,7 +29,7 @@ use fedimint_unknown_common::config::{
 };
 use fedimint_unknown_common::{
     MODULE_CONSENSUS_VERSION, UnknownCommonInit, UnknownConsensusItem, UnknownInput,
-    UnknownInputError, UnknownModuleTypes, UnknownOutput, UnknownOutputError, UnknownOutputOutcome,
+    UnknownInputError, UnknownModuleTypes, UnknownOutput, UnknownOutputError,
 };
 pub mod db;
 
@@ -169,14 +169,6 @@ impl ServerModule for Unknown {
         _out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, UnknownOutputError> {
         unreachable!();
-    }
-
-    async fn output_status(
-        &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
-        _out_point: OutPoint,
-    ) -> Option<UnknownOutputOutcome> {
-        unreachable!()
     }
 
     async fn audit(

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use fedimint_core::core::{
     Decoder, DynInput, DynInputError, DynModuleConsensusItem, DynOutput, DynOutputError,
-    DynOutputOutcome, ModuleInstanceId, ModuleKind,
+    ModuleInstanceId, ModuleKind,
 };
 use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::module::audit::Audit;
@@ -105,33 +105,13 @@ pub trait ServerModule: Debug + Sized {
     ///
     /// The supplied `out_point` identifies the operation (e.g. a peg-out or
     /// note issuance) and can be used to retrieve its outcome later using
-    /// `output_status`.
+    /// module-specific API endpoints.
     async fn process_output<'a, 'b>(
         &'a self,
         dbtx: &mut DatabaseTransaction<'b>,
         output: &'a <Self::Common as ModuleCommon>::Output,
         out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, <Self::Common as ModuleCommon>::OutputError>;
-
-    /// **Deprecated**: Modules should not be using it. Instead, they should
-    /// implement their own custom endpoints with semantics, versioning,
-    /// serialization, etc. that suits them. Potentially multiple or none.
-    ///
-    /// Depending on the module this might contain data needed by the client to
-    /// access funds or give an estimate of when funds will be available.
-    ///
-    /// Returns `None` if the output is unknown, **NOT** if it is just not ready
-    /// yet.
-    ///
-    /// Since this has become deprecated you may return `None` even if the
-    /// output is known as long as the output outcome is not used inside the
-    /// module.
-    #[deprecated(note = "https://github.com/fedimint/fedimint/issues/6671")]
-    async fn output_status(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        out_point: OutPoint,
-    ) -> Option<<Self::Common as ModuleCommon>::OutputOutcome>;
 
     /// Queries the database and returns all assets and liabilities of the
     /// module.
@@ -206,15 +186,6 @@ pub trait IServerModule: Debug {
         output: &DynOutput,
         out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, DynOutputError>;
-
-    /// See [`ServerModule::output_status`]
-    #[deprecated(note = "https://github.com/fedimint/fedimint/issues/6671")]
-    async fn output_status(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        out_point: OutPoint,
-        module_instance_id: ModuleInstanceId,
-    ) -> Option<DynOutputOutcome>;
 
     /// Queries the database and returns all assets and liabilities of the
     /// module.
@@ -340,19 +311,6 @@ where
         )
         .await
         .map_err(|v| DynOutputError::from_typed(output.module_instance_id(), v))
-    }
-
-    /// See [`ServerModule::output_status`]
-    async fn output_status(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        out_point: OutPoint,
-        module_instance_id: ModuleInstanceId,
-    ) -> Option<DynOutputOutcome> {
-        #[allow(deprecated)]
-        <Self as ServerModule>::output_status(self, dbtx, out_point)
-            .await
-            .map(|v| DynOutputOutcome::from_typed(module_instance_id, v))
     }
 
     /// Queries the database and returns all assets and liabilities of the

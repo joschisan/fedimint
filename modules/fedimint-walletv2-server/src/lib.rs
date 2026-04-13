@@ -23,8 +23,7 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, Sequence, Transaction, TxIn, TxOut, Txid};
 use common::config::WalletConfigConsensus;
 use common::{
-    OutputInfo, WalletCommonInit, WalletConsensusItem, WalletInput, WalletModuleTypes,
-    WalletOutput, WalletOutputOutcome,
+    OutputInfo, WalletCommonInit, WalletConsensusItem, WalletInput, WalletModuleTypes, WalletOutput,
 };
 use db::{
     DbKeyPrefix, FederationWalletKey, FederationWalletPrefix, Output, OutputKey, OutputPrefix,
@@ -724,14 +723,6 @@ impl ServerModule for Wallet {
             amount,
             fee: self.cfg.consensus.output_fee,
         })
-    }
-
-    async fn output_status(
-        &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
-        _outpoint: OutPoint,
-    ) -> Option<WalletOutputOutcome> {
-        None
     }
 
     async fn audit(

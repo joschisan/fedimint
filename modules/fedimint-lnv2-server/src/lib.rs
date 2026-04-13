@@ -44,7 +44,7 @@ use fedimint_lnv2_common::endpoint_constants::{
 use fedimint_lnv2_common::{
     ContractId, LightningCommonInit, LightningConsensusItem, LightningInput, LightningInputError,
     LightningInputV0, LightningModuleTypes, LightningOutput, LightningOutputError,
-    LightningOutputOutcome, LightningOutputV0, MODULE_CONSENSUS_VERSION, OutgoingWitness,
+    LightningOutputV0, MODULE_CONSENSUS_VERSION, OutgoingWitness,
 };
 use fedimint_logging::LOG_MODULE_LNV2;
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
@@ -526,14 +526,6 @@ impl ServerModule for Lightning {
             amount,
             fee: self.cfg.consensus.output_fee,
         })
-    }
-
-    async fn output_status(
-        &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
-        _out_point: OutPoint,
-    ) -> Option<LightningOutputOutcome> {
-        None
     }
 
     async fn audit(
