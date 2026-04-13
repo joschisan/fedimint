@@ -1,6 +1,3 @@
-use std::process::Command;
-
-use anyhow::{Context, Result};
 use fedimint_core::Amount;
 use fedimint_core::util::SafeUrl;
 use fedimint_lnv2_client::{
@@ -10,33 +7,8 @@ use fedimint_lnv2_common::Bolt11InvoiceDescription;
 use serde_json::Value;
 use tracing::info;
 
-use crate::cli::RunGatewayCli;
-use crate::env::{GUARDIAN_BASE_PORT, NUM_GUARDIANS, PORTS_PER_GUARDIAN, TestEnv, find_binary};
-
-fn fedimintd_cli(peer: usize) -> Command {
-    let cli_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN) + 4;
-    let mut cmd = Command::new(find_binary("fedimintd-cli"));
-    cmd.arg("-a").arg(format!("http://127.0.0.1:{cli_port}"));
-    cmd
-}
-
-fn add_gateway(peer: usize, gateway: &str) -> Result<bool> {
-    let output = fedimintd_cli(peer)
-        .args(["module", "lnv2", "gateway", "add", gateway])
-        .output()
-        .context("Failed to run fedimintd-cli")?;
-    let stdout = String::from_utf8(output.stdout)?;
-    serde_json::from_str(stdout.trim()).context("Failed to parse response")
-}
-
-fn remove_gateway(peer: usize, gateway: &str) -> Result<bool> {
-    let output = fedimintd_cli(peer)
-        .args(["module", "lnv2", "gateway", "remove", gateway])
-        .output()
-        .context("Failed to run fedimintd-cli")?;
-    let stdout = String::from_utf8(output.stdout)?;
-    serde_json::from_str(stdout.trim()).context("Failed to parse response")
-}
+use crate::cli;
+use crate::env::{NUM_GUARDIANS, TestEnv};
 
 pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
     test_gateway_registration(env).await?;
@@ -57,7 +29,7 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
 
     for gateway in &gateways {
         for peer in 0..NUM_GUARDIANS {
-            assert!(add_gateway(peer, gateway)?);
+            assert!(cli::fedimintd_lnv2_gateway_add(peer, gateway)?);
         }
     }
 
@@ -73,7 +45,7 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
 
     for gateway in &gateways {
         for peer in 0..NUM_GUARDIANS {
-            assert!(remove_gateway(peer, gateway)?);
+            assert!(cli::fedimintd_lnv2_gateway_remove(peer, gateway)?);
         }
     }
 
@@ -174,10 +146,7 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
     info!("Testing payment from client to gateway...");
 
     {
-        let invoice_str = crate::cli::gateway_cmd(&env.gw2_addr)
-            .args(["ldk", "invoice", "create", "1000000"])
-            .run_gateway_cli::<fedimint_gateway_cli_core::LdkInvoiceCreateResponse>()?
-            .invoice;
+        let invoice_str = cli::gatewayd_ldk_invoice_create(&env.gw2_addr, 1_000_000)?.invoice;
 
         let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
 
@@ -200,9 +169,7 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
             )
             .await?;
 
-        crate::cli::gateway_cmd(&env.gw2_addr)
-            .args(["ldk", "invoice", "pay", &invoice.to_string()])
-            .run_gateway_cli::<serde_json::Value>()?;
+        cli::gatewayd_ldk_invoice_pay(&env.gw2_addr, &invoice.to_string())?;
 
         let state = lnv2.await_final_receive_operation_state(receive_op).await?;
         assert_eq!(state, FinalReceiveOperationState::Claimed);

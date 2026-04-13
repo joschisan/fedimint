@@ -12,10 +12,6 @@ use fedimint_client::secret::RootSecretStrategy;
 use fedimint_client::{Client, ClientHandleArc, RootSecret};
 use fedimint_core::Amount;
 use fedimint_core::invite_code::InviteCode;
-use fedimint_gateway_cli_core::{
-    FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkOnchainReceiveResponse,
-    WalletReceiveResponse,
-};
 use fedimint_walletv2_client::WalletClientModule;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
@@ -23,7 +19,7 @@ use tokio::process::Command;
 use tokio::task::block_in_place;
 use tracing::info;
 
-use crate::cli::{RunGatewayCli, gateway_cmd};
+use crate::cli;
 
 pub fn find_binary(name: &str) -> PathBuf {
     let target_dir =
@@ -109,32 +105,18 @@ impl TestEnv {
 
         info!("Waiting for gateways...");
         retry("gw1 ready", || async {
-            gateway_cmd(&gw1_addr)
-                .arg("info")
-                .run_gateway_cli::<InfoResponse>()
-                .map(|_| ())
+            cli::gatewayd_info(&gw1_addr).map(|_| ())
         })
         .await?;
         retry("gw2 ready", || async {
-            gateway_cmd(&gw2_addr)
-                .arg("info")
-                .run_gateway_cli::<InfoResponse>()
-                .map(|_| ())
+            cli::gatewayd_info(&gw2_addr).map(|_| ())
         })
         .await?;
         info!("Gateways ready");
 
         info!("Connecting gateways to federation...");
-        gateway_cmd(&gw1_addr)
-            .arg("federation")
-            .arg("join")
-            .arg(invite_code_str.trim())
-            .run_gateway_cli::<serde_json::Value>()?;
-        gateway_cmd(&gw2_addr)
-            .arg("federation")
-            .arg("join")
-            .arg(invite_code_str.trim())
-            .run_gateway_cli::<serde_json::Value>()?;
+        cli::gatewayd_federation_join(&gw1_addr, invite_code_str.trim())?;
+        cli::gatewayd_federation_join(&gw2_addr, invite_code_str.trim())?;
         info!("Gateways connected");
 
         info!("Funding gateways and opening channel...");
@@ -224,9 +206,7 @@ impl TestEnv {
     ) -> anyhow::Result<()> {
         let fed_id = self.invite_code.federation_id().to_string();
 
-        let addr = gateway_cmd(gw_addr)
-            .args(["module", &fed_id, "walletv2", "receive"])
-            .run_gateway_cli::<WalletReceiveResponse>()?
+        let addr = cli::gatewayd_wallet_receive(gw_addr, &fed_id)?
             .address
             .assume_checked();
 
@@ -237,10 +217,7 @@ impl TestEnv {
             let gw_addr = gw_addr.to_string();
             let fed_id = fed_id.clone();
             async move {
-                let balance = gateway_cmd(&gw_addr)
-                    .args(["federation", "balance", &fed_id])
-                    .run_gateway_cli::<FederationBalanceResponse>()?
-                    .balance_msat;
+                let balance = cli::gatewayd_federation_balance(&gw_addr, &fed_id)?.balance_msat;
 
                 ensure!(balance.msats > 0, "gateway balance is zero");
                 Ok(())
@@ -467,14 +444,10 @@ async fn open_channel_between_gateways(
     gw1_addr: &str,
     gw2_addr: &str,
 ) -> anyhow::Result<()> {
-    let gw2_info = gateway_cmd(gw2_addr)
-        .arg("info")
-        .run_gateway_cli::<InfoResponse>()?;
+    let gw2_info = cli::gatewayd_info(gw2_addr)?;
 
     for gw_addr in [gw1_addr, gw2_addr] {
-        let addr = gateway_cmd(gw_addr)
-            .args(["ldk", "onchain", "receive"])
-            .run_gateway_cli::<LdkOnchainReceiveResponse>()?
+        let addr = cli::gatewayd_ldk_onchain_receive(gw_addr)?
             .address
             .assume_checked();
 
@@ -487,9 +460,7 @@ async fn open_channel_between_gateways(
         retry("gateway sync", || {
             let gw_addr = gw_addr.to_string();
             async move {
-                let info = gateway_cmd(&gw_addr)
-                    .arg("info")
-                    .run_gateway_cli::<InfoResponse>()?;
+                let info = cli::gatewayd_info(&gw_addr)?;
                 ensure!(
                     info.block_height >= target_height,
                     "not synced: {} < {target_height}",
@@ -502,30 +473,15 @@ async fn open_channel_between_gateways(
     }
 
     let gw2_pubkey = gw2_info.public_key.to_string();
-
     let gw2_ln_addr = format!("127.0.0.1:{GW2_LN_PORT}");
 
-    gateway_cmd(gw1_addr)
-        .args([
-            "ldk",
-            "channel",
-            "open",
-            &gw2_pubkey,
-            &gw2_ln_addr,
-            "10000000",
-            "--push-amount-sats",
-            "5000000",
-        ])
-        .run_gateway_cli::<serde_json::Value>()?;
+    cli::gatewayd_ldk_channel_open(gw1_addr, &gw2_pubkey, &gw2_ln_addr, 10_000_000, 5_000_000)?;
 
     // Wait for the funding tx to be negotiated
     retry("funding tx", || {
         let gw1_addr = gw1_addr.to_string();
         async move {
-            let channels = gateway_cmd(&gw1_addr)
-                .args(["ldk", "channel", "list"])
-                .run_gateway_cli::<LdkChannelListResponse>()?
-                .channels;
+            let channels = cli::gatewayd_ldk_channel_list(&gw1_addr)?.channels;
             ensure!(!channels.is_empty(), "no channels yet");
             Ok(())
         }
@@ -540,10 +496,7 @@ async fn open_channel_between_gateways(
         retry("channel active", || {
             let gw_addr = gw_addr.to_string();
             async move {
-                let channels = gateway_cmd(&gw_addr)
-                    .args(["ldk", "channel", "list"])
-                    .run_gateway_cli::<LdkChannelListResponse>()?
-                    .channels;
+                let channels = cli::gatewayd_ldk_channel_list(&gw_addr)?.channels;
                 ensure!(
                     channels.iter().any(|c| c.is_usable),
                     "no active channels yet"
