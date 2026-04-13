@@ -87,16 +87,6 @@ pub trait ServerModule: Debug + Sized {
         peer_id: PeerId,
     ) -> anyhow::Result<()>;
 
-    // Use this function to parallelise stateless cryptographic verification of
-    // inputs across a transaction. All inputs of a transaction are verified
-    // before any input is processed.
-    fn verify_input(
-        &self,
-        _input: &<Self::Common as ModuleCommon>::Input,
-    ) -> Result<(), <Self::Common as ModuleCommon>::InputError> {
-        Ok(())
-    }
-
     /// Try to spend a transaction input. On success all necessary updates will
     /// be part of the database transaction. On failure (e.g. double spend)
     /// the database transaction is rolled back and the operation will take
@@ -142,39 +132,6 @@ pub trait ServerModule: Debug + Sized {
         dbtx: &mut DatabaseTransaction<'_>,
         out_point: OutPoint,
     ) -> Option<<Self::Common as ModuleCommon>::OutputOutcome>;
-
-    /// Verify submission-only checks for an input
-    ///
-    /// Most modules should not need to know or implement it, so the default
-    /// implementation just returns OK.
-    ///
-    /// In special circumstances it is useful to enforce requirements on the
-    /// included transaction outside of the consensus, in a similar way
-    /// Bitcoin enforces mempool policies.
-    ///
-    /// This functionality might be removed in the future versions, as more
-    /// checks become part of the consensus, so it is advised not to use it.
-    #[doc(hidden)]
-    async fn verify_input_submission<'a, 'b, 'c>(
-        &'a self,
-        _dbtx: &mut DatabaseTransaction<'c>,
-        _input: &'b <Self::Common as ModuleCommon>::Input,
-    ) -> Result<(), <Self::Common as ModuleCommon>::InputError> {
-        Ok(())
-    }
-
-    /// Verify submission-only checks for an output
-    ///
-    /// See [`Self::verify_input_submission`] for more information.
-    #[doc(hidden)]
-    async fn verify_output_submission<'a, 'b>(
-        &'a self,
-        _dbtx: &mut DatabaseTransaction<'b>,
-        _output: &'a <Self::Common as ModuleCommon>::Output,
-        _out_point: OutPoint,
-    ) -> Result<(), <Self::Common as ModuleCommon>::OutputError> {
-        Ok(())
-    }
 
     /// Queries the database and returns all assets and liabilities of the
     /// module.
@@ -224,11 +181,6 @@ pub trait IServerModule: Debug {
         peer_id: PeerId,
     ) -> anyhow::Result<()>;
 
-    // Use this function to parallelise stateless cryptographic verification of
-    // inputs across a transaction. All inputs of a transaction are verified
-    // before any input is processed.
-    fn verify_input(&self, input: &DynInput) -> Result<(), DynInputError>;
-
     /// Try to spend a transaction input. On success all necessary updates will
     /// be part of the database transaction. On failure (e.g. double spend)
     /// the database transaction is rolled back and the operation will take
@@ -254,23 +206,6 @@ pub trait IServerModule: Debug {
         output: &DynOutput,
         out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, DynOutputError>;
-
-    /// See [`ServerModule::verify_input_submission`]
-    #[doc(hidden)]
-    async fn verify_input_submission<'a, 'b, 'c>(
-        &'a self,
-        dbtx: &mut DatabaseTransaction<'c>,
-        input: &'b DynInput,
-    ) -> Result<(), DynInputError>;
-
-    /// See [`ServerModule::verify_output_submission`]
-    #[doc(hidden)]
-    async fn verify_output_submission<'a>(
-        &self,
-        _dbtx: &mut DatabaseTransaction<'a>,
-        _output: &DynOutput,
-        _out_point: OutPoint,
-    ) -> Result<(), DynOutputError>;
 
     /// See [`ServerModule::output_status`]
     #[deprecated(note = "https://github.com/fedimint/fedimint/issues/6671")]
@@ -357,20 +292,6 @@ where
         .await
     }
 
-    // Use this function to parallelise stateless cryptographic verification of
-    // inputs across a transaction. All inputs of a transaction are verified
-    // before any input is processed.
-    fn verify_input(&self, input: &DynInput) -> Result<(), DynInputError> {
-        <Self as ServerModule>::verify_input(
-            self,
-            input
-                .as_any()
-                .downcast_ref::<<<Self as ServerModule>::Common as ModuleCommon>::Input>()
-                .expect("incorrect input type passed to module plugin"),
-        )
-        .map_err(|v| DynInputError::from_typed(input.module_instance_id(), v))
-    }
-
     /// Try to spend a transaction input. On success all necessary updates will
     /// be part of the database transaction. On failure (e.g. double spend)
     /// the database transaction is rolled back and the operation will take
@@ -409,42 +330,6 @@ where
         out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, DynOutputError> {
         <Self as ServerModule>::process_output(
-            self,
-            dbtx,
-            output
-                .as_any()
-                .downcast_ref::<<<Self as ServerModule>::Common as ModuleCommon>::Output>()
-                .expect("incorrect output type passed to module plugin"),
-            out_point,
-        )
-        .await
-        .map_err(|v| DynOutputError::from_typed(output.module_instance_id(), v))
-    }
-
-    async fn verify_input_submission<'a, 'b, 'c>(
-        &'a self,
-        dbtx: &mut DatabaseTransaction<'c>,
-        input: &'b DynInput,
-    ) -> Result<(), DynInputError> {
-        <Self as ServerModule>::verify_input_submission(
-            self,
-            dbtx,
-            input
-                .as_any()
-                .downcast_ref::<<<Self as ServerModule>::Common as ModuleCommon>::Input>()
-                .expect("incorrect input type passed to module plugin"),
-        )
-        .await
-        .map_err(|v| DynInputError::from_typed(input.module_instance_id(), v))
-    }
-
-    async fn verify_output_submission<'a>(
-        &self,
-        dbtx: &mut DatabaseTransaction<'a>,
-        output: &DynOutput,
-        out_point: OutPoint,
-    ) -> Result<(), DynOutputError> {
-        <Self as ServerModule>::verify_output_submission(
             self,
             dbtx,
             output

@@ -39,7 +39,7 @@ use crate::consensus::db::{
     SignedSessionOutcomeKey, SignedSessionOutcomePrefix,
 };
 use crate::consensus::debug::DebugConsensusItem;
-use crate::consensus::transaction::{TxProcessingMode, process_transaction_with_dbtx};
+use crate::consensus::transaction::process_transaction_with_dbtx;
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
@@ -717,14 +717,9 @@ impl ConsensusEngine {
                     .map(DynOutput::module_instance_id)
                     .collect::<Vec<_>>();
 
-                process_transaction_with_dbtx(
-                    self.modules.clone(),
-                    dbtx,
-                    &transaction,
-                    TxProcessingMode::Consensus,
-                )
-                .await
-                .map_err(|error| anyhow!(error.to_string()))?;
+                process_transaction_with_dbtx(self.modules.clone(), dbtx, &transaction)
+                    .await
+                    .map_err(|error| anyhow!(error.to_string()))?;
 
                 debug!(target: LOG_CONSENSUS, %txid,  "Transaction accepted");
                 dbtx.insert_entry(&AcceptedTransactionKey(txid), &modules_ids)

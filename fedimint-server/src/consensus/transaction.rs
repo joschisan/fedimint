@@ -3,55 +3,18 @@ use fedimint_core::module::TransactionItemAmounts;
 use fedimint_core::transaction::{TRANSACTION_OVERFLOW_ERROR, Transaction, TransactionError};
 use fedimint_core::{Amount, InPoint, OutPoint};
 use fedimint_server_core::ServerModuleRegistry;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum TxProcessingMode {
-    Submission,
-    Consensus,
-}
 
 pub async fn process_transaction_with_dbtx(
     modules: ServerModuleRegistry,
     dbtx: &mut DatabaseTransaction<'_>,
     transaction: &Transaction,
-    mode: TxProcessingMode,
 ) -> Result<(), TransactionError> {
-    // We can not return the error here as errors are not returned in a specified
-    // order and the client still expects consensus on the error. Since the
-    // error is not extensible at the moment we need to incorrectly return the
-    // InvalidWitnessLength variant.
-    transaction
-        .inputs
-        .clone()
-        .into_par_iter()
-        .try_for_each(|input| {
-            modules
-                .get_expect(input.module_instance_id())
-                .verify_input(&input)
-        })
-        .map_err(|_| TransactionError::InvalidWitnessLength)?;
-
     let mut funding_verifier = FundingVerifier::default();
     let mut public_keys = Vec::new();
 
     let txid = transaction.tx_hash();
 
     for (input, in_idx) in transaction.inputs.iter().zip(0u64..) {
-        // somewhat unfortunately, we need to do the extra checks berofe `process_x`
-        // does the changes in the dbtx
-        if mode == TxProcessingMode::Submission {
-            modules
-                .get_expect(input.module_instance_id())
-                .verify_input_submission(
-                    &mut dbtx
-                        .to_ref_with_prefix_module_id(input.module_instance_id())
-                        .0,
-                    input,
-                )
-                .await
-                .map_err(TransactionError::Input)?;
-        }
         let meta = modules
             .get_expect(input.module_instance_id())
             .process_input(
@@ -71,22 +34,6 @@ pub async fn process_transaction_with_dbtx(
     transaction.validate_signatures(&public_keys)?;
 
     for (output, out_idx) in transaction.outputs.iter().zip(0u64..) {
-        // somewhat unfortunately, we need to do the extra checks berofe `process_x`
-        // does the changes in the dbtx
-        if mode == TxProcessingMode::Submission {
-            modules
-                .get_expect(output.module_instance_id())
-                .verify_output_submission(
-                    &mut dbtx
-                        .to_ref_with_prefix_module_id(output.module_instance_id())
-                        .0,
-                    output,
-                    OutPoint { txid, out_idx },
-                )
-                .await
-                .map_err(TransactionError::Output)?;
-        }
-
         let amount = modules
             .get_expect(output.module_instance_id())
             .process_output(
@@ -123,6 +70,7 @@ impl FundingVerifier {
             .inputs
             .checked_add(input.amount)
             .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
+
         self.fees = self
             .fees
             .checked_add(input.fee)
@@ -139,6 +87,7 @@ impl FundingVerifier {
             .outputs
             .checked_add(output_amounts.amount)
             .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
+
         self.fees = self
             .fees
             .checked_add(output_amounts.fee)
@@ -153,17 +102,55 @@ impl FundingVerifier {
             .checked_add(self.fees)
             .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
 
-        if self.inputs < outputs_and_fees {
-            return Err(TransactionError::UnbalancedTransaction {
-                inputs: self.inputs,
-                outputs: self.outputs,
-                fee: self.fees,
-            });
+        if self.inputs >= outputs_and_fees {
+            return Ok(());
         }
 
-        Ok(())
+        Err(TransactionError::UnbalancedTransaction {
+            inputs: self.inputs,
+            outputs: self.outputs,
+            fee: self.fees,
+        })
     }
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use fedimint_core::Amount;
+    use fedimint_core::module::TransactionItemAmounts;
+
+    #[test]
+    fn sanity_test_funding_verifier() {
+        let mut v = super::FundingVerifier::default();
+
+        v.add_input(TransactionItemAmounts {
+            amount: Amount::from_msats(3),
+            fee: Amount::from_msats(1),
+        })
+        .unwrap()
+        .add_output(TransactionItemAmounts {
+            amount: Amount::from_msats(1),
+            fee: Amount::from_msats(1),
+        })
+        .unwrap();
+
+        assert!(v.clone().verify_funding().is_ok());
+
+        v.add_output(TransactionItemAmounts {
+            amount: Amount::from_msats(1),
+            fee: Amount::ZERO,
+        })
+        .unwrap();
+
+        assert!(v.clone().verify_funding().is_err());
+
+        v.add_input(TransactionItemAmounts {
+            amount: Amount::from_msats(10),
+            fee: Amount::ZERO,
+        })
+        .unwrap();
+
+        // Overfunding is always allowed
+        assert!(v.clone().verify_funding().is_ok());
+    }
+}
