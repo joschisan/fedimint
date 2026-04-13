@@ -276,7 +276,6 @@ async fn start_fedimintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
     let p2p_port = port_base;
     let api_port = port_base + 1;
     let ui_port = port_base + 2;
-    let metrics_port = port_base + 3;
     let cli_port = port_base + 4;
 
     let data_dir = base.join(format!("fedimintd-{peer_idx}"));
@@ -296,7 +295,6 @@ async fn start_fedimintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
         .env("FM_BIND_P2P", format!("127.0.0.1:{p2p_port}"))
         .env("FM_BIND_API", format!("127.0.0.1:{api_port}"))
         .env("FM_BIND_UI", format!("127.0.0.1:{ui_port}"))
-        .env("FM_BIND_METRICS", format!("127.0.0.1:{metrics_port}"))
         .env("FM_BIND_CLI", format!("127.0.0.1:{cli_port}"))
         .env("FM_UI_PASSWORD", PASSWORD)
         .env("FM_P2P_URL", format!("fedimint://127.0.0.1:{p2p_port}"))
@@ -306,7 +304,7 @@ async fn start_fedimintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
         .spawn()
         .context(format!("Failed to start fedimintd-{peer_idx}"))?;
 
-    info!("Started fedimintd-{peer_idx} on ports {p2p_port}-{metrics_port}");
+    info!("Started fedimintd-{peer_idx} on ports {p2p_port}-{cli_port}");
     Ok(())
 }
 

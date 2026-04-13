@@ -20,7 +20,6 @@ axum-extra = { workspace = true, features = ["cookie", "form"] }
 chrono = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-lnv2-server = { workspace = true }
-fedimint-metrics = { workspace = true }
 fedimint-mintv2-server = { workspace = true }
 fedimint-server-core = { workspace = true }
 fedimint-ui-common = { workspace = true }

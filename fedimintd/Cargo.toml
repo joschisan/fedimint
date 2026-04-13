@@ -30,7 +30,6 @@ fedimint-lnv2-common = { workspace = true }
 fedimint-lnv2-server = { workspace = true }
 fedimint-server-cli-core = { workspace = true }
 fedimint-logging = { workspace = true, features = ["telemetry"] }
-fedimint-metrics = { workspace = true }
 fedimint-mintv2-server = { workspace = true }
 fedimint-rocksdb = { workspace = true }
 fedimint-server = { workspace = true }

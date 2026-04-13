@@ -24,7 +24,6 @@ members = [
     "fedimint-integration-tests",
     "fedimint-lnurl",
     "fedimint-logging",
-    "fedimint-metrics",
     "fedimint-recurringdv2",
     "fedimint-rocksdb",
     "fedimint-server",
@@ -152,7 +151,6 @@ fedimint-lnv2-client = { path = "./modules/fedimint-lnv2-client", version = "=0.
 fedimint-lnv2-common = { path = "./modules/fedimint-lnv2-common", version = "=0.11.0-alpha" }
 fedimint-lnv2-server = { path = "./modules/fedimint-lnv2-server", version = "=0.11.0-alpha" }
 fedimint-logging = { path = "./fedimint-logging", version = "=0.11.0-alpha" }
-fedimint-metrics = { path = "./fedimint-metrics", version = "=0.11.0-alpha" }
 fedimint-mintv2-client = { path = "./modules/fedimint-mintv2-client", version = "=0.11.0-alpha" }
 fedimint-mintv2-common = { path = "./modules/fedimint-mintv2-common", version = "=0.11.0-alpha" }
 fedimint-mintv2-server = { path = "./modules/fedimint-mintv2-server", version = "=0.11.0-alpha" }

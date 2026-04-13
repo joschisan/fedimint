@@ -67,8 +67,8 @@ pub async fn run(
     ui_bind: SocketAddr,
     dashboard_ui_router: DashboardUiRouter,
     dashboard_cli_router: crate::DashboardCliRouter,
-    iroh_api_max_connections: usize,
-    iroh_api_max_requests_per_connection: usize,
+    max_connections: usize,
+    max_requests_per_connection: usize,
     cli_bind: SocketAddr,
 ) -> anyhow::Result<()> {
     cfg.validate_config(&cfg.local.identity, &module_init_registry)?;
@@ -201,8 +201,8 @@ pub async fn run(
         cfg.private.iroh_api_sk.clone(),
         consensus_api.clone(),
         task_group,
-        iroh_api_max_connections,
-        iroh_api_max_requests_per_connection,
+        max_connections,
+        max_requests_per_connection,
     ))
     .await?;
 
@@ -450,10 +450,10 @@ async fn handle_incoming(
     task_group: TaskGroup,
     incoming: Incoming,
     _connection_permit: tokio::sync::OwnedSemaphorePermit,
-    iroh_api_max_requests_per_connection: usize,
+    max_requests_per_connection: usize,
 ) -> anyhow::Result<()> {
     let connection = incoming.accept()?.await?;
-    let parallel_requests_limit = Arc::new(Semaphore::new(iroh_api_max_requests_per_connection));
+    let parallel_requests_limit = Arc::new(Semaphore::new(max_requests_per_connection));
 
     loop {
         let (send_stream, recv_stream) = connection.accept_bi().await?;
@@ -461,7 +461,7 @@ async fn handle_incoming(
         if parallel_requests_limit.available_permits() == 0 {
             warn!(
                 target: LOG_NET_API,
-                limit = iroh_api_max_requests_per_connection,
+                limit = max_requests_per_connection,
                 "Iroh API request limit reached for connection, blocking new requests"
             );
         }

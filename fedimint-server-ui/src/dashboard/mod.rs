@@ -9,12 +9,11 @@ pub mod modules;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Form, State};
-use axum::http::{StatusCode, header};
+use axum::http::header;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum_extra::extract::cookie::CookieJar;
 use consensus_explorer::consensus_explorer_view;
-use fedimint_metrics::{Encoder, REGISTRY, TextEncoder};
 use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi};
 use fedimint_ui_common::assets::WithStaticRoutesExt;
 use fedimint_ui_common::auth::UserAuth;
@@ -27,7 +26,7 @@ use maud::html;
 use {fedimint_lnv2_server, fedimint_mintv2_server, fedimint_walletv2_server};
 
 use crate::dashboard::modules::{lnv2, mintv2, walletv2};
-use crate::{DOWNLOAD_BACKUP_ROUTE, EXPLORER_IDX_ROUTE, EXPLORER_ROUTE, METRICS_ROUTE};
+use crate::{DOWNLOAD_BACKUP_ROUTE, EXPLORER_IDX_ROUTE, EXPLORER_ROUTE};
 
 // Dashboard login form handler
 async fn login_form_handler() -> impl IntoResponse {
@@ -68,26 +67,6 @@ async fn download_backup(
         )
         .body(Body::from(backup.tar_archive_bytes))
         .expect("Failed to build response")
-}
-
-// Prometheus metrics handler
-async fn metrics_handler(_user_auth: UserAuth) -> impl IntoResponse {
-    let metric_families = REGISTRY.gather();
-    let result = || -> Result<String, Box<dyn std::error::Error>> {
-        let mut buffer = Vec::new();
-        let encoder = TextEncoder::new();
-        encoder.encode(&metric_families, &mut buffer)?;
-        Ok(String::from_utf8(buffer)?)
-    };
-    match result() {
-        Ok(metrics) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            metrics,
-        )
-            .into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")).into_response(),
-    }
 }
 
 // Main dashboard view
@@ -184,7 +163,6 @@ pub fn router(api: DynDashboardApi) -> Router {
         .route(EXPLORER_ROUTE, get(consensus_explorer_view))
         .route(EXPLORER_IDX_ROUTE, get(consensus_explorer_view))
         .route(DOWNLOAD_BACKUP_ROUTE, get(download_backup))
-        .route(METRICS_ROUTE, get(metrics_handler))
         .route(
             CONNECTIVITY_CHECK_ROUTE,
             get(connectivity_check_handler::<DynDashboardApi>),

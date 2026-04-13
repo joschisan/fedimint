@@ -24,7 +24,7 @@ use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::timing;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl, handle_version_hash_command};
-use fedimint_logging::{LOG_CORE, LOG_SERVER, TracingSetup};
+use fedimint_logging::{LOG_CORE, TracingSetup};
 use fedimint_rocksdb::RocksDb;
 use fedimint_server::config::ConfigGenSettings;
 use fedimint_server::config::io::DB_FILE;
@@ -36,11 +36,10 @@ use fedimint_server_core::ServerModuleInitRegistryExt;
 use fedimint_server_core::bitcoin_rpc::IServerBitcoinRpc;
 use fedimint_unknown_server::UnknownInit;
 use fedimintd_envs::{
-    FM_BIND_METRICS_ENV, FM_BIND_P2P_ENV, FM_BIND_TOKIO_CONSOLE_ENV, FM_BIND_UI_ENV,
-    FM_BITCOIN_NETWORK_ENV, FM_BITCOIND_PASSWORD_ENV, FM_BITCOIND_URL_ENV,
-    FM_BITCOIND_URL_PASSWORD_FILE_ENV, FM_BITCOIND_USERNAME_ENV, FM_DATA_DIR_ENV,
-    FM_ESPLORA_URL_ENV, FM_IROH_API_MAX_CONNECTIONS_ENV,
-    FM_IROH_API_MAX_REQUESTS_PER_CONNECTION_ENV, FM_UI_PASSWORD_ENV,
+    FM_BIND_P2P_ENV, FM_BIND_TOKIO_CONSOLE_ENV, FM_BIND_UI_ENV, FM_BITCOIN_NETWORK_ENV,
+    FM_BITCOIND_PASSWORD_ENV, FM_BITCOIND_URL_ENV, FM_BITCOIND_URL_PASSWORD_FILE_ENV,
+    FM_BITCOIND_USERNAME_ENV, FM_DATA_DIR_ENV, FM_ESPLORA_URL_ENV, FM_MAX_CONNECTIONS_ENV,
+    FM_MAX_REQUESTS_PER_CONNECTION_ENV, FM_UI_PASSWORD_ENV,
 };
 use futures::FutureExt as _;
 use tracing::{debug, error, info};
@@ -78,6 +77,16 @@ struct ServerOpts {
     #[arg(long, env = FM_BITCOIN_NETWORK_ENV, default_value = "regtest")]
     bitcoin_network: Network,
 
+    /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
+    #[arg(long, env = FM_ESPLORA_URL_ENV)]
+    esplora_url: Option<SafeUrl>,
+
+    /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
+    /// This should not include authentication parameters, they should be
+    /// included in `FM_BITCOIND_USERNAME` and `FM_BITCOIND_PASSWORD`
+    #[arg(long, env = FM_BITCOIND_URL_ENV)]
+    bitcoind_url: Option<SafeUrl>,
+
     /// The username to use when connecting to bitcoind
     #[arg(long, env = FM_BITCOIND_USERNAME_ENV)]
     bitcoind_username: Option<String>,
@@ -85,12 +94,6 @@ struct ServerOpts {
     /// The password to use when connecting to bitcoind
     #[arg(long, env = FM_BITCOIND_PASSWORD_ENV)]
     bitcoind_password: Option<String>,
-
-    /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
-    /// This should not include authentication parameters, they should be
-    /// included in `FM_BITCOIND_USERNAME` and `FM_BITCOIND_PASSWORD`
-    #[arg(long, env = FM_BITCOIND_URL_ENV)]
-    bitcoind_url: Option<SafeUrl>,
 
     /// If set, the password part of `--bitcoind-url` will be set/replaced with
     /// the content of this file.
@@ -101,10 +104,6 @@ struct ServerOpts {
     /// Note this is not meant to handle bitcoind's cookie file.
     #[arg(long, env = FM_BITCOIND_URL_PASSWORD_FILE_ENV)]
     bitcoind_url_password_file: Option<PathBuf>,
-
-    /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
-    #[arg(long, env = FM_ESPLORA_URL_ENV)]
-    esplora_url: Option<SafeUrl>,
 
     /// Address we bind to for p2p consensus communication
     ///
@@ -118,11 +117,11 @@ struct ServerOpts {
     /// Built-in web UI is exposed as an HTTP port, and typically should
     /// have TLS terminated by Nginx/Traefik/etc. and forwarded to the locally
     /// bind port.
-    #[arg(long, env = FM_BIND_UI_ENV, default_value = "127.0.0.1:8175")]
+    #[arg(long, env = FM_BIND_UI_ENV, default_value = "127.0.0.1:8174")]
     bind_ui: SocketAddr,
 
     /// Address we bind to for the CLI admin API (localhost-only, no auth)
-    #[arg(long, env = "FM_BIND_CLI", default_value = "127.0.0.1:8177")]
+    #[arg(long, env = "FM_BIND_CLI", default_value = "127.0.0.1:8175")]
     bind_cli: SocketAddr,
 
     /// Password for the web UI (setup and dashboard)
@@ -141,21 +140,13 @@ struct ServerOpts {
     #[arg(long, env = FM_BIND_TOKIO_CONSOLE_ENV)]
     bind_tokio_console: Option<SocketAddr>,
 
-    /// Enable jaeger for tokio console logging
-    #[arg(long, default_value = "false")]
-    with_jaeger: bool,
-
-    /// Enable prometheus metrics
-    #[arg(long, env = FM_BIND_METRICS_ENV, default_value = "127.0.0.1:8176")]
-    bind_metrics: Option<SocketAddr>,
-
     /// Maximum number of concurrent Iroh API connections
-    #[arg(long = "iroh-api-max-connections", env = FM_IROH_API_MAX_CONNECTIONS_ENV, default_value = "1000")]
-    iroh_api_max_connections: usize,
+    #[arg(long, env = FM_MAX_CONNECTIONS_ENV, default_value = "1000")]
+    max_connections: usize,
 
     /// Maximum number of parallel requests per Iroh API connection
-    #[arg(long = "iroh-api-max-requests-per-connection", env = FM_IROH_API_MAX_REQUESTS_PER_CONNECTION_ENV, default_value = "50")]
-    iroh_api_max_requests_per_connection: usize,
+    #[arg(long, env = FM_MAX_REQUESTS_PER_CONNECTION_ENV, default_value = "50")]
+    max_requests_per_connection: usize,
 }
 
 impl ServerOpts {
@@ -353,9 +344,7 @@ pub async fn run(
 
     let mut tracing_builder = TracingSetup::default();
 
-    tracing_builder
-        .tokio_console_bind(server_opts.bind_tokio_console)
-        .with_jaeger(server_opts.with_jaeger);
+    tracing_builder.tokio_console_bind(server_opts.bind_tokio_console);
 
     tracing_builder.init().unwrap();
 
@@ -369,15 +358,6 @@ pub async fn run(
     let timing_total_runtime = timing::TimeReporter::new("total-runtime").info();
 
     let root_task_group = TaskGroup::new();
-
-    if let Some(bind_metrics) = server_opts.bind_metrics.as_ref() {
-        info!(
-            target: LOG_SERVER,
-            url = %format!("http://{}/metrics", bind_metrics),
-            "Initializing metrics server",
-        );
-        fedimint_metrics::spawn_api_server(*bind_metrics, root_task_group.clone()).await?;
-    }
 
     let settings = ConfigGenSettings {
         p2p_bind: server_opts.bind_p2p,
@@ -456,8 +436,8 @@ pub async fn run(
             Box::new(fedimint_server_ui::setup::router),
             Box::new(fedimint_server_ui::dashboard::router),
             Box::new(dashboard_cli_router),
-            server_opts.iroh_api_max_connections,
-            server_opts.iroh_api_max_requests_per_connection,
+            server_opts.max_connections,
+            server_opts.max_requests_per_connection,
             server_opts.bind_cli,
         )
         .await
