@@ -2381,11 +2381,21 @@ dependencies = [
  "clap",
  "fedimint-build",
  "fedimint-core",
- "fedimint-gateway-common",
+ "fedimint-gateway-cli-core",
  "lightning-invoice",
  "reqwest 0.12.22",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "fedimint-gateway-cli-core"
+version = "0.11.0-alpha"
+dependencies = [
+ "bitcoin",
+ "fedimint-core",
+ "lightning-invoice",
+ "serde",
 ]
 
 [[package]]
@@ -2431,6 +2441,7 @@ dependencies = [
  "fedimint-core",
  "fedimint-derive-secret",
  "fedimint-eventlog",
+ "fedimint-gateway-cli-core",
  "fedimint-gateway-common",
  "fedimint-gwv2-client",
  "fedimint-ldk-node",

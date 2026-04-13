@@ -1,0 +1,18 @@
+[package]
+authors = { workspace = true }
+description = "Shared types for fedimint-gateway admin CLI"
+edition = { workspace = true }
+license = { workspace = true }
+name = "fedimint-gateway-cli-core"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+bitcoin = { workspace = true }
+fedimint-core = { workspace = true }
+lightning-invoice = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

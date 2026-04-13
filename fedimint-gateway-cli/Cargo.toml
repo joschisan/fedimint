@@ -21,7 +21,7 @@ anyhow = { workspace = true }
 bitcoin = { workspace = true }
 clap = { workspace = true }
 fedimint-core = { workspace = true }
-fedimint-gateway-common = { workspace = true }
+fedimint-gateway-cli-core = { workspace = true }
 lightning-invoice = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 serde = { workspace = true }

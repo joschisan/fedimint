@@ -7,7 +7,20 @@ use bitcoin::secp256k1::PublicKey;
 use clap::{Parser, Subcommand};
 use fedimint_core::config::FederationId;
 use fedimint_core::{Amount, BitcoinAmountOrAll};
-use fedimint_gateway_common::*;
+use fedimint_gateway_cli_core::{
+    CloseChannelsWithPeerRequest, ConfigPayload, ConnectFedPayload,
+    CreateInvoiceForOperatorPayload, ListTransactionsPayload, ModuleMintCountRequest,
+    ModuleMintReceiveRequest, ModuleMintSendRequest, ModuleWalletInfoRequest,
+    ModuleWalletReceiveRequest, ModuleWalletSendFeeRequest, ModuleWalletSendRequest,
+    OpenChannelRequest, PayInvoiceForOperatorPayload, PeerConnectRequest, PeerDisconnectRequest,
+    ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
+    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_COUNT, ROUTE_MODULE_MINT_RECEIVE,
+    ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_INFO, ROUTE_MODULE_WALLET_RECEIVE,
+    ROUTE_MODULE_WALLET_SEND, ROUTE_MODULE_WALLET_SEND_FEE, SendOnchainRequest,
+};
 use serde::Serialize;
 use serde_json::Value;
 

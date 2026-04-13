@@ -36,6 +36,7 @@ fedimint-core = { workspace = true }
 iroh = { workspace = true, default-features = false }
 fedimint-derive-secret = { workspace = true }
 fedimint-eventlog = { workspace = true }
+fedimint-gateway-cli-core = { workspace = true }
 fedimint-gateway-common = { workspace = true }
 fedimint-gwv2-client = { workspace = true }
 fedimint-lnurl = { workspace = true }

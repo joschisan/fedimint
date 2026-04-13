@@ -19,6 +19,7 @@ members = [
     "fedimint-eventlog",
     "fedimint-fountain",
     "fedimint-gateway-cli",
+    "fedimint-gateway-cli-core",
     "fedimint-gateway-common",
     "fedimint-gateway-daemon",
     "fedimint-integration-tests",
@@ -144,6 +145,7 @@ fedimint-derive = { path = "./fedimint-derive", version = "=0.11.0-alpha" }
 fedimint-derive-secret = { path = "./crypto/derive-secret", version = "=0.11.0-alpha" }
 fedimint-empty-common = { path = "./modules/fedimint-empty-common", version = "=0.11.0-alpha" }
 fedimint-eventlog = { path = "./fedimint-eventlog", version = "=0.11.0-alpha" }
+fedimint-gateway-cli-core = { path = "./fedimint-gateway-cli-core", version = "=0.11.0-alpha" }
 fedimint-gateway-common = { path = "./fedimint-gateway-common", version = "=0.11.0-alpha" }
 fedimint-gateway-daemon = { path = "./fedimint-gateway-daemon", version = "=0.11.0-alpha" }
 fedimint-gwv2-client = { path = "./modules/fedimint-gwv2-client", version = "=0.11.0-alpha" }

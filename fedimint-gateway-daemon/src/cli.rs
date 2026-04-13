@@ -11,21 +11,23 @@ use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::task::TaskHandle;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
 use fedimint_core::{Amount, BitcoinAmountOrAll};
-use fedimint_gateway_common::{
-    CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConfigPayload, ConnectFedPayload,
-    CreateInvoiceForOperatorPayload, DepositAddressPayload, DepositAddressResponse,
-    ExportInviteCodesResponse, FederationBalanceInfo, FederationInfo, GatewayBalances,
-    GatewayFedConfig, GatewayInfo, InvoiceCreateResponse, InvoicePayResponse, ListChannelsResponse,
-    ListFederationsResponse, ListPeersResponse, ListTransactionsPayload, ListTransactionsResponse,
-    MnemonicResponse, OnchainReceiveResponse, OnchainSendResponse, OpenChannelRequest,
-    PayInvoiceForOperatorPayload, PeerConnectRequest, PeerDisconnectRequest, Preimage,
+use fedimint_gateway_cli_core::{
+    CloseChannelsWithPeerRequest, ConfigPayload, ConnectFedPayload,
+    CreateInvoiceForOperatorPayload, DepositAddressPayload, ListTransactionsPayload,
+    OpenChannelRequest, PayInvoiceForOperatorPayload, PeerConnectRequest, PeerDisconnectRequest,
     ROUTE_FED_CONFIG, ROUTE_FED_INVITE, ROUTE_FED_JOIN, ROUTE_FED_LIST, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND,
-    ROUTE_MODULE_WALLET_RECEIVE, ReceiveEcashPayload, ReceiveEcashResponse, SendOnchainRequest,
-    SpendEcashPayload, SpendEcashResponse,
+    ROUTE_MODULE_WALLET_RECEIVE, ReceiveEcashPayload, SendOnchainRequest, SpendEcashPayload,
+};
+use fedimint_gateway_common::{
+    CloseChannelsWithPeerResponse, DepositAddressResponse, ExportInviteCodesResponse,
+    FederationBalanceInfo, FederationInfo, GatewayBalances, GatewayFedConfig, GatewayInfo,
+    InvoiceCreateResponse, InvoicePayResponse, ListChannelsResponse, ListFederationsResponse,
+    ListPeersResponse, ListTransactionsResponse, MnemonicResponse, OnchainReceiveResponse,
+    OnchainSendResponse, Preimage, ReceiveEcashResponse, SpendEcashResponse,
 };
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule;
