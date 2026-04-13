@@ -1,41 +1,36 @@
-use std::collections::BTreeSet;
-use std::fmt::Debug;
+use std::sync::Arc;
 
-use anyhow::Context;
-use fedimint_connectors::error::ServerError;
-use fedimint_connectors::{
-    ConnectionPool, ConnectorRegistry, DynGatewayConnection, IGatewayConnection, ServerResult,
-};
 use fedimint_core::util::SafeUrl;
 use reqwest::Method;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tokio::sync::watch;
+use thiserror::Error;
+
+/// Error type for gateway API calls
+#[derive(Debug, Error)]
+pub enum GatewayError {
+    #[error("Invalid response: {0}")]
+    InvalidResponse(anyhow::Error),
+
+    #[error("Server error: {0}")]
+    ServerError(anyhow::Error),
+
+    #[error("Connection error: {0}")]
+    Connection(anyhow::Error),
+}
 
 #[derive(Clone, Debug)]
 pub struct GatewayApi {
     password: Option<String>,
-    connection_pool: ConnectionPool<dyn IGatewayConnection>,
+    client: Arc<reqwest::Client>,
 }
 
 impl GatewayApi {
-    pub fn new(password: Option<String>, connectors: ConnectorRegistry) -> Self {
+    pub fn new(password: Option<String>) -> Self {
         Self {
             password,
-            connection_pool: ConnectionPool::new(connectors),
+            client: Arc::new(reqwest::Client::new()),
         }
-    }
-
-    async fn get_or_create_connection(&self, url: &SafeUrl) -> ServerResult<DynGatewayConnection> {
-        self.connection_pool
-            .get_or_create_connection(url, None, |url, _api_secret, connectors| async move {
-                let conn = connectors
-                    .connect_gateway(&url)
-                    .await
-                    .map_err(ServerError::Connection)?;
-                Ok(conn)
-            })
-            .await
     }
 
     pub async fn request<P: Serialize, T: DeserializeOwned>(
@@ -44,23 +39,34 @@ impl GatewayApi {
         method: Method,
         route: &str,
         payload: Option<P>,
-    ) -> ServerResult<T> {
-        let conn = self
-            .get_or_create_connection(base_url)
-            .await
-            .context("Failed to connect to gateway")
-            .map_err(ServerError::Connection)?;
-        let payload = payload.map(|p| serde_json::to_value(p).expect("Could not serialize"));
-        let res = conn
-            .request(self.password.clone(), method, route, payload)
-            .await?;
-        let response = serde_json::from_value::<T>(res).map_err(|e| {
-            ServerError::InvalidResponse(anyhow::anyhow!("Received invalid response: {e}"))
-        })?;
-        Ok(response)
-    }
+    ) -> Result<T, GatewayError> {
+        let url = base_url.join(route).expect("Invalid base url");
+        let mut builder = self.client.request(method, url.to_unsafe());
+        if let Some(password) = self.password.clone() {
+            builder = builder.bearer_auth(password);
+        }
+        if let Some(payload) = payload {
+            builder = builder.json(&payload);
+        }
 
-    pub fn get_active_connection_receiver(&self) -> watch::Receiver<BTreeSet<SafeUrl>> {
-        self.connection_pool.get_active_connection_receiver()
+        let response = builder
+            .send()
+            .await
+            .map_err(|e| GatewayError::Connection(e.into()))?;
+
+        match response.status() {
+            reqwest::StatusCode::OK => {
+                let value = response
+                    .json::<serde_json::Value>()
+                    .await
+                    .map_err(|e| GatewayError::InvalidResponse(e.into()))?;
+                serde_json::from_value::<T>(value).map_err(|e| {
+                    GatewayError::InvalidResponse(anyhow::anyhow!("Received invalid response: {e}"))
+                })
+            }
+            status => Err(GatewayError::ServerError(anyhow::anyhow!(
+                "HTTP request returned unexpected status: {status}"
+            ))),
+        }
     }
 }

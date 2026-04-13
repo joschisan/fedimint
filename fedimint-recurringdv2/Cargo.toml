@@ -18,7 +18,6 @@ anyhow = { workspace = true }
 axum = { workspace = true }
 bitcoin = { workspace = true, features = ["serde"] }
 clap = { workspace = true }
-fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-lnurl = { workspace = true }
 fedimint-lnv2-common = { workspace = true }

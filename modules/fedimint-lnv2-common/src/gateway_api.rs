@@ -3,7 +3,6 @@ use std::str::FromStr;
 
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::schnorr::Signature;
-use fedimint_connectors::error::ServerError;
 use fedimint_core::config::FederationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::util::SafeUrl;
@@ -16,6 +15,7 @@ use crate::contracts::{IncomingContract, OutgoingContract};
 use crate::endpoint_constants::{
     CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
 };
+use crate::gateway_connection::GatewayError;
 use crate::{Bolt11InvoiceDescription, GatewayApi, LightningInvoice};
 
 #[apply(async_trait_maybe_send!)]
@@ -24,7 +24,7 @@ pub trait GatewayConnection: std::fmt::Debug {
         &self,
         gateway_api: SafeUrl,
         federation_id: &FederationId,
-    ) -> Result<Option<RoutingInfo>, ServerError>;
+    ) -> Result<Option<RoutingInfo>, GatewayError>;
 
     async fn bolt11_invoice(
         &self,
@@ -34,7 +34,7 @@ pub trait GatewayConnection: std::fmt::Debug {
         amount: Amount,
         description: Bolt11InvoiceDescription,
         expiry_secs: u32,
-    ) -> Result<Bolt11Invoice, ServerError>;
+    ) -> Result<Bolt11Invoice, GatewayError>;
 
     async fn send_payment(
         &self,
@@ -44,7 +44,7 @@ pub trait GatewayConnection: std::fmt::Debug {
         contract: OutgoingContract,
         invoice: LightningInvoice,
         auth: Signature,
-    ) -> Result<Result<[u8; 32], Signature>, ServerError>;
+    ) -> Result<Result<[u8; 32], Signature>, GatewayError>;
 }
 
 #[derive(Debug, Clone)]
@@ -58,7 +58,7 @@ impl GatewayConnection for RealGatewayConnection {
         &self,
         gateway_api: SafeUrl,
         federation_id: &FederationId,
-    ) -> Result<Option<RoutingInfo>, ServerError> {
+    ) -> Result<Option<RoutingInfo>, GatewayError> {
         self.api
             .request(
                 &gateway_api,
@@ -77,7 +77,7 @@ impl GatewayConnection for RealGatewayConnection {
         amount: Amount,
         description: Bolt11InvoiceDescription,
         expiry_secs: u32,
-    ) -> Result<Bolt11Invoice, ServerError> {
+    ) -> Result<Bolt11Invoice, GatewayError> {
         self.api
             .request(
                 &gateway_api,
@@ -102,7 +102,7 @@ impl GatewayConnection for RealGatewayConnection {
         contract: OutgoingContract,
         invoice: LightningInvoice,
         auth: Signature,
-    ) -> Result<Result<[u8; 32], Signature>, ServerError> {
+    ) -> Result<Result<[u8; 32], Signature>, GatewayError> {
         self.api
             .request(
                 &gateway_api,

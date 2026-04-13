@@ -13,7 +13,7 @@ use std::time::Duration;
 use anyhow::bail;
 use async_channel::Sender;
 use db::{ServerDbMigrationContext, get_global_database_migrations};
-use fedimint_connectors::ConnectorRegistry;
+use fedimint_api_client::connection::ConnectionPool;
 use fedimint_core::NumPeers;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
@@ -55,7 +55,7 @@ const TRANSACTION_BUFFER: usize = 1000;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
-    connectors: ConnectorRegistry,
+    connectors: ConnectionPool,
     auth: ApiAuth,
     connections: DynP2PConnections<P2PMessage>,
     p2p_status_receivers: P2PStatusReceivers,

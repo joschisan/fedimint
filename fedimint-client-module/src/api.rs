@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::string::ToString;
 
 use fedimint_api_client::api::{DynModuleApi, IRawFederationApi, ServerResult};
-use fedimint_connectors::DynGuaridianConnection;
+use fedimint_api_client::connection::DynGuaridianConnection;
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{Database, DatabaseTransaction};
 use fedimint_core::module::ApiRequestErased;

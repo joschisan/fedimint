@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use fedimint_api_client::connection::{
+    ConnectionPool, create_iroh_endpoint, load_iroh_connection_overrides,
+};
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::{Client, ClientBuilder, RootSecret};
 use fedimint_client_module::secret::RootSecretStrategy;
-use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::invite_code::InviteCode;
@@ -18,7 +20,7 @@ pub struct GatewayClientFactory {
     db: Database,
     mnemonic: Mnemonic,
     registry: ClientModuleInitRegistry,
-    connectors: ConnectorRegistry,
+    connectors: ConnectionPool,
 }
 
 impl GatewayClientFactory {
@@ -35,8 +37,11 @@ impl GatewayClientFactory {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to store mnemonic: {e}"))?;
 
+        let endpoint = create_iroh_endpoint(None, false).await?;
+        let connection_overrides = load_iroh_connection_overrides()?;
+
         Ok(Self {
-            connectors: ConnectorRegistry::build_from_client_env()?.bind().await?,
+            connectors: ConnectionPool::new(endpoint, connection_overrides),
             db,
             mnemonic,
             registry,
@@ -58,8 +63,12 @@ impl GatewayClientFactory {
             Some(entropy) => {
                 let mnemonic = Mnemonic::from_entropy(&entropy)
                     .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {e}"))?;
+
+                let endpoint = create_iroh_endpoint(None, false).await?;
+                let connection_overrides = load_iroh_connection_overrides()?;
+
                 Ok(Some(Self {
-                    connectors: ConnectorRegistry::build_from_client_env()?.bind().await?,
+                    connectors: ConnectionPool::new(endpoint, connection_overrides),
                     db,
                     mnemonic,
                     registry,
@@ -93,9 +102,7 @@ impl GatewayClientFactory {
 
         let mut builder = Client::builder()
             .await
-            .map_err(|e| anyhow::anyhow!("Client creation error: {e}"))?
-            .with_iroh_enable_dht(true)
-            .with_iroh_enable_next(true);
+            .map_err(|e| anyhow::anyhow!("Client creation error: {e}"))?;
         builder.with_module_inits(registry);
         Ok(builder)
     }

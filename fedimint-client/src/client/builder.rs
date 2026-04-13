@@ -10,6 +10,7 @@ use fedimint_api_client::api::global_api::with_request_hook::{
     ApiRequestHook, RawFederationApiWithRequestHookExt as _,
 };
 use fedimint_api_client::api::{ApiVersionSet, DynGlobalApi, FederationApi, FederationApiExt as _};
+use fedimint_api_client::connection::ConnectionPool;
 use fedimint_api_client::download_from_invite_code;
 use fedimint_bitcoind::DynBitcoindRpc;
 use fedimint_client_module::api::ClientRawFederationApiExt as _;
@@ -26,7 +27,6 @@ use fedimint_client_module::transaction::{
     TRANSACTION_SUBMISSION_MODULE_INSTANCE, TxSubmissionContext, tx_submission_sm_decoder,
 };
 use fedimint_client_module::{AdminCreds, ModuleRecoveryStarted};
-use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::{
@@ -330,7 +330,7 @@ impl ClientBuilder {
     #[allow(clippy::too_many_arguments)]
     async fn init(
         self,
-        connectors: ConnectorRegistry,
+        connectors: ConnectionPool,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: ClientConfig,
@@ -390,7 +390,7 @@ impl ClientBuilder {
 
     pub async fn preview(
         self,
-        connectors: ConnectorRegistry,
+        connectors: ConnectionPool,
         invite_code: &InviteCode,
     ) -> anyhow::Result<ClientPreview> {
         let (config, api) = download_from_invite_code(&connectors, invite_code).await?;
@@ -405,7 +405,7 @@ impl ClientBuilder {
     /// to speed up the final join.
     pub async fn preview_with_existing_config(
         self,
-        connectors: ConnectorRegistry,
+        connectors: ConnectionPool,
         config: ClientConfig,
         api_secret: Option<String>,
     ) -> anyhow::Result<ClientPreview> {
@@ -415,7 +415,7 @@ impl ClientBuilder {
 
     async fn preview_inner(
         self,
-        connectors: ConnectorRegistry,
+        connectors: ConnectionPool,
         config: ClientConfig,
         api_secret: Option<String>,
         prefetch_api: Option<DynGlobalApi>,
@@ -444,7 +444,7 @@ impl ClientBuilder {
 
     pub async fn open(
         self,
-        connectors: ConnectorRegistry,
+        connectors: ConnectionPool,
         db_no_decoders: Database,
         pre_root_secret: RootSecret,
     ) -> anyhow::Result<ClientHandle> {
@@ -512,7 +512,7 @@ impl ClientBuilder {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn build(
         self,
-        connectors: ConnectorRegistry,
+        connectors: ConnectionPool,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: ClientConfig,
@@ -550,7 +550,7 @@ impl ClientBuilder {
     #[allow(clippy::too_many_arguments)]
     async fn build_stopped(
         mut self,
-        connectors: ConnectorRegistry,
+        connectors: ConnectionPool,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: &ClientConfig,
@@ -970,11 +970,6 @@ impl ClientBuilder {
             .spawn_cancellable("event log ordering task", {
                 let client_inner = client_inner.clone();
                 async move {
-                    client_inner
-                        .connectors
-                        .wait_for_initialized_connections()
-                        .await;
-
                     run_event_log_ordering_task(
                         db.clone(),
                         log_ordering_wakeup_rx,
@@ -1001,7 +996,6 @@ impl ClientBuilder {
                 .spawn_cancellable("fetch-chain-id", {
                     let client_inner = client_inner.clone();
                     async move {
-                        client_inner.api.wait_for_initialized_connections().await;
                         match client_inner.api.chain_id().await {
                             Ok(chain_id) => {
                                 debug!(target: LOG_CLIENT, %chain_id, "Caching chain ID from background fetch");
@@ -1127,7 +1121,6 @@ impl ClientBuilder {
 
         // Spawn background task to refetch config
         task_group.spawn_cancellable("refresh_client_config_static", async move {
-            api.wait_for_initialized_connections().await;
             Self::refresh_client_config_static(&config, &api, &db).await;
         });
     }
@@ -1221,7 +1214,7 @@ impl ClientBuilder {
 pub struct ClientPreview {
     inner: ClientBuilder,
     config: ClientConfig,
-    connectors: ConnectorRegistry,
+    connectors: ConnectionPool,
     api_secret: Option<String>,
     preview_prefetch_api_version_set:
         Option<JitTryAnyhow<BTreeMap<PeerId, SupportedApiVersionsSummary>>>,
@@ -1258,7 +1251,7 @@ impl ClientPreview {
     /// # use fedimint_core::config::ClientConfig;
     /// # use fedimint_derive_secret::DerivableSecret;
     /// # use fedimint_client::{Client, ClientBuilder, RootSecret};
-    /// # use fedimint_connectors::ConnectorRegistry;
+    /// # use fedimint_api_client::connection::ConnectionPool;
     /// # use fedimint_core::db::Database;
     /// # use fedimint_core::config::META_FEDERATION_NAME_KEY;
     /// #
@@ -1288,7 +1281,7 @@ impl ClientPreview {
     /// // let db_path = format!("./path/to/db/{}", config.federation_id());
     /// // let db = RocksDb::open(db_path).expect("error opening DB");
     /// # let db: Database = unimplemented!();
-    /// # let connectors: ConnectorRegistry = unimplemented!();
+    /// # let connectors: ConnectionPool = unimplemented!();
     ///
     /// let preview = Client::builder().await
     ///     // Mount the modules the client should support:

@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use fedimint_connectors::{DynGuaridianConnection, ServerResult};
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::module::ApiRequestErased;
 use fedimint_core::task::{MaybeSend, MaybeSync};
@@ -10,6 +9,7 @@ use futures::stream::BoxStream;
 use serde_json::Value;
 
 use super::super::{DynModuleApi, IRawFederationApi};
+use crate::connection::{DynGuaridianConnection, ServerResult};
 
 /// "Api Request Hook"
 ///

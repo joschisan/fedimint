@@ -9,7 +9,6 @@ use axum::{Json, Router};
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::{self, PublicKey};
 use clap::Parser;
-use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::base32::{FEDIMINT_PREFIX, decode_prefixed};
 use fedimint_core::config::FederationId;
 use fedimint_core::encoding::Encodable;
@@ -59,14 +58,9 @@ async fn main() -> anyhow::Result<()> {
 
     let cli_opts = CliOpts::parse();
 
-    let connector_registry = ConnectorRegistry::build_from_client_defaults()
-        .with_env_var_overrides()?
-        .bind()
-        .await?;
-
     let state = AppState {
         gateway_conn: RealGatewayConnection {
-            api: GatewayApi::new(None, connector_registry),
+            api: GatewayApi::new(None),
         },
     };
 

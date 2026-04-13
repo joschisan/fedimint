@@ -356,15 +356,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atomic-polyfill"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cf2bce30dfe09ef0bfaef228b9d414faaf7e563035494d7fe092dba54b300f4"
-dependencies = [
- "critical-section",
-]
-
-[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -554,7 +545,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "302eaff5357a264a2c42f127ecb8bac761cf99749fc3dc95677e2743991f99e7"
 dependencies = [
  "fastrand",
- "gloo-timers 0.3.0",
+ "gloo-timers",
  "tokio",
 ]
 
@@ -916,12 +907,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "102dbef1187b1893e6dfe05a774e79fd52265f49f214f6879c8ff49f52c8188b"
 
 [[package]]
-name = "btparse"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "387e80962b798815a2b5c4bcfdb6bf626fa922ffe9f74e373103b858738e9f31"
-
-[[package]]
 name = "bumpalo"
 version = "3.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1140,17 +1125,6 @@ name = "cobs"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
-
-[[package]]
-name = "color-backtrace"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2123a5984bd52ca861c66f66a9ab9883b27115c607f801f86c1bc2a84eb69f0f"
-dependencies = [
- "backtrace",
- "btparse",
- "termcolor",
-]
 
 [[package]]
 name = "colorchoice"
@@ -1993,11 +1967,11 @@ dependencies = [
  "async-channel",
  "async-trait",
  "bitcoin",
- "fedimint-connectors",
  "fedimint-core",
  "fedimint-logging",
- "fedimint-metrics",
  "futures",
+ "iroh",
+ "iroh-base",
  "itertools 0.14.0",
  "jsonrpsee-core",
  "lru 0.16.3",
@@ -2008,6 +1982,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "z32",
 ]
 
 [[package]]
@@ -2056,7 +2031,6 @@ dependencies = [
  "fedimint-bitcoind",
  "fedimint-build",
  "fedimint-client-module",
- "fedimint-connectors",
  "fedimint-core",
  "fedimint-derive-secret",
  "fedimint-eventlog",
@@ -2086,7 +2060,6 @@ dependencies = [
  "fedimint-api-client",
  "fedimint-bitcoind",
  "fedimint-build",
- "fedimint-connectors",
  "fedimint-core",
  "fedimint-derive-secret",
  "fedimint-eventlog",
@@ -2103,37 +2076,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
-]
-
-[[package]]
-name = "fedimint-connectors"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "aws-lc-sys",
- "base64 0.22.1",
- "fedimint-core",
- "fedimint-logging",
- "fedimint-metrics",
- "futures",
- "iroh 0.35.0",
- "iroh 0.90.0",
- "iroh-base 0.35.0",
- "jsonrpsee-core",
- "jsonrpsee-types",
- "jsonrpsee-wasm-client",
- "jsonrpsee-ws-client",
- "reqwest 0.12.22",
- "rustls-pki-types",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-rustls 0.26.4",
- "tracing",
- "url",
- "webpki-roots 1.0.6",
- "z32",
 ]
 
 [[package]]
@@ -2164,14 +2106,14 @@ dependencies = [
  "futures",
  "futures-util",
  "getrandom 0.3.3",
- "gloo-timers 0.3.0",
+ "gloo-timers",
  "group",
  "hex",
  "hex-conservative 1.0.1",
  "imbl",
- "iroh 0.35.0",
- "iroh-base 0.35.0",
- "iroh-relay 0.35.0",
+ "iroh",
+ "iroh-base",
+ "iroh-relay",
  "itertools 0.14.0",
  "js-sys",
  "jsonrpsee-core",
@@ -2337,7 +2279,6 @@ dependencies = [
  "bitcoin",
  "clap",
  "fedimint-api-client",
- "fedimint-connectors",
  "fedimint-core",
  "fedimint-eventlog",
  "futures",
@@ -2370,7 +2311,6 @@ dependencies = [
  "fedimint-build",
  "fedimint-client",
  "fedimint-client-module",
- "fedimint-connectors",
  "fedimint-core",
  "fedimint-derive-secret",
  "fedimint-eventlog",
@@ -2451,9 +2391,9 @@ dependencies = [
  "anyhow",
  "bitcoin",
  "bitcoincore-rpc",
+ "fedimint-api-client",
  "fedimint-bip39",
  "fedimint-client",
- "fedimint-connectors",
  "fedimint-core",
  "fedimint-gateway-common",
  "fedimint-lnv2-client",
@@ -2564,7 +2504,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bitcoin",
- "fedimint-connectors",
  "fedimint-core",
  "fedimint-tpe",
  "group",
@@ -2724,7 +2663,6 @@ dependencies = [
  "axum 0.8.8",
  "bitcoin",
  "clap",
- "fedimint-connectors",
  "fedimint-core",
  "fedimint-lnurl",
  "fedimint-lnv2-common",
@@ -2769,8 +2707,8 @@ dependencies = [
  "bytes",
  "fedimint-aead",
  "fedimint-aleph-bft",
+ "fedimint-api-client",
  "fedimint-build",
- "fedimint-connectors",
  "fedimint-core",
  "fedimint-derive-secret",
  "fedimint-logging",
@@ -2780,9 +2718,9 @@ dependencies = [
  "group",
  "hex",
  "hyper 1.6.0",
- "iroh 0.35.0",
- "iroh-base 0.35.0",
- "iroh-relay 0.35.0",
+ "iroh",
+ "iroh-base",
+ "iroh-relay",
  "itertools 0.14.0",
  "jsonrpsee",
  "parity-scale-codec",
@@ -3305,10 +3243,6 @@ name = "futures-timer"
 version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f288b0a4f20f9a56b5d1da57e2227c661b7b16168e2f72365f57b63326e29b24"
-dependencies = [
- "gloo-timers 0.2.6",
- "send_wrapper 0.4.0",
-]
 
 [[package]]
 name = "futures-util"
@@ -3392,39 +3326,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 
 [[package]]
-name = "gloo-net"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c06f627b1a58ca3d42b45d6104bf1e1a03799df472df00988b6ba21accc10580"
-dependencies = [
- "futures-channel",
- "futures-core",
- "futures-sink",
- "gloo-utils",
- "http 1.3.1",
- "js-sys",
- "pin-project",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "gloo-timers"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b995a66bb87bebce9a0f4a95aed01daca4872c050bfcb21653361c03bc35e5c"
-dependencies = [
- "futures-channel",
- "futures-core",
- "js-sys",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "gloo-timers"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3434,19 +3335,6 @@ dependencies = [
  "futures-core",
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "gloo-utils"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b5555354113b18c547c1d3a98fbf7fb32a9ff4f6fa112ce823a21641a0ba3aa"
-dependencies = [
- "js-sys",
- "serde",
- "serde_json",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -3506,15 +3394,6 @@ checksum = "459196ed295495a68f7d7fe1d84f6c4b7ff0e21fe3017b2f283c6fac3ad803c9"
 dependencies = [
  "cfg-if",
  "crunchy",
-]
-
-[[package]]
-name = "hash32"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0c35f58762feb77d74ebe43bdbc3210f09be9fe6742234d573bacc26ed92b67"
-dependencies = [
- "byteorder",
 ]
 
 [[package]]
@@ -3581,20 +3460,6 @@ dependencies = [
  "flate2",
  "nom",
  "num-traits",
-]
-
-[[package]]
-name = "heapless"
-version = "0.7.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdc6457c0eb62c71aac4bc17216026d8410337c4126773b9c5daba343f17964f"
-dependencies = [
- "atomic-polyfill",
- "hash32",
- "rustc_version",
- "serde",
- "spin",
- "stable_deref_trait",
 ]
 
 [[package]]
@@ -4243,18 +4108,18 @@ dependencies = [
  "http 1.3.1",
  "igd-next",
  "instant",
- "iroh-base 0.35.0",
- "iroh-metrics 0.34.0",
- "iroh-quinn 0.13.0",
+ "iroh-base",
+ "iroh-metrics",
+ "iroh-quinn",
  "iroh-quinn-proto",
  "iroh-quinn-udp",
- "iroh-relay 0.35.0",
+ "iroh-relay",
  "n0-future",
  "netdev",
- "netwatch 0.5.0",
+ "netwatch",
  "pin-project",
  "pkarr",
- "portmapper 0.5.0",
+ "portmapper",
  "rand 0.8.5",
  "rcgen",
  "reqwest 0.12.22",
@@ -4281,67 +4146,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "iroh"
-version = "0.90.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9436f319c2d24bca1b28a2fab4477c8d2ac795ab2d3aeda142d207b38ec068f4"
-dependencies = [
- "aead",
- "backon",
- "bytes",
- "cfg_aliases",
- "crypto_box",
- "data-encoding",
- "der",
- "derive_more",
- "ed25519-dalek",
- "futures-buffered",
- "futures-util",
- "getrandom 0.3.3",
- "hickory-resolver",
- "http 1.3.1",
- "igd-next",
- "instant",
- "iroh-base 0.90.0",
- "iroh-metrics 0.35.0",
- "iroh-quinn 0.14.0",
- "iroh-quinn-proto",
- "iroh-quinn-udp",
- "iroh-relay 0.90.0",
- "n0-future",
- "n0-snafu",
- "n0-watcher",
- "nested_enum_utils",
- "netdev",
- "netwatch 0.6.0",
- "pin-project",
- "pkarr",
- "portmapper 0.6.1",
- "rand 0.8.5",
- "reqwest 0.12.22",
- "ring",
- "rustls 0.23.28",
- "rustls-pki-types",
- "rustls-webpki 0.103.10",
- "serde",
- "smallvec",
- "snafu",
- "spki",
- "strum 0.26.3",
- "stun-rs",
- "surge-ping",
- "time",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "url",
- "wasm-bindgen-futures",
- "webpki-roots 0.26.11",
- "z32",
-]
-
-[[package]]
 name = "iroh-base"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4359,24 +4163,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "iroh-base"
-version = "0.90.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e0090050c4055b21e61cbcb856f043a2b24ad22c65d76bab91f121b4c7bece3"
-dependencies = [
- "curve25519-dalek",
- "data-encoding",
- "derive_more",
- "ed25519-dalek",
- "n0-snafu",
- "nested_enum_utils",
- "rand_core 0.6.4",
- "serde",
- "snafu",
- "url",
-]
-
-[[package]]
 name = "iroh-metrics"
 version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4384,20 +4170,6 @@ checksum = "f70466f14caff7420a14373676947e25e2917af6a5b1bec45825beb2bf1eb6a7"
 dependencies = [
  "iroh-metrics-derive",
  "itoa",
- "serde",
- "snafu",
- "tracing",
-]
-
-[[package]]
-name = "iroh-metrics"
-version = "0.35.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8922c169f1b84d39d325c02ef1bbe1419d4de6e35f0403462b3c7e60cc19634"
-dependencies = [
- "iroh-metrics-derive",
- "itoa",
- "postcard",
  "serde",
  "snafu",
  "tracing",
@@ -4420,26 +4192,6 @@ name = "iroh-quinn"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76c6245c9ed906506ab9185e8d7f64857129aee4f935e899f398a3bd3b70338d"
-dependencies = [
- "bytes",
- "cfg_aliases",
- "iroh-quinn-proto",
- "iroh-quinn-udp",
- "pin-project-lite",
- "rustc-hash",
- "rustls 0.23.28",
- "socket2 0.5.10",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "web-time",
-]
-
-[[package]]
-name = "iroh-quinn"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cde160ebee7aabede6ae887460cd303c8b809054224815addf1469d54a6fcf7"
 dependencies = [
  "bytes",
  "cfg_aliases",
@@ -4506,9 +4258,9 @@ dependencies = [
  "http-body-util",
  "hyper 1.6.0",
  "hyper-util",
- "iroh-base 0.35.0",
- "iroh-metrics 0.34.0",
- "iroh-quinn 0.13.0",
+ "iroh-base",
+ "iroh-metrics",
+ "iroh-quinn",
  "iroh-quinn-proto",
  "lru 0.12.5",
  "n0-future",
@@ -4525,54 +4277,6 @@ dependencies = [
  "strum 0.26.3",
  "stun-rs",
  "thiserror 2.0.18",
- "tokio",
- "tokio-rustls 0.26.4",
- "tokio-util",
- "tokio-websockets",
- "tracing",
- "url",
- "webpki-roots 0.26.11",
- "ws_stream_wasm",
- "z32",
-]
-
-[[package]]
-name = "iroh-relay"
-version = "0.90.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3f3cdbdaebc92835452e4e1d0d4b36118206b0950089b7bc3654f13e843475b"
-dependencies = [
- "bytes",
- "cfg_aliases",
- "data-encoding",
- "derive_more",
- "getrandom 0.3.3",
- "hickory-resolver",
- "http 1.3.1",
- "http-body-util",
- "hyper 1.6.0",
- "hyper-util",
- "iroh-base 0.90.0",
- "iroh-metrics 0.35.0",
- "iroh-quinn 0.14.0",
- "iroh-quinn-proto",
- "lru 0.13.0",
- "n0-future",
- "n0-snafu",
- "nested_enum_utils",
- "num_enum",
- "pin-project",
- "pkarr",
- "postcard",
- "rand 0.8.5",
- "reqwest 0.12.22",
- "rustls 0.23.28",
- "rustls-pki-types",
- "rustls-webpki 0.103.10",
- "serde",
- "sha1",
- "snafu",
- "strum 0.26.3",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-util",
@@ -4688,30 +4392,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonrpsee-client-transport"
-version = "0.24.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bacb85abf4117092455e1573625e21b8f8ef4dec8aff13361140b2dc266cdff2"
-dependencies = [
- "base64 0.22.1",
- "futures-channel",
- "futures-util",
- "gloo-net",
- "http 1.3.1",
- "jsonrpsee-core",
- "pin-project",
- "rustls 0.23.28",
- "rustls-pki-types",
- "soketto",
- "thiserror 1.0.69",
- "tokio",
- "tokio-rustls 0.26.4",
- "tokio-util",
- "tracing",
- "url",
-]
-
-[[package]]
 name = "jsonrpsee-core"
 version = "0.24.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4719,23 +4399,19 @@ checksum = "456196007ca3a14db478346f58c7238028d55ee15c1df15115596e411ff27925"
 dependencies = [
  "async-trait",
  "bytes",
- "futures-timer",
  "futures-util",
  "http 1.3.1",
  "http-body 1.0.1",
  "http-body-util",
  "jsonrpsee-types",
  "parking_lot",
- "pin-project",
  "rand 0.8.5",
  "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
- "tokio-stream",
  "tracing",
- "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -4775,30 +4451,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "jsonrpsee-wasm-client"
-version = "0.24.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6558a9586cad43019dafd0b6311d0938f46efc116b34b28c74778bc11a2edf6"
-dependencies = [
- "jsonrpsee-client-transport",
- "jsonrpsee-core",
- "jsonrpsee-types",
-]
-
-[[package]]
-name = "jsonrpsee-ws-client"
-version = "0.24.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01b3323d890aa384f12148e8d2a1fd18eb66e9e7e825f9de4fa53bcc19b93eef"
-dependencies = [
- "http 1.3.1",
- "jsonrpsee-client-transport",
- "jsonrpsee-core",
- "jsonrpsee-types",
- "url",
 ]
 
 [[package]]
@@ -5104,9 +4756,6 @@ name = "lru"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "227748d55f2f0ab4735d87fd623798cb6b664512fe979705f829c9f81c934465"
-dependencies = [
- "hashbrown 0.15.4",
-]
 
 [[package]]
 name = "lru"
@@ -5328,36 +4977,12 @@ dependencies = [
  "futures-util",
  "js-sys",
  "pin-project",
- "send_wrapper 0.6.0",
+ "send_wrapper",
  "tokio",
  "tokio-util",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-time",
-]
-
-[[package]]
-name = "n0-snafu"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4fed465ff57041f29db78a9adc8864296ef93c6c16029f9e192dc303404ebd0"
-dependencies = [
- "anyhow",
- "btparse",
- "color-backtrace",
- "snafu",
- "tracing-error",
-]
-
-[[package]]
-name = "n0-watcher"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f216d4ebc5fcf9548244803cbb93f488a2ae160feba3706cd17040d69cf7a368"
-dependencies = [
- "derive_more",
- "n0-future",
- "snafu",
 ]
 
 [[package]]
@@ -5488,41 +5113,6 @@ dependencies = [
  "netlink-packet-route 0.23.0",
  "netlink-proto",
  "netlink-sys",
- "serde",
- "snafu",
- "socket2 0.5.10",
- "time",
- "tokio",
- "tokio-util",
- "tracing",
- "web-sys",
- "windows 0.59.0",
- "windows-result",
- "wmi",
-]
-
-[[package]]
-name = "netwatch"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a829a830199b14989f9bccce6136ab928ab48336ab1f8b9002495dbbbb2edbe"
-dependencies = [
- "atomic-waker",
- "bytes",
- "cfg_aliases",
- "derive_more",
- "iroh-quinn-udp",
- "js-sys",
- "libc",
- "n0-future",
- "n0-watcher",
- "nested_enum_utils",
- "netdev",
- "netlink-packet-core",
- "netlink-packet-route 0.23.0",
- "netlink-proto",
- "netlink-sys",
- "pin-project-lite",
  "serde",
  "snafu",
  "socket2 0.5.10",
@@ -6118,41 +5708,10 @@ dependencies = [
  "futures-util",
  "hyper-util",
  "igd-next",
- "iroh-metrics 0.34.0",
+ "iroh-metrics",
  "libc",
  "nested_enum_utils",
- "netwatch 0.5.0",
- "num_enum",
- "rand 0.8.5",
- "serde",
- "smallvec",
- "snafu",
- "socket2 0.5.10",
- "time",
- "tokio",
- "tokio-util",
- "tower-layer",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "portmapper"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d82975dc029c00d566f4e0f61f567d31f0297a290cb5416b5580dd8b4b54ade"
-dependencies = [
- "base64 0.22.1",
- "bytes",
- "derive_more",
- "futures-lite",
- "futures-util",
- "hyper-util",
- "igd-next",
- "iroh-metrics 0.35.0",
- "libc",
- "nested_enum_utils",
- "netwatch 0.6.0",
+ "netwatch",
  "num_enum",
  "rand 0.8.5",
  "serde",
@@ -6185,7 +5744,6 @@ dependencies = [
  "cobs",
  "embedded-io 0.4.0",
  "embedded-io 0.6.1",
- "heapless",
  "postcard-derive",
  "serde",
 ]
@@ -7106,12 +6664,6 @@ checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 
 [[package]]
 name = "send_wrapper"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f638d531eccd6e23b980caf34876660d38e265409d8e99b397ab71eb3612fad0"
-
-[[package]]
-name = "send_wrapper"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd0b0ec5f1c1ca621c432a25813d8d60c88abe6d3e08a3eb9cf37d97a0fe3d73"
@@ -7385,7 +6937,6 @@ version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320b01e011bf8d5d7a4a4a4be966d9160968935849c83b918827f6a435e7f627"
 dependencies = [
- "backtrace",
  "snafu-derive",
 ]
 
@@ -7682,15 +7233,6 @@ dependencies = [
  "once_cell",
  "rustix 1.0.7",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "termcolor"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
-dependencies = [
- "winapi-util",
 ]
 
 [[package]]
@@ -8136,16 +7678,6 @@ checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
  "valuable",
-]
-
-[[package]]
-name = "tracing-error"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b1581020d7a273442f5b45074a6a57d5757ad0a47dac0e9f0bd57b81936f3db"
-dependencies = [
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -9027,7 +8559,7 @@ dependencies = [
  "log",
  "pharos",
  "rustc_version",
- "send_wrapper 0.6.0",
+ "send_wrapper",
  "thiserror 2.0.18",
  "wasm-bindgen",
  "wasm-bindgen-futures",

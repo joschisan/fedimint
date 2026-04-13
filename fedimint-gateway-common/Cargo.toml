@@ -17,7 +17,6 @@ anyhow = { workspace = true }
 bitcoin = { workspace = true }
 clap = { workspace = true }
 fedimint-api-client = { workspace = true }
-fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-eventlog = { workspace = true }
 futures = { workspace = true }

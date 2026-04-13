@@ -18,7 +18,6 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bitcoin = { workspace = true }
-fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
 group = { workspace = true }
 lightning-invoice = { workspace = true }

@@ -3,6 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use fedimint_api_client::api::DynGlobalApi;
+use fedimint_api_client::connection::ConnectionPool;
 use fedimint_bitcoind::DynBitcoindRpc;
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{
@@ -11,7 +12,6 @@ use fedimint_client_module::module::init::{
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{ClientContext, DynClientModule, FinalClientIface};
 use fedimint_client_module::{ClientModule, ModuleInstanceId, ModuleKind};
-use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::config::{ClientModuleConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::Decoder;
 use fedimint_core::db::{Database, DatabaseVersion};
@@ -75,7 +75,7 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
         api: DynGlobalApi,
         admin_auth: Option<ApiAuth>,
         task_group: TaskGroup,
-        connector_registry: ConnectorRegistry,
+        connector_registry: ConnectionPool,
         user_bitcoind_rpc: Option<DynBitcoindRpc>,
         user_bitcoind_rpc_no_chain_id: Option<BitcoindRpcNoChainIdFactory>,
     ) -> anyhow::Result<DynClientModule>;
@@ -175,7 +175,7 @@ where
         api: DynGlobalApi,
         admin_auth: Option<ApiAuth>,
         task_group: TaskGroup,
-        connector_registry: ConnectorRegistry,
+        connector_registry: ConnectionPool,
         user_bitcoind_rpc: Option<DynBitcoindRpc>,
         user_bitcoind_rpc_no_chain_id: Option<BitcoindRpcNoChainIdFactory>,
     ) -> anyhow::Result<DynClientModule> {

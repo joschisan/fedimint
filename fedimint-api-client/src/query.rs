@@ -2,10 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::mem;
 
-use fedimint_connectors::ServerResult;
-use fedimint_connectors::error::ServerError;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::{NumPeers, PeerId, maybe_add_send_sync};
+
+use crate::connection::{ServerError, ServerResult};
 
 /// Fedimint query strategy
 ///

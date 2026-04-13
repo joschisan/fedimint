@@ -13,7 +13,6 @@ members = [
     "fedimint-build",
     "fedimint-client",
     "fedimint-client-module",
-    "fedimint-connectors",
     "fedimint-core",
     "fedimint-db-locked",
     "fedimint-derive",
@@ -139,7 +138,6 @@ fedimint-bitcoind = { path = "./fedimint-bitcoind", version = "=0.11.0-alpha" }
 fedimint-build = { path = "./fedimint-build", version = "=0.11.0-alpha" }
 fedimint-client = { path = "./fedimint-client", version = "=0.11.0-alpha" }
 fedimint-client-module = { path = "./fedimint-client-module", version = "=0.11.0-alpha" }
-fedimint-connectors = { path = "./fedimint-connectors", version = "=0.11.0-alpha" }
 fedimint-core = { path = "./fedimint-core", version = "=0.11.0-alpha" }
 fedimint-db-locked = { path = "./fedimint-db-locked", version = "=0.11.0-alpha" }
 fedimint-derive = { path = "./fedimint-derive", version = "=0.11.0-alpha" }

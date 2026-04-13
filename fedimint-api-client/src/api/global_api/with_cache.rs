@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, format_err};
 use bitcoin::secp256k1;
-use fedimint_connectors::{DynGuaridianConnection, ServerResult};
 use fedimint_core::backup::ClientBackupSnapshot;
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::core::backup::SignedBackupRequest;
@@ -36,6 +35,7 @@ use super::super::{DynModuleApi, IGlobalFederationApi, IRawFederationApi};
 use crate::api::{
     FederationApiExt, FederationResult, VERSION_THAT_INTRODUCED_GET_SESSION_STATUS_V2,
 };
+use crate::connection::{DynGuaridianConnection, ServerResult};
 use crate::query::FilterMapThreshold;
 
 /// Convenience extension trait used for wrapping [`IRawFederationApi`] in

@@ -20,10 +20,11 @@ anyhow = { workspace = true }
 async-channel = { workspace = true }
 async-trait = { workspace = true }
 bitcoin = { workspace = true }
-fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-logging = { workspace = true }
-fedimint-metrics = { workspace = true }
+iroh = { workspace = true, default-features = false }
+iroh-base = { workspace = true, default-features = false, features = ["ticket"] }
+z32 = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 jsonrpsee-core = { workspace = true }

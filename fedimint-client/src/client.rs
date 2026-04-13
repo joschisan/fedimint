@@ -15,6 +15,7 @@ use fedimint_api_client::api::global_api::with_request_hook::ApiRequestHook;
 use fedimint_api_client::api::{
     ApiVersionSet, DynGlobalApi, FederationApiExt as _, FederationResult, IGlobalFederationApi,
 };
+use fedimint_api_client::connection::ConnectionPool;
 use fedimint_bitcoind::DynBitcoindRpc;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
@@ -33,7 +34,6 @@ use fedimint_client_module::{
     AddStateMachinesResult, ClientModuleInstance, GetInviteCodeRequest, ModuleGlobalContextGen,
     ModuleRecoveryCompleted, TransactionUpdates, TxCreatedEvent,
 };
-use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::config::{
     ClientConfig, FederationId, GlobalClientConfig, JsonClientConfig, ModuleInitRegistry,
 };
@@ -131,7 +131,7 @@ pub struct Client {
     config: tokio::sync::RwLock<ClientConfig>,
     api_secret: Option<String>,
     decoders: ModuleDecoderRegistry,
-    connectors: ConnectorRegistry,
+    connectors: ConnectionPool,
     db: Database,
     federation_id: FederationId,
     federation_config_meta: BTreeMap<String, String>,
@@ -918,7 +918,7 @@ impl Client {
         &self.db
     }
 
-    pub fn endpoints(&self) -> &ConnectorRegistry {
+    pub fn endpoints(&self) -> &ConnectionPool {
         &self.connectors
     }
 
@@ -1043,7 +1043,7 @@ impl Client {
         api: &DynGlobalApi,
     ) -> (
         PeerId,
-        Result<SupportedApiVersionsSummary, fedimint_connectors::error::ServerError>,
+        Result<SupportedApiVersionsSummary, fedimint_api_client::connection::ServerError>,
     ) {
         runtime::sleep(delay).await;
         (
@@ -1326,7 +1326,7 @@ impl Client {
     async fn load_and_refresh_common_api_version_static(
         config: &ClientConfig,
         module_init: &ClientModuleInitRegistry,
-        connectors: ConnectorRegistry,
+        connectors: ConnectionPool,
         api: &DynGlobalApi,
         db: &Database,
         task_group: &TaskGroup,
@@ -1351,8 +1351,6 @@ impl Client {
             task_group
                 .clone()
                 .spawn_cancellable("refresh_common_api_version_static", async move {
-                    connectors.wait_for_initialized_connections().await;
-
                     if let Err(error) = Self::refresh_common_api_version_static(
                         &config,
                         &client_module_init,

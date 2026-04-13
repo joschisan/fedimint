@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Display};
 use std::time::Duration;
 
-use fedimint_connectors::error::ServerError;
 use fedimint_core::PeerId;
 use fedimint_core::fmt_utils::AbbreviateJson;
 use fedimint_core::util::FmtCompactAnyhow as _;
@@ -10,6 +9,8 @@ use fedimint_logging::LOG_CLIENT_NET_API;
 use serde::Serialize;
 use thiserror::Error;
 use tracing::{trace, warn};
+
+use crate::connection::ServerError;
 
 /// An API request error when calling an entire federation
 ///

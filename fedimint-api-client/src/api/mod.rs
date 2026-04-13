@@ -11,11 +11,6 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use bitcoin::secp256k1;
 pub use error::{FederationError, OutputOutcomeError};
-pub use fedimint_connectors::ServerResult;
-pub use fedimint_connectors::error::ServerError;
-use fedimint_connectors::{
-    ConnectionPool, ConnectorRegistry, DynGuaridianConnection, IGuardianConnection,
-};
 use fedimint_core::backup::ClientBackupSnapshot;
 use fedimint_core::core::backup::SignedBackupRequest;
 use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, OutputOutcome};
@@ -34,7 +29,6 @@ use fedimint_core::{
     util,
 };
 use fedimint_logging::LOG_CLIENT_NET_API;
-use fedimint_metrics::HistogramExt as _;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{Future, StreamExt};
 use global_api::with_cache::GlobalFederationApiWithCache;
@@ -45,7 +39,9 @@ use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, instrument, trace, warn};
 
-use crate::metrics::{CLIENT_API_REQUEST_DURATION_SECONDS, CLIENT_API_REQUESTS_TOTAL};
+pub use crate::connection::{
+    ConnectionPool, DynGuaridianConnection, IGuardianConnection, ServerError, ServerResult,
+};
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 
 pub const VERSION_THAT_INTRODUCED_GET_SESSION_STATUS_V2: ApiVersion = ApiVersion::new(0, 5);
@@ -398,23 +394,27 @@ impl AsRef<dyn IGlobalFederationApi + 'static> for DynGlobalApi {
 
 impl DynGlobalApi {
     pub fn new(
-        connectors: ConnectorRegistry,
+        connection_pool: ConnectionPool,
         peers: BTreeMap<PeerId, SafeUrl>,
         api_secret: Option<&str>,
     ) -> anyhow::Result<Self> {
         Ok(GlobalFederationApiWithCache::new(FederationApi::new(
-            connectors, peers, None, api_secret,
+            connection_pool,
+            peers,
+            None,
+            api_secret,
         ))
         .into())
     }
+
     pub fn new_admin(
-        connectors: ConnectorRegistry,
+        connection_pool: ConnectionPool,
         peer: PeerId,
         url: SafeUrl,
         api_secret: Option<&str>,
     ) -> anyhow::Result<DynGlobalApi> {
         Ok(GlobalFederationApiWithCache::new(FederationApi::new(
-            connectors,
+            connection_pool,
             [(peer, url)].into(),
             Some(peer),
             api_secret,
@@ -422,16 +422,8 @@ impl DynGlobalApi {
         .into())
     }
 
-    pub fn new_admin_setup(connectors: ConnectorRegistry, url: SafeUrl) -> anyhow::Result<Self> {
-        // PeerIds are used only for informational purposes, but just in case, make a
-        // big number so it stands out
-        Self::new_admin(
-            connectors,
-            PeerId::from(1024),
-            url,
-            // Setup does not have api secrets yet
-            None,
-        )
+    pub fn new_admin_setup(connection_pool: ConnectionPool, url: SafeUrl) -> anyhow::Result<Self> {
+        Self::new_admin(connection_pool, PeerId::from(1024), url, None)
     }
 }
 
@@ -517,12 +509,12 @@ pub struct FederationApi {
     /// Api secret of the federation
     api_secret: Option<String>,
     /// Connection pool
-    connection_pool: ConnectionPool<dyn IGuardianConnection>,
+    connection_pool: ConnectionPool,
 }
 
 impl FederationApi {
     pub fn new(
-        connectors: ConnectorRegistry,
+        connection_pool: ConnectionPool,
         peers: BTreeMap<PeerId, SafeUrl>,
         admin_peer_id: Option<PeerId>,
         api_secret: Option<&str>,
@@ -533,23 +525,15 @@ impl FederationApi {
             admin_id: admin_peer_id,
             module_id: None,
             api_secret: api_secret.map(ToOwned::to_owned),
-            connection_pool: ConnectionPool::new(connectors),
+            connection_pool,
         }
     }
 
     async fn get_or_create_connection(
         &self,
         url: &SafeUrl,
-        api_secret: Option<&str>,
     ) -> ServerResult<DynGuaridianConnection> {
-        self.connection_pool
-            .get_or_create_connection(url, api_secret, |url, api_secret, connectors| async move {
-                let conn = connectors
-                    .connect_guardian(&url, api_secret.as_deref())
-                    .await?;
-                Ok(conn)
-            })
-            .await
+        self.connection_pool.get_or_create_connection(url).await
     }
 
     async fn request(
@@ -564,25 +548,12 @@ impl FederationApi {
             .get(&peer)
             .ok_or_else(|| ServerError::InvalidPeerId { peer_id: peer })?;
         let conn = self
-            .get_or_create_connection(url, self.api_secret.as_deref())
+            .get_or_create_connection(url)
             .await
             .context("Failed to connect to peer")
             .map_err(ServerError::Connection)?;
 
-        let method_str = method.to_string();
-        let peer_str = peer.to_string();
-        let timer = CLIENT_API_REQUEST_DURATION_SECONDS
-            .with_label_values(&[&method_str, &peer_str])
-            .start_timer_ext();
-
         let res = conn.request(method.clone(), request).await;
-
-        timer.observe_duration();
-
-        let result_label = if res.is_ok() { "success" } else { "error" }.to_string();
-        CLIENT_API_REQUESTS_TOTAL
-            .with_label_values(&[&method_str, &peer_str, &result_label])
-            .inc();
 
         trace!(target: LOG_CLIENT_NET_API, ?method, res_ok = res.is_ok(), "Api response");
 
@@ -657,9 +628,7 @@ impl IRawFederationApi for FederationApi {
             .boxed()
     }
     async fn wait_for_initialized_connections(&self) {
-        self.connection_pool
-            .wait_for_initialized_connections()
-            .await;
+        // Iroh endpoint is ready at construction time, nothing to wait for
     }
 
     async fn get_peer_connection(&self, peer_id: PeerId) -> ServerResult<DynGuaridianConnection> {
@@ -667,8 +636,7 @@ impl IRawFederationApi for FederationApi {
             .peers
             .get(&peer_id)
             .ok_or_else(|| ServerError::InvalidPeerId { peer_id })?;
-        self.get_or_create_connection(url, self.api_secret.as_deref())
-            .await
+        self.get_or_create_connection(url).await
     }
 }
 

@@ -262,7 +262,7 @@ impl ClientModuleInit for LightningClientInit {
         let gateway_conn = if let Some(gateway_conn) = self.gateway_conn.clone() {
             gateway_conn
         } else {
-            let api = GatewayApi::new(None, args.connector_registry.clone());
+            let api = GatewayApi::new(None);
             Arc::new(RealGatewayConnection { api })
         };
         Ok(LightningClientModule::new(
@@ -392,10 +392,8 @@ impl LightningClientModule {
 
     fn spawn_gateway_map_update_task(&self, task_group: &TaskGroup) {
         let module = self.clone();
-        let api = self.module_api.clone();
 
         task_group.spawn_cancellable("gateway_map_update_task", async move {
-            api.wait_for_initialized_connections().await;
             module.update_gateway_map().await;
         });
     }
@@ -1088,10 +1086,8 @@ impl LightningClientModule {
         task_group: &TaskGroup,
     ) {
         let module = self.clone();
-        let api = self.module_api.clone();
 
         task_group.spawn_cancellable("receive_lnurl_task", async move {
-            api.wait_for_initialized_connections().await;
             loop {
                 module.receive_lnurl(custom_meta_fn()).await;
             }

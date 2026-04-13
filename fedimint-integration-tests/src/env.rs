@@ -6,10 +6,12 @@ use std::time::Duration;
 
 use anyhow::{Context, ensure};
 use bitcoincore_rpc::RpcApi;
+use fedimint_api_client::connection::{
+    ConnectionPool, create_iroh_endpoint, load_iroh_connection_overrides,
+};
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::secret::RootSecretStrategy;
 use fedimint_client::{Client, ClientHandleArc, RootSecret};
-use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::Amount;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_gateway_common::{
@@ -175,9 +177,9 @@ impl TestEnv {
         builder.with_module(fedimint_walletv2_client::WalletClientInit);
         builder.with_module(fedimint_lnv2_client::LightningClientInit::default());
 
-        let connectors = ConnectorRegistry::build_from_client_defaults()
-            .bind()
-            .await?;
+        let endpoint = create_iroh_endpoint(None, false).await?;
+        let connection_overrides = load_iroh_connection_overrides()?;
+        let connectors = ConnectionPool::new(endpoint, connection_overrides);
 
         let mnemonic = Mnemonic::generate(12)?;
         let root_secret = RootSecret::StandardDoubleDerive(
