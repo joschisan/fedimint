@@ -382,10 +382,8 @@ pub async fn run(
             Box::new(fedimint_server_ui::setup::router),
             Box::new(fedimint_server_ui::dashboard::router),
             Box::new(dashboard_cli_router),
-            fedimint_server::ConnectionLimits::new(
-                server_opts.iroh_api_max_connections,
-                server_opts.iroh_api_max_requests_per_connection,
-            ),
+            server_opts.iroh_api_max_connections,
+            server_opts.iroh_api_max_requests_per_connection,
             server_opts.bind_cli,
         )
         .await

@@ -67,7 +67,8 @@ pub async fn run(
     ui_bind: SocketAddr,
     dashboard_ui_router: DashboardUiRouter,
     dashboard_cli_router: crate::DashboardCliRouter,
-    iroh_api_limits: ConnectionLimits,
+    iroh_api_max_connections: usize,
+    iroh_api_max_requests_per_connection: usize,
     cli_bind: SocketAddr,
 ) -> anyhow::Result<()> {
     cfg.validate_config(&cfg.local.identity, &module_init_registry)?;
@@ -204,7 +205,8 @@ pub async fn run(
         cfg.private.iroh_api_sk.clone(),
         consensus_api.clone(),
         task_group,
-        iroh_api_limits,
+        iroh_api_max_connections,
+        iroh_api_max_requests_per_connection,
     ))
     .await?;
 
@@ -349,29 +351,12 @@ fn submit_module_ci_proposals(
     );
 }
 
-/// Configuration for connection and request limits
-#[derive(Debug, Clone, Copy)]
-pub struct ConnectionLimits {
-    /// Maximum number of concurrent connections
-    pub max_connections: usize,
-    /// Maximum number of parallel requests per connection
-    pub max_requests_per_connection: usize,
-}
-
-impl ConnectionLimits {
-    pub fn new(max_connections: usize, max_requests_per_connection: usize) -> Self {
-        Self {
-            max_connections,
-            max_requests_per_connection,
-        }
-    }
-}
-
 async fn start_iroh_api(
     secret_key: iroh::SecretKey,
     consensus_api: ConsensusApi,
     task_group: &TaskGroup,
-    iroh_api_limits: ConnectionLimits,
+    max_connections: usize,
+    max_requests_per_connection: usize,
 ) -> anyhow::Result<()> {
     let endpoint = build_iroh_endpoint(
         secret_key,
@@ -381,7 +366,13 @@ async fn start_iroh_api(
     .await?;
     task_group.spawn_cancellable(
         "iroh-api",
-        run_iroh_api(consensus_api, endpoint, task_group.clone(), iroh_api_limits),
+        run_iroh_api(
+            consensus_api,
+            endpoint,
+            task_group.clone(),
+            max_connections,
+            max_requests_per_connection,
+        ),
     );
 
     Ok(())
@@ -391,7 +382,8 @@ async fn run_iroh_api(
     consensus_api: ConsensusApi,
     endpoint: Endpoint,
     task_group: TaskGroup,
-    iroh_api_limits: ConnectionLimits,
+    max_connections: usize,
+    max_requests_per_connection: usize,
 ) {
     let core_api = server_endpoints()
         .into_iter()
@@ -415,7 +407,7 @@ async fn run_iroh_api(
     let consensus_api = Arc::new(consensus_api);
     let core_api = Arc::new(core_api);
     let module_api = Arc::new(module_api);
-    let parallel_connections_limit = Arc::new(Semaphore::new(iroh_api_limits.max_connections));
+    let parallel_connections_limit = Arc::new(Semaphore::new(max_connections));
 
     loop {
         match endpoint.accept().await {
@@ -423,7 +415,7 @@ async fn run_iroh_api(
                 if parallel_connections_limit.available_permits() == 0 {
                     warn!(
                         target: LOG_NET_API,
-                        limit = iroh_api_limits.max_connections,
+                        limit = max_connections,
                         "Iroh API connection limit reached, blocking new connections"
                     );
                 }
@@ -441,7 +433,7 @@ async fn run_iroh_api(
                         task_group.clone(),
                         incoming,
                         permit,
-                        iroh_api_limits.max_requests_per_connection,
+                        max_requests_per_connection,
                     )
                     .then(|result| async {
                         if let Err(err) = result {

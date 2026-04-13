@@ -29,7 +29,6 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use config::ServerConfig;
 use config::io::read_server_config;
-pub use consensus::ConnectionLimits;
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped as _};
@@ -87,7 +86,8 @@ pub async fn run(
     setup_ui_router: SetupUiRouter,
     dashboard_ui_router: DashboardUiRouter,
     module_cli_router: DashboardCliRouter,
-    iroh_api_limits: ConnectionLimits,
+    max_connections: usize,
+    max_requests_per_connection: usize,
     cli_bind: std::net::SocketAddr,
 ) -> anyhow::Result<()> {
     let (cfg, connections, p2p_status_receivers) = match get_config(&data_dir)? {
@@ -160,7 +160,8 @@ pub async fn run(
         settings.ui_bind,
         dashboard_ui_router,
         module_cli_router,
-        iroh_api_limits,
+        max_connections,
+        max_requests_per_connection,
         cli_bind,
     ))
     .await?;
