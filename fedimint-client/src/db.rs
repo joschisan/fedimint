@@ -103,7 +103,6 @@ pub enum DbKeyPrefix {
     GuardianMetadata = 0x42,
 
     DatabaseVersion = fedimint_core::db::DbKeyPrefix::DatabaseVersion as u8,
-    ClientBackup = fedimint_core::db::DbKeyPrefix::ClientBackup as u8,
 
     ActiveStates = ExecutorDbPrefixes::ActiveStates as u8,
     InactiveStates = ExecutorDbPrefixes::InactiveStates as u8,

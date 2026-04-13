@@ -62,8 +62,6 @@ use crate::module::registry::ModuleDecoderRegistry;
 
 /// Bitcoin amount types
 mod amount;
-/// Federation-stored client backups
-pub mod backup;
 /// Legacy serde encoding for `bls12_381`
 pub mod bls12_381_serde;
 /// Federation configuration

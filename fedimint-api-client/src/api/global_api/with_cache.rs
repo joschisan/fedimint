@@ -5,12 +5,10 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, format_err};
 use bitcoin::secp256k1;
-use fedimint_core::backup::ClientBackupSnapshot;
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::core::backup::SignedBackupRequest;
 use fedimint_core::endpoint_constants::{
-    AWAIT_SESSION_OUTCOME_ENDPOINT, AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT, CHAIN_ID_ENDPOINT,
-    RECOVER_ENDPOINT, SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT,
+    AWAIT_SESSION_OUTCOME_ENDPOINT, AWAIT_TRANSACTION_ENDPOINT, CHAIN_ID_ENDPOINT,
+    SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT,
 };
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -22,7 +20,7 @@ use fedimint_core::session_outcome::{
 };
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::transaction::{SerdeTransaction, Transaction, TransactionSubmissionOutcome};
-use fedimint_core::{ChainId, NumPeersExt, PeerId, TransactionId, apply, async_trait_maybe_send};
+use fedimint_core::{ChainId, PeerId, TransactionId, apply, async_trait_maybe_send};
 use fedimint_logging::LOG_CLIENT_NET_API;
 use futures::stream::BoxStream;
 use itertools::Itertools;
@@ -36,7 +34,6 @@ use crate::api::{
     FederationApiExt, FederationResult, VERSION_THAT_INTRODUCED_GET_SESSION_STATUS_V2,
 };
 use crate::connection::{DynGuaridianConnection, ServerResult};
-use crate::query::FilterMapThreshold;
 
 /// Convenience extension trait used for wrapping [`IRawFederationApi`] in
 /// a [`GlobalFederationApiWithCache`]
@@ -335,23 +332,6 @@ where
         self.request_current_consensus_retry(
             AWAIT_TRANSACTION_ENDPOINT.to_owned(),
             ApiRequestErased::new(txid),
-        )
-        .await
-    }
-
-    async fn upload_backup(&self, request: &SignedBackupRequest) -> FederationResult<()> {
-        self.request_current_consensus(BACKUP_ENDPOINT.to_owned(), ApiRequestErased::new(request))
-            .await
-    }
-
-    async fn download_backup(
-        &self,
-        id: &secp256k1::PublicKey,
-    ) -> FederationResult<BTreeMap<PeerId, Option<ClientBackupSnapshot>>> {
-        self.request_with_strategy(
-            FilterMapThreshold::new(|_, snapshot| Ok(snapshot), self.all_peers().to_num_peers()),
-            RECOVER_ENDPOINT.to_owned(),
-            ApiRequestErased::new(id),
         )
         .await
     }

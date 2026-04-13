@@ -28,8 +28,6 @@ use crate::{
     module_plugin_static_trait_define, module_plugin_static_trait_define_config,
 };
 
-pub mod backup;
-
 /// Unique identifier for one semantic, correlatable operation.
 ///
 /// The concept of *operations* is used to avoid losing privacy while being as

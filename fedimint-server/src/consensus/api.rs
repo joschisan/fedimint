@@ -7,21 +7,19 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
-use fedimint_core::backup::{ClientBackupKey, ClientBackupSnapshot};
 use fedimint_core::config::{ClientConfig, JsonClientConfig, META_FEDERATION_NAME_KEY};
-use fedimint_core::core::backup::{BACKUP_REQUEST_MAX_PAYLOAD_SIZE_BYTES, SignedBackupRequest};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::{
     Committable, Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped,
 };
 use fedimint_core::endpoint_constants::{
     AWAIT_SESSION_OUTCOME_ENDPOINT, AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT,
-    AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT, CHAIN_ID_ENDPOINT, CLIENT_CONFIG_ENDPOINT,
+    AWAIT_TRANSACTION_ENDPOINT, CHAIN_ID_ENDPOINT, CLIENT_CONFIG_ENDPOINT,
     CLIENT_CONFIG_JSON_ENDPOINT, CONSENSUS_ORD_LATENCY_ENDPOINT, FEDERATION_ID_ENDPOINT,
     FEDIMINTD_VERSION_ENDPOINT, INVITE_CODE_ENDPOINT, P2P_CONNECTION_STATUS_ENDPOINT,
-    RECOVER_ENDPOINT, SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SESSION_COUNT_ENDPOINT,
-    SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT,
-    SUBMIT_TRANSACTION_ENDPOINT, VERSION_ENDPOINT,
+    SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT,
+    SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
+    VERSION_ENDPOINT,
 };
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::{Audit, AuditSummary};
@@ -30,7 +28,6 @@ use fedimint_core::module::{
     SerdeModuleEncoding, SerdeModuleEncodingBase64, SupportedApiVersionsSummary, api_endpoint,
 };
 use fedimint_core::net::auth::GuardianAuthToken;
-use fedimint_core::secp256k1::{PublicKey, SECP256K1};
 use fedimint_core::session_outcome::{
     SessionOutcome, SessionStatus, SessionStatusV2, SignedSessionOutcome,
 };
@@ -48,7 +45,7 @@ use fedimint_server_core::dashboard_ui::{
 use fedimint_server_core::{DynServerModule, ServerModuleRegistry, ServerModuleRegistryExt};
 use futures::StreamExt;
 use tokio::sync::watch::{self, Receiver, Sender};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG};
 use crate::config::{ServerConfig, legacy_consensus_config_hash};
@@ -239,46 +236,6 @@ impl ConsensusApi {
             .expect("Error building tar archive");
 
         GuardianConfigBackup { tar_archive_bytes }
-    }
-
-    async fn handle_backup_request(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        request: SignedBackupRequest,
-    ) -> Result<(), ApiError> {
-        let request = request
-            .verify_valid(SECP256K1)
-            .map_err(|_| ApiError::bad_request("invalid request".into()))?;
-
-        if request.payload.len() > BACKUP_REQUEST_MAX_PAYLOAD_SIZE_BYTES {
-            return Err(ApiError::bad_request("snapshot too large".into()));
-        }
-        debug!(target: LOG_NET_API, id = %request.id, len = request.payload.len(), "Received client backup request");
-        if let Some(prev) = dbtx.get_value(&ClientBackupKey(request.id)).await
-            && request.timestamp <= prev.timestamp
-        {
-            debug!(target: LOG_NET_API, id = %request.id, len = request.payload.len(), "Received client backup request with old timestamp - ignoring");
-            return Err(ApiError::bad_request("timestamp too small".into()));
-        }
-
-        info!(target: LOG_NET_API, id = %request.id, len = request.payload.len(), "Storing new client backup");
-        dbtx.insert_entry(
-            &ClientBackupKey(request.id),
-            &ClientBackupSnapshot {
-                timestamp: request.timestamp,
-                data: request.payload.clone(),
-            },
-        )
-        .await;
-        Ok(())
-    }
-
-    async fn handle_recover_request(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        id: PublicKey,
-    ) -> Option<ClientBackupSnapshot> {
-        dbtx.get_value(&ClientBackupKey(id)).await
     }
 
     /// Returns the tagged fedimintd version currently running
@@ -542,29 +499,6 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
             ApiVersion::new(0, 5),
             async |fedimint: &ConsensusApi, _context, index: u64| -> SerdeModuleEncodingBase64<SessionStatusV2> {
                 Ok((&fedimint.session_status(index).await).into())
-            }
-        },
-        api_endpoint! {
-            BACKUP_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, context, request: SignedBackupRequest| -> () {
-                let db = context.db();
-                let mut dbtx = db.begin_transaction().await;
-                fedimint
-                    .handle_backup_request(&mut dbtx.to_ref_nc(), request).await?;
-                dbtx.commit_tx_result().await?;
-                Ok(())
-
-            }
-        },
-        api_endpoint! {
-            RECOVER_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, context, id: PublicKey| -> Option<ClientBackupSnapshot> {
-                let db = context.db();
-                let mut dbtx = db.begin_transaction_nc().await;
-                Ok(fedimint
-                    .handle_recover_request(&mut dbtx, id).await)
             }
         },
         api_endpoint! {

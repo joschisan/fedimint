@@ -11,8 +11,6 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use bitcoin::secp256k1;
 pub use error::{FederationError, OutputOutcomeError};
-use fedimint_core::backup::ClientBackupSnapshot;
-use fedimint_core::core::backup::SignedBackupRequest;
 use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, OutputOutcome};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -452,13 +450,6 @@ pub trait IGlobalFederationApi: IRawFederationApi {
     async fn session_count(&self) -> FederationResult<u64>;
 
     async fn await_transaction(&self, txid: TransactionId) -> TransactionId;
-
-    async fn upload_backup(&self, request: &SignedBackupRequest) -> FederationResult<()>;
-
-    async fn download_backup(
-        &self,
-        id: &secp256k1::PublicKey,
-    ) -> FederationResult<BTreeMap<PeerId, Option<ClientBackupSnapshot>>>;
 
     /// Returns the chain ID (bitcoin block hash at height 1) from the
     /// federation
