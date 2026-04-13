@@ -24,17 +24,15 @@ use fedimint_core::db::{
 #[allow(deprecated)]
 use fedimint_core::endpoint_constants::AWAIT_OUTPUT_OUTCOME_ENDPOINT;
 use fedimint_core::endpoint_constants::{
-    API_ANNOUNCEMENTS_ENDPOINT, AUDIT_ENDPOINT, AUTH_ENDPOINT, AWAIT_OUTPUTS_OUTCOMES_ENDPOINT,
-    AWAIT_SESSION_OUTCOME_ENDPOINT, AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT,
-    AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT, BACKUP_STATISTICS_ENDPOINT, CHAIN_ID_ENDPOINT,
-    CHANGE_PASSWORD_ENDPOINT, CLIENT_CONFIG_ENDPOINT, CLIENT_CONFIG_JSON_ENDPOINT,
+    API_ANNOUNCEMENTS_ENDPOINT, AWAIT_OUTPUTS_OUTCOMES_ENDPOINT, AWAIT_SESSION_OUTCOME_ENDPOINT,
+    AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT, AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT,
+    CHAIN_ID_ENDPOINT, CLIENT_CONFIG_ENDPOINT, CLIENT_CONFIG_JSON_ENDPOINT,
     CONSENSUS_ORD_LATENCY_ENDPOINT, FEDERATION_ID_ENDPOINT, FEDIMINTD_VERSION_ENDPOINT,
-    GUARDIAN_CONFIG_BACKUP_ENDPOINT, GUARDIAN_METADATA_ENDPOINT, INVITE_CODE_ENDPOINT,
-    P2P_CONNECTION_STATUS_ENDPOINT, RECOVER_ENDPOINT, SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT,
-    SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT,
-    SETUP_STATUS_ENDPOINT, SHUTDOWN_ENDPOINT, SIGN_API_ANNOUNCEMENT_ENDPOINT,
-    SIGN_GUARDIAN_METADATA_ENDPOINT, STATUS_ENDPOINT, SUBMIT_API_ANNOUNCEMENT_ENDPOINT,
-    SUBMIT_GUARDIAN_METADATA_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT, VERSION_ENDPOINT,
+    GUARDIAN_METADATA_ENDPOINT, INVITE_CODE_ENDPOINT, P2P_CONNECTION_STATUS_ENDPOINT,
+    RECOVER_ENDPOINT, SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SESSION_COUNT_ENDPOINT,
+    SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT, STATUS_ENDPOINT,
+    SUBMIT_API_ANNOUNCEMENT_ENDPOINT, SUBMIT_GUARDIAN_METADATA_ENDPOINT,
+    SUBMIT_TRANSACTION_ENDPOINT, VERSION_ENDPOINT,
 };
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::{Audit, AuditSummary};
@@ -43,9 +41,9 @@ use fedimint_core::module::{
     SerdeModuleEncoding, SerdeModuleEncodingBase64, SupportedApiVersionsSummary, api_endpoint,
 };
 use fedimint_core::net::api_announcement::{
-    ApiAnnouncement, SignedApiAnnouncement, SignedApiAnnouncementSubmission,
+    SignedApiAnnouncement, SignedApiAnnouncementSubmission,
 };
-use fedimint_core::net::auth::{GuardianAuthToken, check_auth};
+use fedimint_core::net::auth::GuardianAuthToken;
 use fedimint_core::secp256k1::{PublicKey, SECP256K1};
 use fedimint_core::session_outcome::{
     SessionOutcome, SessionStatus, SessionStatusV2, SignedSessionOutcome,
@@ -55,7 +53,7 @@ use fedimint_core::transaction::{
     SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
 };
 use fedimint_core::util::{FmtCompact, SafeUrl};
-use fedimint_core::{ChainId, OutPoint, OutPointRange, PeerId, TransactionId, secp256k1};
+use fedimint_core::{ChainId, OutPoint, OutPointRange, PeerId, TransactionId};
 use fedimint_logging::LOG_NET_API;
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::dashboard_ui::{
@@ -312,10 +310,6 @@ impl ConsensusApi {
         })
     }
 
-    fn shutdown(&self, index: Option<u64>) {
-        self.shutdown_sender.send_replace(index);
-    }
-
     async fn get_federation_audit(&self) -> ApiResult<AuditSummary> {
         let mut dbtx = self.db.begin_transaction_nc().await;
         // Writes are related to compacting audit keys, which we can safely ignore
@@ -525,39 +519,6 @@ impl ConsensusApi {
             })
     }
 
-    async fn sign_api_announcement(&self, new_url: SafeUrl) -> SignedApiAnnouncement {
-        self.db
-            .autocommit(
-                |dbtx, _| {
-                    let new_url_inner = new_url.clone();
-                    Box::pin(async move {
-                        let new_nonce = dbtx
-                            .get_value(&ApiAnnouncementKey(self.cfg.local.identity))
-                            .await
-                            .map_or(0, |a| a.api_announcement.nonce + 1);
-                        let announcement = ApiAnnouncement {
-                            api_url: new_url_inner,
-                            nonce: new_nonce,
-                        };
-                        let ctx = secp256k1::Secp256k1::new();
-                        let signed_announcement = announcement
-                            .sign(&ctx, &self.cfg.private.broadcast_secret_key.keypair(&ctx));
-
-                        dbtx.insert_entry(
-                            &ApiAnnouncementKey(self.cfg.local.identity),
-                            &signed_announcement,
-                        )
-                        .await;
-
-                        Result::<_, ()>::Ok(signed_announcement)
-                    })
-                },
-                None,
-            )
-            .await
-            .expect("Will not terminate on error")
-    }
-
     async fn guardian_metadata_list(
         &self,
     ) -> BTreeMap<PeerId, fedimint_core::net::guardian_metadata::SignedGuardianMetadata> {
@@ -616,36 +577,6 @@ impl ConsensusApi {
         dbtx.commit_tx().await;
 
         Ok(())
-    }
-
-    async fn sign_guardian_metadata(
-        &self,
-        new_metadata: fedimint_core::net::guardian_metadata::GuardianMetadata,
-    ) -> fedimint_core::net::guardian_metadata::SignedGuardianMetadata {
-        use crate::net::api::guardian_metadata::GuardianMetadataKey;
-
-        let ctx = secp256k1::Secp256k1::new();
-        let signed_metadata =
-            new_metadata.sign(&ctx, &self.cfg.private.broadcast_secret_key.keypair(&ctx));
-
-        self.db
-            .autocommit(
-                |dbtx, _| {
-                    let signed_metadata_inner = signed_metadata.clone();
-                    Box::pin(async move {
-                        dbtx.insert_entry(
-                            &GuardianMetadataKey(self.cfg.local.identity),
-                            &signed_metadata_inner,
-                        )
-                        .await;
-
-                        Result::<_, ()>::Ok(signed_metadata_inner)
-                    })
-                },
-                None,
-            )
-            .await
-            .expect("Will not terminate on error")
     }
 
     /// Changes the guardian password by re-encrypting the private config and
@@ -972,32 +903,6 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
             }
         },
         api_endpoint! {
-            SHUTDOWN_ENDPOINT,
-            ApiVersion::new(0, 3),
-            async |fedimint: &ConsensusApi, context, index: Option<u64>| -> () {
-                check_auth(context)?;
-                fedimint.shutdown(index);
-                Ok(())
-            }
-        },
-        api_endpoint! {
-            AUDIT_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, context, _v: ()| -> AuditSummary {
-                check_auth(context)?;
-                Ok(fedimint.get_federation_audit().await?)
-            }
-        },
-        api_endpoint! {
-            GUARDIAN_CONFIG_BACKUP_ENDPOINT,
-            ApiVersion::new(0, 2),
-            async |fedimint: &ConsensusApi, context, _v: ()| -> GuardianConfigBackup {
-                let auth = check_auth(context)?;
-                let password = context.request_auth().expect("Auth was checked before").as_str().to_string();
-                Ok(fedimint.get_guardian_config_backup(&password, &auth))
-            }
-        },
-        api_endpoint! {
             BACKUP_ENDPOINT,
             ApiVersion::new(0, 0),
             async |fedimint: &ConsensusApi, context, request: SignedBackupRequest| -> () {
@@ -1021,14 +926,6 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
             }
         },
         api_endpoint! {
-            AUTH_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |_fedimint: &ConsensusApi, context, _v: ()| -> () {
-                check_auth(context)?;
-                Ok(())
-            }
-        },
-        api_endpoint! {
             API_ANNOUNCEMENTS_ENDPOINT,
             ApiVersion::new(0, 3),
             async |fedimint: &ConsensusApi, _context, _v: ()| -> BTreeMap<PeerId, SignedApiAnnouncement> {
@@ -1040,14 +937,6 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
             ApiVersion::new(0, 3),
             async |fedimint: &ConsensusApi, _context, submission: SignedApiAnnouncementSubmission| -> () {
                 fedimint.submit_api_announcement(submission.peer_id, submission.signed_api_announcement).await
-            }
-        },
-        api_endpoint! {
-            SIGN_API_ANNOUNCEMENT_ENDPOINT,
-            ApiVersion::new(0, 3),
-            async |fedimint: &ConsensusApi, context, new_url: SafeUrl| -> SignedApiAnnouncement {
-                check_auth(context)?;
-                Ok(fedimint.sign_api_announcement(new_url).await)
             }
         },
         api_endpoint! {
@@ -1065,43 +954,10 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
             }
         },
         api_endpoint! {
-            SIGN_GUARDIAN_METADATA_ENDPOINT,
-            ApiVersion::new(0, 9),
-            async |fedimint: &ConsensusApi, context, metadata: fedimint_core::net::guardian_metadata::GuardianMetadata| -> fedimint_core::net::guardian_metadata::SignedGuardianMetadata {
-                check_auth(context)?;
-                Ok(fedimint.sign_guardian_metadata(metadata).await)
-            }
-        },
-        api_endpoint! {
             FEDIMINTD_VERSION_ENDPOINT,
             ApiVersion::new(0, 4),
             async |fedimint: &ConsensusApi, _context, _v: ()| -> String {
                 Ok(fedimint.fedimintd_version())
-            }
-        },
-        api_endpoint! {
-            BACKUP_STATISTICS_ENDPOINT,
-            ApiVersion::new(0, 5),
-            async |_fedimint: &ConsensusApi, context, _v: ()| -> BackupStatistics {
-                check_auth(context)?;
-                let db = context.db();
-                let mut dbtx = db.begin_transaction_nc().await;
-                Ok(backup_statistics_static(&mut dbtx).await)
-            }
-        },
-        api_endpoint! {
-            CHANGE_PASSWORD_ENDPOINT,
-            ApiVersion::new(0, 6),
-            async |fedimint: &ConsensusApi, context, new_password: String| -> () {
-                let auth = check_auth(context)?;
-                fedimint.change_guardian_password(&new_password, &auth)?;
-                let task_group = fedimint.task_group.clone();
-                fedimint_core::runtime::spawn("shutdown after password change",  async move {
-                    info!(target: LOG_NET_API, "Will shutdown after password change");
-                    fedimint_core:: runtime::sleep(Duration::from_secs(1)).await;
-                    task_group.shutdown();
-                });
-                Ok(())
             }
         },
         api_endpoint! {

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
-use fedimint_server_cli_core::*;
+use fedimint_server_cli_core::{self as cli, *};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -25,6 +25,8 @@ enum Commands {
     /// Setup commands (DKG)
     #[command(subcommand)]
     Setup(SetupCommands),
+    /// Show federation audit summary
+    Audit,
     /// Module admin commands
     #[command(subcommand)]
     Module(ModuleCommands),
@@ -115,6 +117,7 @@ fn main() -> Result<()> {
     let addr = &cli.address;
 
     let result = match cli.command {
+        Commands::Audit => request(addr, cli::ROUTE_AUDIT, ())?,
         Commands::Setup(cmd) => match cmd {
             SetupCommands::Status => request(addr, ROUTE_SETUP_STATUS, ())?,
             SetupCommands::SetLocalParams {

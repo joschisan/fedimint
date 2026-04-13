@@ -25,7 +25,6 @@ use fedimint_core::module::{
     InputMeta, ModuleConsensusVersion, ModuleInit, SupportedModuleApiVersions,
     TransactionItemAmounts, api_endpoint,
 };
-use fedimint_core::net::auth::check_auth;
 use fedimint_core::task::timeout;
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::SafeUrl;
@@ -38,9 +37,9 @@ use fedimint_lnv2_common::config::{
 };
 use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract};
 use fedimint_lnv2_common::endpoint_constants::{
-    ADD_GATEWAY_ENDPOINT, AWAIT_INCOMING_CONTRACT_ENDPOINT, AWAIT_INCOMING_CONTRACTS_ENDPOINT,
-    AWAIT_PREIMAGE_ENDPOINT, CONSENSUS_BLOCK_COUNT_ENDPOINT, DECRYPTION_KEY_SHARE_ENDPOINT,
-    GATEWAYS_ENDPOINT, OUTGOING_CONTRACT_EXPIRATION_ENDPOINT, REMOVE_GATEWAY_ENDPOINT,
+    AWAIT_INCOMING_CONTRACT_ENDPOINT, AWAIT_INCOMING_CONTRACTS_ENDPOINT, AWAIT_PREIMAGE_ENDPOINT,
+    CONSENSUS_BLOCK_COUNT_ENDPOINT, DECRYPTION_KEY_SHARE_ENDPOINT, GATEWAYS_ENDPOINT,
+    OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
 };
 use fedimint_lnv2_common::{
     ContractId, LightningCommonInit, LightningConsensusItem, LightningInput, LightningInputError,
@@ -623,28 +622,6 @@ impl ServerModule for Lightning {
                     }
 
                     Ok(module.await_incoming_contracts(db, params.0, params.1).await)
-                }
-            },
-            api_endpoint! {
-                ADD_GATEWAY_ENDPOINT,
-                ApiVersion::new(0, 0),
-                async |_module: &Lightning, context, gateway: SafeUrl| -> bool {
-                    check_auth(context)?;
-
-                    let db = context.db();
-
-                    Ok(Lightning::add_gateway(db, gateway).await)
-                }
-            },
-            api_endpoint! {
-                REMOVE_GATEWAY_ENDPOINT,
-                ApiVersion::new(0, 0),
-                async |_module: &Lightning, context, gateway: SafeUrl| -> bool {
-                    check_auth(context)?;
-
-                    let db = context.db();
-
-                    Ok(Lightning::remove_gateway(db, gateway).await)
                 }
             },
             api_endpoint! {

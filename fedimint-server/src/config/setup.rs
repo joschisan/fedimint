@@ -6,23 +6,19 @@ use std::sync::Arc;
 
 use anyhow::{Context, ensure};
 use async_trait::async_trait;
-use fedimint_core::admin_client::{SetLocalParamsRequest, SetupStatus};
+use fedimint_core::admin_client::SetupStatus;
 use fedimint_core::base32::FEDIMINT_PREFIX;
 use fedimint_core::config::META_FEDERATION_NAME_KEY;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::Database;
-use fedimint_core::endpoint_constants::{
-    ADD_PEER_SETUP_CODE_ENDPOINT, GET_SETUP_CODE_ENDPOINT, RESET_PEER_SETUP_CODES_ENDPOINT,
-    SET_LOCAL_PARAMS_ENDPOINT, SETUP_STATUS_ENDPOINT, START_DKG_ENDPOINT,
-};
+use fedimint_core::endpoint_constants::SETUP_STATUS_ENDPOINT;
 use fedimint_core::envs::{
     FM_DISABLE_BASE_FEES_ENV, FM_IROH_API_SECRET_KEY_OVERRIDE_ENV,
     FM_IROH_P2P_SECRET_KEY_OVERRIDE_ENV, is_env_var_set,
 };
 use fedimint_core::module::{
-    ApiAuth, ApiEndpoint, ApiEndpointContext, ApiError, ApiRequestErased, ApiVersion, api_endpoint,
+    ApiAuth, ApiEndpoint, ApiEndpointContext, ApiRequestErased, ApiVersion, api_endpoint,
 };
-use fedimint_core::net::auth::check_auth;
 use fedimint_core::setup_code::PeerEndpoints;
 use fedimint_core::{PeerId, base32};
 use fedimint_server_core::setup_ui::ISetupApi;
@@ -512,66 +508,11 @@ impl HasApiContext<SetupApi> for SetupApi {
 }
 
 pub fn server_endpoints() -> Vec<ApiEndpoint<SetupApi>> {
-    vec![
-        api_endpoint! {
-            SETUP_STATUS_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |config: &SetupApi, _c, _v: ()| -> SetupStatus {
-                Ok(config.setup_status().await)
-            }
-        },
-        api_endpoint! {
-            SET_LOCAL_PARAMS_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |config: &SetupApi, context, request: SetLocalParamsRequest| -> String {
-                let auth = context
-                    .request_auth()
-                    .ok_or(ApiError::bad_request("Missing password".to_string()))?;
-
-                 config.set_local_parameters(auth, request.name, request.federation_name, request.disable_base_fees, request.enabled_modules, request.federation_size)
-                    .await
-                    .map_err(|e| ApiError::bad_request(e.to_string()))
-            }
-        },
-        api_endpoint! {
-            ADD_PEER_SETUP_CODE_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |config: &SetupApi, context, info: String| -> String {
-                check_auth(context)?;
-
-                config.add_peer_setup_code(info.clone())
-                    .await
-                    .map_err(|e|ApiError::bad_request(e.to_string()))
-            }
-        },
-        api_endpoint! {
-            RESET_PEER_SETUP_CODES_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |config: &SetupApi, context, _v: ()| -> () {
-                check_auth(context)?;
-
-                config.reset_setup_codes().await;
-
-                Ok(())
-            }
-        },
-        api_endpoint! {
-            GET_SETUP_CODE_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |config: &SetupApi, context, _request: ()| -> Option<String> {
-                check_auth(context)?;
-
-                Ok(config.setup_code().await)
-            }
-        },
-        api_endpoint! {
-            START_DKG_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |config: &SetupApi, context, _v: ()| -> () {
-                check_auth(context)?;
-
-                config.start_dkg().await.map_err(|e| ApiError::server_error(e.to_string()))
-            }
-        },
-    ]
+    vec![api_endpoint! {
+        SETUP_STATUS_ENDPOINT,
+        ApiVersion::new(0, 0),
+        async |config: &SetupApi, _c, _v: ()| -> SetupStatus {
+            Ok(config.setup_status().await)
+        }
+    }]
 }

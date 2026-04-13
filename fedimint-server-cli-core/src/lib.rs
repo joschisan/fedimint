@@ -8,6 +8,9 @@ pub const ROUTE_SETUP_SET_LOCAL_PARAMS: &str = "/setup/set-local-params";
 pub const ROUTE_SETUP_ADD_PEER: &str = "/setup/add-peer";
 pub const ROUTE_SETUP_START_DKG: &str = "/setup/start-dkg";
 
+// Dashboard routes
+pub const ROUTE_AUDIT: &str = "/audit";
+
 // Module routes
 pub const ROUTE_MODULE_WALLET_TOTAL_VALUE: &str = "/module/walletv2/total-value";
 pub const ROUTE_MODULE_WALLET_BLOCK_COUNT: &str = "/module/walletv2/block-count";

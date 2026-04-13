@@ -247,8 +247,8 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
     use fedimint_lnv2_server::Lightning;
     use fedimint_server::cli::CliError;
     use fedimint_server_cli_core::{
-        GatewayUrlRequest, ROUTE_MODULE_LNV2_GATEWAY_ADD, ROUTE_MODULE_LNV2_GATEWAY_LIST,
-        ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
+        GatewayUrlRequest, ROUTE_AUDIT, ROUTE_MODULE_LNV2_GATEWAY_ADD,
+        ROUTE_MODULE_LNV2_GATEWAY_LIST, ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
     };
     use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi};
 
@@ -289,7 +289,14 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         Ok(Json(lnv2.gateways_ui().await))
     }
 
+    async fn audit(
+        State(api): State<DynDashboardApi>,
+    ) -> Result<Json<fedimint_core::module::audit::AuditSummary>, CliError> {
+        Ok(Json(api.federation_audit().await))
+    }
+
     axum::Router::new()
+        .route(ROUTE_AUDIT, post(audit))
         .route(ROUTE_MODULE_LNV2_GATEWAY_ADD, post(lnv2_gateway_add))
         .route(ROUTE_MODULE_LNV2_GATEWAY_REMOVE, post(lnv2_gateway_remove))
         .route(ROUTE_MODULE_LNV2_GATEWAY_LIST, post(lnv2_gateway_list))
