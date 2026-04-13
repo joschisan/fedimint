@@ -4,7 +4,7 @@ use fedimint_client::DynGlobalClientContext;
 use fedimint_client_module::sm::{ClientSMDatabaseTransaction, State, StateTransition};
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_gateway_common::{InterceptPaymentResponse, PaymentAction, Preimage};
+use crate::{InterceptPaymentResponse, PaymentAction, Preimage};
 use fedimint_lnv2_common::contracts::PaymentImage;
 
 use super::FinalReceiveState;

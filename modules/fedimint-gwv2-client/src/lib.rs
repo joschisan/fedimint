@@ -32,7 +32,7 @@ use fedimint_core::secp256k1::Keypair;
 use fedimint_core::time::now;
 use fedimint_core::util::Spanned;
 use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send, secp256k1};
-use fedimint_gateway_common::{InterceptPaymentResponse, LightningRpcError};
+use fedimint_core::hex::ToHex;
 use fedimint_lnv2_common::config::LightningClientConfig;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::SendPaymentPayload;
@@ -644,4 +644,81 @@ pub trait IGatewayClientV2: Debug + Send + Sync {
         client: &ClientHandleArc,
         invoice: &Bolt11Invoice,
     ) -> anyhow::Result<FinalReceiveState>;
+}
+
+// --- Types shared with fedimint-gateway-daemon ---
+
+#[derive(
+    thiserror::Error,
+    Debug,
+    Serialize,
+    Deserialize,
+    Encodable,
+    Decodable,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+)]
+pub enum LightningRpcError {
+    #[error("Failed to connect to Lightning node")]
+    FailedToConnect,
+    #[error("Failed to retrieve node info: {failure_reason}")]
+    FailedToGetNodeInfo { failure_reason: String },
+    #[error("Failed to retrieve route hints: {failure_reason}")]
+    FailedToGetRouteHints { failure_reason: String },
+    #[error("Payment failed: {failure_reason}")]
+    FailedPayment { failure_reason: String },
+    #[error("Failed to route HTLCs: {failure_reason}")]
+    FailedToRouteHtlcs { failure_reason: String },
+    #[error("Failed to complete HTLC: {failure_reason}")]
+    FailedToCompleteHtlc { failure_reason: String },
+    #[error("Failed to open channel: {failure_reason}")]
+    FailedToOpenChannel { failure_reason: String },
+    #[error("Failed to close channel: {failure_reason}")]
+    FailedToCloseChannelsWithPeer { failure_reason: String },
+    #[error("Failed to get Invoice: {failure_reason}")]
+    FailedToGetInvoice { failure_reason: String },
+    #[error("Failed to list transactions: {failure_reason}")]
+    FailedToListTransactions { failure_reason: String },
+    #[error("Failed to get funding address: {failure_reason}")]
+    FailedToGetLnOnchainAddress { failure_reason: String },
+    #[error("Failed to withdraw funds on-chain: {failure_reason}")]
+    FailedToWithdrawOnchain { failure_reason: String },
+    #[error("Failed to connect to peer: {failure_reason}")]
+    FailedToConnectToPeer { failure_reason: String },
+    #[error("Failed to list active channels: {failure_reason}")]
+    FailedToListChannels { failure_reason: String },
+    #[error("Failed to get balances: {failure_reason}")]
+    FailedToGetBalances { failure_reason: String },
+    #[error("Failed to sync to chain: {failure_reason}")]
+    FailedToSyncToChain { failure_reason: String },
+    #[error("Invalid metadata: {failure_reason}")]
+    InvalidMetadata { failure_reason: String },
+    #[error("Bolt12 Error: {failure_reason}")]
+    Bolt12Error { failure_reason: String },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InterceptPaymentResponse {
+    pub incoming_chan_id: u64,
+    pub htlc_id: u64,
+    pub payment_hash: sha256::Hash,
+    pub action: PaymentAction,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum PaymentAction {
+    Settle(Preimage),
+    Cancel,
+    Forward,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
+pub struct Preimage(pub [u8; 32]);
+
+impl std::fmt::Display for Preimage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.encode_hex::<String>())
+    }
 }

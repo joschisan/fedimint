@@ -29,7 +29,7 @@ use fedimint_gateway_cli_core::{
     ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND,
     ROUTE_MODULE_WALLET_RECEIVE, WalletReceiveRequest, WalletReceiveResponse,
 };
-use fedimint_gateway_common::Preimage;
+use fedimint_gwv2_client::Preimage;
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule;
 use hex::ToHex;
@@ -81,8 +81,8 @@ impl IntoResponse for CliError {
     }
 }
 
-impl From<fedimint_gateway_common::LightningRpcError> for CliError {
-    fn from(e: fedimint_gateway_common::LightningRpcError) -> Self {
+impl From<fedimint_gwv2_client::LightningRpcError> for CliError {
+    fn from(e: fedimint_gwv2_client::LightningRpcError) -> Self {
         Self::internal(e)
     }
 }

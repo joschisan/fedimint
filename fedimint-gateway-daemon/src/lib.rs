@@ -42,12 +42,11 @@ use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, Spanned};
 use fedimint_core::{Amount, PeerId, crit};
 use fedimint_gateway_cli_core::FederationInfo;
-use fedimint_gateway_common::{
-    LightningContext, LightningRpcError, PaymentAction, PaymentFee, Preimage,
-};
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
+    LightningRpcError, PaymentAction, Preimage,
 };
+use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_lnurl::VerifyResponse;
 use fedimint_lnv2_common::Bolt11InvoiceDescription;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
@@ -76,6 +75,14 @@ pub const DB_FILE: &str = "gatewayd.db";
 
 /// Name of the folder for LDK node data.
 pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
+
+#[derive(Debug, Clone)]
+pub struct LightningContext {
+    pub lightning_public_key: PublicKey,
+    pub lightning_alias: String,
+    pub lightning_network: Network,
+    pub supports_private_payments: bool,
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -289,13 +296,6 @@ impl AppState {
 
         let context = self.get_lightning_context().await?;
 
-        let to_lnv2_fee = |fee: PaymentFee| -> fedimint_lnv2_common::gateway_api::PaymentFee {
-            fedimint_lnv2_common::gateway_api::PaymentFee {
-                base: fee.base,
-                parts_per_million: fee.parts_per_million,
-            }
-        };
-
         Ok(self
             .public_key_v2(federation_id)
             .await
@@ -303,11 +303,11 @@ impl AppState {
                 lightning_public_key: context.lightning_public_key,
                 lightning_alias: Some(context.lightning_alias.clone()),
                 module_public_key,
-                send_fee_default: to_lnv2_fee(self.routing_fees + self.transaction_fees),
-                send_fee_minimum: to_lnv2_fee(self.transaction_fees),
+                send_fee_default: self.routing_fees + self.transaction_fees,
+                send_fee_minimum: self.transaction_fees,
                 expiration_delta_default: 1440,
                 expiration_delta_minimum: EXPIRATION_DELTA_MINIMUM_V2,
-                receive_fee: to_lnv2_fee(self.transaction_fees),
+                receive_fee: self.transaction_fees,
             }))
     }
 
@@ -530,7 +530,7 @@ impl AppState {
 impl IGatewayClientV2 for AppState {
     async fn complete_htlc(
         &self,
-        htlc_response: fedimint_gateway_common::InterceptPaymentResponse,
+        htlc_response: fedimint_gwv2_client::InterceptPaymentResponse,
     ) {
         let ph = PaymentHash(*htlc_response.payment_hash.as_byte_array());
         let claimable_amount_msat = 999_999_999_999_999;

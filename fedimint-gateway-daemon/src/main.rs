@@ -24,7 +24,7 @@ use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
 use fedimint_core::{Amount, fedimint_build_code_version_env};
-use fedimint_gateway_common::PaymentFee;
+use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_gateway_daemon::client::GatewayClientFactory;
 use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
 use fedimint_gwv2_client::GatewayClientModuleV2;
