@@ -228,7 +228,15 @@ impl TestEnv {
         let walletv2 = client.get_first_module::<WalletClientModule>()?;
         let addr = walletv2.receive().await;
 
-        self.send_to_address(&addr, amount)?;
+        let txid = self.send_to_address(&addr, amount)?;
+
+        retry("pegin tx in mempool", || async {
+            block_in_place(|| self.bitcoind.get_mempool_entry(&txid))
+                .map(|_| ())
+                .context("pegin tx not in mempool yet")
+        })
+        .await?;
+
         self.mine_blocks(10);
 
         retry("pegin balance", || async {

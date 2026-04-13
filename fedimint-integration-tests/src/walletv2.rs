@@ -1,6 +1,8 @@
-use anyhow::ensure;
+use anyhow::{Context, ensure};
+use bitcoincore_rpc::RpcApi;
 use fedimint_core::Amount;
 use fedimint_walletv2_client::{FinalSendOperationState, WalletClientModule};
+use tokio::task::block_in_place;
 use tracing::info;
 
 use crate::env::{TestEnv, retry};
@@ -42,11 +44,18 @@ pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
         panic!("Circular deposit send operation failed: {state:?}");
     };
 
-    info!(%txid, "Send confirmed, mining blocks for deposit confirmation");
+    info!(%txid, "Send confirmed, waiting for tx in mempool");
+
+    retry("send tx in mempool", || async {
+        block_in_place(|| env.bitcoind.get_mempool_entry(&txid))
+            .map(|_| ())
+            .context("send tx not in mempool yet")
+    })
+    .await?;
+
+    env.mine_blocks(10);
 
     retry("circular deposit balance", || async {
-        env.mine_blocks(1);
-
         let balance = client_receive.get_balance().await?;
 
         ensure!(

@@ -55,7 +55,7 @@ use send_sm::{SendSMCommon, SendSMState, SendStateMachine};
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator as _;
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::warn;
 
 /// Number of output info entries to scan per batch.
 const SLICE_SIZE: u64 = 1000;
@@ -515,11 +515,6 @@ impl WalletClientModule {
             .module_api
             .output_info_slice(next_output_index, next_output_index + SLICE_SIZE)
             .await?;
-
-        info!(
-            target: LOG_CLIENT_MODULE_WALLETV2,
-            "Scanning for outputs..."
-        );
 
         for output in &outputs {
             if let Some(&address_index) = address_map.get(&output.script) {
