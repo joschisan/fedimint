@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +10,7 @@ pub use fedimint_core::config::{
     PeerUrl, ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
 };
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::envs::{is_env_var_set, is_running_in_test_env};
+use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::{
     ApiAuth, ApiVersion, CORE_CONSENSUS_VERSION, CoreConsensusVersion, MultiApiVersion,
@@ -479,68 +479,6 @@ impl ServerConfig {
         Ok(())
     }
 
-    pub fn trusted_dealer_gen(
-        params: &HashMap<PeerId, ConfigGenParams>,
-        registry: &ServerModuleInitRegistry,
-        code_version_str: &str,
-    ) -> BTreeMap<PeerId, Self> {
-        let peer0 = &params[&PeerId::from(0)];
-
-        let mut broadcast_pks = BTreeMap::new();
-        let mut broadcast_sks = BTreeMap::new();
-        for peer_id in peer0.peer_ids() {
-            let (broadcast_sk, broadcast_pk) = secp256k1::generate_keypair(&mut OsRng);
-            broadcast_pks.insert(peer_id, broadcast_pk);
-            broadcast_sks.insert(peer_id, broadcast_sk);
-        }
-
-        let args = ConfigGenModuleArgs {
-            network: peer0.network,
-            disable_base_fees: peer0.disable_base_fees,
-        };
-
-        // Use legacy module ordering for backwards compatibility tests
-        let use_legacy_order = is_env_var_set("FM_BACKWARDS_COMPATIBILITY_TEST");
-        let module_iter: Vec<_> = if use_legacy_order {
-            registry.iter_legacy_order()
-        } else {
-            registry.iter().collect()
-        };
-
-        let module_configs: BTreeMap<_, _> = module_iter
-            .into_iter()
-            .filter(|(kind, _)| peer0.enabled_modules.contains(kind))
-            .enumerate()
-            .map(|(module_id, (_kind, module_init))| {
-                (
-                    module_id as ModuleInstanceId,
-                    module_init.trusted_dealer_gen(&peer0.peer_ids(), &args),
-                )
-            })
-            .collect();
-
-        let server_config: BTreeMap<_, _> = peer0
-            .peer_ids()
-            .iter()
-            .map(|&id| {
-                let config = ServerConfig::from(
-                    params[&id].clone(),
-                    id,
-                    broadcast_pks.clone(),
-                    *broadcast_sks.get(&id).expect("We created this entry"),
-                    module_configs
-                        .iter()
-                        .map(|(module_id, cfgs)| (*module_id, cfgs[&id].clone()))
-                        .collect(),
-                    code_version_str.to_string(),
-                );
-                (id, config)
-            })
-            .collect();
-
-        server_config
-    }
-
     /// Runs the distributed key gen algorithm
     pub async fn distributed_gen(
         params: &ConfigGenParams,
@@ -550,17 +488,6 @@ impl ServerConfig {
         mut p2p_status_receivers: P2PStatusReceivers,
     ) -> anyhow::Result<Self> {
         let _timing /* logs on drop */ = timing::TimeReporter::new("distributed-gen").info();
-
-        // in case we are running by ourselves, avoid DKG
-        if params.peer_ids().len() == 1 {
-            let server = Self::trusted_dealer_gen(
-                &HashMap::from([(params.identity, params.clone())]),
-                &registry,
-                &code_version_str,
-            );
-
-            return Ok(server[&params.identity].clone());
-        }
 
         info!(
             target: LOG_NET_PEER_DKG,
@@ -653,18 +580,10 @@ impl ServerConfig {
             disable_base_fees: params.disable_base_fees,
         };
 
-        // Use legacy module ordering for backwards compatibility tests
-        let use_legacy_order = is_env_var_set("FM_BACKWARDS_COMPATIBILITY_TEST");
-        let module_iter: Vec<_> = if use_legacy_order {
-            registry.iter_legacy_order()
-        } else {
-            registry.iter().collect()
-        };
-
         let mut module_cfgs = BTreeMap::new();
 
-        for (module_id, (kind, module_init)) in module_iter
-            .into_iter()
+        for (module_id, (kind, module_init)) in registry
+            .iter()
             .filter(|(kind, _)| params.enabled_modules.contains(kind))
             .enumerate()
         {

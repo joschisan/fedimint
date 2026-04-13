@@ -10,8 +10,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow, ensure};
-use bls12_381::{G1Projective, Scalar};
-use fedimint_core::bitcoin::hashes::sha256;
 use fedimint_core::config::{
     ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
     TypedServerModuleConsensusConfig,
@@ -20,7 +18,6 @@ use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{
     Database, DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped,
 };
-use fedimint_core::encoding::Encodable;
 use fedimint_core::envs::{FM_ENABLE_MODULE_LNV2_ENV, is_env_var_set_opt};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
@@ -33,8 +30,7 @@ use fedimint_core::task::timeout;
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{
-    BitcoinHash, InPoint, NumPeers, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send,
-    push_db_pair_items,
+    InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send, push_db_pair_items,
 };
 use fedimint_lnv2_common::config::{
     FeeConsensus, LightningClientConfig, LightningConfig, LightningConfigConsensus,
@@ -60,13 +56,8 @@ use fedimint_server_core::{
 };
 use futures::StreamExt;
 use group::Curve;
-use group::ff::Field;
-use rand::SeedableRng;
-use rand_chacha::ChaChaRng;
 use strum::IntoEnumIterator;
-use tpe::{
-    AggregatePublicKey, DecryptionKeyShare, PublicKeyShare, SecretKeyShare, derive_pk_share,
-};
+use tpe::{DecryptionKeyShare, PublicKeyShare, SecretKeyShare};
 use tracing::trace;
 
 use crate::db::{
@@ -247,40 +238,6 @@ impl ServerModuleInit for LightningInit {
         })
     }
 
-    fn trusted_dealer_gen(
-        &self,
-        peers: &[PeerId],
-        args: &ConfigGenModuleArgs,
-    ) -> BTreeMap<PeerId, ServerModuleConfig> {
-        let tpe_pks = peers
-            .iter()
-            .map(|peer| (*peer, dealer_pk(peers.to_num_peers(), *peer)))
-            .collect::<BTreeMap<PeerId, PublicKeyShare>>();
-
-        peers
-            .iter()
-            .map(|peer| {
-                let cfg = LightningConfig {
-                    consensus: LightningConfigConsensus {
-                        tpe_agg_pk: dealer_agg_pk(),
-                        tpe_pks: tpe_pks.clone(),
-                        fee_consensus: if args.disable_base_fees {
-                            FeeConsensus::zero()
-                        } else {
-                            FeeConsensus::new(0).expect("Relative fee is within range")
-                        },
-                        network: args.network,
-                    },
-                    private: LightningConfigPrivate {
-                        sk: dealer_sk(peers.to_num_peers(), *peer),
-                    },
-                };
-
-                (*peer, cfg.to_erased())
-            })
-            .collect()
-    }
-
     async fn distributed_gen(
         &self,
         peers: &(dyn PeerHandleOps + Send + Sync),
@@ -357,35 +314,6 @@ impl ServerModuleInit for LightningInit {
     fn used_db_prefixes(&self) -> Option<BTreeSet<u8>> {
         Some(DbKeyPrefix::iter().map(|p| p as u8).collect())
     }
-}
-
-fn dealer_agg_pk() -> AggregatePublicKey {
-    AggregatePublicKey((G1Projective::generator() * coefficient(0)).to_affine())
-}
-
-fn dealer_pk(num_peers: NumPeers, peer: PeerId) -> PublicKeyShare {
-    derive_pk_share(&dealer_sk(num_peers, peer))
-}
-
-fn dealer_sk(num_peers: NumPeers, peer: PeerId) -> SecretKeyShare {
-    let x = Scalar::from(peer.to_usize() as u64 + 1);
-
-    // We evaluate the scalar polynomial of degree threshold - 1 at the point x
-    // using the Horner schema.
-
-    let y = (0..num_peers.threshold())
-        .map(|index| coefficient(index as u64))
-        .rev()
-        .reduce(|accumulator, c| accumulator * x + c)
-        .expect("We have at least one coefficient");
-
-    SecretKeyShare(y)
-}
-
-fn coefficient(index: u64) -> Scalar {
-    Scalar::random(&mut ChaChaRng::from_seed(
-        *index.consensus_hash::<sha256::Hash>().as_byte_array(),
-    ))
 }
 
 #[derive(Debug)]

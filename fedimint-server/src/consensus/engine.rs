@@ -85,72 +85,7 @@ impl ConsensusEngine {
 
     #[instrument(target = LOG_CONSENSUS, name = "run", skip_all, fields(id=%self.cfg.local.identity))]
     pub async fn run(self) -> anyhow::Result<()> {
-        if self.num_peers().total() == 1 {
-            self.run_single_guardian(self.task_group.make_handle())
-                .await
-        } else {
-            self.run_consensus(self.task_group.make_handle()).await
-        }
-    }
-
-    pub async fn run_single_guardian(&self, task_handle: TaskHandle) -> anyhow::Result<()> {
-        assert_eq!(self.num_peers(), NumPeers::from(1));
-
-        self.initialize_checkpoint_directory(self.get_finished_session_count().await)?;
-
-        while !task_handle.is_shutting_down() {
-            let session_index = self.get_finished_session_count().await;
-
-            CONSENSUS_SESSION_COUNT.set(session_index as i64);
-
-            let mut item_index = self.pending_accepted_items().await.len() as u64;
-
-            let session_start_time = std::time::Instant::now();
-
-            while let Ok(item) = self.submission_receiver.recv().await {
-                if self
-                    .process_consensus_item(session_index, item_index, item, self.identity())
-                    .await
-                    .is_ok()
-                {
-                    item_index += 1;
-                }
-
-                // we rely on the module consensus items to notice the timeout
-                if session_start_time.elapsed() > Duration::from_mins(1) {
-                    break;
-                }
-            }
-
-            let session_outcome = SessionOutcome {
-                items: self.pending_accepted_items().await,
-            };
-
-            let header = session_outcome.header(session_index);
-            let signature = Keychain::new(&self.cfg).sign_schnorr(&header);
-            let signatures = BTreeMap::from_iter([(self.identity(), signature)]);
-
-            self.complete_session(
-                session_index,
-                SignedSessionOutcome {
-                    session_outcome,
-                    signatures,
-                },
-            )
-            .await;
-
-            self.checkpoint_database(session_index);
-
-            info!(target: LOG_CONSENSUS, "Session {session_index} completed");
-
-            if Some(session_index) == self.shutdown_receiver.borrow().to_owned() {
-                break;
-            }
-        }
-
-        info!(target: LOG_CONSENSUS, "Consensus task shut down");
-
-        Ok(())
+        self.run_consensus(self.task_group.make_handle()).await
     }
 
     pub async fn run_consensus(&self, task_handle: TaskHandle) -> anyhow::Result<()> {

@@ -9,7 +9,6 @@ mod db;
 use std::collections::BTreeMap;
 
 use anyhow::{bail, ensure};
-use bitcoin::hashes::sha256;
 use fedimint_core::config::{
     ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
     TypedServerModuleConsensusConfig,
@@ -27,8 +26,7 @@ use fedimint_core::module::{
     SupportedModuleApiVersions, TransactionItemAmounts, api_endpoint,
 };
 use fedimint_core::{
-    Amount, BitcoinHash, InPoint, NumPeers, NumPeersExt, OutPoint, PeerId, apply,
-    async_trait_maybe_send, push_db_key_items, push_db_pair_items,
+    InPoint, OutPoint, PeerId, apply, async_trait_maybe_send, push_db_key_items, push_db_pair_items,
 };
 use fedimint_mintv2_common::config::{
     FeeConsensus, MintClientConfig, MintConfig, MintConfigConsensus, MintConfigPrivate,
@@ -49,15 +47,9 @@ use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
 use futures::StreamExt;
-use rand::SeedableRng;
-use rand_chacha::ChaChaRng;
 use strum::IntoEnumIterator;
-use tbs::{
-    AggregatePublicKey, BlindedSignatureShare, PublicKeyShare, SecretKeyShare, derive_pk_share,
-};
-use threshold_crypto::ff::Field;
+use tbs::{AggregatePublicKey, BlindedSignatureShare, PublicKeyShare, derive_pk_share};
 use threshold_crypto::group::Curve;
-use threshold_crypto::{G2Projective, Scalar};
 
 use crate::db::{
     BlindedSignatureShareKey, BlindedSignatureSharePrefix, BlindedSignatureShareRecoveryKey,
@@ -162,64 +154,6 @@ impl ServerModuleInit for MintInit {
         })
     }
 
-    fn trusted_dealer_gen(
-        &self,
-        peers: &[PeerId],
-        args: &ConfigGenModuleArgs,
-    ) -> BTreeMap<PeerId, ServerModuleConfig> {
-        let fee_consensus = if args.disable_base_fees {
-            FeeConsensus::zero()
-        } else {
-            FeeConsensus::new(0).expect("Relative fee is within range")
-        };
-
-        let tbs_agg_pks = consensus_denominations()
-            .map(|denomination| (denomination, dealer_agg_pk(denomination.amount())))
-            .collect::<BTreeMap<Denomination, AggregatePublicKey>>();
-
-        let tbs_pks = consensus_denominations()
-            .map(|denomination| {
-                let pks = peers
-                    .iter()
-                    .map(|peer| {
-                        (
-                            *peer,
-                            dealer_pk(denomination.amount(), peers.to_num_peers(), *peer),
-                        )
-                    })
-                    .collect();
-
-                (denomination, pks)
-            })
-            .collect::<BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>>();
-
-        peers
-            .iter()
-            .map(|peer| {
-                let cfg = MintConfig {
-                    consensus: MintConfigConsensus {
-                        tbs_agg_pks: tbs_agg_pks.clone(),
-                        tbs_pks: tbs_pks.clone(),
-                        fee_consensus: fee_consensus.clone(),
-                        amount_unit: AmountUnit::BITCOIN,
-                    },
-                    private: MintConfigPrivate {
-                        tbs_sks: consensus_denominations()
-                            .map(|denomination| {
-                                (
-                                    denomination,
-                                    dealer_sk(denomination.amount(), peers.to_num_peers(), *peer),
-                                )
-                            })
-                            .collect(),
-                    },
-                };
-
-                (*peer, cfg.to_erased())
-            })
-            .collect()
-    }
-
     async fn distributed_gen(
         &self,
         peers: &(dyn PeerHandleOps + Send + Sync),
@@ -298,37 +232,6 @@ impl ServerModuleInit for MintInit {
     ) -> BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<Mint>> {
         BTreeMap::new()
     }
-}
-
-fn dealer_agg_pk(amount: Amount) -> AggregatePublicKey {
-    AggregatePublicKey((G2Projective::generator() * coefficient(amount, 0)).to_affine())
-}
-
-fn dealer_pk(amount: Amount, num_peers: NumPeers, peer: PeerId) -> PublicKeyShare {
-    derive_pk_share(&dealer_sk(amount, num_peers, peer))
-}
-
-fn dealer_sk(amount: Amount, num_peers: NumPeers, peer: PeerId) -> SecretKeyShare {
-    let x = Scalar::from(peer.to_usize() as u64 + 1);
-
-    // We evaluate the scalar polynomial of degree threshold - 1 at the point x
-    // using the Horner schema.
-
-    let y = (0..num_peers.threshold())
-        .map(|index| coefficient(amount, index as u64))
-        .rev()
-        .reduce(|accumulator, c| accumulator * x + c)
-        .expect("We have at least one coefficient");
-
-    SecretKeyShare(y)
-}
-
-fn coefficient(amount: Amount, index: u64) -> Scalar {
-    Scalar::random(&mut ChaChaRng::from_seed(
-        *(amount, index)
-            .consensus_hash::<sha256::Hash>()
-            .as_byte_array(),
-    ))
 }
 
 #[derive(Debug)]

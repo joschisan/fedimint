@@ -212,10 +212,7 @@ impl ISetupApi for SetupApi {
         }
 
         if let Some(size) = federation_size {
-            ensure!(
-                size == 1 || 4 <= size,
-                "Federation size must be 1 or at least 4"
-            );
+            ensure!(size >= 4, "Federation size must be at least 4");
         }
 
         let mut state = self.state.lock().await;
@@ -381,8 +378,8 @@ impl ISetupApi for SetupApi {
         state.setup_codes.insert(our_setup_code.clone());
 
         ensure!(
-            state.setup_codes.len() == 1 || 4 <= state.setup_codes.len(),
-            "The number of guardians is invalid"
+            state.setup_codes.len() >= 4,
+            "Federation size must be at least 4"
         );
 
         if let Some(federation_size) = state

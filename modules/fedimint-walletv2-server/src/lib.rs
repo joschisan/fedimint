@@ -77,7 +77,7 @@ use futures::StreamExt;
 use miniscript::descriptor::Wsh;
 use rand::rngs::OsRng;
 use secp256k1::ecdsa::Signature;
-use secp256k1::{PublicKey, Scalar, SecretKey};
+use secp256k1::{PublicKey, Scalar};
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use tracing::info;
@@ -288,40 +288,6 @@ impl ServerModuleInit for WalletInit {
             args.task_group(),
             args.server_bitcoin_rpc_monitor(),
         ))
-    }
-
-    fn trusted_dealer_gen(
-        &self,
-        peers: &[PeerId],
-        args: &ConfigGenModuleArgs,
-    ) -> BTreeMap<PeerId, ServerModuleConfig> {
-        let fee_consensus = FeeConsensus::new(0).expect("Relative fee is within range");
-
-        let bitcoin_sks = peers
-            .iter()
-            .map(|peer| (*peer, SecretKey::new(&mut secp256k1::rand::thread_rng())))
-            .collect::<BTreeMap<PeerId, SecretKey>>();
-
-        let bitcoin_pks = bitcoin_sks
-            .iter()
-            .map(|(peer, sk)| (*peer, sk.public_key(secp256k1::SECP256K1)))
-            .collect::<BTreeMap<PeerId, PublicKey>>();
-
-        bitcoin_sks
-            .into_iter()
-            .map(|(peer, bitcoin_sk)| {
-                let config = WalletConfig {
-                    private: WalletConfigPrivate { bitcoin_sk },
-                    consensus: WalletConfigConsensus::new(
-                        bitcoin_pks.clone(),
-                        fee_consensus.clone(),
-                        args.network,
-                    ),
-                };
-
-                (peer, config.to_erased())
-            })
-            .collect()
     }
 
     async fn distributed_gen(

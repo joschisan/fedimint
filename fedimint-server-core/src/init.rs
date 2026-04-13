@@ -69,12 +69,6 @@ pub trait IServerModuleInit: IDynCommonModuleInit {
         server_bitcoin_rpc_monitor: ServerBitcoinRpcMonitor,
     ) -> anyhow::Result<DynServerModule>;
 
-    fn trusted_dealer_gen(
-        &self,
-        peers: &[PeerId],
-        args: &ConfigGenModuleArgs,
-    ) -> BTreeMap<PeerId, ServerModuleConfig>;
-
     async fn distributed_gen(
         &self,
         peers: &(dyn PeerHandleOps + Send + Sync),
@@ -188,12 +182,6 @@ pub trait ServerModuleInit: ModuleInit + Sized {
     /// Initialize the module instance from its config
     async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<Self::Module>;
 
-    fn trusted_dealer_gen(
-        &self,
-        peers: &[PeerId],
-        args: &ConfigGenModuleArgs,
-    ) -> BTreeMap<PeerId, ServerModuleConfig>;
-
     async fn distributed_gen(
         &self,
         peers: &(dyn PeerHandleOps + Send + Sync),
@@ -276,14 +264,6 @@ where
         .await?;
 
         Ok(DynServerModule::from(module))
-    }
-
-    fn trusted_dealer_gen(
-        &self,
-        peers: &[PeerId],
-        args: &ConfigGenModuleArgs,
-    ) -> BTreeMap<PeerId, ServerModuleConfig> {
-        <Self as ServerModuleInit>::trusted_dealer_gen(self, peers, args)
     }
 
     async fn distributed_gen(

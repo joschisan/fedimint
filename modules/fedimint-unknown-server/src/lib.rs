@@ -77,26 +77,6 @@ impl ServerModuleInit for UnknownInit {
         Ok(Unknown::new(args.cfg().to_typed()?))
     }
 
-    /// Generates configs for all peers in a trusted manner for testing
-    fn trusted_dealer_gen(
-        &self,
-        peers: &[PeerId],
-        _args: &ConfigGenModuleArgs,
-    ) -> BTreeMap<PeerId, ServerModuleConfig> {
-        // Generate a config for each peer
-        peers
-            .iter()
-            .map(|&peer| {
-                let config = UnknownConfig {
-                    private: UnknownConfigPrivate,
-                    consensus: UnknownConfigConsensus {},
-                };
-                (peer, config.to_erased())
-            })
-            .collect()
-    }
-
-    /// Generates configs for all peers in an untrusted manner
     async fn distributed_gen(
         &self,
         _peers: &(dyn PeerHandleOps + Send + Sync),
