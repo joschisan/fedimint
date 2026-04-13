@@ -628,7 +628,6 @@ impl ClientBuilder {
         let common_api_versions = Client::load_and_refresh_common_api_version_static(
             &config,
             &self.module_inits,
-            connectors.clone(),
             &api,
             &db,
             &task_group,
@@ -968,7 +967,6 @@ impl ClientBuilder {
         client_inner
             .task_group
             .spawn_cancellable("event log ordering task", {
-                let client_inner = client_inner.clone();
                 async move {
                     run_event_log_ordering_task(
                         db.clone(),

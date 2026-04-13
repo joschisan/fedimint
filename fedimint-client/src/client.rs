@@ -1310,7 +1310,6 @@ impl Client {
         Self::load_and_refresh_common_api_version_static(
             &self.config().await,
             &self.module_inits,
-            self.connectors.clone(),
             &self.api,
             &self.db,
             &self.task_group,
@@ -1326,7 +1325,6 @@ impl Client {
     async fn load_and_refresh_common_api_version_static(
         config: &ClientConfig,
         module_init: &ClientModuleInitRegistry,
-        connectors: ConnectionPool,
         api: &DynGlobalApi,
         db: &Database,
         task_group: &TaskGroup,
