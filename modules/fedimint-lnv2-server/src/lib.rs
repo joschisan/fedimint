@@ -240,16 +240,8 @@ impl ServerModuleInit for LightningInit {
                     .peer_ids()
                     .map(|peer| (peer, PublicKeyShare(eval_poly_g1(&polynomial, &peer))))
                     .collect(),
-                input_fee: if args.disable_base_fees {
-                    Amount::ZERO
-                } else {
-                    Amount::from_sats(1)
-                },
-                output_fee: if args.disable_base_fees {
-                    Amount::ZERO
-                } else {
-                    Amount::from_sats(1)
-                },
+                input_fee: Amount::from_sats(1),
+                output_fee: Amount::from_sats(1),
                 network: args.network,
             },
             private: LightningConfigPrivate {

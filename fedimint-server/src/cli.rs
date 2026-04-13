@@ -107,7 +107,6 @@ async fn setup_set_local_params(
             payload.name,
             payload.federation_name,
             None,
-            None,
             payload.federation_size,
         )
         .await

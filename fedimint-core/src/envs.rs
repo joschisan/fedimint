@@ -28,9 +28,6 @@ pub const FM_ENABLE_MODULE_MINTV2_ENV: &str = "FM_ENABLE_MODULE_MINTV2";
 pub const FM_ENABLE_MODULE_WALLET_ENV: &str = "FM_ENABLE_MODULE_WALLET";
 pub const FM_ENABLE_MODULE_WALLETV2_ENV: &str = "FM_ENABLE_MODULE_WALLETV2";
 
-/// Disable mint base fees for testing and development environments
-pub const FM_DISABLE_BASE_FEES_ENV: &str = "FM_DISABLE_BASE_FEES";
-
 /// Print sensitive secrets without redacting them. Use only for debugging.
 pub const FM_DEBUG_SHOW_SECRETS_ENV: &str = "FM_DEBUG_SHOW_SECRETS";
 

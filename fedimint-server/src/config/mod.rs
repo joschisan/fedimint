@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::{Context, bail, format_err};
-use bitcoin::hashes::sha256;
 pub use fedimint_core::config::{
     ClientConfig, FederationId, GlobalClientConfig, JsonWithKind, ModuleInitRegistry, P2PMessage,
     PeerUrl, ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
@@ -165,8 +164,6 @@ pub struct ConfigGenParams {
     pub peers: BTreeMap<PeerId, PeerSetupCode>,
     /// Guardian-defined key-value pairs that will be passed to the client
     pub meta: BTreeMap<String, String>,
-    /// Whether to disable base fees for this federation
-    pub disable_base_fees: bool,
     /// Modules enabled by the leader during setup
     pub enabled_modules: BTreeSet<ModuleKind>,
     /// Bitcoin network for this federation
@@ -479,7 +476,6 @@ impl ServerConfig {
 
         let args = ConfigGenModuleArgs {
             network: params.network,
-            disable_base_fees: params.disable_base_fees,
         };
 
         let mut module_cfgs = BTreeMap::new();

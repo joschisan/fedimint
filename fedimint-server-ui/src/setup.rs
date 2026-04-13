@@ -33,8 +33,6 @@ pub(crate) struct SetupInput {
     pub federation_name: String,
     #[serde(default)]
     pub federation_size: String,
-    #[serde(default)] // will not be sent if disabled
-    pub enable_base_fees: bool,
     #[serde(default)] // list of enabled module kinds
     pub enabled_modules: Vec<String>,
 }
@@ -48,7 +46,6 @@ fn peer_list_section(
     connected_peers: &[String],
     federation_size: Option<u32>,
     cfg_federation_name: &Option<String>,
-    cfg_base_fees_disabled: Option<bool>,
     cfg_enabled_modules: &Option<BTreeSet<ModuleKind>>,
     error: Option<&str>,
 ) -> Markup {
@@ -84,7 +81,6 @@ fn peer_list_section(
                 // All guardians connected — show confirm form
                 @let has_settings = cfg_federation_name.is_some()
                     || federation_size.is_some()
-                    || cfg_base_fees_disabled.is_some()
                     || cfg_enabled_modules.is_some();
 
                 form id="start-dkg-form" hx-post=(START_DKG_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
@@ -100,10 +96,6 @@ fn peer_list_section(
                             (name) " federation has been configured"
                         } @else {
                             "The federation has been configured"
-                        }
-                        @if let Some(disabled) = cfg_base_fees_disabled {
-                            " with base fees "
-                            @if disabled { "disabled" } @else { "enabled" }
                         }
                         @if let Some(modules) = cfg_enabled_modules {
                             " and modules "
@@ -152,14 +144,6 @@ fn setup_form_content(
                     display: block;
                 }
 
-                #base-fees-warning {
-                    display: block;
-                }
-
-                .form-check:has(#enable_base_fees:checked) + #base-fees-warning {
-                    display: none;
-                }
-
                 .accordion-button {
                     background-color: #f8f9fa;
                 }
@@ -202,43 +186,21 @@ fn setup_form_content(
                     input type="text" class="form-control" id="federation_name" name="federation_name" placeholder="Federation Name";
 
                     div class="form-group mt-3" {
-                        label class="form-label" for="federation_size" {
+                        label class="form-label d-block" {
                             "Total number of guardians (including you)"
                         }
-                        select class="form-select" id="federation_size" name="federation_size" {
-                            option value="" selected disabled { "Federation Size" }
-                            option value="1" { "1 — Testing" }
-                            option value="4" { "4 — Recommended" }
-                            option value="5" { "5" }
-                            option value="6" { "6" }
-                            option value="7" { "7 — Recommended" }
-                            option value="8" { "8" }
-                            option value="9" { "9" }
-                            option value="10" { "10 — Recommended" }
-                            option value="11" { "11" }
-                            option value="12" { "12" }
-                            option value="13" { "13 — Recommended" }
-                            option value="14" { "14" }
-                            option value="15" { "15" }
-                            option value="16" { "16 — Recommended" }
-                            option value="17" { "17" }
-                            option value="18" { "18" }
-                            option value="19" { "19 — Recommended" }
-                            option value="20" { "20" }
+                        @for size in [4u32, 7, 10, 13, 16, 19] {
+                            div class="form-check form-check-inline" {
+                                input type="radio" class="form-check-input"
+                                    id=(format!("federation_size_{size}"))
+                                    name="federation_size"
+                                    value=(size.to_string())
+                                    required;
+                                label class="form-check-label" for=(format!("federation_size_{size}")) {
+                                    (size.to_string())
+                                }
+                            }
                         }
-                    }
-
-                    div class="form-check mt-3" {
-                        input type="checkbox" class="form-check-input" id="enable_base_fees" name="enable_base_fees" checked value="true";
-
-                        label class="form-check-label" for="enable_base_fees" {
-                            "Enable base fees for this federation"
-                        }
-                    }
-
-                    div id="base-fees-warning" class="alert alert-warning mt-2" style="font-size: 0.875rem;" {
-                        strong { "Warning: " }
-                        "Base fees discourage spam and wasting storage space. The typical fee is only 1-3 sats per transaction, regardless of the value transferred. We recommend enabling the base fee and it cannot be changed later."
                     }
 
                     div class="accordion mt-3" id="modulesAccordion" {
@@ -317,12 +279,6 @@ async fn setup_submit(
         None
     };
 
-    let disable_base_fees = if input.is_lead {
-        Some(!input.enable_base_fees)
-    } else {
-        None
-    };
-
     let enabled_modules = if input.is_lead {
         let enabled: BTreeSet<ModuleKind> = input
             .enabled_modules
@@ -364,7 +320,6 @@ async fn setup_submit(
         .set_local_parameters(
             input.name,
             federation_name,
-            disable_base_fees,
             enabled_modules,
             federation_size,
         )
@@ -422,7 +377,6 @@ async fn federation_setup(
     let connected_peers = state.api.connected_peers().await;
     let federation_size = state.api.federation_size().await;
     let cfg_federation_name = state.api.cfg_federation_name().await;
-    let cfg_base_fees_disabled = state.api.cfg_base_fees_disabled().await;
     let cfg_enabled_modules = state.api.cfg_enabled_modules().await;
 
     let content = html! {
@@ -448,7 +402,7 @@ async fn federation_setup(
             (copiable_text(&our_connection_info))
         }
 
-        (peer_list_section(&connected_peers, federation_size, &cfg_federation_name, cfg_base_fees_disabled, &cfg_enabled_modules, None))
+        (peer_list_section(&connected_peers, federation_size, &cfg_federation_name, &cfg_enabled_modules, None))
 
         // QR Scanner Modal
         div class="modal fade" id="qrScannerModal" tabindex="-1" aria-labelledby="qrScannerModalLabel" aria-hidden="true" {
@@ -563,7 +517,6 @@ async fn post_add_setup_code(
     let connected_peers = state.api.connected_peers().await;
     let federation_size = state.api.federation_size().await;
     let cfg_federation_name = state.api.cfg_federation_name().await;
-    let cfg_base_fees_disabled = state.api.cfg_base_fees_disabled().await;
     let cfg_enabled_modules = state.api.cfg_enabled_modules().await;
 
     Html(
@@ -571,7 +524,6 @@ async fn post_add_setup_code(
             &connected_peers,
             federation_size,
             &cfg_federation_name,
-            cfg_base_fees_disabled,
             &cfg_enabled_modules,
             error.as_ref().map(|e| e.to_string()).as_deref(),
         )
@@ -630,7 +582,6 @@ async fn post_start_dkg(
             let connected_peers = state.api.connected_peers().await;
             let federation_size = state.api.federation_size().await;
             let cfg_federation_name = state.api.cfg_federation_name().await;
-            let cfg_base_fees_disabled = state.api.cfg_base_fees_disabled().await;
             let cfg_enabled_modules = state.api.cfg_enabled_modules().await;
 
             Html(
@@ -638,7 +589,6 @@ async fn post_start_dkg(
                     &connected_peers,
                     federation_size,
                     &cfg_federation_name,
-                    cfg_base_fees_disabled,
                     &cfg_enabled_modules,
                     Some(&e.to_string()),
                 )

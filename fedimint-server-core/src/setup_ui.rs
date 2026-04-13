@@ -37,7 +37,6 @@ pub trait ISetupApi {
         &self,
         name: String,
         federation_name: Option<String>,
-        disable_base_fees: Option<bool>,
         enabled_modules: Option<BTreeSet<ModuleKind>>,
         federation_size: Option<u32>,
     ) -> Result<String>;
@@ -54,9 +53,6 @@ pub trait ISetupApi {
 
     /// Returns the federation name if set by any setup code
     async fn cfg_federation_name(&self) -> Option<String>;
-
-    /// Returns whether base fees are disabled, if set by any setup code
-    async fn cfg_base_fees_disabled(&self) -> Option<bool>;
 
     /// Returns the enabled modules, if set by any setup code
     async fn cfg_enabled_modules(&self) -> Option<BTreeSet<ModuleKind>>;

@@ -38,8 +38,6 @@ use crate::{DynServerModule, ServerModule};
 pub struct ConfigGenModuleArgs {
     /// Bitcoin network for the federation
     pub network: Network,
-    /// Whether to disable base fees for this federation
-    pub disable_base_fees: bool,
 }
 
 /// Interface for Module Generation

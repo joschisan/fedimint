@@ -263,7 +263,7 @@ impl ServerModuleInit for WalletInit {
     }
 
     fn is_enabled_by_default(&self) -> bool {
-        is_env_var_set_opt(FM_ENABLE_MODULE_WALLETV2_ENV).unwrap_or(false)
+        is_env_var_set_opt(FM_ENABLE_MODULE_WALLETV2_ENV).unwrap_or(true)
     }
 
     async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
