@@ -94,7 +94,8 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
 
     let client = env.new_client().await?;
 
-    env.pegin(&client).await?;
+    env.pegin(&client, bitcoin::Amount::from_sat(100_000_000))
+        .await?;
 
     let lnv2 = client.get_first_module::<LightningClientModule>()?;
 
@@ -135,8 +136,10 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
 
     info!("Pegging in gateways...");
 
-    env.pegin_gateway(&env.gw1_addr).await?;
-    env.pegin_gateway(&env.gw2_addr).await?;
+    env.pegin_gateway(&env.gw1_addr, bitcoin::Amount::from_sat(100_000_000))
+        .await?;
+    env.pegin_gateway(&env.gw2_addr, bitcoin::Amount::from_sat(100_000_000))
+        .await?;
 
     info!("Testing circular payments...");
 

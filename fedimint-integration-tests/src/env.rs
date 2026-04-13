@@ -20,6 +20,7 @@ use fedimint_walletv2_client::WalletClientModule;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use tokio::process::Command;
+use tokio::task::block_in_place;
 use tracing::info;
 
 use crate::cli::{RunGatewayCli, gateway_cmd};
@@ -46,7 +47,7 @@ pub const PASSWORD: &str = "theresnosecondbest";
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
 
-fn dummy_regtest_address() -> bitcoin::Address {
+fn dummy_address() -> bitcoin::Address {
     "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
         .parse::<bitcoin::Address<bitcoin::address::NetworkUnchecked>>()
         .expect("valid address")
@@ -75,9 +76,9 @@ impl TestEnv {
 
         // Fund bitcoind's own wallet so peg-ins can be regular (non-coinbase)
         // transactions — avoids the 100-block coinbase maturity wait.
-        let funding_addr = tokio::task::block_in_place(|| bitcoind.get_new_address(None, None))?
+        let funding_addr = block_in_place(|| bitcoind.get_new_address(None, None))?
             .require_network(bitcoin::Network::Regtest)?;
-        tokio::task::block_in_place(|| bitcoind.generate_to_address(101, &funding_addr))?;
+        block_in_place(|| bitcoind.generate_to_address(101, &funding_addr))?;
 
         for i in 0..NUM_GUARDIANS {
             start_fedimintd(base, i).await?;
@@ -160,8 +161,7 @@ impl TestEnv {
 
         // Verify connection
         retry("connect to bitcoind", || async {
-            tokio::task::block_in_place(|| client.get_blockchain_info())
-                .context("bitcoind not reachable")
+            block_in_place(|| client.get_blockchain_info()).context("bitcoind not reachable")
         })
         .await?;
 
@@ -203,40 +203,35 @@ impl TestEnv {
     }
 
     pub fn mine_blocks(&self, n: u64) {
-        tokio::task::block_in_place(|| {
-            self.bitcoind
-                .generate_to_address(n, &dummy_regtest_address())
-        })
-        .expect("failed to mine blocks");
+        block_in_place(|| self.bitcoind.generate_to_address(n, &dummy_address())).unwrap();
     }
 
-    pub async fn pegin_gateway(&self, gw_addr: &str) -> anyhow::Result<()> {
+    pub fn send_to_address(
+        &self,
+        addr: &bitcoin::Address,
+        amount: bitcoin::Amount,
+    ) -> anyhow::Result<bitcoin::Txid> {
+        Ok(block_in_place(|| {
+            self.bitcoind
+                .send_to_address(addr, amount, None, None, None, None, None, None)
+        })?)
+    }
+
+    pub async fn pegin_gateway(
+        &self,
+        gw_addr: &str,
+        amount: bitcoin::Amount,
+    ) -> anyhow::Result<()> {
         let fed_id = self.invite_code.federation_id().to_string();
 
         let addr = gateway_cmd(gw_addr)
             .args(["module", &fed_id, "walletv2", "receive"])
             .run_gateway_cli::<WalletReceiveResponse>()?
-            .address;
+            .address
+            .assume_checked();
 
-        let pegin_addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = addr.parse()?;
-        let pegin_addr = pegin_addr.assume_checked();
-
-        tokio::task::block_in_place(|| {
-            self.bitcoind.send_to_address(
-                &pegin_addr,
-                bitcoin::Amount::from_sat(100_000_000),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-        })?;
-        tokio::task::block_in_place(|| {
-            self.bitcoind
-                .generate_to_address(10, &dummy_regtest_address())
-        })?;
+        self.send_to_address(&addr, amount)?;
+        self.mine_blocks(10);
 
         retry("gateway pegin balance", || {
             let gw_addr = gw_addr.to_string();
@@ -266,26 +261,16 @@ impl TestEnv {
         Ok(())
     }
 
-    pub async fn pegin(&self, client: &ClientHandleArc) -> anyhow::Result<()> {
+    pub async fn pegin(
+        &self,
+        client: &ClientHandleArc,
+        amount: bitcoin::Amount,
+    ) -> anyhow::Result<()> {
         let walletv2 = client.get_first_module::<WalletClientModule>()?;
         let addr = walletv2.receive().await;
 
-        tokio::task::block_in_place(|| {
-            self.bitcoind.send_to_address(
-                &addr,
-                bitcoin::Amount::from_sat(100_000_000),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-        })?;
-        tokio::task::block_in_place(|| {
-            self.bitcoind
-                .generate_to_address(10, &dummy_regtest_address())
-        })?;
+        self.send_to_address(&addr, amount)?;
+        self.mine_blocks(10);
 
         retry("pegin balance", || async {
             let balance = client.get_balance_for_btc().await?;
@@ -503,13 +488,11 @@ async fn open_channel_between_gateways(
 
         let addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = addr.parse()?;
         let addr = addr.assume_checked();
-        tokio::task::block_in_place(|| bitcoind.generate_to_address(1, &addr))?;
-        tokio::task::block_in_place(|| {
-            bitcoind.generate_to_address(100, &dummy_regtest_address())
-        })?;
+        block_in_place(|| bitcoind.generate_to_address(1, &addr))?;
+        block_in_place(|| bitcoind.generate_to_address(100, &dummy_address()))?;
     }
 
-    let target_height = tokio::task::block_in_place(|| bitcoind.get_block_count())? - 1;
+    let target_height = block_in_place(|| bitcoind.get_block_count())? - 1;
     for gw_addr in [gw1_addr, gw2_addr] {
         retry("gateway sync", || {
             let gw_addr = gw_addr.to_string();
@@ -560,7 +543,7 @@ async fn open_channel_between_gateways(
     .await?;
 
     // Mine to confirm channel
-    tokio::task::block_in_place(|| bitcoind.generate_to_address(10, &dummy_regtest_address()))?;
+    block_in_place(|| bitcoind.generate_to_address(10, &dummy_address()))?;
 
     // Wait for channel to be active on both sides
     for gw_addr in [gw1_addr, gw2_addr] {

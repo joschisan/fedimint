@@ -350,5 +350,5 @@ pub struct WalletReceiveRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WalletReceiveResponse {
-    pub address: String,
+    pub address: bitcoin::Address<bitcoin::address::NetworkUnchecked>,
 }

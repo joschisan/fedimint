@@ -720,6 +720,6 @@ async fn module_wallet_receive(
 
     let address = wallet_module.receive().await;
     Ok(Json(WalletReceiveResponse {
-        address: address.to_string(),
+        address: address.as_unchecked().clone(),
     }))
 }

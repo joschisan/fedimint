@@ -11,7 +11,8 @@ pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
     let client_send = env.new_client().await?;
     let client_receive = env.new_client().await?;
 
-    env.pegin(&client_send).await?;
+    env.pegin(&client_send, bitcoin::Amount::from_sat(100_000_000))
+        .await?;
 
     let receive_address = client_receive
         .get_first_module::<WalletClientModule>()?
