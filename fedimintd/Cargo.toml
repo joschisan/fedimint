@@ -26,16 +26,11 @@ axum = { workspace = true }
 bitcoin = { workspace = true }
 clap = { workspace = true }
 fedimint-core = { workspace = true }
-fedimint-ln-common = { workspace = true }
-fedimint-ln-server = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 fedimint-lnv2-server = { workspace = true }
 fedimint-server-cli-core = { workspace = true }
 fedimint-logging = { workspace = true, features = ["telemetry"] }
-fedimint-meta-server = { workspace = true }
 fedimint-metrics = { workspace = true }
-fedimint-mint-common = { workspace = true }
-fedimint-mint-server = { workspace = true }
 fedimint-mintv2-server = { workspace = true }
 fedimint-rocksdb = { workspace = true }
 fedimint-server = { workspace = true }
@@ -44,7 +39,6 @@ fedimint-server-core = { workspace = true }
 fedimint-server-ui = { workspace = true }
 fedimint-unknown-common = { workspace = true }
 fedimint-unknown-server = { workspace = true }
-fedimint-wallet-server = { workspace = true }
 fedimint-walletv2-common = { workspace = true }
 fedimint-walletv2-server = { workspace = true }
 fedimintd-envs = { workspace = true }

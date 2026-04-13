@@ -8,7 +8,6 @@ use fedimint_core::config::FederationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, OutPoint, apply, async_trait_maybe_send};
-use fedimint_ln_common::client::GatewayApi;
 use lightning_invoice::{Bolt11Invoice, RoutingFees};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -17,7 +16,7 @@ use crate::contracts::{IncomingContract, OutgoingContract};
 use crate::endpoint_constants::{
     CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
 };
-use crate::{Bolt11InvoiceDescription, LightningInvoice};
+use crate::{Bolt11InvoiceDescription, GatewayApi, LightningInvoice};
 
 #[apply(async_trait_maybe_send!)]
 pub trait GatewayConnection: std::fmt::Debug {

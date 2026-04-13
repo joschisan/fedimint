@@ -60,9 +60,6 @@ impl GatewayApi {
         Ok(response)
     }
 
-    /// Get receiver for changes in the active connections
-    ///
-    /// This allows real-time monitoring of connection status.
     pub fn get_active_connection_receiver(&self) -> watch::Receiver<BTreeSet<SafeUrl>> {
         self.connection_pool.get_active_connection_receiver()
     }

@@ -13,12 +13,8 @@ members = [
     "fedimint-build",
     "fedimint-client",
     "fedimint-client-module",
-    "fedimint-client-rpc",
-    "fedimint-client-uniffi",
-    "fedimint-client-wasm",
     "fedimint-connectors",
     "fedimint-core",
-    "fedimint-cursed-redb",
     "fedimint-db-locked",
     "fedimint-derive",
     "fedimint-eventlog",
@@ -40,34 +36,20 @@ members = [
     "fedimint-server-ui",
     "fedimint-ui-common",
     "fedimint-util-error",
-    "fedimint-wasm-tests",
     "fedimintd",
     "fedimintd-envs",
-    "fuzz",
     "modules/fedimint-empty-client",
     "modules/fedimint-empty-common",
     "modules/fedimint-empty-server",
     "modules/fedimint-gwv2-client",
-    "modules/fedimint-ln-client",
-    "modules/fedimint-ln-common",
-    "modules/fedimint-ln-server",
     "modules/fedimint-lnv2-client",
     "modules/fedimint-lnv2-common",
     "modules/fedimint-lnv2-server",
-    "modules/fedimint-meta-client",
-    "modules/fedimint-meta-common",
-    "modules/fedimint-meta-server",
-    "modules/fedimint-mint-client",
-    "modules/fedimint-mint-common",
-    "modules/fedimint-mint-server",
     "modules/fedimint-mintv2-client",
     "modules/fedimint-mintv2-common",
     "modules/fedimint-mintv2-server",
     "modules/fedimint-unknown-common",
     "modules/fedimint-unknown-server",
-    "modules/fedimint-wallet-client",
-    "modules/fedimint-wallet-common",
-    "modules/fedimint-wallet-server",
     "modules/fedimint-walletv2-client",
     "modules/fedimint-walletv2-common",
     "modules/fedimint-walletv2-server",
@@ -161,10 +143,8 @@ fedimint-bitcoind = { path = "./fedimint-bitcoind", version = "=0.11.0-alpha" }
 fedimint-build = { path = "./fedimint-build", version = "=0.11.0-alpha" }
 fedimint-client = { path = "./fedimint-client", version = "=0.11.0-alpha" }
 fedimint-client-module = { path = "./fedimint-client-module", version = "=0.11.0-alpha" }
-fedimint-client-rpc = { path = "./fedimint-client-rpc", version = "=0.11.0-alpha" }
 fedimint-connectors = { path = "./fedimint-connectors", version = "=0.11.0-alpha" }
 fedimint-core = { path = "./fedimint-core", version = "=0.11.0-alpha" }
-fedimint-cursed-redb = { path = "./fedimint-cursed-redb", version = "=0.11.0-alpha" }
 fedimint-db-locked = { path = "./fedimint-db-locked", version = "=0.11.0-alpha" }
 fedimint-derive = { path = "./fedimint-derive", version = "=0.11.0-alpha" }
 fedimint-derive-secret = { path = "./crypto/derive-secret", version = "=0.11.0-alpha" }
@@ -173,21 +153,12 @@ fedimint-eventlog = { path = "./fedimint-eventlog", version = "=0.11.0-alpha" }
 fedimint-gateway-common = { path = "./fedimint-gateway-common", version = "=0.11.0-alpha" }
 fedimint-gateway-daemon = { path = "./fedimint-gateway-daemon", version = "=0.11.0-alpha" }
 fedimint-gwv2-client = { path = "./modules/fedimint-gwv2-client", version = "=0.11.0-alpha" }
-fedimint-ln-client = { path = "./modules/fedimint-ln-client", version = "=0.11.0-alpha" }
-fedimint-ln-common = { path = "./modules/fedimint-ln-common", version = "=0.11.0-alpha" }
-fedimint-ln-server = { path = "./modules/fedimint-ln-server", version = "=0.11.0-alpha" }
 fedimint-lnurl = { path = "./fedimint-lnurl", version = "=0.11.0-alpha" }
 fedimint-lnv2-client = { path = "./modules/fedimint-lnv2-client", version = "=0.11.0-alpha" }
 fedimint-lnv2-common = { path = "./modules/fedimint-lnv2-common", version = "=0.11.0-alpha" }
 fedimint-lnv2-server = { path = "./modules/fedimint-lnv2-server", version = "=0.11.0-alpha" }
 fedimint-logging = { path = "./fedimint-logging", version = "=0.11.0-alpha" }
-fedimint-meta-client = { path = "./modules/fedimint-meta-client", version = "=0.11.0-alpha" }
-fedimint-meta-common = { path = "./modules/fedimint-meta-common", version = "=0.11.0-alpha" }
-fedimint-meta-server = { path = "./modules/fedimint-meta-server", version = "=0.11.0-alpha" }
 fedimint-metrics = { path = "./fedimint-metrics", version = "=0.11.0-alpha" }
-fedimint-mint-client = { path = "./modules/fedimint-mint-client", version = "=0.11.0-alpha" }
-fedimint-mint-common = { path = "./modules/fedimint-mint-common", version = "=0.11.0-alpha" }
-fedimint-mint-server = { path = "./modules/fedimint-mint-server", version = "=0.11.0-alpha" }
 fedimint-mintv2-client = { path = "./modules/fedimint-mintv2-client", version = "=0.11.0-alpha" }
 fedimint-mintv2-common = { path = "./modules/fedimint-mintv2-common", version = "=0.11.0-alpha" }
 fedimint-mintv2-server = { path = "./modules/fedimint-mintv2-server", version = "=0.11.0-alpha" }
@@ -203,9 +174,6 @@ fedimint-ui-common = { path = "./fedimint-ui-common", version = "=0.11.0-alpha" 
 fedimint-unknown-common = { path = "./modules/fedimint-unknown-common", version = "=0.11.0-alpha" }
 fedimint-unknown-server = { path = "./modules/fedimint-unknown-server", version = "=0.11.0-alpha" }
 fedimint-util-error = { path = "./fedimint-util-error", version = "=0.11.0-alpha" }
-fedimint-wallet-client = { path = "./modules/fedimint-wallet-client", version = "=0.11.0-alpha" }
-fedimint-wallet-common = { path = "./modules/fedimint-wallet-common", version = "=0.11.0-alpha" }
-fedimint-wallet-server = { path = "./modules/fedimint-wallet-server", version = "=0.11.0-alpha" }
 fedimint-walletv2-client = { path = "./modules/fedimint-walletv2-client", version = "=0.11.0-alpha" }
 fedimint-walletv2-common = { path = "./modules/fedimint-walletv2-common", version = "=0.11.0-alpha" }
 fedimint-walletv2-server = { path = "./modules/fedimint-walletv2-server", version = "=0.11.0-alpha" }

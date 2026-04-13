@@ -26,10 +26,7 @@ use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::timing;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl, handle_version_hash_command};
-use fedimint_ln_server::LightningInit;
 use fedimint_logging::{LOG_CORE, LOG_SERVER, TracingSetup};
-use fedimint_meta_server::MetaInit;
-use fedimint_mint_server::MintInit;
 use fedimint_rocksdb::RocksDb;
 use fedimint_server::config::ConfigGenSettings;
 use fedimint_server::config::io::DB_FILE;
@@ -41,12 +38,11 @@ use fedimint_server_bitcoin_rpc::esplora::EsploraClient;
 use fedimint_server_core::ServerModuleInitRegistryExt;
 use fedimint_server_core::bitcoin_rpc::IServerBitcoinRpc;
 use fedimint_unknown_server::UnknownInit;
-use fedimint_wallet_server::WalletInit;
 use fedimintd_envs::{
     FM_API_URL_ENV, FM_BIND_API_ENV, FM_BIND_METRICS_ENV, FM_BIND_P2P_ENV,
     FM_BIND_TOKIO_CONSOLE_ENV, FM_BIND_UI_ENV, FM_BITCOIN_NETWORK_ENV, FM_BITCOIND_PASSWORD_ENV,
     FM_BITCOIND_URL_ENV, FM_BITCOIND_URL_PASSWORD_FILE_ENV, FM_BITCOIND_USERNAME_ENV,
-    FM_DATA_DIR_ENV, FM_DB_CHECKPOINT_RETENTION_ENV, FM_DISABLE_META_MODULE_ENV,
+    FM_DATA_DIR_ENV, FM_DB_CHECKPOINT_RETENTION_ENV,
     FM_ENABLE_IROH_ENV, FM_ESPLORA_URL_ENV, FM_FORCE_API_SECRETS_ENV,
     FM_IROH_API_MAX_CONNECTIONS_ENV, FM_IROH_API_MAX_REQUESTS_PER_CONNECTION_ENV, FM_P2P_URL_ENV,
 };
@@ -472,18 +468,9 @@ pub async fn run(
 pub fn default_modules() -> ServerModuleInitRegistry {
     let mut server_gens = ServerModuleInitRegistry::new();
 
-    server_gens.attach(MintInit);
     server_gens.attach(fedimint_mintv2_server::MintInit);
-
-    server_gens.attach(WalletInit);
     server_gens.attach(fedimint_walletv2_server::WalletInit);
-
-    server_gens.attach(LightningInit);
     server_gens.attach(fedimint_lnv2_server::LightningInit);
-
-    if !is_env_var_set(FM_DISABLE_META_MODULE_ENV) {
-        server_gens.attach(MetaInit);
-    }
 
     if is_env_var_set(FM_USE_UNKNOWN_MODULE_ENV) {
         server_gens.attach(UnknownInit);

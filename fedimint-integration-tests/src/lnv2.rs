@@ -11,9 +11,7 @@ use serde_json::Value;
 use tracing::info;
 
 use crate::cli::RunGatewayCli;
-use crate::env::{
-    GUARDIAN_BASE_PORT, NUM_GUARDIANS, PORTS_PER_GUARDIAN, TestEnv, find_binary,
-};
+use crate::env::{GUARDIAN_BASE_PORT, NUM_GUARDIANS, PORTS_PER_GUARDIAN, TestEnv, find_binary};
 
 fn fedimintd_cli(peer: usize) -> Command {
     let cli_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN) + 4;

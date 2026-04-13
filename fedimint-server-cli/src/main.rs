@@ -150,9 +150,7 @@ fn main() -> Result<()> {
                         ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
                         GatewayUrlRequest { url },
                     )?,
-                    Lnv2GatewayCommands::List => {
-                        request(addr, ROUTE_MODULE_LNV2_GATEWAY_LIST, ())?
-                    }
+                    Lnv2GatewayCommands::List => request(addr, ROUTE_MODULE_LNV2_GATEWAY_LIST, ())?,
                 },
             },
         },

@@ -20,7 +20,6 @@ async-trait = { workspace = true }
 bitcoin = { workspace = true }
 fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
-fedimint-ln-common = { workspace = true }
 group = { workspace = true }
 lightning-invoice = { workspace = true }
 rand = { workspace = true }
@@ -28,6 +27,7 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 tpe = { workspace = true }
 
 [lints]

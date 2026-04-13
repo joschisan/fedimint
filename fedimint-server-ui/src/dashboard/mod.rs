@@ -24,12 +24,9 @@ use fedimint_ui_common::{
     single_card_layout,
 };
 use maud::html;
-use {
-    fedimint_lnv2_server, fedimint_meta_server, fedimint_mintv2_server, fedimint_wallet_server,
-    fedimint_walletv2_server,
-};
+use {fedimint_lnv2_server, fedimint_mintv2_server, fedimint_walletv2_server};
 
-use crate::dashboard::modules::{lnv2, meta, mintv2, wallet, walletv2};
+use crate::dashboard::modules::{lnv2, mintv2, walletv2};
 use crate::{
     CHANGE_PASSWORD_ROUTE, DOWNLOAD_BACKUP_ROUTE, EXPLORER_IDX_ROUTE, EXPLORER_ROUTE, METRICS_ROUTE,
 };
@@ -235,24 +232,6 @@ async fn dashboard_view(
             }
         }
 
-        // Conditionally add Wallet UI if the module is available
-        @if let Some(wallet_module) = state.api.get_module::<fedimint_wallet_server::Wallet>() {
-            div class="row gy-4 mt-2" {
-                div class="col-12" {
-                    (wallet::render(wallet_module).await)
-                }
-            }
-        }
-
-        // Conditionally add Meta UI if the module is available
-        @if let Some(meta_module) = state.api.get_module::<fedimint_meta_server::Meta>() {
-            div class="row gy-4 mt-2" {
-                div class="col-12" {
-                    (meta::render(meta_module).await)
-                }
-            }
-        }
-
         // Guardian Backup and Password Change side by side
         div class="row gy-4 mt-2" {
             div class="col-lg-6" {
@@ -325,17 +304,6 @@ pub fn router(api: DynDashboardApi) -> Router {
         app = app
             .route(lnv2::LNV2_ADD_ROUTE, post(lnv2::post_add))
             .route(lnv2::LNV2_REMOVE_ROUTE, post(lnv2::post_remove));
-    }
-
-    // Only add Meta module routes if the module exists
-    if api.get_module::<fedimint_meta_server::Meta>().is_some() {
-        app = app
-            .route(meta::META_SUBMIT_ROUTE, post(meta::post_submit))
-            .route(meta::META_SET_ROUTE, post(meta::post_set))
-            .route(meta::META_RESET_ROUTE, post(meta::post_reset))
-            .route(meta::META_DELETE_ROUTE, post(meta::post_delete))
-            .route(meta::META_MERGE_ROUTE, post(meta::post_merge))
-            .route(meta::META_VALUE_INPUT_ROUTE, get(meta::get_value_input));
     }
 
     // Finalize the router with state

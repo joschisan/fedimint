@@ -25,7 +25,8 @@ use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersi
 use fedimint_core::{
     Amount, OutPoint, extensible_associated_module_type, plugin_types_trait_impl_common,
 };
-pub use fedimint_ln_common::client::GatewayApi;
+pub use gateway_connection::GatewayApi;
+mod gateway_connection;
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
