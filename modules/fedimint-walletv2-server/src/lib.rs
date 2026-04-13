@@ -89,7 +89,7 @@ pub const CONFIRMATION_FINALITY_DELAY: u64 = 6;
 
 /// Maximum number of blocks the consensus block count can advance in a single
 /// consensus item to limit the work done in one `process_consensus_item` step.
-const MAX_BLOCK_COUNT_INCREMENT: u64 = 50;
+const MAX_BLOCK_COUNT_INCREMENT: u64 = 10;
 
 /// Minimum fee rate vote of 1 sat/vB to ensure we never propose a fee rate
 /// below what Bitcoin Core will relay.

@@ -73,6 +73,12 @@ impl TestEnv {
 
         let bitcoind = Self::connect_bitcoind().await?;
 
+        // Fund bitcoind's own wallet so peg-ins can be regular (non-coinbase)
+        // transactions — avoids the 100-block coinbase maturity wait.
+        let funding_addr = tokio::task::block_in_place(|| bitcoind.get_new_address(None, None))?
+            .require_network(bitcoin::Network::Regtest)?;
+        tokio::task::block_in_place(|| bitcoind.generate_to_address(101, &funding_addr))?;
+
         for i in 0..NUM_GUARDIANS {
             start_fedimintd(base, i).await?;
         }
@@ -215,10 +221,21 @@ impl TestEnv {
         let pegin_addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = addr.parse()?;
         let pegin_addr = pegin_addr.assume_checked();
 
-        tokio::task::block_in_place(|| self.bitcoind.generate_to_address(1, &pegin_addr))?;
+        tokio::task::block_in_place(|| {
+            self.bitcoind.send_to_address(
+                &pegin_addr,
+                bitcoin::Amount::from_sat(100_000_000),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        })?;
         tokio::task::block_in_place(|| {
             self.bitcoind
-                .generate_to_address(100, &dummy_regtest_address())
+                .generate_to_address(10, &dummy_regtest_address())
         })?;
 
         retry("gateway pegin balance", || {
@@ -253,10 +270,21 @@ impl TestEnv {
         let walletv2 = client.get_first_module::<WalletClientModule>()?;
         let addr = walletv2.receive().await;
 
-        tokio::task::block_in_place(|| self.bitcoind.generate_to_address(1, &addr))?;
+        tokio::task::block_in_place(|| {
+            self.bitcoind.send_to_address(
+                &addr,
+                bitcoin::Amount::from_sat(100_000_000),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        })?;
         tokio::task::block_in_place(|| {
             self.bitcoind
-                .generate_to_address(100, &dummy_regtest_address())
+                .generate_to_address(10, &dummy_regtest_address())
         })?;
 
         retry("pegin balance", || async {
