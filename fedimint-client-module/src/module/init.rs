@@ -1,5 +1,3 @@
-pub mod recovery;
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::Pin;
@@ -11,7 +9,7 @@ use fedimint_bitcoind::DynBitcoindRpc;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::ModuleKind;
 use fedimint_core::db::{Database, DatabaseVersion};
-use fedimint_core::module::{ApiAuth, ApiVersion, CommonModuleInit, ModuleInit, MultiApiVersion};
+use fedimint_core::module::{ApiAuth, CommonModuleInit, ModuleInit};
 use fedimint_core::task::TaskGroup;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{ChainId, NumPeers, apply, async_trait_maybe_send};
@@ -52,8 +50,6 @@ where
     pub peer_num: usize,
     pub cfg: <<C as ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     pub db: Database,
-    pub core_api_version: ApiVersion,
-    pub module_api_version: ApiVersion,
     pub module_root_secret: DerivableSecret,
     pub notifier: ModuleNotifier<<<C as ClientModuleInit>::Module as ClientModule>::States>,
     pub api: DynGlobalApi,
@@ -95,14 +91,6 @@ where
 
     pub fn db(&self) -> &Database {
         &self.db
-    }
-
-    pub fn core_api_version(&self) -> &ApiVersion {
-        &self.core_api_version
-    }
-
-    pub fn module_api_version(&self) -> &ApiVersion {
-        &self.module_api_version
     }
 
     pub fn module_root_secret(&self) -> &DerivableSecret {
@@ -171,8 +159,6 @@ where
     pub num_peers: NumPeers,
     pub cfg: <<C as ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     pub db: Database,
-    pub core_api_version: ApiVersion,
-    pub module_api_version: ApiVersion,
     pub module_root_secret: DerivableSecret,
     pub notifier: ModuleNotifier<<<C as ClientModuleInit>::Module as ClientModule>::States>,
     pub api: DynGlobalApi,
@@ -218,14 +204,6 @@ where
 
     pub fn task_group(&self) -> &TaskGroup {
         &self.task_group
-    }
-
-    pub fn core_api_version(&self) -> &ApiVersion {
-        &self.core_api_version
-    }
-
-    pub fn module_api_version(&self) -> &ApiVersion {
-        &self.module_api_version
     }
 
     pub fn module_root_secret(&self) -> &DerivableSecret {
@@ -295,10 +273,6 @@ where
 #[apply(async_trait_maybe_send!)]
 pub trait ClientModuleInit: ModuleInit + Sized {
     type Module: ClientModule;
-
-    /// Api versions of the corresponding server side module's API
-    /// that this client module implementation can use.
-    fn supported_api_versions(&self) -> MultiApiVersion;
 
     fn kind() -> ModuleKind {
         <Self::Module as ClientModule>::kind()

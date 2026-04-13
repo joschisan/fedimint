@@ -15,9 +15,7 @@ use fedimint_client_module::{ClientModule, ModuleInstanceId, ModuleKind};
 use fedimint_core::config::{ClientModuleConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::Decoder;
 use fedimint_core::db::{Database, DatabaseVersion};
-use fedimint_core::module::{
-    ApiAuth, ApiVersion, CommonModuleInit, IDynCommonModuleInit, ModuleInit, MultiApiVersion,
-};
+use fedimint_core::module::{ApiAuth, CommonModuleInit, IDynCommonModuleInit, ModuleInit};
 use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::{NumPeers, apply, async_trait_maybe_send, dyn_newtype_define};
 use fedimint_derive_secret::DerivableSecret;
@@ -35,9 +33,6 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
 
     fn as_common(&self) -> &(dyn IDynCommonModuleInit + Send + Sync + 'static);
 
-    /// See [`ClientModuleInit::supported_api_versions`]
-    fn supported_api_versions(&self) -> MultiApiVersion;
-
     #[allow(clippy::too_many_arguments)]
     async fn recover(
         &self,
@@ -47,8 +42,6 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
         cfg: ClientModuleConfig,
         db: Database,
         instance_id: ModuleInstanceId,
-        core_api_version: ApiVersion,
-        module_api_version: ApiVersion,
         module_root_secret: DerivableSecret,
         notifier: Notifier,
         api: DynGlobalApi,
@@ -68,8 +61,6 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
         cfg: ClientModuleConfig,
         db: Database,
         instance_id: ModuleInstanceId,
-        core_api_version: ApiVersion,
-        module_api_version: ApiVersion,
         module_root_secret: DerivableSecret,
         notifier: Notifier,
         api: DynGlobalApi,
@@ -103,10 +94,6 @@ where
         self
     }
 
-    fn supported_api_versions(&self) -> MultiApiVersion {
-        <Self as ClientModuleInit>::supported_api_versions(self)
-    }
-
     async fn recover(
         &self,
         final_client: FinalClientIface,
@@ -115,8 +102,6 @@ where
         cfg: ClientModuleConfig,
         db: Database,
         instance_id: ModuleInstanceId,
-        core_api_version: ApiVersion,
-        module_api_version: ApiVersion,
         module_root_secret: DerivableSecret,
         // TODO: make dyn type for notifier
         notifier: Notifier,
@@ -137,8 +122,6 @@ where
                 num_peers,
                 cfg: typed_cfg.clone(),
                 db: module_db.clone(),
-                core_api_version,
-                module_api_version,
                 module_root_secret,
                 notifier: notifier.module_notifier(instance_id, final_client.clone()),
                 api: api.clone(),
@@ -167,8 +150,6 @@ where
         cfg: ClientModuleConfig,
         db: Database,
         instance_id: ModuleInstanceId,
-        core_api_version: ApiVersion,
-        module_api_version: ApiVersion,
         module_root_secret: DerivableSecret,
         // TODO: make dyn type for notifier
         notifier: Notifier,
@@ -188,8 +169,6 @@ where
                 peer_num,
                 cfg: typed_cfg.clone(),
                 db: module_db.clone(),
-                core_api_version,
-                module_api_version,
                 module_root_secret,
                 notifier: notifier.module_notifier(instance_id, final_client.clone()),
                 api: api.clone(),

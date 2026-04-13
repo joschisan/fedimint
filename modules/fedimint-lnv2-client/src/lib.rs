@@ -32,9 +32,7 @@ use fedimint_core::config::FederationId;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{
-    ApiAuth, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
-};
+use fedimint_core::module::{ApiAuth, CommonModuleInit, ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::SECP256K1;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::time::duration_since_epoch;
@@ -252,11 +250,6 @@ impl ModuleInit for LightningClientInit {
 #[apply(async_trait_maybe_send!)]
 impl ClientModuleInit for LightningClientInit {
     type Module = LightningClientModule;
-
-    fn supported_api_versions(&self) -> MultiApiVersion {
-        MultiApiVersion::try_from_iter([ApiVersion { major: 0, minor: 0 }])
-            .expect("no version conflicts")
-    }
 
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
         let gateway_conn = if let Some(gateway_conn) = self.gateway_conn.clone() {

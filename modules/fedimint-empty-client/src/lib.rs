@@ -10,7 +10,7 @@ use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule}
 use fedimint_client_module::sm::Context;
 use fedimint_core::core::{Decoder, ModuleKind};
 use fedimint_core::db::{Database, DatabaseTransaction, DatabaseVersion};
-use fedimint_core::module::{ApiVersion, ModuleCommon, ModuleInit, MultiApiVersion};
+use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::{Amount, apply, async_trait_maybe_send};
 pub use fedimint_empty_common as common;
 use fedimint_empty_common::config::EmptyClientConfig;
@@ -107,11 +107,6 @@ impl ModuleInit for EmptyClientInit {
 #[apply(async_trait_maybe_send!)]
 impl ClientModuleInit for EmptyClientInit {
     type Module = EmptyClientModule;
-
-    fn supported_api_versions(&self) -> MultiApiVersion {
-        MultiApiVersion::try_from_iter([ApiVersion { major: 0, minor: 0 }])
-            .expect("no version conflicts")
-    }
 
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
         Ok(EmptyClientModule {

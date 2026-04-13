@@ -11,10 +11,7 @@ pub use fedimint_core::config::{
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
-use fedimint_core::module::{
-    ApiVersion, CORE_CONSENSUS_VERSION, CoreConsensusVersion, MultiApiVersion,
-    SupportedApiVersionsSummary, SupportedCoreApiVersions,
-};
+use fedimint_core::module::{CORE_CONSENSUS_VERSION, CoreConsensusVersion};
 use fedimint_core::net::peers::{DynP2PConnections, Recipient};
 use fedimint_core::setup_code::PeerSetupCode;
 use fedimint_core::task::sleep;
@@ -74,27 +71,6 @@ impl ServerConfig {
         &self,
     ) -> impl Iterator<Item = (ModuleInstanceId, &ModuleKind)> + '_ {
         self.consensus.iter_module_instances()
-    }
-
-    pub(crate) fn supported_api_versions_summary(
-        modules: &BTreeMap<ModuleInstanceId, ServerModuleConsensusConfig>,
-        module_inits: &ServerModuleInitRegistry,
-    ) -> SupportedApiVersionsSummary {
-        SupportedApiVersionsSummary {
-            core: Self::supported_api_versions(),
-            modules: modules
-                .iter()
-                .map(|(&id, config)| {
-                    (
-                        id,
-                        module_inits
-                            .get(&config.kind)
-                            .expect("missing module kind gen")
-                            .supported_api_versions(),
-                    )
-                })
-                .collect(),
-        }
     }
 }
 
@@ -270,14 +246,6 @@ impl ServerConfigConsensus {
 }
 
 impl ServerConfig {
-    /// Api versions supported by this server
-    pub fn supported_api_versions() -> SupportedCoreApiVersions {
-        SupportedCoreApiVersions {
-            core_consensus: CORE_CONSENSUS_VERSION,
-            api: MultiApiVersion::try_from_iter([ApiVersion { major: 0, minor: 9 }])
-                .expect("not version conflicts"),
-        }
-    }
     /// Creates a new config from the results of a trusted or distributed key
     /// setup
     pub fn from(

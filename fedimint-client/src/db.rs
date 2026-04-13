@@ -3,7 +3,6 @@ use std::time::SystemTime;
 
 use anyhow::{anyhow, bail};
 use bitcoin::hex::DisplayHex as _;
-use fedimint_api_client::api::ApiVersionSet;
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::oplog::{JsonStringed, OperationLogEntry, OperationOutcome};
@@ -16,9 +15,8 @@ use fedimint_core::db::{
     apply_migrations_dbtx, create_database_version_dbtx, get_current_database_version,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::SupportedApiVersionsSummary;
 use fedimint_core::module::registry::ModuleRegistry;
-use fedimint_core::{ChainId, PeerId, impl_db_lookup, impl_db_record};
+use fedimint_core::{ChainId, impl_db_lookup, impl_db_record};
 use fedimint_eventlog::{
     DB_KEY_PREFIX_EVENT_LOG, DB_KEY_PREFIX_UNORDERED_EVENT_LOG, EventLogId, UnordedEventLogId,
 };
@@ -84,16 +82,16 @@ pub enum DbKeyPrefix {
     ClientPreRootSecretHash = 0x2a,
     OperationLog = 0x2c,
     ChronologicalOperationLog = 0x2d,
-    CommonApiVersionCache = 0x2e,
+    CommonApiVersionCache = 0x2e, // Unused
     ClientConfig = 0x2f,
-    PendingClientConfig = 0x3b,
-    ClientInviteCode = 0x30, // Unused; clean out remnant data before re-using!
+    PendingClientConfig = 0x3b, // Unused
+    ClientInviteCode = 0x30,    // Unused; clean out remnant data before re-using!
     ClientInitState = 0x31,
     ClientMetadata = 0x32,
     ClientMetaField = 0x34,
     ClientMetaServiceInfo = 0x35,
     ApiSecret = 0x36,
-    PeerLastApiVersionsSummaryCache = 0x37,
+    PeerLastApiVersionsSummaryCache = 0x37, // Unused
     ApiUrlAnnouncement = 0x38,
     EventLog = fedimint_eventlog::DB_KEY_PREFIX_EVENT_LOG,
     UnorderedEventLog = fedimint_eventlog::DB_KEY_PREFIX_UNORDERED_EVENT_LOG,
@@ -243,30 +241,6 @@ impl_db_lookup!(
     query_prefix = ChronologicalOperationLogKeyPrefix
 );
 
-#[derive(Debug, Encodable, Decodable)]
-pub struct CachedApiVersionSetKey;
-
-#[derive(Debug, Encodable, Decodable)]
-pub struct CachedApiVersionSet(pub ApiVersionSet);
-
-impl_db_record!(
-    key = CachedApiVersionSetKey,
-    value = CachedApiVersionSet,
-    db_prefix = DbKeyPrefix::CommonApiVersionCache
-);
-
-#[derive(Debug, Encodable, Decodable)]
-pub struct PeerLastApiVersionsSummaryKey(pub PeerId);
-
-#[derive(Debug, Encodable, Decodable)]
-pub struct PeerLastApiVersionsSummary(pub SupportedApiVersionsSummary);
-
-impl_db_record!(
-    key = PeerLastApiVersionsSummaryKey,
-    value = PeerLastApiVersionsSummary,
-    db_prefix = DbKeyPrefix::PeerLastApiVersionsSummaryCache
-);
-
 #[derive(Debug, Encodable, Decodable, Serialize)]
 pub struct ClientConfigKey;
 
@@ -274,15 +248,6 @@ impl_db_record!(
     key = ClientConfigKey,
     value = ClientConfig,
     db_prefix = DbKeyPrefix::ClientConfig
-);
-
-#[derive(Debug, Encodable, Decodable, Serialize)]
-pub struct PendingClientConfigKey;
-
-impl_db_record!(
-    key = PendingClientConfigKey,
-    value = ClientConfig,
-    db_prefix = DbKeyPrefix::PendingClientConfig
 );
 
 #[derive(Debug, Encodable, Decodable, Serialize)]

@@ -38,9 +38,7 @@ use fedimint_core::db::{
     Database, DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{
-    ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
-};
+use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use fedimint_core::task::{TaskGroup, block_in_place, sleep};
 use fedimint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
@@ -161,11 +159,6 @@ impl ModuleInit for WalletClientInit {
 #[apply(async_trait_maybe_send!)]
 impl ClientModuleInit for WalletClientInit {
     type Module = WalletClientModule;
-
-    fn supported_api_versions(&self) -> MultiApiVersion {
-        MultiApiVersion::try_from_iter([ApiVersion { major: 0, minor: 0 }])
-            .expect("no version conflicts")
-    }
 
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
         let module = WalletClientModule {

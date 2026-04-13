@@ -19,8 +19,8 @@ use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_core::config::ClientConfig;
 pub use fedimint_core::core::{IInput, IOutput, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::Database;
+use fedimint_core::module::ApiAuth;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
-use fedimint_core::module::{ApiAuth, ApiVersion};
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::{BoxStream, NextOrPending};
 use fedimint_core::{
@@ -60,8 +60,6 @@ pub mod secret;
 pub mod sm;
 /// Structs and interfaces to construct Fedimint transactions
 pub mod transaction;
-
-pub mod api_version_discovery;
 
 #[derive(Serialize, Deserialize)]
 pub struct TxCreatedEvent {
@@ -212,9 +210,6 @@ pub trait IGlobalClientContext: Debug + MaybeSend + MaybeSync + 'static {
     );
 
     async fn transaction_update_stream(&self) -> BoxStream<TxSubmissionStatesSM>;
-
-    /// Returns the core API version that the federation supports
-    async fn core_api_version(&self) -> ApiVersion;
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -271,10 +266,6 @@ impl IGlobalClientContext for () {
     }
 
     async fn transaction_update_stream(&self) -> BoxStream<TxSubmissionStatesSM> {
-        unimplemented!("fake implementation, only for tests");
-    }
-
-    async fn core_api_version(&self) -> ApiVersion {
         unimplemented!("fake implementation, only for tests");
     }
 }

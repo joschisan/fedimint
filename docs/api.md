@@ -15,12 +15,6 @@ Use [github search to find more details about every API](https://github.com/sear
 
 ## Core Server API Endpoints
 
-### Version Endpoint
-- **Endpoint**: `version`
-- **Arguments**: None
-- **Returns**: [`SupportedApiVersionsSummary`](https://docs.fedimint.org/?search=SupportedApiVersionsSummary)
-- **Purpose**: Returns the API versions supported by the server.
-
 ### Submit Transaction Endpoint
 - **Endpoint**: `submit_transaction`
 - **Arguments**: [`SerdeTransaction`](https://docs.fedimint.org/?search=SerdeTransaction) - A serialized transaction
@@ -86,36 +80,6 @@ Use [github search to find more details about every API](https://github.com/sear
 - **Arguments**: None
 - **Returns**: `BTreeMap<PeerId, Option<P2PConnectionStatus>>` where `P2PConnectionStatus` contains connection type and RTT
 - **Purpose**: Returns the connection status to other peers in the federation.
-
-### Session Count Endpoint
-- **Endpoint**: `session_count`
-- **Arguments**: None
-- **Returns**: `u64`
-- **Purpose**: Returns the number of completed consensus sessions.
-
-### Await Session Outcome Endpoint
-- **Endpoint**: `await_session_outcome`
-- **Arguments**: `u64` - Session index
-- **Returns**: [`SessionOutcome`](https://docs.fedimint.org/?search=SessionOutcome)
-- **Purpose**: Waits for and returns the outcome of a specific consensus session.
-
-### Await Signed Session Outcome Endpoint
-- **Endpoint**: `await_signed_session_outcome`
-- **Arguments**: `u64` - Session index
-- **Returns**: [`SignedSessionOutcome`](https://docs.fedimint.org/?search=SignedSessionOutcome)
-- **Purpose**: Waits for and returns the signed outcome of a specific consensus session.
-
-### Session Status Endpoint
-- **Endpoint**: `session_status`
-- **Arguments**: `u64` - Session index
-- **Returns**: [`SessionStatus`](https://docs.fedimint.org/?search=SessionStatus)
-- **Purpose**: Returns the current status of a specific consensus session.
-
-### Session Status V2 Endpoint
-- **Endpoint**: `signed_session_status`
-- **Arguments**: `u64` - Session index
-- **Returns**: [`SessionStatusV2`](https://docs.fedimint.org/?search=SessionStatusV2)
-- **Purpose**: Returns the current status of a specific consensus session with enhanced information.
 
 ### Shutdown Endpoint
 - **Endpoint**: `shutdown`

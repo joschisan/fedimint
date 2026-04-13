@@ -13,24 +13,19 @@ use fedimint_core::db::{
     Committable, Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped,
 };
 use fedimint_core::endpoint_constants::{
-    AWAIT_SESSION_OUTCOME_ENDPOINT, AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT,
     AWAIT_TRANSACTION_ENDPOINT, CHAIN_ID_ENDPOINT, CLIENT_CONFIG_ENDPOINT,
     CLIENT_CONFIG_JSON_ENDPOINT, CONSENSUS_ORD_LATENCY_ENDPOINT, FEDERATION_ID_ENDPOINT,
     FEDIMINTD_VERSION_ENDPOINT, INVITE_CODE_ENDPOINT, P2P_CONNECTION_STATUS_ENDPOINT,
-    SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT,
-    SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
-    VERSION_ENDPOINT,
+    SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SETUP_STATUS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::{Audit, AuditSummary};
 use fedimint_core::module::{
     ApiAuth, ApiEndpoint, ApiEndpointContext, ApiError, ApiRequestErased, ApiResult, ApiVersion,
-    SerdeModuleEncoding, SerdeModuleEncodingBase64, SupportedApiVersionsSummary, api_endpoint,
+    SerdeModuleEncoding, api_endpoint,
 };
 use fedimint_core::net::auth::GuardianAuthToken;
-use fedimint_core::session_outcome::{
-    SessionOutcome, SessionStatus, SessionStatusV2, SignedSessionOutcome,
-};
+use fedimint_core::session_outcome::SessionStatusV2;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::transaction::{
     SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
@@ -74,17 +69,12 @@ pub struct ConsensusApi {
     pub p2p_status_receivers: P2PStatusReceivers,
     pub ci_status_receivers: BTreeMap<PeerId, Receiver<Option<u64>>>,
     pub bitcoin_rpc_connection: ServerBitcoinRpcMonitor,
-    pub supported_api_versions: SupportedApiVersionsSummary,
     pub auth: ApiAuth,
     pub code_version_str: String,
     pub task_group: TaskGroup,
 }
 
 impl ConsensusApi {
-    pub fn api_versions_summary(&self) -> &SupportedApiVersionsSummary {
-        &self.supported_api_versions
-    }
-
     pub fn get_active_api_secret(&self) -> Option<String> {
         // TODO: In the future, we might want to fetch it from the DB, so it's possible
         // to customize from the UX
@@ -143,18 +133,11 @@ impl ConsensusApi {
             .await
     }
 
-    pub async fn session_count(&self) -> u64 {
+    async fn session_count_internal(&self) -> u64 {
         get_finished_session_count_static(&mut self.db.begin_transaction_nc().await).await
     }
 
-    pub async fn await_signed_session_outcome(&self, index: u64) -> SignedSessionOutcome {
-        self.db
-            .wait_key_check(&SignedSessionOutcomeKey(index), std::convert::identity)
-            .await
-            .0
-    }
-
-    pub async fn session_status(&self, session_index: u64) -> SessionStatusV2 {
+    async fn session_status_internal(&self, session_index: u64) -> SessionStatusV2 {
         let mut dbtx = self.db.begin_transaction_nc().await;
 
         match session_index.cmp(&get_finished_session_count_static(&mut dbtx).await) {
@@ -313,11 +296,11 @@ impl IDashboardApi for ConsensusApi {
     }
 
     async fn session_count(&self) -> u64 {
-        self.session_count().await
+        self.session_count_internal().await
     }
 
     async fn get_session_status(&self, session_idx: u64) -> SessionStatusV2 {
-        self.session_status(session_idx).await
+        self.session_status_internal(session_idx).await
     }
 
     async fn consensus_ord_latency(&self) -> Option<Duration> {
@@ -377,13 +360,6 @@ impl IDashboardApi for ConsensusApi {
 
 pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
     vec![
-        api_endpoint! {
-            VERSION_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, _context, _v: ()| -> SupportedApiVersionsSummary {
-                Ok(fedimint.api_versions_summary().to_owned())
-            }
-        },
         api_endpoint! {
             SUBMIT_TRANSACTION_ENDPOINT,
             ApiVersion::new(0, 0),
@@ -464,41 +440,6 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
                     .iter()
                     .map(|(peer, receiver)| (*peer, receiver.borrow().clone()))
                     .collect())
-            }
-        },
-        api_endpoint! {
-            SESSION_COUNT_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, _context, _v: ()| -> u64 {
-                Ok(fedimint.session_count().await)
-            }
-        },
-        api_endpoint! {
-            AWAIT_SESSION_OUTCOME_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, _context, index: u64| -> SerdeModuleEncoding<SessionOutcome> {
-                Ok((&fedimint.await_signed_session_outcome(index).await.session_outcome).into())
-            }
-        },
-        api_endpoint! {
-            AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, _context, index: u64| -> SerdeModuleEncoding<SignedSessionOutcome> {
-                Ok((&fedimint.await_signed_session_outcome(index).await).into())
-            }
-        },
-        api_endpoint! {
-            SESSION_STATUS_ENDPOINT,
-            ApiVersion::new(0, 1),
-            async |fedimint: &ConsensusApi, _context, index: u64| -> SerdeModuleEncoding<SessionStatus> {
-                Ok((&SessionStatus::from(fedimint.session_status(index).await)).into())
-            }
-        },
-        api_endpoint! {
-            SESSION_STATUS_V2_ENDPOINT,
-            ApiVersion::new(0, 5),
-            async |fedimint: &ConsensusApi, _context, index: u64| -> SerdeModuleEncodingBase64<SessionStatusV2> {
-                Ok((&fedimint.session_status(index).await).into())
             }
         },
         api_endpoint! {

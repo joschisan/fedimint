@@ -48,9 +48,7 @@ use fedimint_core::config::FederationId;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{
-    ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
-};
+use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::rand::{Rng, thread_rng};
 use fedimint_core::secp256k1::{Keypair, PublicKey};
 use fedimint_core::util::{BoxStream, NextOrPending};
@@ -144,11 +142,6 @@ impl ModuleInit for MintClientInit {
 #[apply(async_trait_maybe_send!)]
 impl ClientModuleInit for MintClientInit {
     type Module = MintClientModule;
-
-    fn supported_api_versions(&self) -> MultiApiVersion {
-        MultiApiVersion::try_from_iter([ApiVersion { major: 0, minor: 1 }])
-            .expect("no version conflicts")
-    }
 
     async fn recover(&self, args: &ClientModuleRecoverArgs<Self>) -> anyhow::Result<()> {
         let mut state = if let Some(state) = args
@@ -741,7 +734,7 @@ impl MintClientModule {
 
         self.client_ctx
             .global_api()
-            .session_count()
+            .chain_id()
             .await
             .map_err(|_| SendECashError::Offline)?;
 

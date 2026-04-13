@@ -9,7 +9,7 @@ use fedimint_api_client::api::global_api::with_cache::GlobalFederationApiWithCac
 use fedimint_api_client::api::global_api::with_request_hook::{
     ApiRequestHook, RawFederationApiWithRequestHookExt as _,
 };
-use fedimint_api_client::api::{ApiVersionSet, DynGlobalApi, FederationApi, FederationApiExt as _};
+use fedimint_api_client::api::{DynGlobalApi, FederationApi};
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_api_client::download_from_invite_code;
 use fedimint_bitcoind::DynBitcoindRpc;
@@ -32,11 +32,9 @@ use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::{
     Database, IDatabaseTransactionOpsCoreTyped as _, verify_module_db_integrity_dbtx,
 };
-use fedimint_core::endpoint_constants::CLIENT_CONFIG_ENDPOINT;
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
-use fedimint_core::module::{ApiRequestErased, ApiVersion, SupportedApiVersionsSummary};
 use fedimint_core::task::TaskGroup;
 use fedimint_core::task::jit::{JitTry, JitTryAnyhow};
 use fedimint_core::util::{FmtCompact as _, FmtCompactAnyhow as _, SafeUrl};
@@ -54,7 +52,7 @@ use super::{Client, client_decoders};
 use crate::db::{
     self, ApiSecretKey, ChainIdKey, ClientInitStateKey, ClientMetadataKey, ClientModuleRecovery,
     ClientModuleRecoveryState, ClientPreRootSecretHashKey, InitMode, InitState, Metadata,
-    PendingClientConfigKey, apply_migrations_client_module_dbtx,
+    apply_migrations_client_module_dbtx,
 };
 use crate::meta::MetaService;
 use crate::module_init::ClientModuleInitRegistry;
@@ -335,9 +333,6 @@ impl ClientBuilder {
         config: ClientConfig,
         api_secret: Option<String>,
         init_mode: InitMode,
-        preview_prefetch_api_version_set: Option<
-            JitTryAnyhow<BTreeMap<PeerId, SupportedApiVersionsSummary>>,
-        >,
         prefetch_chain_id: Option<JitTryAnyhow<ChainId>>,
     ) -> anyhow::Result<ClientHandle> {
         if Client::is_initialized(&db_no_decoders).await {
@@ -381,7 +376,6 @@ impl ClientBuilder {
             config,
             api_secret,
             stopped,
-            preview_prefetch_api_version_set,
             prefetch_chain_id,
         )
         .await
@@ -419,14 +413,6 @@ impl ClientBuilder {
         api_secret: Option<String>,
         prefetch_api: Option<DynGlobalApi>,
     ) -> anyhow::Result<ClientPreview> {
-        let preview_prefetch_api_version_set = prefetch_api.as_ref().map(|api| {
-            JitTry::new_try({
-                let config = config.clone();
-                let api = api.clone();
-                || async move { Client::fetch_common_api_versions(&config, &api).await }
-            })
-        });
-
         let prefetch_chain_id = prefetch_api.map(|api| {
             JitTry::new_try(|| async move { api.chain_id().await.map_err(anyhow::Error::from) })
         });
@@ -436,7 +422,6 @@ impl ClientBuilder {
             inner: self,
             config,
             api_secret,
-            preview_prefetch_api_version_set,
             prefetch_chain_id,
         })
     }
@@ -448,9 +433,6 @@ impl ClientBuilder {
         pre_root_secret: RootSecret,
     ) -> anyhow::Result<ClientHandle> {
         Client::run_core_migrations(&db_no_decoders).await?;
-
-        // Check for pending config and migrate if present
-        Self::migrate_pending_config_if_present(&db_no_decoders).await;
 
         let Some(config) = Client::get_config_from_db(&db_no_decoders).await else {
             bail!("Client database not initialized")
@@ -497,7 +479,6 @@ impl ClientBuilder {
                 api_secret,
                 log_event_added_transient_tx,
                 request_hook,
-                None,
                 None, // chain_id should already be cached for existing clients
             )
             .await?;
@@ -517,9 +498,6 @@ impl ClientBuilder {
         config: ClientConfig,
         api_secret: Option<String>,
         stopped: bool,
-        preview_prefetch_api_version_set: Option<
-            JitTryAnyhow<BTreeMap<PeerId, SupportedApiVersionsSummary>>,
-        >,
         prefetch_chain_id: Option<JitTryAnyhow<ChainId>>,
     ) -> anyhow::Result<ClientHandle> {
         let log_event_added_transient_tx = self.log_event_added_transient_tx.clone();
@@ -533,7 +511,6 @@ impl ClientBuilder {
                 api_secret,
                 log_event_added_transient_tx,
                 request_hook,
-                preview_prefetch_api_version_set,
                 prefetch_chain_id,
             )
             .await?;
@@ -556,9 +533,6 @@ impl ClientBuilder {
         api_secret: Option<String>,
         log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
         request_hook: ApiRequestHook,
-        preview_prefetch_api_version_set: Option<
-            JitTryAnyhow<BTreeMap<PeerId, SupportedApiVersionsSummary>>,
-        >,
         prefetch_chain_id: Option<JitTryAnyhow<ChainId>>,
     ) -> anyhow::Result<ClientHandle> {
         debug!(
@@ -579,7 +553,7 @@ impl ClientBuilder {
             .iter()
             .map(|(peer, endpoint)| (*peer, endpoint.url.clone()))
             .collect();
-        let api = match self.admin_creds.as_ref() {
+        let api: DynGlobalApi = match self.admin_creds.as_ref() {
             Some(admin_creds) => FederationApi::new(
                 connectors.clone(),
                 peer_urls,
@@ -606,45 +580,6 @@ impl ClientBuilder {
         let init_state = Self::load_init_state(&db).await;
 
         let notifier = Notifier::new();
-
-        if let Some(preview_prefetch_api_version_set) = preview_prefetch_api_version_set {
-            match preview_prefetch_api_version_set.get_try().await {
-                Ok(peer_api_versions) => {
-                    Client::store_prefetched_api_versions(
-                        &db,
-                        &config,
-                        &self.module_inits,
-                        peer_api_versions,
-                    )
-                    .await;
-                }
-                Err(err) => {
-                    debug!(target: LOG_CLIENT, err = %err.fmt_compact(), "Prefetching api version negotiation failed");
-                }
-            }
-        }
-
-        let common_api_versions = Client::load_and_refresh_common_api_version_static(
-            &config,
-            &self.module_inits,
-            &api,
-            &db,
-            &task_group,
-        )
-        .await
-        .inspect_err(|err| {
-            warn!(target: LOG_CLIENT, err = %err.fmt_compact_anyhow(), "Failed to discover API version to use.");
-        })
-        .unwrap_or(ApiVersionSet {
-            core: ApiVersion::new(0, 0),
-            // This will cause all modules to skip initialization
-            modules: BTreeMap::new(),
-        });
-
-        debug!(target: LOG_CLIENT, ?common_api_versions, "Completed api version negotiation");
-
-        // Asynchronously refetch client config and compare with existing
-        Self::load_and_refresh_client_config_static(&config, &api, &db, &task_group);
 
         // Try to cache chain_id if not already cached
         // This is best-effort - if the server doesn't support the endpoint yet, we'll
@@ -705,17 +640,6 @@ impl ClientBuilder {
                     continue;
                 };
 
-                let Some(&api_version) = common_api_versions.modules.get(&module_instance_id)
-                else {
-                    warn!(
-                        target: LOG_CLIENT,
-                        kind=%kind,
-                        instance_id=%module_instance_id,
-                        "Module kind of instance has incompatible api version, skipping"
-                    );
-                    continue;
-                };
-
                 // since the exact logic of when to start recovery is a bit gnarly,
                 // the recovery call is extracted here.
                 let start_module_recover_fn = |progress: RecoveryProgress| {
@@ -744,8 +668,6 @@ impl ClientBuilder {
                                         module_config.clone(),
                                         db.clone(),
                                         module_instance_id,
-                                        common_api_versions.core,
-                                        api_version,
                                         root_secret.derive_module_secret(module_instance_id),
                                         notifier.clone(),
                                         api.clone(),
@@ -834,8 +756,6 @@ impl ClientBuilder {
                                 module_config,
                                 db.clone(),
                                 module_instance_id,
-                                common_api_versions.core,
-                                api_version,
                                 // This is a divergence from the legacy client, where the child
                                 // secret keys were derived using
                                 // *module kind*-specific derivation paths.
@@ -1068,125 +988,6 @@ impl ClientBuilder {
     pub fn get_event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry> {
         self.log_event_added_transient_tx.subscribe()
     }
-
-    /// Check for pending config and migrate it if present.
-    /// Returns the config to use (either the original or the migrated pending
-    /// config).
-    async fn migrate_pending_config_if_present(db: &Database) {
-        if let Some(pending_config) = Client::get_pending_config_from_db(db).await {
-            debug!(target: LOG_CLIENT, "Found pending client config, migrating to current config");
-
-            let mut dbtx = db.begin_transaction().await;
-            // Update the main config with the pending config
-            dbtx.insert_entry(&crate::db::ClientConfigKey, &pending_config)
-                .await;
-            // Remove the pending config
-            dbtx.remove_entry(&PendingClientConfigKey).await;
-            dbtx.commit_tx().await;
-
-            debug!(target: LOG_CLIENT, "Successfully migrated pending config to current config");
-        }
-    }
-
-    /// Asynchronously refetch client config from federation and compare with
-    /// existing. If different, save to pending config in database.
-    fn load_and_refresh_client_config_static(
-        config: &ClientConfig,
-        api: &DynGlobalApi,
-        db: &Database,
-        task_group: &TaskGroup,
-    ) {
-        let config = config.clone();
-        let api = api.clone();
-        let db = db.clone();
-        let task_group = task_group.clone();
-
-        // Spawn background task to refetch config
-        task_group.spawn_cancellable("refresh_client_config_static", async move {
-            Self::refresh_client_config_static(&config, &api, &db).await;
-        });
-    }
-
-    /// Wrapper that handles errors from config refresh with proper logging
-    async fn refresh_client_config_static(
-        config: &ClientConfig,
-        api: &DynGlobalApi,
-        db: &Database,
-    ) {
-        if let Err(error) = Self::refresh_client_config_static_try(config, api, db).await {
-            warn!(
-                target: LOG_CLIENT,
-                err = %error.fmt_compact_anyhow(), "Failed to refresh client config"
-            );
-        }
-    }
-
-    /// Validate that a config update is valid
-    fn validate_config_update(
-        current_config: &ClientConfig,
-        new_config: &ClientConfig,
-    ) -> anyhow::Result<()> {
-        // Global config must not change
-        if current_config.global != new_config.global {
-            bail!("Global configuration changes are not allowed in config updates");
-        }
-
-        // Modules can only be added, existing ones must stay the same
-        for (module_id, current_module_config) in &current_config.modules {
-            match new_config.modules.get(module_id) {
-                Some(new_module_config) => {
-                    if current_module_config != new_module_config {
-                        bail!(
-                            "Module {} configuration changes are not allowed, only additions are permitted",
-                            module_id
-                        );
-                    }
-                }
-                None => {
-                    bail!(
-                        "Module {} was removed in new config, only additions are allowed",
-                        module_id
-                    );
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Refetch client config from federation and save as pending if different
-    async fn refresh_client_config_static_try(
-        current_config: &ClientConfig,
-        api: &DynGlobalApi,
-        db: &Database,
-    ) -> anyhow::Result<()> {
-        debug!(target: LOG_CLIENT, "Refreshing client config");
-
-        // Fetch latest config from federation
-        let fetched_config = api
-            .request_current_consensus::<ClientConfig>(
-                CLIENT_CONFIG_ENDPOINT.to_owned(),
-                ApiRequestErased::default(),
-            )
-            .await?;
-
-        // Validate the new config before proceeding
-        Self::validate_config_update(current_config, &fetched_config)?;
-
-        // Compare with current config
-        if current_config != &fetched_config {
-            debug!(target: LOG_CLIENT, "Detected federation config change, saving as pending config");
-
-            let mut dbtx = db.begin_transaction().await;
-            dbtx.insert_entry(&PendingClientConfigKey, &fetched_config)
-                .await;
-            dbtx.commit_tx().await;
-        } else {
-            debug!(target: LOG_CLIENT, "No federation config changes detected");
-        }
-
-        Ok(())
-    }
 }
 
 /// An intermediate step before Client joining or recovering
@@ -1198,8 +999,6 @@ pub struct ClientPreview {
     config: ClientConfig,
     connectors: ConnectionPool,
     api_secret: Option<String>,
-    preview_prefetch_api_version_set:
-        Option<JitTryAnyhow<BTreeMap<PeerId, SupportedApiVersionsSummary>>>,
     prefetch_chain_id: Option<JitTryAnyhow<ChainId>>,
 }
 
@@ -1303,7 +1102,6 @@ impl ClientPreview {
                 self.config,
                 self.api_secret,
                 InitMode::Fresh,
-                self.preview_prefetch_api_version_set,
                 self.prefetch_chain_id,
             )
             .await?;
@@ -1338,7 +1136,6 @@ impl ClientPreview {
                 self.config,
                 self.api_secret,
                 InitMode::Recover,
-                self.preview_prefetch_api_version_set,
                 self.prefetch_chain_id,
             )
             .await?;

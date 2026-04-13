@@ -9,15 +9,9 @@ use std::result;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
-use bitcoin::secp256k1;
 pub use error::{FederationError, OutputOutcomeError};
 use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, OutputOutcome};
-use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::registry::ModuleDecoderRegistry;
-use fedimint_core::module::{
-    ApiAuth, ApiMethod, ApiRequestErased, ApiVersion, SerdeModuleEncoding,
-};
-use fedimint_core::session_outcome::{SessionOutcome, SessionStatus};
+use fedimint_core::module::{ApiAuth, ApiMethod, ApiRequestErased, SerdeModuleEncoding};
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::transaction::{Transaction, TransactionSubmissionOutcome};
 use fedimint_core::util::backoff_util::api_networking_backoff;
@@ -31,7 +25,6 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{Future, StreamExt};
 use global_api::with_cache::GlobalFederationApiWithCache;
 use jsonrpsee_core::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
@@ -42,25 +35,10 @@ pub use crate::connection::{
 };
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 
-pub const VERSION_THAT_INTRODUCED_GET_SESSION_STATUS_V2: ApiVersion = ApiVersion::new(0, 5);
-
-pub const VERSION_THAT_INTRODUCED_GET_SESSION_STATUS: ApiVersion =
-    ApiVersion { major: 0, minor: 1 };
-
-pub const VERSION_THAT_INTRODUCED_AWAIT_OUTPUTS_OUTCOMES: ApiVersion = ApiVersion::new(0, 8);
 pub type FederationResult<T> = Result<T, FederationError>;
 pub type SerdeOutputOutcome = SerdeModuleEncoding<DynOutputOutcome>;
 
 pub type OutputOutcomeResult<O> = result::Result<O, OutputOutcomeError>;
-
-/// Set of api versions for each component (core + modules)
-///
-/// E.g. result of federated common api versions discovery.
-#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ApiVersionSet {
-    pub core: ApiVersion,
-    pub modules: BTreeMap<ModuleInstanceId, ApiVersion>,
-}
 
 /// An API (module or global) that can query a federation
 #[apply(async_trait_maybe_send!)]
@@ -432,22 +410,6 @@ pub trait IGlobalFederationApi: IRawFederationApi {
         &self,
         tx: Transaction,
     ) -> SerdeModuleEncoding<TransactionSubmissionOutcome>;
-
-    async fn await_block(
-        &self,
-        block_index: u64,
-        decoders: &ModuleDecoderRegistry,
-    ) -> anyhow::Result<SessionOutcome>;
-
-    async fn get_session_status(
-        &self,
-        block_index: u64,
-        decoders: &ModuleDecoderRegistry,
-        core_api_version: ApiVersion,
-        broadcast_public_keys: Option<&BTreeMap<PeerId, secp256k1::PublicKey>>,
-    ) -> anyhow::Result<SessionStatus>;
-
-    async fn session_count(&self) -> FederationResult<u64>;
 
     async fn await_transaction(&self, txid: TransactionId) -> TransactionId;
 

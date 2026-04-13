@@ -26,10 +26,7 @@ iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false }
 z32 = { workspace = true }
 futures = { workspace = true }
-itertools = { workspace = true }
 jsonrpsee-core = { workspace = true }
-lru = { workspace = true }
-rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

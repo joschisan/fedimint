@@ -27,9 +27,7 @@ use fedimint_core::config::FederationId;
 use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{
-    ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
-};
+use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::time::now;
 use fedimint_core::util::Spanned;
@@ -81,11 +79,6 @@ impl ModuleInit for GatewayClientInitV2 {
 #[apply(async_trait_maybe_send!)]
 impl ClientModuleInit for GatewayClientInitV2 {
     type Module = GatewayClientModuleV2;
-
-    fn supported_api_versions(&self) -> MultiApiVersion {
-        MultiApiVersion::try_from_iter([ApiVersion { major: 0, minor: 0 }])
-            .expect("no version conflicts")
-    }
 
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
         Ok(GatewayClientModuleV2 {

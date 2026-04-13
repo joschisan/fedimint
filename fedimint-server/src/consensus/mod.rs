@@ -185,10 +185,6 @@ pub async fn run(
         submission_sender: submission_sender.clone(),
         shutdown_sender,
         shutdown_receiver: shutdown_receiver.clone(),
-        supported_api_versions: ServerConfig::supported_api_versions_summary(
-            &cfg.consensus.modules,
-            &module_init_registry,
-        ),
         p2p_status_receivers,
         ci_status_receivers,
         ord_latency_receiver,
