@@ -286,7 +286,7 @@ pub async fn run_config_gen(
     )
     .await?;
 
-    write_server_config(&cfg, &data_dir, &module_init_registry, None)?;
+    write_server_config(&cfg, &data_dir)?;
 
     Ok((cfg, connections, p2p_status_receivers))
 }

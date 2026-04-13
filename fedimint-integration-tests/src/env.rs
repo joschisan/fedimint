@@ -74,13 +74,23 @@ impl TestEnv {
         }
 
         info!("Running DKG...");
-        runtime.block_on(run_dkg(base))?;
+        runtime.block_on(run_dkg())?;
 
-        let peer0_dir = base.join("fedimintd-0");
-        let invite_code_str = runtime.block_on(retry("read invite code", || async {
-            tokio::fs::read_to_string(peer0_dir.join("invite-code"))
-                .await
-                .context("invite code not yet available")
+        let peer0_cli = format!("http://127.0.0.1:{}", GUARDIAN_BASE_PORT + 4);
+        let invite_code_str = runtime.block_on(retry("fetch invite code", || async {
+            let http = reqwest::Client::new();
+            let resp: fedimint_server_cli_core::InviteResponse = http
+                .post(format!(
+                    "{peer0_cli}{}",
+                    fedimint_server_cli_core::ROUTE_INVITE
+                ))
+                .json(&())
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            Ok(resp.invite_code)
         }))?;
         let invite_code: InviteCode = invite_code_str.trim().parse()?;
         info!("Federation ready");
@@ -329,7 +339,7 @@ async fn start_gatewayd(
     Ok(())
 }
 
-async fn run_dkg(base: &Path) -> anyhow::Result<()> {
+async fn run_dkg() -> anyhow::Result<()> {
     use fedimint_server_cli_core::{
         ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG,
         ROUTE_SETUP_STATUS, SetupAddPeerRequest, SetupSetLocalParamsRequest,
@@ -425,16 +435,7 @@ async fn run_dkg(base: &Path) -> anyhow::Result<()> {
             .error_for_status()?;
     }
 
-    // Wait for invite code to appear
-    let peer0_dir = base.join("fedimintd-0");
-    retry("await invite-code file", || async {
-        tokio::fs::read_to_string(peer0_dir.join("invite-code"))
-            .await
-            .context("invite code not yet written")
-    })
-    .await?;
-
-    info!("DKG complete");
+    info!("DKG started");
     Ok(())
 }
 
