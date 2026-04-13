@@ -273,7 +273,7 @@ impl TestEnv {
         self.mine_blocks(10);
 
         retry("pegin balance", || async {
-            let balance = client.get_balance_for_btc().await?;
+            let balance = client.get_balance().await?;
             ensure!(balance > Amount::ZERO, "balance is zero");
             Ok(())
         })

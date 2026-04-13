@@ -578,7 +578,7 @@ async fn federation_join(
     let federation_info = FederationInfo {
         federation_id,
         federation_name: AppState::federation_name(&client).await,
-        balance_msat: client.get_balance_for_btc().await.unwrap_or_else(|err| {
+        balance_msat: client.get_balance().await.unwrap_or_else(|err| {
             warn!(
                 target: LOG_GATEWAY,
                 err = %err.fmt_compact_anyhow(),

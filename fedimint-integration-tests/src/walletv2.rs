@@ -47,7 +47,7 @@ pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
     retry("circular deposit balance", || async {
         env.mine_blocks(1);
 
-        let balance = client_receive.get_balance_for_btc().await?;
+        let balance = client_receive.get_balance().await?;
 
         ensure!(
             balance >= Amount::from_sats(99_000),

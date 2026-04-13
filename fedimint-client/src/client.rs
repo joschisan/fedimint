@@ -847,15 +847,6 @@ impl Client {
         self.config().await.to_json()
     }
 
-    // Ideally this would not be in the API, but there's a lot of places where this
-    // makes it easier.
-    #[doc(hidden)]
-    /// Like [`Self::get_balance`] but returns an error if primary module is not
-    /// available
-    pub async fn get_balance_for_btc(&self) -> anyhow::Result<Amount> {
-        self.get_balance().await
-    }
-
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {
         let (id, module) = self
             .primary_module()

@@ -217,7 +217,7 @@ impl AppState {
         let clients = self.clients.read().await;
         let mut infos = Vec::new();
         for (federation_id, client) in clients.iter() {
-            let balance_msat = match client.borrow().with(|c| c.get_balance_for_btc()).await {
+            let balance_msat = match client.borrow().with(|c| c.get_balance()).await {
                 Ok(balance) => balance,
                 Err(err) => {
                     warn!(
