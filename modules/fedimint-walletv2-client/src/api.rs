@@ -5,7 +5,7 @@ use fedimint_core::{OutPoint, apply, async_trait_maybe_send};
 use fedimint_walletv2_common::endpoint_constants::{
     CONSENSUS_BLOCK_COUNT_ENDPOINT, CONSENSUS_FEERATE_ENDPOINT, FEDERATION_WALLET_ENDPOINT,
     OUTPUT_INFO_SLICE_ENDPOINT, PENDING_TRANSACTION_CHAIN_ENDPOINT, RECEIVE_FEE_ENDPOINT,
-    SEND_FEE_ENDPOINT, TRANSACTION_CHAIN_ENDPOINT, TRANSACTION_ID_ENDPOINT,
+    SEND_FEE_ENDPOINT, TRANSACTION_ID_ENDPOINT,
 };
 use fedimint_walletv2_common::{FederationWallet, OutputInfo, TxInfo};
 
@@ -22,8 +22,6 @@ pub trait WalletFederationApi {
     async fn receive_fee(&self) -> FederationResult<Option<bitcoin::Amount>>;
 
     async fn pending_tx_chain(&self) -> FederationResult<Vec<TxInfo>>;
-
-    async fn tx_chain(&self) -> FederationResult<Vec<TxInfo>>;
 
     async fn output_info_slice(
         &self,
@@ -76,14 +74,6 @@ where
     async fn pending_tx_chain(&self) -> FederationResult<Vec<TxInfo>> {
         self.request_current_consensus(
             PENDING_TRANSACTION_CHAIN_ENDPOINT.to_string(),
-            ApiRequestErased::new(()),
-        )
-        .await
-    }
-
-    async fn tx_chain(&self) -> FederationResult<Vec<TxInfo>> {
-        self.request_current_consensus(
-            TRANSACTION_CHAIN_ENDPOINT.to_string(),
             ApiRequestErased::new(()),
         )
         .await

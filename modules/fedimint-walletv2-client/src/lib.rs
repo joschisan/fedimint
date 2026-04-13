@@ -47,7 +47,7 @@ use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_logging::LOG_CLIENT_MODULE_WALLETV2;
 use fedimint_walletv2_common::config::WalletClientConfig;
 use fedimint_walletv2_common::{
-    KIND, StandardScript, TxInfo, WalletCommonInit, WalletInput, WalletInputV0, WalletModuleTypes,
+    KIND, StandardScript, WalletCommonInit, WalletInput, WalletInputV0, WalletModuleTypes,
     WalletOutput, WalletOutputV0, descriptor, is_potential_receive,
 };
 use futures::StreamExt;
@@ -217,16 +217,6 @@ impl WalletClientModule {
     /// Fetch the current consensus feerate.
     pub async fn feerate(&self) -> FederationResult<Option<u64>> {
         self.module_api.consensus_feerate().await
-    }
-
-    /// Fetch information on the chain of pending bitcoin transactions.
-    async fn pending_tx_chain(&self) -> FederationResult<Vec<TxInfo>> {
-        self.module_api.pending_tx_chain().await
-    }
-
-    /// Display log of bitcoin transactions.
-    async fn tx_chain(&self) -> FederationResult<Vec<TxInfo>> {
-        self.module_api.tx_chain().await
     }
 
     /// Fetch the current fee required to send an onchain payment.
