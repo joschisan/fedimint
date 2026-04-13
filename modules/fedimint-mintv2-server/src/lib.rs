@@ -141,8 +141,6 @@ impl ServerModuleInit for MintInit {
         peers: &(dyn PeerHandleOps + Send + Sync),
         _args: &ConfigGenModuleArgs,
     ) -> anyhow::Result<ServerModuleConfig> {
-        let (input_fee, output_fee) = (Amount::from_sats(1), Amount::from_sats(1));
-
         let mut tbs_sks = BTreeMap::new();
         let mut tbs_agg_pks = BTreeMap::new();
         let mut tbs_pks = BTreeMap::new();
@@ -168,8 +166,8 @@ impl ServerModuleInit for MintInit {
             consensus: MintConfigConsensus {
                 tbs_agg_pks,
                 tbs_pks,
-                input_fee,
-                output_fee,
+                input_fee: Amount::from_msats(100),
+                output_fee: Amount::from_msats(100),
             },
         };
 
