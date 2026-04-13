@@ -5,16 +5,25 @@ on:
   # Safety: we checkout the base branch (trusted) and only fetch the PR
   # diff as text — no untrusted code is checked out or executed.
   pull_request_target:
-    types: [opened, ready_for_review, synchronize]
+    types: [opened, ready_for_review]
+  # Re-review only when explicitly requested via "/review" comment on a PR
+  issue_comment:
+    types: [created]
 
 # One review per PR at a time
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
   review:
-    if: github.repository == 'fedimint/fedimint' && github.event.pull_request.draft == false
+    # Run on PR open/ready-for-review, or when someone comments "/review" on a PR
+    if: >-
+      github.repository == 'fedimint/fedimint' && (
+        (github.event_name == 'pull_request_target' && !github.event.pull_request.draft) ||
+        (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+         contains(github.event.comment.body, '/review'))
+      )
     name: Claude Code Review
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -25,22 +34,48 @@ jobs:
       GH_TOKEN: ${{ secrets.BACKPORT_TOKEN }}
 
     steps:
+      - name: Resolve PR metadata
+        id: pr
+        run: |
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            PR_NUMBER="${{ github.event.issue.number }}"
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+
+          # Fetch full PR data from the API (works uniformly for both triggers)
+          PR_JSON=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}")
+
+          echo "number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$(echo "$PR_JSON" | jq -r '.base.ref')" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$(echo "$PR_JSON" | jq -r '.base.sha')" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(echo "$PR_JSON" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
+          echo "title=$(echo "$PR_JSON" | jq -r '.title')" >> "$GITHUB_OUTPUT"
+
+      - name: Acknowledge review request
+        if: github.event_name == 'issue_comment'
+        run: |
+          gh api \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            --method POST \
+            -f content='eyes'
+
       - uses: actions/checkout@v6
         with:
           # Checkout the base branch (trusted code only)
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ steps.pr.outputs.base_ref }}
           fetch-depth: 0
 
       - name: Fetch PR head
         run: |
           # Fetch the PR head commit without checking it out
-          git fetch origin "${{ github.event.pull_request.head.sha }}"
+          git fetch origin "${{ steps.pr.outputs.head_sha }}"
 
       - name: Get changed files
         id: changed
         run: |
-          BASE_SHA=${{ github.event.pull_request.base.sha }}
-          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          BASE_SHA=${{ steps.pr.outputs.base_sha }}
+          HEAD_SHA=${{ steps.pr.outputs.head_sha }}
           FILES=$(git diff --name-only "$BASE_SHA"..."$HEAD_SHA")
           echo "files<<EOF" >> "$GITHUB_OUTPUT"
           echo "$FILES" >> "$GITHUB_OUTPUT"
@@ -72,8 +107,8 @@ jobs:
       - name: Get diff for review
         id: diff
         run: |
-          BASE_SHA=${{ github.event.pull_request.base.sha }}
-          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          BASE_SHA=${{ steps.pr.outputs.base_sha }}
+          HEAD_SHA=${{ steps.pr.outputs.head_sha }}
 
           git diff "$BASE_SHA"..."$HEAD_SHA" > /tmp/pr_diff.patch
 
@@ -93,7 +128,7 @@ jobs:
       - name: Fetch prior AI reviews
         id: prior
         run: |
-          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
 
           # Determine the bot account login from the token
           BOT_LOGIN=$(gh api user --jq '.login')
@@ -164,7 +199,7 @@ jobs:
           # PR metadata
           cat >> /tmp/review_prompt.txt <<PROMPT_META
 
-          PR Title: ${{ github.event.pull_request.title }}
+          PR Title: ${{ steps.pr.outputs.title }}
           Consensus-critical files changed: ${IS_CONSENSUS}
           PROMPT_META
 
@@ -293,8 +328,8 @@ jobs:
         run: |
           VERDICT="${{ steps.claude-review.outputs.verdict }}"
           HAS_INLINE="${{ steps.claude-review.outputs.has_inline }}"
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
+          COMMIT_SHA="${{ steps.pr.outputs.head_sha }}"
 
           if [ "$VERDICT" = "APPROVE" ]; then
             GH_EVENT="APPROVE"
