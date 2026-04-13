@@ -8,7 +8,6 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::net::STANDARD_FEDIMINT_P2P_PORT;
 use fedimint_core::net::iroh::build_iroh_endpoint;
 use fedimint_core::util::SafeUrl;
-use fedimint_server_core::dashboard_ui::ConnectionType;
 use iroh::{Endpoint, PublicKey, SecretKey};
 
 use super::IP2PConnector;
@@ -95,10 +94,5 @@ where
             .0;
 
         Ok((*auth_peer, connection.into_dyn()))
-    }
-
-    fn connection_type(&self, _peer: PeerId) -> Option<ConnectionType> {
-        // Connection type monitoring was removed in iroh 0.97
-        None
     }
 }

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use fedimint_core::PeerId;
-use fedimint_server_core::dashboard_ui::{ConnectionType, P2PConnectionStatus};
+use fedimint_server_core::dashboard_ui::P2PConnectionStatus;
 use maud::{Markup, html};
 
 pub fn render(
@@ -34,7 +34,6 @@ pub fn render(
                             tr {
                                 th { "ID" }
                                 th { "Status" }
-                                th { "Connection Type" }
                                 th { "Round Trip" }
                             }
                         }
@@ -49,22 +48,6 @@ pub fn render(
                                             }
                                             None => {
                                                 span class="badge bg-danger" { "Disconnected" }
-                                            }
-                                        }
-                                    }
-                                    td {
-                                        @match status.as_ref().and_then(|s| s.conn_type) {
-                                            Some(ConnectionType::Direct) => {
-                                                span class="badge bg-success" { "Direct" }
-                                            }
-                                            Some(ConnectionType::Relay) => {
-                                                span class="badge bg-warning" { "Relay" }
-                                            }
-                                            Some(ConnectionType::Mixed) => {
-                                                span class="badge bg-info" { "Mixed" }
-                                            }
-                                            None => {
-                                                span class="text-muted" { "N/A" }
                                             }
                                         }
                                     }

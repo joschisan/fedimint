@@ -17,23 +17,9 @@ use crate::{DynServerModule, ServerModule};
 
 pub type DynDashboardApi = Arc<dyn IDashboardApi + Send + Sync + 'static>;
 
-/// Type of the connection to a peer. Mirrors iroh::endpoint::ConnectionType.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectionType {
-    /// Direct UDP connectivity
-    Direct,
-    /// Going through an Iroh relay
-    Relay,
-    /// Both relay and direct paths available
-    Mixed,
-}
-
 /// P2P connection status for a peer. None indicates disconnected.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct P2PConnectionStatus {
-    /// The type of connection (Direct, Relay, Mixed), None if unknown
-    pub conn_type: Option<ConnectionType>,
     /// Round-trip time (only available for iroh connections)
     pub rtt: Option<Duration>,
 }
