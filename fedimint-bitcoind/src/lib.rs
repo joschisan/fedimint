@@ -16,7 +16,6 @@ use anyhow::{Result, format_err};
 use bitcoin::{ScriptBuf, Transaction, Txid};
 use esplora_client::{AsyncClient, Builder};
 use fedimint_core::envs::FM_FORCE_BITCOIN_RPC_URL_ENV;
-use fedimint_core::txoproof::TxOutProof;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{apply, async_trait_maybe_send};
 use fedimint_metrics::HistogramExt as _;
@@ -57,9 +56,6 @@ pub trait IBitcoindRpc: Debug + Send + Sync + 'static {
 
     /// Get script transaction history
     async fn get_script_history(&self, script: &ScriptBuf) -> Result<Vec<Transaction>>;
-
-    /// Returns a proof that a tx is included in the bitcoin blockchain
-    async fn get_txout_proof(&self, txid: Txid) -> Result<TxOutProof>;
 
     /// Returns `BlockchainInfo` which contains a subset of info about the chain
     /// data source.
@@ -141,16 +137,6 @@ impl IBitcoindRpc for BitcoindTracked {
         result
     }
 
-    async fn get_txout_proof(&self, txid: Txid) -> Result<TxOutProof> {
-        let timer = BITCOIND_RPC_DURATION_SECONDS
-            .with_label_values(&["get_txout_proof", self.name])
-            .start_timer_ext();
-        let result = self.inner.get_txout_proof(txid).await;
-        timer.observe_duration();
-        self.record_call("get_txout_proof", &result);
-        result
-    }
-
     async fn get_info(&self) -> Result<BlockchainInfo> {
         let timer = BITCOIND_RPC_DURATION_SECONDS
             .with_label_values(&["get_info", self.name])
@@ -223,19 +209,6 @@ impl IBitcoindRpc for EsploraClient {
         }
 
         Ok(transactions)
-    }
-
-    async fn get_txout_proof(&self, txid: Txid) -> anyhow::Result<TxOutProof> {
-        let proof = self
-            .client
-            .get_merkle_block(&txid)
-            .await?
-            .ok_or(format_err!("No merkle proof found"))?;
-
-        Ok(TxOutProof {
-            block_header: proof.header,
-            merkle_proof: proof.txn,
-        })
     }
 
     async fn get_info(&self) -> anyhow::Result<BlockchainInfo> {

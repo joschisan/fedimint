@@ -2,16 +2,13 @@ use bitcoin::{Address, ScriptBuf, Txid};
 use bitcoincore_rpc::json::ImportDescriptors;
 use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
 use bitcoincore_rpc::{Auth, Error as RpcError, RpcApi};
-use fedimint_core::encoding::Decodable;
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::block_in_place;
-use fedimint_core::txoproof::TxOutProof;
 use fedimint_core::util::{FmtCompact, SafeUrl};
 use fedimint_core::{apply, async_trait_maybe_send};
 use fedimint_logging::LOG_BITCOIND_CORE;
 use tracing::{debug, warn};
 
-use crate::{BlockchainInfo, IBitcoindRpc, format_err};
+use crate::{BlockchainInfo, IBitcoindRpc};
 
 #[derive(Debug)]
 pub struct BitcoindClient {
@@ -136,14 +133,6 @@ impl IBitcoindRpc for BitcoindClient {
             results.push(raw_tx);
         }
         Ok(results)
-    }
-
-    async fn get_txout_proof(&self, txid: Txid) -> anyhow::Result<TxOutProof> {
-        TxOutProof::consensus_decode_whole(
-            &block_in_place(|| self.client.get_tx_out_proof(&[txid], None))?,
-            &ModuleDecoderRegistry::default(),
-        )
-        .map_err(|error| format_err!("Could not decode tx: {}", error))
     }
 
     async fn get_info(&self) -> anyhow::Result<BlockchainInfo> {

@@ -109,7 +109,6 @@ pub mod timing;
 /// Fedimint transaction (inpus + outputs + signature) types
 pub mod transaction;
 /// Peg-in txo proofs
-pub mod txoproof;
 /// General purpose utilities
 pub mod util;
 /// Version
