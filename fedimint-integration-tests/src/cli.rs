@@ -8,7 +8,7 @@ use fedimint_gateway_cli_core::{
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::env::{GUARDIAN_BASE_PORT, PORTS_PER_GUARDIAN, find_binary};
+use crate::env::{GUARDIAN_BASE_PORT, PORTS_PER_GUARDIAN};
 
 trait RunCli {
     fn run_cli<T: DeserializeOwned>(&mut self) -> Result<T>;
@@ -30,7 +30,7 @@ impl RunCli for Command {
 }
 
 pub fn gatewayd_info(gw_addr: &str) -> Result<InfoResponse> {
-    Command::new(find_binary("gatewayd-cli"))
+    Command::new("target-nix/debug/gatewayd-cli")
         .arg("-a")
         .arg(gw_addr)
         .arg("info")
@@ -38,7 +38,7 @@ pub fn gatewayd_info(gw_addr: &str) -> Result<InfoResponse> {
 }
 
 pub fn gatewayd_federation_join(gw_addr: &str, invite: &str) -> Result<Value> {
-    Command::new(find_binary("gatewayd-cli"))
+    Command::new("target-nix/debug/gatewayd-cli")
         .arg("-a")
         .arg(gw_addr)
         .arg("federation")
@@ -51,7 +51,7 @@ pub fn gatewayd_federation_balance(
     gw_addr: &str,
     fed_id: &str,
 ) -> Result<FederationBalanceResponse> {
-    Command::new(find_binary("gatewayd-cli"))
+    Command::new("target-nix/debug/gatewayd-cli")
         .arg("-a")
         .arg(gw_addr)
         .arg("federation")
@@ -61,7 +61,7 @@ pub fn gatewayd_federation_balance(
 }
 
 pub fn gatewayd_wallet_receive(gw_addr: &str, fed_id: &str) -> Result<WalletReceiveResponse> {
-    Command::new(find_binary("gatewayd-cli"))
+    Command::new("target-nix/debug/gatewayd-cli")
         .arg("-a")
         .arg(gw_addr)
         .arg("module")
@@ -72,7 +72,7 @@ pub fn gatewayd_wallet_receive(gw_addr: &str, fed_id: &str) -> Result<WalletRece
 }
 
 pub fn gatewayd_ldk_onchain_receive(gw_addr: &str) -> Result<LdkOnchainReceiveResponse> {
-    Command::new(find_binary("gatewayd-cli"))
+    Command::new("target-nix/debug/gatewayd-cli")
         .arg("-a")
         .arg(gw_addr)
         .arg("ldk")
@@ -88,7 +88,7 @@ pub fn gatewayd_ldk_channel_open(
     channel_sats: u64,
     push_sats: u64,
 ) -> Result<Value> {
-    Command::new(find_binary("gatewayd-cli"))
+    Command::new("target-nix/debug/gatewayd-cli")
         .arg("-a")
         .arg(gw_addr)
         .arg("ldk")
@@ -103,7 +103,7 @@ pub fn gatewayd_ldk_channel_open(
 }
 
 pub fn gatewayd_ldk_channel_list(gw_addr: &str) -> Result<LdkChannelListResponse> {
-    Command::new(find_binary("gatewayd-cli"))
+    Command::new("target-nix/debug/gatewayd-cli")
         .arg("-a")
         .arg(gw_addr)
         .arg("ldk")
@@ -116,7 +116,7 @@ pub fn gatewayd_ldk_invoice_create(
     gw_addr: &str,
     amount_msat: u64,
 ) -> Result<LdkInvoiceCreateResponse> {
-    Command::new(find_binary("gatewayd-cli"))
+    Command::new("target-nix/debug/gatewayd-cli")
         .arg("-a")
         .arg(gw_addr)
         .arg("ldk")
@@ -127,7 +127,7 @@ pub fn gatewayd_ldk_invoice_create(
 }
 
 pub fn gatewayd_ldk_invoice_pay(gw_addr: &str, invoice: &str) -> Result<Value> {
-    Command::new(find_binary("gatewayd-cli"))
+    Command::new("target-nix/debug/gatewayd-cli")
         .arg("-a")
         .arg(gw_addr)
         .arg("ldk")
@@ -139,7 +139,8 @@ pub fn gatewayd_ldk_invoice_pay(gw_addr: &str, invoice: &str) -> Result<Value> {
 
 pub fn fedimintd_lnv2_gateway_add(peer: usize, gateway: &str) -> Result<bool> {
     let cli_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN) + 4;
-    Command::new(find_binary("fedimintd-cli"))
+
+    Command::new("target-nix/debug/fedimintd-cli")
         .arg("-a")
         .arg(format!("http://127.0.0.1:{cli_port}"))
         .arg("module")
@@ -152,7 +153,8 @@ pub fn fedimintd_lnv2_gateway_add(peer: usize, gateway: &str) -> Result<bool> {
 
 pub fn fedimintd_lnv2_gateway_remove(peer: usize, gateway: &str) -> Result<bool> {
     let cli_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN) + 4;
-    Command::new(find_binary("fedimintd-cli"))
+
+    Command::new("target-nix/debug/fedimintd-cli")
         .arg("-a")
         .arg(format!("http://127.0.0.1:{cli_port}"))
         .arg("module")

@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -20,13 +20,6 @@ use tokio::task::block_in_place;
 use tracing::info;
 
 use crate::cli;
-
-pub fn find_binary(name: &str) -> PathBuf {
-    let target_dir =
-        std::env::var("CARGO_BUILD_TARGET_DIR").unwrap_or_else(|_| "target".to_string());
-    let profile = std::env::var("CARGO_PROFILE_DIR").unwrap_or_else(|_| "debug".to_string());
-    PathBuf::from(format!("{target_dir}/{profile}/{name}"))
-}
 
 pub const BTC_RPC_PORT: u16 = 18443;
 pub const GUARDIAN_BASE_PORT: u16 = 17000;
@@ -264,7 +257,7 @@ async fn start_fedimintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
 
     let log_file = std::fs::File::create(base.join(format!("fedimintd-{peer_idx}.log")))?;
 
-    Command::new(find_binary("fedimintd"))
+    Command::new("target-nix/debug/fedimintd")
         .env("FM_DATA_DIR", data_dir.to_str().unwrap())
         .env("FM_BITCOIN_NETWORK", "regtest")
         .env(
@@ -302,7 +295,7 @@ async fn start_gatewayd(
 
     let log_file = std::fs::File::create(base.join(format!("{name}.log")))?;
 
-    Command::new(find_binary("gatewayd"))
+    Command::new("target-nix/debug/gatewayd")
         .env("FM_GATEWAY_DATA_DIR", data_dir.to_str().unwrap())
         .env("FM_GATEWAY_API_BIND", format!("0.0.0.0:{gw_port}"))
         .env("FM_GATEWAY_CLI_BIND", format!("127.0.0.1:{}", gw_port + 1))
