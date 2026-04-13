@@ -46,7 +46,6 @@ fn dummy_address() -> bitcoin::Address {
 
 pub struct TestEnv {
     pub ldk_node: Arc<ldk_node::Node>,
-    _ldk_runtime: Arc<tokio::runtime::Runtime>,
     pub data_dir: tempfile::TempDir,
     pub bitcoind: bitcoincore_rpc::Client,
     pub invite_code: InviteCode,
@@ -56,7 +55,7 @@ pub struct TestEnv {
 }
 
 impl TestEnv {
-    pub async fn setup() -> anyhow::Result<Self> {
+    pub async fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<Self> {
         let data_dir = tempfile::TempDir::new()?;
         let base = data_dir.path();
         info!("Test data directory: {}", base.display());
@@ -102,7 +101,7 @@ impl TestEnv {
         info!("Gateway connected");
 
         info!("Building freestanding LDK node...");
-        let (ldk_node, ldk_runtime) = block_in_place(|| build_ldk_node(base))?;
+        let ldk_node = block_in_place(|| build_ldk_node(base, runtime))?;
         info!("LDK node built: {}", ldk_node.node_id());
 
         info!("Funding gateway and opening channel to LDK node...");
@@ -111,7 +110,6 @@ impl TestEnv {
 
         Ok(Self {
             ldk_node,
-            _ldk_runtime: ldk_runtime,
             data_dir,
             bitcoind,
             invite_code,
@@ -423,7 +421,8 @@ async fn run_dkg(base: &Path) -> anyhow::Result<()> {
 
 fn build_ldk_node(
     base: &Path,
-) -> anyhow::Result<(Arc<ldk_node::Node>, Arc<tokio::runtime::Runtime>)> {
+    runtime: Arc<tokio::runtime::Runtime>,
+) -> anyhow::Result<Arc<ldk_node::Node>> {
     let mut builder = ldk_node::Builder::new();
 
     builder.set_network(Network::Regtest);
@@ -445,10 +444,9 @@ fn build_ldk_node(
     );
 
     let node = Arc::new(builder.build()?);
-    let runtime = Arc::new(tokio::runtime::Runtime::new()?);
-    node.start_with_runtime(runtime.clone())?;
+    node.start_with_runtime(runtime)?;
 
-    Ok((node, runtime))
+    Ok(node)
 }
 
 async fn open_channel(

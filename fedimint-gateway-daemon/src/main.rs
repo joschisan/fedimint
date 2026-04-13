@@ -130,6 +130,7 @@ pub struct GatewayOpts {
 
 fn main() -> anyhow::Result<()> {
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);
+
     runtime.block_on(async {
         fedimint_core::util::handle_version_hash_command(fedimint_build_code_version_env!());
         TracingSetup::default().init()?;
@@ -204,9 +205,7 @@ fn main() -> anyhow::Result<()> {
 
         let node = Arc::new(node_builder.build()?);
 
-        let ldk_runtime = Arc::new(tokio::runtime::Runtime::new()?);
-
-        node.start_with_runtime(ldk_runtime.clone())?;
+        node.start_with_runtime(runtime.clone())?;
 
         info!("Successfully started LDK Node");
 
