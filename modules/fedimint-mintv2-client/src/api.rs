@@ -13,8 +13,8 @@ use fedimint_mintv2_common::endpoint_constants::{
 use fedimint_mintv2_common::{Denomination, RecoveryItem};
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
-use crate::output::verify_blind_shares;
 use crate::NoteIssuanceRequest;
+use crate::output::verify_blind_shares;
 
 #[async_trait::async_trait]
 pub trait MintV2ModuleApi {
