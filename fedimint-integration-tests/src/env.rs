@@ -356,7 +356,11 @@ async fn start_gatewayd(
 }
 
 async fn run_dkg(base: &Path) -> anyhow::Result<()> {
-    use fedimint_server_cli_core::*;
+    use fedimint_server_cli_core::{
+        ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG,
+        ROUTE_SETUP_STATUS, SetupAddPeerRequest, SetupSetLocalParamsRequest,
+        SetupSetLocalParamsResponse, SetupStatus,
+    };
 
     let mut cli_addrs = BTreeMap::new();
     for i in 0..NUM_GUARDIANS {
@@ -394,7 +398,7 @@ async fn run_dkg(base: &Path) -> anyhow::Result<()> {
     // Set local params: peer 0 is leader, rest are followers
     let mut setup_codes = BTreeMap::new();
     for (peer, addr) in &cli_addrs {
-        let request = SetLocalParamsRequest {
+        let request = SetupSetLocalParamsRequest {
             name: format!("Guardian {peer}"),
             federation_name: if *peer == 0 {
                 Some("Test Federation".to_string())
@@ -408,7 +412,7 @@ async fn run_dkg(base: &Path) -> anyhow::Result<()> {
             },
         };
 
-        let resp: SetLocalParamsResponse = http
+        let resp: SetupSetLocalParamsResponse = http
             .post(format!("{addr}{ROUTE_SETUP_SET_LOCAL_PARAMS}"))
             .json(&request)
             .send()
@@ -428,7 +432,7 @@ async fn run_dkg(base: &Path) -> anyhow::Result<()> {
                 continue;
             }
             http.post(format!("{addr}{ROUTE_SETUP_ADD_PEER}"))
-                .json(&AddPeerRequest {
+                .json(&SetupAddPeerRequest {
                     setup_code: code.clone(),
                 })
                 .send()

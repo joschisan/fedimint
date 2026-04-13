@@ -2887,6 +2887,7 @@ dependencies = [
 name = "fedimint-server-cli-core"
 version = "0.11.0-alpha"
 dependencies = [
+ "fedimint-core",
  "fedimint-server-core",
  "serde",
 ]

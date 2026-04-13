@@ -7,9 +7,9 @@ use axum::response::IntoResponse;
 use axum::routing::post;
 use fedimint_core::task::TaskHandle;
 use fedimint_server_cli_core::{
-    AddPeerRequest, AddPeerResponse, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_SET_LOCAL_PARAMS,
-    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetLocalParamsRequest, SetLocalParamsResponse,
-    SetupStatus,
+    ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS,
+    SetupAddPeerRequest, SetupAddPeerResponse, SetupSetLocalParamsRequest,
+    SetupSetLocalParamsResponse, SetupStatus,
 };
 use fedimint_server_core::setup_ui::DynSetupApi;
 use tokio::net::TcpListener;
@@ -99,8 +99,8 @@ async fn setup_status(State(state): State<CliState>) -> Result<Json<SetupStatus>
 
 async fn setup_set_local_params(
     State(state): State<CliState>,
-    Json(payload): Json<SetLocalParamsRequest>,
-) -> Result<Json<SetLocalParamsResponse>, CliError> {
+    Json(payload): Json<SetupSetLocalParamsRequest>,
+) -> Result<Json<SetupSetLocalParamsResponse>, CliError> {
     let setup_code = state
         .setup_api
         .set_local_parameters(
@@ -113,20 +113,20 @@ async fn setup_set_local_params(
         .await
         .map_err(CliError::internal)?;
 
-    Ok(Json(SetLocalParamsResponse { setup_code }))
+    Ok(Json(SetupSetLocalParamsResponse { setup_code }))
 }
 
 async fn setup_add_peer(
     State(state): State<CliState>,
-    Json(payload): Json<AddPeerRequest>,
-) -> Result<Json<AddPeerResponse>, CliError> {
+    Json(payload): Json<SetupAddPeerRequest>,
+) -> Result<Json<SetupAddPeerResponse>, CliError> {
     let name = state
         .setup_api
         .add_peer_setup_code(payload.setup_code)
         .await
         .map_err(CliError::internal)?;
 
-    Ok(Json(AddPeerResponse { name }))
+    Ok(Json(SetupAddPeerResponse { name }))
 }
 
 async fn setup_start_dkg(State(state): State<CliState>) -> Result<Json<()>, CliError> {

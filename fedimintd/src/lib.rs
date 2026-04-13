@@ -198,14 +198,81 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
     use fedimint_lnv2_server::Lightning;
     use fedimint_server::cli::CliError;
     use fedimint_server_cli_core::{
-        GatewayUrlRequest, ROUTE_AUDIT, ROUTE_MODULE_LNV2_GATEWAY_ADD,
+        Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_MODULE_LNV2_GATEWAY_ADD,
         ROUTE_MODULE_LNV2_GATEWAY_LIST, ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
+        ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
+        ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
+        ROUTE_MODULE_WALLET_TX_CHAIN, AuditResponse, WalletBlockCountResponse,
+        WalletFeerateResponse, WalletTotalValueResponse,
     };
     use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi};
+    use fedimint_walletv2_server::Wallet;
+
+    async fn audit(
+        State(api): State<DynDashboardApi>,
+    ) -> Result<Json<AuditResponse>, CliError> {
+        Ok(Json(AuditResponse {
+            audit: api.federation_audit().await,
+        }))
+    }
+
+    async fn wallet_total_value(
+        State(api): State<DynDashboardApi>,
+    ) -> Result<Json<WalletTotalValueResponse>, CliError> {
+        let wallet = api
+            .get_module::<Wallet>()
+            .ok_or_else(|| CliError::internal("Wallet module not found"))?;
+        Ok(Json(WalletTotalValueResponse {
+            total_value_sats: wallet
+                .federation_wallet_ui()
+                .await
+                .map(|w| w.value.to_sat()),
+        }))
+    }
+
+    async fn wallet_block_count(
+        State(api): State<DynDashboardApi>,
+    ) -> Result<Json<WalletBlockCountResponse>, CliError> {
+        let wallet = api
+            .get_module::<Wallet>()
+            .ok_or_else(|| CliError::internal("Wallet module not found"))?;
+        Ok(Json(WalletBlockCountResponse {
+            block_count: wallet.consensus_block_count_ui().await,
+        }))
+    }
+
+    async fn wallet_feerate(
+        State(api): State<DynDashboardApi>,
+    ) -> Result<Json<WalletFeerateResponse>, CliError> {
+        let wallet = api
+            .get_module::<Wallet>()
+            .ok_or_else(|| CliError::internal("Wallet module not found"))?;
+        Ok(Json(WalletFeerateResponse {
+            sats_per_vbyte: wallet.consensus_feerate_ui().await,
+        }))
+    }
+
+    async fn wallet_pending_tx_chain(
+        State(api): State<DynDashboardApi>,
+    ) -> Result<Json<Vec<fedimint_walletv2_common::TxInfo>>, CliError> {
+        let wallet = api
+            .get_module::<Wallet>()
+            .ok_or_else(|| CliError::internal("Wallet module not found"))?;
+        Ok(Json(wallet.pending_tx_chain_ui().await))
+    }
+
+    async fn wallet_tx_chain(
+        State(api): State<DynDashboardApi>,
+    ) -> Result<Json<Vec<fedimint_walletv2_common::TxInfo>>, CliError> {
+        let wallet = api
+            .get_module::<Wallet>()
+            .ok_or_else(|| CliError::internal("Wallet module not found"))?;
+        Ok(Json(wallet.tx_chain_ui().await))
+    }
 
     async fn lnv2_gateway_add(
         State(api): State<DynDashboardApi>,
-        Json(payload): Json<GatewayUrlRequest>,
+        Json(payload): Json<Lnv2GatewayRequest>,
     ) -> Result<Json<bool>, CliError> {
         let lnv2 = api
             .get_module::<Lightning>()
@@ -219,7 +286,7 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
 
     async fn lnv2_gateway_remove(
         State(api): State<DynDashboardApi>,
-        Json(payload): Json<GatewayUrlRequest>,
+        Json(payload): Json<Lnv2GatewayRequest>,
     ) -> Result<Json<bool>, CliError> {
         let lnv2 = api
             .get_module::<Lightning>()
@@ -240,14 +307,13 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         Ok(Json(lnv2.gateways_ui().await))
     }
 
-    async fn audit(
-        State(api): State<DynDashboardApi>,
-    ) -> Result<Json<fedimint_core::module::audit::AuditSummary>, CliError> {
-        Ok(Json(api.federation_audit().await))
-    }
-
     axum::Router::new()
         .route(ROUTE_AUDIT, post(audit))
+        .route(ROUTE_MODULE_WALLET_TOTAL_VALUE, post(wallet_total_value))
+        .route(ROUTE_MODULE_WALLET_BLOCK_COUNT, post(wallet_block_count))
+        .route(ROUTE_MODULE_WALLET_FEERATE, post(wallet_feerate))
+        .route(ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, post(wallet_pending_tx_chain))
+        .route(ROUTE_MODULE_WALLET_TX_CHAIN, post(wallet_tx_chain))
         .route(ROUTE_MODULE_LNV2_GATEWAY_ADD, post(lnv2_gateway_add))
         .route(ROUTE_MODULE_LNV2_GATEWAY_REMOVE, post(lnv2_gateway_remove))
         .route(ROUTE_MODULE_LNV2_GATEWAY_LIST, post(lnv2_gateway_list))

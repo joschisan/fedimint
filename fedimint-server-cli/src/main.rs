@@ -1,6 +1,13 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
-use fedimint_server_cli_core::{self as cli, *};
+use fedimint_server_cli_core::{
+    Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_MODULE_LNV2_GATEWAY_ADD,
+    ROUTE_MODULE_LNV2_GATEWAY_LIST, ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
+    ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
+    ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
+    ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_SET_LOCAL_PARAMS,
+    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest, SetupSetLocalParamsRequest,
+};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -58,9 +65,26 @@ enum SetupCommands {
 
 #[derive(Subcommand)]
 enum ModuleCommands {
+    /// Wallet module commands
+    #[command(subcommand)]
+    Walletv2(WalletCommands),
     /// LNv2 module commands
     #[command(subcommand)]
     Lnv2(Lnv2Commands),
+}
+
+#[derive(Subcommand)]
+enum WalletCommands {
+    /// Get total wallet value
+    TotalValue,
+    /// Get consensus block count
+    BlockCount,
+    /// Get consensus fee rate
+    Feerate,
+    /// Get pending transaction chain
+    PendingTxChain,
+    /// Get transaction chain
+    TxChain,
 }
 
 #[derive(Subcommand)]
@@ -114,7 +138,7 @@ fn main() -> Result<()> {
     let addr = &cli.address;
 
     let result = match cli.command {
-        Commands::Audit => request(addr, cli::ROUTE_AUDIT, ())?,
+        Commands::Audit => request(addr, ROUTE_AUDIT, ())?,
         Commands::Setup(cmd) => match cmd {
             SetupCommands::Status => request(addr, ROUTE_SETUP_STATUS, ())?,
             SetupCommands::SetLocalParams {
@@ -124,31 +148,46 @@ fn main() -> Result<()> {
             } => request(
                 addr,
                 ROUTE_SETUP_SET_LOCAL_PARAMS,
-                SetLocalParamsRequest {
+                SetupSetLocalParamsRequest {
                     name,
                     federation_name,
                     federation_size,
                 },
             )?,
             SetupCommands::AddPeer { setup_code } => {
-                request(addr, ROUTE_SETUP_ADD_PEER, AddPeerRequest { setup_code })?
+                request(addr, ROUTE_SETUP_ADD_PEER, SetupAddPeerRequest { setup_code })?
             }
             SetupCommands::StartDkg => request(addr, ROUTE_SETUP_START_DKG, ())?,
         },
         Commands::Module(cmd) => match cmd {
+            ModuleCommands::Walletv2(cmd) => match cmd {
+                WalletCommands::TotalValue => {
+                    request(addr, ROUTE_MODULE_WALLET_TOTAL_VALUE, ())?
+                }
+                WalletCommands::BlockCount => {
+                    request(addr, ROUTE_MODULE_WALLET_BLOCK_COUNT, ())?
+                }
+                WalletCommands::Feerate => request(addr, ROUTE_MODULE_WALLET_FEERATE, ())?,
+                WalletCommands::PendingTxChain => {
+                    request(addr, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ())?
+                }
+                WalletCommands::TxChain => request(addr, ROUTE_MODULE_WALLET_TX_CHAIN, ())?,
+            },
             ModuleCommands::Lnv2(cmd) => match cmd {
                 Lnv2Commands::Gateway(cmd) => match cmd {
                     Lnv2GatewayCommands::Add { url } => request(
                         addr,
                         ROUTE_MODULE_LNV2_GATEWAY_ADD,
-                        GatewayUrlRequest { url },
+                        Lnv2GatewayRequest { url },
                     )?,
                     Lnv2GatewayCommands::Remove { url } => request(
                         addr,
                         ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
-                        GatewayUrlRequest { url },
+                        Lnv2GatewayRequest { url },
                     )?,
-                    Lnv2GatewayCommands::List => request(addr, ROUTE_MODULE_LNV2_GATEWAY_LIST, ())?,
+                    Lnv2GatewayCommands::List => {
+                        request(addr, ROUTE_MODULE_LNV2_GATEWAY_LIST, ())?
+                    }
                 },
             },
         },
