@@ -1,5 +1,3 @@
-pub(crate) mod jsonrpsee;
-
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -129,30 +127,6 @@ pub(crate) static IROH_API_REQUEST_DURATION_SECONDS: LazyLock<HistogramVec> = La
     .unwrap()
 });
 
-pub(crate) static JSONRPC_API_REQUEST_DURATION_SECONDS: LazyLock<HistogramVec> =
-    LazyLock::new(|| {
-        register_histogram_vec_with_registry!(
-            histogram_opts!(
-                "jsonrpc_api_request_duration_seconds",
-                "Duration of processing an rpc request",
-            ),
-            &["method"],
-            REGISTRY
-        )
-        .unwrap()
-    });
-pub(crate) static JSONRPC_API_REQUEST_RESPONSE_CODE: LazyLock<IntCounterVec> =
-    LazyLock::new(|| {
-        register_int_counter_vec_with_registry!(
-            opts!(
-                "jsonrpc_api_request_response_code_total",
-                "Count of response counts and types",
-            ),
-            &["method", "code", "type"],
-            REGISTRY
-        )
-        .unwrap()
-    });
 pub(crate) static CONSENSUS_SESSION_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge_with_registry!(
         opts!(

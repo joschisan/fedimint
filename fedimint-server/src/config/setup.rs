@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter::once;
-use std::mem::discriminant;
-use std::str::FromStr as _;
 use std::sync::Arc;
 
 use anyhow::{Context, ensure};
@@ -12,10 +10,7 @@ use fedimint_core::config::META_FEDERATION_NAME_KEY;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::Database;
 use fedimint_core::endpoint_constants::SETUP_STATUS_ENDPOINT;
-use fedimint_core::envs::{
-    FM_DISABLE_BASE_FEES_ENV, FM_IROH_API_SECRET_KEY_OVERRIDE_ENV,
-    FM_IROH_P2P_SECRET_KEY_OVERRIDE_ENV, is_env_var_set,
-};
+use fedimint_core::envs::{FM_DISABLE_BASE_FEES_ENV, is_env_var_set};
 use fedimint_core::module::{
     ApiAuth, ApiEndpoint, ApiEndpointContext, ApiRequestErased, ApiVersion, api_endpoint,
 };
@@ -26,11 +21,9 @@ use iroh::SecretKey;
 use rand::rngs::OsRng;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
-use tokio_rustls::rustls;
 
 use crate::config::{ConfigGenParams, ConfigGenSettings, PeerSetupCode};
 use crate::net::api::HasApiContext;
-use crate::net::p2p_connector::gen_cert_and_key;
 
 /// State held by the API after receiving a `ConfigGenConnectionsRequest`
 #[derive(Debug, Clone, Default)]
@@ -44,15 +37,13 @@ pub struct SetupState {
 #[derive(Clone, Debug)]
 /// Connection information sent between peers in order to start config gen
 pub struct LocalParams {
-    /// Our TLS private key
-    tls_key: Option<Arc<rustls::pki_types::PrivateKeyDer<'static>>>,
-    /// Optional secret key for our iroh api endpoint
-    iroh_api_sk: Option<iroh::SecretKey>,
-    /// Optional secret key for our iroh p2p endpoint
-    iroh_p2p_sk: Option<iroh::SecretKey>,
+    /// Secret key for our iroh api endpoint
+    iroh_api_sk: iroh::SecretKey,
+    /// Secret key for our iroh p2p endpoint
+    iroh_p2p_sk: iroh::SecretKey,
     /// Our api and p2p endpoint
     endpoints: PeerEndpoints,
-    /// Name of the peer, used in TLS auth
+    /// Name of the peer
     name: String,
     /// Federation name set by the leader
     federation_name: Option<String>,
@@ -210,63 +201,21 @@ impl ISetupApi for SetupApi {
             "Local parameters have already been set"
         );
 
-        let lp = if self.settings.enable_iroh {
-            let iroh_api_sk = if let Ok(var) = std::env::var(FM_IROH_API_SECRET_KEY_OVERRIDE_ENV) {
-                SecretKey::from_str(&var)
-                    .with_context(|| format!("Parsing {FM_IROH_API_SECRET_KEY_OVERRIDE_ENV}"))?
-            } else {
-                SecretKey::generate(&mut OsRng)
-            };
+        let iroh_api_sk = SecretKey::generate(&mut OsRng);
+        let iroh_p2p_sk = SecretKey::generate(&mut OsRng);
 
-            let iroh_p2p_sk = if let Ok(var) = std::env::var(FM_IROH_P2P_SECRET_KEY_OVERRIDE_ENV) {
-                SecretKey::from_str(&var)
-                    .with_context(|| format!("Parsing {FM_IROH_P2P_SECRET_KEY_OVERRIDE_ENV}"))?
-            } else {
-                SecretKey::generate(&mut OsRng)
-            };
-
-            LocalParams {
-                tls_key: None,
-                iroh_api_sk: Some(iroh_api_sk.clone()),
-                iroh_p2p_sk: Some(iroh_p2p_sk.clone()),
-                endpoints: PeerEndpoints::Iroh {
-                    api_pk: iroh_api_sk.public(),
-                    p2p_pk: iroh_p2p_sk.public(),
-                },
-                name,
-                federation_name,
-                disable_base_fees,
-                enabled_modules,
-                federation_size,
-            }
-        } else {
-            let (tls_cert, tls_key) =
-                gen_cert_and_key(&name).expect("Failed to generate TLS for given guardian name");
-
-            LocalParams {
-                tls_key: Some(tls_key),
-                iroh_api_sk: None,
-                iroh_p2p_sk: None,
-                endpoints: PeerEndpoints::Tcp {
-                    api_url: self
-                        .settings
-                        .api_url
-                        .clone()
-                        .ok_or_else(|| anyhow::format_err!("Api URL must be configured"))?,
-                    p2p_url: self
-                        .settings
-                        .p2p_url
-                        .clone()
-                        .ok_or_else(|| anyhow::format_err!("P2P URL must be configured"))?,
-
-                    cert: tls_cert.as_ref().to_vec(),
-                },
-                name,
-                federation_name,
-                disable_base_fees,
-                enabled_modules,
-                federation_size,
-            }
+        let lp = LocalParams {
+            iroh_api_sk: iroh_api_sk.clone(),
+            iroh_p2p_sk: iroh_p2p_sk.clone(),
+            endpoints: PeerEndpoints {
+                api_pk: iroh_api_sk.public(),
+                p2p_pk: iroh_p2p_sk.public(),
+            },
+            name,
+            federation_name,
+            disable_base_fees,
+            enabled_modules,
+            federation_size,
         };
 
         state.local_params = Some(lp.clone());
@@ -291,11 +240,6 @@ impl ISetupApi for SetupApi {
         ensure!(
             info != local_params.setup_code(),
             "You cannot add your own setup code"
-        );
-
-        ensure!(
-            discriminant(&info.endpoints) == discriminant(&local_params.endpoints),
-            "Guardian has different endpoint variant (TCP/Iroh) than us.",
         );
 
         if let Some(federation_name) = state
@@ -406,7 +350,6 @@ impl ISetupApi for SetupApi {
 
         let params = ConfigGenParams {
             identity: PeerId::from(our_id as u16),
-            tls_key: local_params.tls_key,
             iroh_api_sk: local_params.iroh_api_sk,
             iroh_p2p_sk: local_params.iroh_p2p_sk,
             peers: (0..)

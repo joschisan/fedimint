@@ -75,12 +75,6 @@
 //!
 //! For a hacky instantiation of a complete client see the [`ng` subcommand of `fedimint-cli`](https://github.com/fedimint/fedimint/blob/55f9d88e17d914b92a7018de677d16e57ed42bf6/fedimint-cli/src/ng.rs#L56-L73).
 
-/// Federation Api announcement handling
-mod api_announcements;
-
-/// Guardian metadata handling
-mod guardian_metadata;
-
 /// Core [`Client`]
 mod client;
 

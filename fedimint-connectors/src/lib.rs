@@ -4,8 +4,6 @@ pub mod iroh;
 pub mod metrics;
 #[cfg(all(feature = "tor", not(target_family = "wasm")))]
 pub mod tor;
-pub mod ws;
-
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{self, Debug};
 use std::pin::Pin;
@@ -28,7 +26,6 @@ use tracing::trace;
 
 use crate::error::ServerError;
 use crate::metrics::{CONNECTION_ATTEMPTS_TOTAL, CONNECTION_DURATION_SECONDS};
-use crate::ws::WebsocketConnector;
 
 pub type ServerResult<T> = Result<T, ServerError>;
 
@@ -59,10 +56,6 @@ pub struct ConnectorRegistryBuilder {
     /// Enable Pkarr DHT discovery
     iroh_pkarr_dht: bool,
 
-    /// Enable Websocket API handling at all?
-    ws_enable: bool,
-    ws_force_tor: bool,
-
     // Enable HTTP
     http_enable: bool,
 }
@@ -73,16 +66,6 @@ impl ConnectorRegistryBuilder {
         // Create initialization functions for each connector type
         let mut connectors_lazy: BTreeMap<String, (ConnectorInitFn, OnceCell<DynConnector>)> =
             BTreeMap::new();
-
-        // WS connector init function
-        let builder_ws = self.clone();
-        let ws_connector_init = Arc::new(move || {
-            let builder = builder_ws.clone();
-            Box::pin(async move { builder.build_ws_connector().await })
-                as Pin<Box<dyn Future<Output = anyhow::Result<DynConnector>> + Send>>
-        });
-        connectors_lazy.insert("ws".into(), (ws_connector_init.clone(), OnceCell::new()));
-        connectors_lazy.insert("wss".into(), (ws_connector_init.clone(), OnceCell::new()));
 
         // Iroh connector init function
         let builder_iroh = self.clone();
@@ -134,25 +117,6 @@ impl ConnectorRegistryBuilder {
         ) as DynConnector)
     }
 
-    pub async fn build_ws_connector(&self) -> anyhow::Result<DynConnector> {
-        if !self.ws_enable {
-            bail!("Websocket connector not enabled");
-        }
-
-        match self.ws_force_tor {
-            #[cfg(all(feature = "tor", not(target_family = "wasm")))]
-            true => {
-                use crate::tor::TorConnector;
-
-                Ok(Arc::new(TorConnector::bootstrap().await?) as DynConnector)
-            }
-
-            false => Ok(Arc::new(WebsocketConnector::new()) as DynConnector),
-            #[allow(unreachable_patterns)]
-            _ => bail!("Tor requested, but not support not compiled in"),
-        }
-    }
-
     pub fn build_http_connector(&self) -> anyhow::Result<DynConnector> {
         if !self.http_enable {
             bail!("Http connector not enabled");
@@ -171,13 +135,6 @@ impl ConnectorRegistryBuilder {
     pub fn iroh_next(self, enable: bool) -> Self {
         Self {
             iroh_next: enable,
-            ..self
-        }
-    }
-
-    pub fn ws_force_tor(self, enable: bool) -> Self {
-        Self {
-            ws_force_tor: enable,
             ..self
         }
     }
@@ -260,8 +217,6 @@ impl ConnectorRegistry {
             iroh_dns: None,
             iroh_pkarr_dht: false,
             iroh_next: true,
-            ws_enable: true,
-            ws_force_tor: false,
             http_enable: true,
 
             connection_overrides: BTreeMap::default(),
@@ -276,8 +231,6 @@ impl ConnectorRegistry {
             iroh_dns: None,
             iroh_pkarr_dht: true,
             iroh_next: true,
-            ws_enable: true,
-            ws_force_tor: false,
             http_enable: false,
 
             connection_overrides: BTreeMap::default(),
@@ -292,8 +245,6 @@ impl ConnectorRegistry {
             iroh_dns: None,
             iroh_pkarr_dht: false,
             iroh_next: false,
-            ws_enable: true,
-            ws_force_tor: false,
             http_enable: true,
 
             connection_overrides: BTreeMap::default(),

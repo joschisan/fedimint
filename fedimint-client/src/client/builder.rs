@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{bail, ensure};
 use bitcoin::key::Secp256k1;
@@ -39,7 +38,7 @@ use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::module::{ApiRequestErased, ApiVersion, SupportedApiVersionsSummary};
 use fedimint_core::task::TaskGroup;
-use fedimint_core::task::jit::{Jit, JitTry, JitTryAnyhow};
+use fedimint_core::task::jit::{JitTry, JitTryAnyhow};
 use fedimint_core::util::{FmtCompact as _, FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{ChainId, NumPeers, PeerId, fedimint_build_code_version_env, maybe_add_send};
 use fedimint_derive_secret::DerivableSecret;
@@ -52,10 +51,6 @@ use tracing::{debug, trace, warn};
 
 use super::handle::ClientHandle;
 use super::{Client, client_decoders};
-use crate::api_announcements::{
-    PeersSignedApiAnnouncements, fetch_api_announcements_from_at_least_num_of_peers, get_api_urls,
-    run_api_announcement_refresh_task, store_api_announcements_updates_from_peers,
-};
 use crate::backup::{ClientBackup, Metadata};
 use crate::client::PrimaryModuleCandidates;
 use crate::db::{
@@ -63,7 +58,6 @@ use crate::db::{
     ClientModuleRecoveryState, ClientPreRootSecretHashKey, InitMode, InitState,
     PendingClientConfigKey, apply_migrations_client_module_dbtx,
 };
-use crate::guardian_metadata::run_guardian_metadata_refresh_task;
 use crate::meta::MetaService;
 use crate::module_init::ClientModuleInitRegistry;
 use crate::oplog::OperationLog;
@@ -343,7 +337,6 @@ impl ClientBuilder {
         config: ClientConfig,
         api_secret: Option<String>,
         init_mode: InitMode,
-        preview_prefetch_api_announcements: Option<Jit<Vec<PeersSignedApiAnnouncements>>>,
         preview_prefetch_api_version_set: Option<
             JitTryAnyhow<BTreeMap<PeerId, SupportedApiVersionsSummary>>,
         >,
@@ -394,7 +387,6 @@ impl ClientBuilder {
             config,
             api_secret,
             stopped,
-            preview_prefetch_api_announcements,
             preview_prefetch_api_version_set,
             prefetch_chain_id,
         )
@@ -408,39 +400,8 @@ impl ClientBuilder {
     ) -> anyhow::Result<ClientPreview> {
         let (config, api) = download_from_invite_code(&connectors, invite_code).await?;
 
-        let prefetch_api_announcements =
-            config
-                .global
-                .broadcast_public_keys
-                .clone()
-                .map(|guardian_pub_keys| {
-                    Jit::new({
-                        let api = api.clone();
-                        move || async move {
-                            // Fetching api announcements using invite urls before joining.
-                            // This ensures the client can communicated with
-                            // the Federation even if all the peers moved write them to database.
-                            fetch_api_announcements_from_at_least_num_of_peers(
-                                1,
-                                &api,
-                                &guardian_pub_keys,
-                                // If we can, we would love to get more than just one response,
-                                // but we need to wrap it up fast for good UX.
-                                Duration::from_millis(20),
-                            )
-                            .await
-                        }
-                    })
-                });
-
-        self.preview_inner(
-            connectors,
-            config,
-            invite_code.api_secret(),
-            Some(api),
-            prefetch_api_announcements,
-        )
-        .await
+        self.preview_inner(connectors, config, invite_code.api_secret(), Some(api))
+            .await
     }
 
     /// Use [`Self::preview`] instead
@@ -453,7 +414,7 @@ impl ClientBuilder {
         config: ClientConfig,
         api_secret: Option<String>,
     ) -> anyhow::Result<ClientPreview> {
-        self.preview_inner(connectors, config, api_secret, None, None)
+        self.preview_inner(connectors, config, api_secret, None)
             .await
     }
 
@@ -463,7 +424,6 @@ impl ClientBuilder {
         config: ClientConfig,
         api_secret: Option<String>,
         prefetch_api: Option<DynGlobalApi>,
-        prefetch_api_announcements: Option<Jit<Vec<PeersSignedApiAnnouncements>>>,
     ) -> anyhow::Result<ClientPreview> {
         let preview_prefetch_api_version_set = prefetch_api.as_ref().map(|api| {
             JitTry::new_try({
@@ -482,7 +442,6 @@ impl ClientBuilder {
             inner: self,
             config,
             api_secret,
-            prefetch_api_announcements,
             preview_prefetch_api_version_set,
             prefetch_chain_id,
         })
@@ -545,7 +504,6 @@ impl ClientBuilder {
                 log_event_added_transient_tx,
                 request_hook,
                 None,
-                None,
                 None, // chain_id should already be cached for existing clients
             )
             .await?;
@@ -565,7 +523,6 @@ impl ClientBuilder {
         config: ClientConfig,
         api_secret: Option<String>,
         stopped: bool,
-        preview_prefetch_api_announcements: Option<Jit<Vec<PeersSignedApiAnnouncements>>>,
         preview_prefetch_api_version_set: Option<
             JitTryAnyhow<BTreeMap<PeerId, SupportedApiVersionsSummary>>,
         >,
@@ -582,7 +539,6 @@ impl ClientBuilder {
                 api_secret,
                 log_event_added_transient_tx,
                 request_hook,
-                preview_prefetch_api_announcements,
                 preview_prefetch_api_version_set,
                 prefetch_chain_id,
             )
@@ -606,7 +562,6 @@ impl ClientBuilder {
         api_secret: Option<String>,
         log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
         request_hook: ApiRequestHook,
-        preview_prefetch_api_announcements: Option<Jit<Vec<PeersSignedApiAnnouncements>>>,
         preview_prefetch_api_version_set: Option<
             JitTryAnyhow<BTreeMap<PeerId, SupportedApiVersionsSummary>>,
         >,
@@ -624,7 +579,12 @@ impl ClientBuilder {
         let config = Self::config_decoded(config, &decoders)?;
         let fed_id = config.calculate_federation_id();
         let db = db_no_decoders.with_decoders(decoders.clone());
-        let peer_urls = get_api_urls(&db, &config).await;
+        let peer_urls: BTreeMap<PeerId, SafeUrl> = config
+            .global
+            .api_endpoints
+            .iter()
+            .map(|(peer, endpoint)| (*peer, endpoint.url.clone()))
+            .collect();
         let api = match self.admin_creds.as_ref() {
             Some(admin_creds) => FederationApi::new(
                 connectors.clone(),
@@ -652,15 +612,6 @@ impl ClientBuilder {
         let init_state = Self::load_init_state(&db).await;
 
         let notifier = Notifier::new();
-
-        if let Some(p) = preview_prefetch_api_announcements {
-            // We want to fail if we were unable to figure out
-            // current addresses of peers in the federation, as it will potentially never
-            // fix itself, so it's better to fail the join explicitly.
-            let announcements = p.get().await;
-
-            store_api_announcements_updates_from_peers(&db, announcements).await?
-        }
 
         if let Some(preview_prefetch_api_version_set) = preview_prefetch_api_version_set {
             match preview_prefetch_api_version_set.get_try().await {
@@ -1027,32 +978,6 @@ impl ClientBuilder {
 
         client_inner
             .task_group
-            .spawn_cancellable("update-api-announcements", {
-                let client_inner = client_inner.clone();
-                async move {
-                    client_inner
-                        .connectors
-                        .wait_for_initialized_connections()
-                        .await;
-                    run_api_announcement_refresh_task(client_inner.clone()).await
-                }
-            });
-
-        client_inner
-            .task_group
-            .spawn_cancellable("guardian metadata refresh task", {
-                let client_inner = client_inner.clone();
-                async move {
-                    client_inner
-                        .connectors
-                        .wait_for_initialized_connections()
-                        .await;
-                    run_guardian_metadata_refresh_task(client_inner.clone()).await
-                }
-            });
-
-        client_inner
-            .task_group
             .spawn_cancellable("event log ordering task", {
                 let client_inner = client_inner.clone();
                 async move {
@@ -1309,7 +1234,6 @@ pub struct ClientPreview {
     config: ClientConfig,
     connectors: ConnectorRegistry,
     api_secret: Option<String>,
-    prefetch_api_announcements: Option<Jit<Vec<PeersSignedApiAnnouncements>>>,
     preview_prefetch_api_version_set:
         Option<JitTryAnyhow<BTreeMap<PeerId, SupportedApiVersionsSummary>>>,
     prefetch_chain_id: Option<JitTryAnyhow<ChainId>>,
@@ -1415,7 +1339,6 @@ impl ClientPreview {
                 self.config,
                 self.api_secret,
                 InitMode::Fresh,
-                self.prefetch_api_announcements,
                 self.preview_prefetch_api_version_set,
                 self.prefetch_chain_id,
             )
@@ -1454,7 +1377,6 @@ impl ClientPreview {
                 InitMode::Recover {
                     snapshot: backup.clone(),
                 },
-                self.prefetch_api_announcements,
                 self.preview_prefetch_api_version_set,
                 self.prefetch_chain_id,
             )

@@ -5,7 +5,6 @@ use fedimint_core::core::ModuleKind;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::envs::BitcoinRpcConfig;
 use fedimint_core::{Amount, PeerId, plugin_types_trait_impl_config};
-use group::Curve;
 use serde::{Deserialize, Serialize};
 use tpe::{AggregatePublicKey, PublicKeyShare, SecretKeyShare};
 

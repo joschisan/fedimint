@@ -31,7 +31,6 @@ use fedimint_rocksdb::RocksDb;
 use fedimint_server::config::ConfigGenSettings;
 use fedimint_server::config::io::DB_FILE;
 use fedimint_server::core::ServerModuleInitRegistry;
-use fedimint_server::net::api::ApiSecrets;
 use fedimint_server_bitcoin_rpc::BitcoindClientWithFallback;
 use fedimint_server_bitcoin_rpc::bitcoind::BitcoindClient;
 use fedimint_server_bitcoin_rpc::esplora::EsploraClient;
@@ -39,12 +38,11 @@ use fedimint_server_core::ServerModuleInitRegistryExt;
 use fedimint_server_core::bitcoin_rpc::IServerBitcoinRpc;
 use fedimint_unknown_server::UnknownInit;
 use fedimintd_envs::{
-    FM_API_URL_ENV, FM_BIND_API_ENV, FM_BIND_METRICS_ENV, FM_BIND_P2P_ENV,
-    FM_BIND_TOKIO_CONSOLE_ENV, FM_BIND_UI_ENV, FM_BITCOIN_NETWORK_ENV, FM_BITCOIND_PASSWORD_ENV,
-    FM_BITCOIND_URL_ENV, FM_BITCOIND_URL_PASSWORD_FILE_ENV, FM_BITCOIND_USERNAME_ENV,
-    FM_DATA_DIR_ENV, FM_DB_CHECKPOINT_RETENTION_ENV, FM_ENABLE_IROH_ENV, FM_ESPLORA_URL_ENV,
-    FM_FORCE_API_SECRETS_ENV, FM_IROH_API_MAX_CONNECTIONS_ENV,
-    FM_IROH_API_MAX_REQUESTS_PER_CONNECTION_ENV, FM_P2P_URL_ENV, FM_UI_PASSWORD_ENV,
+    FM_BIND_METRICS_ENV, FM_BIND_P2P_ENV, FM_BIND_TOKIO_CONSOLE_ENV, FM_BIND_UI_ENV,
+    FM_BITCOIN_NETWORK_ENV, FM_BITCOIND_PASSWORD_ENV, FM_BITCOIND_URL_ENV,
+    FM_BITCOIND_URL_PASSWORD_FILE_ENV, FM_BITCOIND_USERNAME_ENV, FM_DATA_DIR_ENV,
+    FM_DB_CHECKPOINT_RETENTION_ENV, FM_ESPLORA_URL_ENV, FM_IROH_API_MAX_CONNECTIONS_ENV,
+    FM_IROH_API_MAX_REQUESTS_PER_CONNECTION_ENV, FM_UI_PASSWORD_ENV,
 };
 use futures::FutureExt as _;
 use tracing::{debug, error, info};
@@ -119,13 +117,6 @@ struct ServerOpts {
     #[arg(long, env = FM_BIND_P2P_ENV, default_value = "0.0.0.0:8173")]
     bind_p2p: SocketAddr,
 
-    /// Address we bind to for the API
-    ///
-    /// Should be `0.0.0.0:8174` most of the time, as api connectivity is public
-    /// and direct, and the port should be open it in the firewall.
-    #[arg(long, env = FM_BIND_API_ENV, default_value = "0.0.0.0:8174")]
-    bind_api: SocketAddr,
-
     /// Address we bind to for exposing the Web UI
     ///
     /// Built-in web UI is exposed as an HTTP port, and typically should
@@ -142,31 +133,12 @@ struct ServerOpts {
     #[arg(long, env = FM_UI_PASSWORD_ENV)]
     ui_password: String,
 
-    /// Our external address for communicating with our peers
-    ///
-    /// `fedimint://<fqdn>:8173` for TCP/TLS p2p connectivity (legacy/standard).
-    ///
-    /// Ignored when Iroh stack is used. (newer/experimental)
-    #[arg(long, env = FM_P2P_URL_ENV)]
-    p2p_url: Option<SafeUrl>,
-
-    /// Our API address for clients to connect to us
-    ///
-    /// Typically `wss://<fqdn>/ws/` for TCP/TLS connectivity (legacy/standard)
-    ///
-    /// Ignored when Iroh stack is used. (newer/experimental)
-    #[arg(long, env = FM_API_URL_ENV)]
-    api_url: Option<SafeUrl>,
-
-    #[arg(long, env = FM_ENABLE_IROH_ENV)]
-    enable_iroh: bool,
-
     /// Optional URL of the Iroh DNS server
-    #[arg(long, env = FM_IROH_DNS_ENV, requires = "enable_iroh")]
+    #[arg(long, env = FM_IROH_DNS_ENV)]
     iroh_dns: Option<SafeUrl>,
 
     /// Optional URLs of the Iroh relays to use for registering
-    #[arg(long, env = FM_IROH_RELAY_ENV, requires = "enable_iroh", value_delimiter = ',')]
+    #[arg(long, env = FM_IROH_RELAY_ENV, value_delimiter = ',')]
     iroh_relays: Vec<SafeUrl>,
 
     /// Number of checkpoints from the current session to retain on disk
@@ -184,23 +156,6 @@ struct ServerOpts {
     /// Enable prometheus metrics
     #[arg(long, env = FM_BIND_METRICS_ENV, default_value = "127.0.0.1:8176")]
     bind_metrics: Option<SocketAddr>,
-
-    /// Comma separated list of API secrets.
-    ///
-    /// Setting it will enforce API authentication and make the Federation
-    /// "private".
-    ///
-    /// The first secret in the list is the "active" one that the peer will use
-    /// itself to connect to other peers. Any further one is accepted by
-    /// this peer, e.g. for the purposes of smooth rotation of secret
-    /// between users.
-    ///
-    /// Note that the value provided here will override any other settings
-    /// that the user might want to set via UI at runtime, etc.
-    /// In the future, managing secrets might be possible via Admin UI
-    /// and defaults will be provided via `FM_DEFAULT_API_SECRETS`.
-    #[arg(long, env = FM_FORCE_API_SECRETS_ENV, default_value = "")]
-    force_api_secrets: ApiSecrets,
 
     /// Maximum number of concurrent Iroh API connections
     #[arg(long = "iroh-api-max-connections", env = FM_IROH_API_MAX_CONNECTIONS_ENV, default_value = "1000")]
@@ -364,11 +319,7 @@ pub async fn run(
 
     let settings = ConfigGenSettings {
         p2p_bind: server_opts.bind_p2p,
-        api_bind: server_opts.bind_api,
         ui_bind: server_opts.bind_ui,
-        p2p_url: server_opts.p2p_url.clone(),
-        api_url: server_opts.api_url.clone(),
-        enable_iroh: server_opts.enable_iroh,
         iroh_dns: server_opts.iroh_dns.clone(),
         iroh_relays: server_opts.iroh_relays.clone(),
         network: server_opts.bitcoin_network,
@@ -434,7 +385,6 @@ pub async fn run(
         fedimint_server::run(
             server_opts.data_dir,
             ui_password,
-            server_opts.force_api_secrets,
             settings,
             db,
             code_version_str,

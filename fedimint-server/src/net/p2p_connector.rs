@@ -2,7 +2,6 @@
 //! implementations
 
 mod iroh;
-mod tls;
 
 use std::sync::Arc;
 
@@ -11,7 +10,6 @@ use fedimint_core::PeerId;
 use fedimint_server_core::dashboard_ui::ConnectionType;
 
 pub use self::iroh::*;
-pub use self::tls::*;
 use crate::net::p2p_connection::DynP2PConnection;
 
 pub type DynP2PConnector<M> = Arc<dyn IP2PConnector<M>>;

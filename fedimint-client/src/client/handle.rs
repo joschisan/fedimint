@@ -121,7 +121,6 @@ impl ClientHandle {
                 api_secret,
                 false,
                 None,
-                None,
                 None, // chain_id should already be cached
             )
             .await

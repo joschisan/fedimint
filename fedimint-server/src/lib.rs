@@ -26,7 +26,6 @@ pub mod connection_limits;
 pub mod db;
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::Context;
 use config::ServerConfig;
@@ -38,15 +37,13 @@ use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCo
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::ApiAuth;
 use fedimint_core::net::peers::DynP2PConnections;
-use fedimint_core::task::{TaskGroup, sleep};
+use fedimint_core::task::TaskGroup;
 use fedimint_logging::LOG_CONSENSUS;
 pub use fedimint_server_core as core;
 use fedimint_server_core::ServerModuleInitRegistry;
 use fedimint_server_core::bitcoin_rpc::DynServerBitcoinRpc;
 use fedimint_server_core::dashboard_ui::DynDashboardApi;
 use fedimint_server_core::setup_ui::{DynSetupApi, ISetupApi};
-use jsonrpsee::RpcModule;
-use net::api::ApiSecrets;
 use net::p2p::P2PStatusReceivers;
 use net::p2p_connector::IrohConnector;
 use tokio::net::TcpListener;
@@ -58,11 +55,8 @@ use crate::config::setup::SetupApi;
 use crate::db::{ServerInfo, ServerInfoKey};
 use crate::fedimint_core::net::peers::IP2PConnections;
 use crate::metrics::initialize_gauge_metrics;
-use crate::net::api::announcement::start_api_announcement_service;
-use crate::net::api::guardian_metadata::start_guardian_metadata_service;
-use crate::net::api::pkarr_publish::start_pkarr_publish_service;
 use crate::net::p2p::{ReconnectP2PConnections, p2p_status_channels};
-use crate::net::p2p_connector::{IP2PConnector, TlsTcpConnector};
+use crate::net::p2p_connector::IP2PConnector;
 
 pub mod metrics;
 
@@ -86,7 +80,6 @@ pub type SetupUiRouter = Box<dyn Fn(DynSetupApi) -> axum::Router + Send>;
 pub async fn run(
     data_dir: PathBuf,
     auth: ApiAuth,
-    force_api_secrets: ApiSecrets,
     settings: ConfigGenSettings,
     db: Database,
     code_version_str: String,
@@ -102,30 +95,19 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let (cfg, connections, p2p_status_receivers) = match get_config(&data_dir)? {
         Some(cfg) => {
-            let connector = if cfg.consensus.iroh_endpoints.is_empty() {
-                TlsTcpConnector::new(
-                    cfg.tls_config(),
-                    settings.p2p_bind,
-                    cfg.local.p2p_endpoints.clone(),
-                    cfg.local.identity,
-                )
-                .await
-                .into_dyn()
-            } else {
-                IrohConnector::new(
-                    cfg.private.iroh_p2p_sk.clone().unwrap(),
-                    settings.p2p_bind,
-                    settings.iroh_dns.clone(),
-                    settings.iroh_relays.clone(),
-                    cfg.consensus
-                        .iroh_endpoints
-                        .iter()
-                        .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
-                        .collect(),
-                )
-                .await?
-                .into_dyn()
-            };
+            let connector = IrohConnector::new(
+                cfg.private.iroh_p2p_sk.clone(),
+                settings.p2p_bind,
+                settings.iroh_dns.clone(),
+                settings.iroh_relays.clone(),
+                cfg.consensus
+                    .iroh_endpoints
+                    .iter()
+                    .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
+                    .collect(),
+            )
+            .await?
+            .into_dyn();
 
             let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
 
@@ -146,7 +128,6 @@ pub async fn run(
                 db.clone(),
                 &task_group,
                 code_version_str.clone(),
-                force_api_secrets.clone(),
                 setup_ui_router,
                 module_init_registry.clone(),
                 auth.clone(),
@@ -167,10 +148,6 @@ pub async fn run(
 
     initialize_gauge_metrics(&task_group, &db).await;
 
-    start_api_announcement_service(&db, &task_group, &cfg, force_api_secrets.get_active()).await?;
-    start_guardian_metadata_service(&db, &task_group, &cfg, force_api_secrets.get_active()).await?;
-    start_pkarr_publish_service(&db, &task_group, &cfg).await?;
-
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 
     let connectors = ConnectorRegistry::build_from_server_defaults()
@@ -182,14 +159,12 @@ pub async fn run(
         auth,
         connections,
         p2p_status_receivers,
-        settings.api_bind,
         settings.iroh_dns,
         settings.iroh_relays,
         cfg,
         db,
         module_init_registry.clone(),
         &task_group,
-        force_api_secrets,
         data_dir,
         code_version_str,
         bitcoin_rpc,
@@ -236,7 +211,6 @@ pub async fn run_config_gen(
     db: Database,
     task_group: &TaskGroup,
     code_version_str: String,
-    api_secrets: ApiSecrets,
     setup_ui_handler: SetupUiRouter,
     module_init_registry: ServerModuleInitRegistry,
     auth: ApiAuth,
@@ -253,20 +227,6 @@ pub async fn run_config_gen(
     let (cgp_sender, mut cgp_receiver) = tokio::sync::mpsc::channel(1);
 
     let setup_api = SetupApi::new(settings.clone(), db.clone(), cgp_sender, auth);
-
-    let mut rpc_module = RpcModule::new(setup_api.clone());
-
-    net::api::attach_endpoints(&mut rpc_module, config::setup::server_endpoints(), None);
-
-    let api_handler = net::api::spawn(
-        "setup",
-        // config gen always uses ws api
-        settings.api_bind,
-        rpc_module,
-        10,
-        api_secrets.clone(),
-    )
-    .await;
 
     let ui_task_group = TaskGroup::new();
 
@@ -298,17 +258,6 @@ pub async fn run_config_gen(
         .await
         .expect("Config gen params receiver closed unexpectedly");
 
-    // HACK: The `start-dkg` API call needs to have some time to finish
-    // before we shut down api handling. There's no easy and good way to do
-    // that other than just giving it some grace period.
-    sleep(Duration::from_millis(100)).await;
-
-    api_handler
-        .stop()
-        .expect("Config api should still be running");
-
-    api_handler.stopped().await;
-
     ui_task_group
         .shutdown_join_all(None)
         .await
@@ -319,30 +268,19 @@ pub async fn run_config_gen(
         .await
         .context("Failed to shutdown CLI server after config gen")?;
 
-    let connector = if cg_params.iroh_endpoints().is_empty() {
-        TlsTcpConnector::new(
-            cg_params.tls_config(),
-            settings.p2p_bind,
-            cg_params.p2p_urls(),
-            cg_params.identity,
-        )
-        .await
-        .into_dyn()
-    } else {
-        IrohConnector::new(
-            cg_params.iroh_p2p_sk.clone().unwrap(),
-            settings.p2p_bind,
-            settings.iroh_dns,
-            settings.iroh_relays,
-            cg_params
-                .iroh_endpoints()
-                .iter()
-                .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
-                .collect(),
-        )
-        .await?
-        .into_dyn()
-    };
+    let connector = IrohConnector::new(
+        cg_params.iroh_p2p_sk.clone(),
+        settings.p2p_bind,
+        settings.iroh_dns,
+        settings.iroh_relays,
+        cg_params
+            .iroh_endpoints()
+            .iter()
+            .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
+            .collect(),
+    )
+    .await?
+    .into_dyn();
 
     let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
 
@@ -363,17 +301,7 @@ pub async fn run_config_gen(
     )
     .await?;
 
-    assert_ne!(
-        cfg.consensus.iroh_endpoints.is_empty(),
-        cfg.consensus.api_endpoints.is_empty(),
-    );
-
-    write_server_config(
-        &cfg,
-        &data_dir,
-        &module_init_registry,
-        api_secrets.get_active(),
-    )?;
+    write_server_config(&cfg, &data_dir, &module_init_registry, None)?;
 
     Ok((cfg, connections, p2p_status_receivers))
 }

@@ -38,14 +38,12 @@ use fedimint_server_core::{DynServerModule, ServerModuleInitRegistry};
 use futures::FutureExt;
 use iroh::Endpoint;
 use iroh::endpoint::{Incoming, RecvStream, SendStream};
-use jsonrpsee::RpcModule;
-use jsonrpsee::server::ServerHandle;
 use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
 use tracing::{info, warn};
 
-use crate::config::{ServerConfig, ServerConfigLocal};
+use crate::config::ServerConfig;
 use crate::connection_limits::ConnectionLimits;
 use crate::consensus::api::{ConsensusApi, server_endpoints};
 use crate::consensus::engine::ConsensusEngine;
@@ -54,10 +52,9 @@ use crate::metrics::{
     IROH_API_CONNECTION_DURATION_SECONDS, IROH_API_CONNECTIONS_ACTIVE,
     IROH_API_REQUEST_DURATION_SECONDS,
 };
-use crate::net::api::announcement::get_api_urls;
-use crate::net::api::{ApiSecrets, HasApiContext};
+use crate::net::api::HasApiContext;
 use crate::net::p2p::P2PStatusReceivers;
-use crate::{DashboardUiRouter, net, update_server_info_version_dbtx};
+use crate::{DashboardUiRouter, update_server_info_version_dbtx};
 
 /// How many txs can be stored in memory before blocking the API
 const TRANSACTION_BUFFER: usize = 1000;
@@ -68,14 +65,12 @@ pub async fn run(
     auth: ApiAuth,
     connections: DynP2PConnections<P2PMessage>,
     p2p_status_receivers: P2PStatusReceivers,
-    api_bind: SocketAddr,
     iroh_dns: Option<SafeUrl>,
     iroh_relays: Vec<SafeUrl>,
     cfg: ServerConfig,
     db: Database,
     module_init_registry: ServerModuleInitRegistry,
     task_group: &TaskGroup,
-    force_api_secrets: ApiSecrets,
     data_dir: PathBuf,
     code_version_str: String,
     dyn_server_bitcoin_rpc: DynServerBitcoinRpc,
@@ -208,7 +203,7 @@ pub async fn run(
         ci_status_receivers,
         ord_latency_receiver,
         bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
-        force_api_secret: force_api_secrets.get_active(),
+        force_api_secret: None,
         auth,
         code_version_str,
         task_group: task_group.clone(),
@@ -216,31 +211,15 @@ pub async fn run(
 
     info!(target: LOG_CONSENSUS, "Starting Consensus Api...");
 
-    let api_handler = start_consensus_api(
-        &cfg.local,
+    Box::pin(start_iroh_api(
+        cfg.private.iroh_api_sk.clone(),
+        iroh_dns,
+        iroh_relays,
         consensus_api.clone(),
-        force_api_secrets.clone(),
-        api_bind,
-    )
-    .await;
-
-    if let Some(iroh_api_sk) = cfg.private.iroh_api_sk.clone()
-        && let Err(e) = Box::pin(start_iroh_api(
-            iroh_api_sk,
-            api_bind,
-            iroh_dns,
-            iroh_relays,
-            consensus_api.clone(),
-            task_group,
-            iroh_api_limits,
-        ))
-        .await
-    {
-        // clean up ws api before propagating error
-        api_handler.stop().expect("Just started");
-        api_handler.stopped().await;
-        return Err(e);
-    }
+        task_group,
+        iroh_api_limits,
+    ))
+    .await?;
 
     info!(target: LOG_CONSENSUS, "Starting Submission of Module CI proposals...");
 
@@ -300,17 +279,16 @@ pub async fn run(
 
     info!(target: LOG_CONSENSUS, "Starting Consensus Engine...");
 
-    let api_urls = get_api_urls(&db, &cfg.consensus).await;
+    let api_urls = cfg
+        .consensus
+        .api_endpoints()
+        .iter()
+        .map(|(&peer_id, url)| (peer_id, url.url.clone()))
+        .collect();
 
-    // FIXME: (@leonardo) How should this be handled ?
-    // Using the `Connector::default()` for now!
     ConsensusEngine {
         db,
-        federation_api: DynGlobalApi::new(
-            connectors,
-            api_urls,
-            force_api_secrets.get_active().as_deref(),
-        )?,
+        federation_api: DynGlobalApi::new(connectors, api_urls, None)?,
         cfg: cfg.clone(),
         connections,
         ord_latency_sender,
@@ -325,37 +303,7 @@ pub async fn run(
     .run()
     .await?;
 
-    api_handler
-        .stop()
-        .expect("Consensus api should still be running");
-
-    api_handler.stopped().await;
-
     Ok(())
-}
-
-async fn start_consensus_api(
-    cfg: &ServerConfigLocal,
-    api: ConsensusApi,
-    force_api_secrets: ApiSecrets,
-    api_bind: SocketAddr,
-) -> ServerHandle {
-    let mut rpc_module = RpcModule::new(api.clone());
-
-    net::api::attach_endpoints(&mut rpc_module, api::server_endpoints(), None);
-
-    for (id, _, module) in api.modules.iter_modules() {
-        net::api::attach_endpoints(&mut rpc_module, module.api_endpoints(), Some(id));
-    }
-
-    net::api::spawn(
-        "consensus",
-        api_bind,
-        rpc_module,
-        cfg.max_connections,
-        force_api_secrets,
-    )
-    .await
 }
 
 const CONSENSUS_PROPOSAL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -426,7 +374,6 @@ fn submit_module_ci_proposals(
 
 async fn start_iroh_api(
     secret_key: iroh::SecretKey,
-    api_bind: SocketAddr,
     iroh_dns: Option<SafeUrl>,
     iroh_relays: Vec<SafeUrl>,
     consensus_api: ConsensusApi,
@@ -435,7 +382,7 @@ async fn start_iroh_api(
 ) -> anyhow::Result<()> {
     let endpoint = build_iroh_endpoint(
         secret_key,
-        api_bind,
+        SocketAddr::from(([0, 0, 0, 0], 0)),
         iroh_dns,
         iroh_relays,
         FEDIMINT_API_ALPN,

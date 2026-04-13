@@ -51,7 +51,6 @@ use fedimint_core::module::{
     AmountUnit, Amounts, ApiRequestErased, ApiVersion, MultiApiVersion,
     SupportedApiVersionsSummary, SupportedCoreApiVersions, SupportedModuleApiVersions,
 };
-use fedimint_core::net::api_announcement::SignedApiAnnouncement;
 use fedimint_core::runtime::sleep;
 use fedimint_core::task::{Elapsed, MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::transaction::Transaction;
@@ -78,7 +77,6 @@ use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, warn};
 
 use crate::ClientBuilder;
-use crate::api_announcements::{ApiAnnouncementPrefix, get_api_urls};
 use crate::backup::Metadata;
 use crate::client::event_log::DefaultApplicationEventLogKey;
 use crate::db::{
@@ -1737,36 +1735,15 @@ impl Client {
         peer_api_version_sets
     }
 
-    /// You likely want to use [`Client::get_peer_urls`]. This function returns
-    /// only the announcements and doesn't use the config as fallback.
-    pub async fn get_peer_url_announcements(&self) -> BTreeMap<PeerId, SignedApiAnnouncement> {
-        self.db()
-            .begin_transaction_nc()
-            .await
-            .find_by_prefix(&ApiAnnouncementPrefix)
-            .await
-            .map(|(announcement_key, announcement)| (announcement_key.0, announcement))
-            .collect()
-            .await
-    }
-
-    /// Returns guardian metadata stored in the client database
-    pub async fn get_guardian_metadata(
-        &self,
-    ) -> BTreeMap<PeerId, fedimint_core::net::guardian_metadata::SignedGuardianMetadata> {
-        self.db()
-            .begin_transaction_nc()
-            .await
-            .find_by_prefix(&crate::guardian_metadata::GuardianMetadataPrefix)
-            .await
-            .map(|(key, metadata)| (key.0, metadata))
-            .collect()
-            .await
-    }
-
     /// Returns a list of guardian API URLs
     pub async fn get_peer_urls(&self) -> BTreeMap<PeerId, SafeUrl> {
-        get_api_urls(&self.db, &self.config().await).await
+        self.config()
+            .await
+            .global
+            .api_endpoints
+            .iter()
+            .map(|(peer, endpoint)| (*peer, endpoint.url.clone()))
+            .collect()
     }
 
     /// Create an invite code with the api endpoint of the given peer which can

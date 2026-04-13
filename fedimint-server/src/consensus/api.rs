@@ -23,14 +23,13 @@ use fedimint_core::db::{
 #[allow(deprecated)]
 use fedimint_core::endpoint_constants::AWAIT_OUTPUT_OUTCOME_ENDPOINT;
 use fedimint_core::endpoint_constants::{
-    API_ANNOUNCEMENTS_ENDPOINT, AWAIT_OUTPUTS_OUTCOMES_ENDPOINT, AWAIT_SESSION_OUTCOME_ENDPOINT,
+    AWAIT_OUTPUTS_OUTCOMES_ENDPOINT, AWAIT_SESSION_OUTCOME_ENDPOINT,
     AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT, AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT,
     CHAIN_ID_ENDPOINT, CLIENT_CONFIG_ENDPOINT, CLIENT_CONFIG_JSON_ENDPOINT,
     CONSENSUS_ORD_LATENCY_ENDPOINT, FEDERATION_ID_ENDPOINT, FEDIMINTD_VERSION_ENDPOINT,
-    GUARDIAN_METADATA_ENDPOINT, INVITE_CODE_ENDPOINT, P2P_CONNECTION_STATUS_ENDPOINT,
-    RECOVER_ENDPOINT, SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SESSION_COUNT_ENDPOINT,
-    SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT, STATUS_ENDPOINT,
-    SUBMIT_API_ANNOUNCEMENT_ENDPOINT, SUBMIT_GUARDIAN_METADATA_ENDPOINT,
+    INVITE_CODE_ENDPOINT, P2P_CONNECTION_STATUS_ENDPOINT, RECOVER_ENDPOINT,
+    SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT,
+    SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT, STATUS_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT, VERSION_ENDPOINT,
 };
 use fedimint_core::epoch::ConsensusItem;
@@ -38,9 +37,6 @@ use fedimint_core::module::audit::{Audit, AuditSummary};
 use fedimint_core::module::{
     ApiAuth, ApiEndpoint, ApiEndpointContext, ApiError, ApiRequestErased, ApiResult, ApiVersion,
     SerdeModuleEncoding, SerdeModuleEncodingBase64, SupportedApiVersionsSummary, api_endpoint,
-};
-use fedimint_core::net::api_announcement::{
-    SignedApiAnnouncement, SignedApiAnnouncementSubmission,
 };
 use fedimint_core::net::auth::GuardianAuthToken;
 use fedimint_core::secp256k1::{PublicKey, SECP256K1};
@@ -70,7 +66,6 @@ use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::transaction::{TxProcessingMode, process_transaction_with_dbtx};
 use crate::metrics::{BACKUP_WRITE_SIZE_BYTES, STORED_BACKUPS_COUNT};
 use crate::net::api::HasApiContext;
-use crate::net::api::announcement::{ApiAnnouncementKey, ApiAnnouncementPrefix};
 use crate::net::p2p::P2PStatusReceivers;
 
 #[derive(Clone)]
@@ -416,143 +411,9 @@ impl ConsensusApi {
         dbtx.get_value(&ClientBackupKey(id)).await
     }
 
-    /// List API URL announcements from all peers we have received them from (at
-    /// least ourselves)
-    async fn api_announcements(&self) -> BTreeMap<PeerId, SignedApiAnnouncement> {
-        self.db
-            .begin_transaction_nc()
-            .await
-            .find_by_prefix(&ApiAnnouncementPrefix)
-            .await
-            .map(|(announcement_key, announcement)| (announcement_key.0, announcement))
-            .collect()
-            .await
-    }
-
     /// Returns the tagged fedimintd version currently running
     fn fedimintd_version(&self) -> String {
         self.code_version_str.clone()
-    }
-
-    /// Add an API URL announcement from a peer to our database to be returned
-    /// by [`ConsensusApi::api_announcements`].
-    async fn submit_api_announcement(
-        &self,
-        peer_id: PeerId,
-        announcement: SignedApiAnnouncement,
-    ) -> Result<(), ApiError> {
-        let Some(peer_key) = self.cfg.consensus.broadcast_public_keys.get(&peer_id) else {
-            return Err(ApiError::bad_request("Peer not in federation".into()));
-        };
-
-        if !announcement.verify(SECP256K1, peer_key) {
-            return Err(ApiError::bad_request("Invalid signature".into()));
-        }
-
-        // Use autocommit to handle potential transaction conflicts with retries
-        self.db
-            .autocommit(
-                |dbtx, _| {
-                    let announcement = announcement.clone();
-                    Box::pin(async move {
-                        if let Some(existing_announcement) =
-                            dbtx.get_value(&ApiAnnouncementKey(peer_id)).await
-                        {
-                            // If the current announcement is semantically identical to the new one
-                            // (except for potentially having a
-                            // different, valid signature) we return ok to allow
-                            // the caller to stop submitting the value if they are in a retry loop.
-                            if existing_announcement.api_announcement
-                                == announcement.api_announcement
-                            {
-                                return Ok(());
-                            }
-
-                            // We only accept announcements with a nonce higher than the current one
-                            // to avoid replay attacks.
-                            if existing_announcement.api_announcement.nonce
-                                >= announcement.api_announcement.nonce
-                            {
-                                return Err(ApiError::bad_request(
-                                    "Outdated or redundant announcement".into(),
-                                ));
-                            }
-                        }
-
-                        dbtx.insert_entry(&ApiAnnouncementKey(peer_id), &announcement)
-                            .await;
-                        Ok(())
-                    })
-                },
-                None,
-            )
-            .await
-            .map_err(|e| match e {
-                fedimint_core::db::AutocommitError::ClosureError { error, .. } => error,
-                fedimint_core::db::AutocommitError::CommitFailed { last_error, .. } => {
-                    ApiError::server_error(format!("Database commit failed: {last_error}"))
-                }
-            })
-    }
-
-    async fn guardian_metadata_list(
-        &self,
-    ) -> BTreeMap<PeerId, fedimint_core::net::guardian_metadata::SignedGuardianMetadata> {
-        use crate::net::api::guardian_metadata::{GuardianMetadataKey, GuardianMetadataPrefix};
-
-        self.db
-            .begin_transaction_nc()
-            .await
-            .find_by_prefix(&GuardianMetadataPrefix)
-            .await
-            .map(|(key, metadata): (GuardianMetadataKey, _)| (key.0, metadata))
-            .collect()
-            .await
-    }
-
-    async fn submit_guardian_metadata(
-        &self,
-        peer_id: PeerId,
-        metadata: fedimint_core::net::guardian_metadata::SignedGuardianMetadata,
-    ) -> Result<(), ApiError> {
-        use crate::net::api::guardian_metadata::GuardianMetadataKey;
-
-        let Some(peer_key) = self.cfg.consensus.broadcast_public_keys.get(&peer_id) else {
-            return Err(ApiError::bad_request("Peer not in federation".into()));
-        };
-
-        let now = fedimint_core::time::duration_since_epoch();
-        if let Err(e) = metadata.verify(SECP256K1, peer_key, now) {
-            return Err(ApiError::bad_request(format!(
-                "Invalid signature or timestamp: {e}"
-            )));
-        }
-
-        let mut dbtx = self.db.begin_transaction().await;
-
-        if let Some(existing_metadata) = dbtx.get_value(&GuardianMetadataKey(peer_id)).await {
-            // If the current metadata is semantically identical to the new one (except
-            // for potentially having a different, valid signature) we return ok to allow
-            // the caller to stop submitting the value if they are in a retry loop.
-            if existing_metadata.bytes == metadata.bytes {
-                return Ok(());
-            }
-
-            // Only update if the new metadata has a newer timestamp
-            if metadata.guardian_metadata().timestamp_secs
-                <= existing_metadata.guardian_metadata().timestamp_secs
-            {
-                return Err(ApiError::bad_request(
-                    "New metadata timestamp is not newer than existing".into(),
-                ));
-            }
-        }
-
-        dbtx.insert_entry(&GuardianMetadataKey(peer_id), &metadata)
-            .await;
-        dbtx.commit_tx().await;
-
-        Ok(())
     }
 }
 
@@ -867,34 +728,6 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
                 let mut dbtx = db.begin_transaction_nc().await;
                 Ok(fedimint
                     .handle_recover_request(&mut dbtx, id).await)
-            }
-        },
-        api_endpoint! {
-            API_ANNOUNCEMENTS_ENDPOINT,
-            ApiVersion::new(0, 3),
-            async |fedimint: &ConsensusApi, _context, _v: ()| -> BTreeMap<PeerId, SignedApiAnnouncement> {
-                Ok(fedimint.api_announcements().await)
-            }
-        },
-        api_endpoint! {
-            SUBMIT_API_ANNOUNCEMENT_ENDPOINT,
-            ApiVersion::new(0, 3),
-            async |fedimint: &ConsensusApi, _context, submission: SignedApiAnnouncementSubmission| -> () {
-                fedimint.submit_api_announcement(submission.peer_id, submission.signed_api_announcement).await
-            }
-        },
-        api_endpoint! {
-            GUARDIAN_METADATA_ENDPOINT,
-            ApiVersion::new(0, 9),
-            async |fedimint: &ConsensusApi, _context, _v: ()| -> BTreeMap<PeerId, fedimint_core::net::guardian_metadata::SignedGuardianMetadata> {
-                Ok(fedimint.guardian_metadata_list().await)
-            }
-        },
-        api_endpoint! {
-            SUBMIT_GUARDIAN_METADATA_ENDPOINT,
-            ApiVersion::new(0, 9),
-            async |fedimint: &ConsensusApi, _context, submission: fedimint_core::net::guardian_metadata::SignedGuardianMetadataSubmission| -> () {
-                fedimint.submit_guardian_metadata(submission.peer_id, submission.signed_guardian_metadata).await
             }
         },
         api_endpoint! {
