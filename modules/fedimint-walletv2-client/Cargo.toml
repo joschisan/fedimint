@@ -11,10 +11,6 @@ version = { workspace = true }
 [package.metadata.docs.rs]
 rustc-args = ["--cfg", "tokio_unstable"]
 
-[features]
-cli = ["dep:clap"]
-default = []
-
 [lib]
 name = "fedimint_walletv2_client"
 path = "src/lib.rs"
@@ -23,7 +19,6 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bitcoin = { workspace = true }
-clap = { workspace = true, optional = true }
 erased-serde = { workspace = true }
 fedimint-api-client = { workspace = true }
 fedimint-client = { workspace = true }

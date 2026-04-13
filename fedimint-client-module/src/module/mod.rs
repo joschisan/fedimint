@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::{Arc, Weak};
-use std::{ffi, marker, ops};
+use std::{marker, ops};
 
 use anyhow::{anyhow, bail};
 use bitcoin::secp256k1::PublicKey;
@@ -813,15 +813,6 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// access to global client is allowed.
     async fn start(&self) {}
 
-    async fn handle_cli_command(
-        &self,
-        _args: &[ffi::OsString],
-    ) -> anyhow::Result<serde_json::Value> {
-        Err(anyhow::format_err!(
-            "This module does not implement cli commands"
-        ))
-    }
-
     async fn handle_rpc(
         &self,
         _method: String,
@@ -1012,9 +1003,6 @@ pub trait IClientModule: Debug {
 
     async fn start(&self);
 
-    async fn handle_cli_command(&self, args: &[ffi::OsString])
-    -> anyhow::Result<serde_json::Value>;
-
     async fn handle_rpc(
         &self,
         method: String,
@@ -1077,13 +1065,6 @@ where
 
     async fn start(&self) {
         <T as ClientModule>::start(self).await;
-    }
-
-    async fn handle_cli_command(
-        &self,
-        args: &[ffi::OsString],
-    ) -> anyhow::Result<serde_json::Value> {
-        <T as ClientModule>::handle_cli_command(self, args).await
     }
 
     async fn handle_rpc(

@@ -10,10 +10,6 @@ version = { workspace = true }
 # cargo udeps can't detect that one
 normal = ["aquamarine"]
 
-[features]
-cli = ["dep:clap"]
-default = []
-
 [lib]
 name = "fedimint_lnv2_client"
 path = "src/lib.rs"
@@ -24,7 +20,6 @@ aquamarine = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
 bitcoin = { workspace = true }
-clap = { workspace = true, optional = true }
 erased-serde = { workspace = true }
 fedimint-api-client = { workspace = true }
 fedimint-client-module = { workspace = true }

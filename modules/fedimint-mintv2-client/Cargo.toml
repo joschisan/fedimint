@@ -15,10 +15,6 @@ rustc-args = ["--cfg", "tokio_unstable"]
 # cargo udeps can't detect that one
 normal = ["aquamarine"]
 
-[features]
-cli = ["dep:clap"]
-default = []
-
 [lib]
 name = "fedimint_mintv2_client"
 path = "src/lib.rs"
@@ -35,7 +31,6 @@ async-stream = { workspace = true }
 async-trait = { workspace = true }
 bitcoin_hashes = { workspace = true }
 bls12_381 = { workspace = true }
-clap = { workspace = true, optional = true }
 erased-serde = { workspace = true }
 fedimint-api-client = { workspace = true }
 fedimint-client = { workspace = true }

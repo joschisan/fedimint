@@ -10,8 +10,6 @@
 pub use fedimint_mintv2_common as common;
 
 mod api;
-#[cfg(feature = "cli")]
-mod cli;
 mod client_db;
 mod ecash;
 mod events;
@@ -389,14 +387,6 @@ impl ClientModule for MintClientModule {
         let fee = self.cfg.fee_consensus.fee(amount);
 
         Some(Amounts::new_custom(unit, fee))
-    }
-
-    #[cfg(feature = "cli")]
-    async fn handle_cli_command(
-        &self,
-        args: &[std::ffi::OsString],
-    ) -> anyhow::Result<serde_json::Value> {
-        cli::handle_cli_command(self, args).await
     }
 
     fn supports_being_primary(&self) -> PrimaryModuleSupport {

@@ -7,8 +7,6 @@
 pub use fedimint_lnv2_common as common;
 
 mod api;
-#[cfg(feature = "cli")]
-mod cli;
 mod db;
 pub mod events;
 mod receive_sm;
@@ -354,14 +352,6 @@ impl ClientModule for LightningClientModule {
         Some(Amounts::new_bitcoin(
             self.cfg.fee_consensus.fee(amounts.expect_only_bitcoin()),
         ))
-    }
-
-    #[cfg(feature = "cli")]
-    async fn handle_cli_command(
-        &self,
-        args: &[std::ffi::OsString],
-    ) -> anyhow::Result<serde_json::Value> {
-        cli::handle_cli_command(self, args).await
     }
 }
 
