@@ -16,24 +16,22 @@ fn main() -> anyhow::Result<()> {
 
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);
 
-    runtime.clone().block_on(async move {
-        info!("Setting up test environment...");
-        let env = env::TestEnv::setup(runtime).await?;
+    info!("Setting up test environment...");
+    let env = env::TestEnv::setup(runtime.clone())?;
 
-        info!("Test environment ready!");
-        info!("Invite code: {}", env.invite_code);
-        info!("Gateway: {}", env.gw_addr);
+    info!("Test environment ready!");
+    info!("Invite code: {}", env.invite_code);
+    info!("Gateway: {}", env.gw_addr);
 
-        info!("Running lnv2 tests...");
-        lnv2::run_tests(&env).await?;
+    info!("Running lnv2 tests...");
+    runtime.block_on(lnv2::run_tests(&env))?;
 
-        info!("Running mintv2 tests...");
-        mintv2::run_tests(&env).await?;
+    info!("Running mintv2 tests...");
+    runtime.block_on(mintv2::run_tests(&env))?;
 
-        info!("Running walletv2 tests...");
-        walletv2::run_tests(&env).await?;
+    info!("Running walletv2 tests...");
+    runtime.block_on(walletv2::run_tests(&env))?;
 
-        info!("All integration tests passed!");
-        Ok(())
-    })
+    info!("All integration tests passed!");
+    Ok(())
 }

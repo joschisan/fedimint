@@ -55,37 +55,43 @@ pub struct TestEnv {
 }
 
 impl TestEnv {
-    pub async fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<Self> {
+    pub fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<Self> {
         let data_dir = tempfile::TempDir::new()?;
         let base = data_dir.path();
         info!("Test data directory: {}", base.display());
 
-        let bitcoind = Self::connect_bitcoind().await?;
+        let bitcoind = Self::connect_bitcoind(&runtime)?;
 
         // Fund bitcoind's own wallet so peg-ins can be regular (non-coinbase)
         // transactions — avoids the 100-block coinbase maturity wait.
-        let funding_addr = block_in_place(|| bitcoind.get_new_address(None, None))?
+        let funding_addr = bitcoind
+            .get_new_address(None, None)?
             .require_network(bitcoin::Network::Regtest)?;
-        block_in_place(|| bitcoind.generate_to_address(101, &funding_addr))?;
+        bitcoind.generate_to_address(101, &funding_addr)?;
 
         for i in 0..NUM_GUARDIANS {
-            start_fedimintd(base, i).await?;
+            runtime.block_on(start_fedimintd(base, i))?;
         }
 
         info!("Running DKG...");
-        run_dkg(base).await?;
+        runtime.block_on(run_dkg(base))?;
 
         let peer0_dir = base.join("fedimintd-0");
-        let invite_code_str = retry("read invite code", || async {
+        let invite_code_str = runtime.block_on(retry("read invite code", || async {
             tokio::fs::read_to_string(peer0_dir.join("invite-code"))
                 .await
                 .context("invite code not yet available")
-        })
-        .await?;
+        }))?;
         let invite_code: InviteCode = invite_code_str.trim().parse()?;
         info!("Federation ready");
 
-        start_gatewayd(base, "gw", GW_PORT, GW_LN_PORT, GW_METRICS_PORT).await?;
+        runtime.block_on(start_gatewayd(
+            base,
+            "gw",
+            GW_PORT,
+            GW_LN_PORT,
+            GW_METRICS_PORT,
+        ))?;
 
         // Admin API is on port+1, bound to localhost
         let gw_addr = format!("http://127.0.0.1:{}", GW_PORT + 1);
@@ -93,7 +99,9 @@ impl TestEnv {
         let gw_public = format!("http://127.0.0.1:{GW_PORT}");
 
         info!("Waiting for gateway...");
-        retry("gw ready", || async { cli::gatewayd_info(&gw_addr).map(|_| ()) }).await?;
+        runtime.block_on(retry("gw ready", || async {
+            cli::gatewayd_info(&gw_addr).map(|_| ())
+        }))?;
         info!("Gateway ready");
 
         info!("Connecting gateway to federation...");
@@ -101,11 +109,11 @@ impl TestEnv {
         info!("Gateway connected");
 
         info!("Building freestanding LDK node...");
-        let ldk_node = block_in_place(|| build_ldk_node(base, runtime))?;
+        let ldk_node = build_ldk_node(base, runtime.clone())?;
         info!("LDK node built: {}", ldk_node.node_id());
 
         info!("Funding gateway and opening channel to LDK node...");
-        open_channel(&bitcoind, &gw_addr, &ldk_node).await?;
+        runtime.block_on(open_channel(&bitcoind, &gw_addr, &ldk_node))?;
         info!("Channel opened");
 
         Ok(Self {
@@ -119,17 +127,20 @@ impl TestEnv {
         })
     }
 
-    async fn connect_bitcoind() -> anyhow::Result<bitcoincore_rpc::Client> {
+    fn connect_bitcoind(
+        runtime: &tokio::runtime::Runtime,
+    ) -> anyhow::Result<bitcoincore_rpc::Client> {
         let url = format!("http://127.0.0.1:{BTC_RPC_PORT}/wallet/");
         let auth =
             bitcoincore_rpc::Auth::UserPass(BTC_RPC_USER.to_string(), BTC_RPC_PASS.to_string());
         let client = bitcoincore_rpc::Client::new(&url, auth)?;
 
         // Verify connection
-        retry("connect to bitcoind", || async {
-            block_in_place(|| client.get_blockchain_info()).context("bitcoind not reachable")
-        })
-        .await?;
+        runtime.block_on(retry("connect to bitcoind", || async {
+            client
+                .get_blockchain_info()
+                .context("bitcoind not reachable")
+        }))?;
 
         Ok(client)
     }

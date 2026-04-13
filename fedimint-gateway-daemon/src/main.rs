@@ -129,144 +129,134 @@ pub struct GatewayOpts {
 }
 
 fn main() -> anyhow::Result<()> {
+    fedimint_core::util::handle_version_hash_command(fedimint_build_code_version_env!());
+    TracingSetup::default().init()?;
+
+    // 1. Parse CLI args
+    let opts = GatewayOpts::parse();
+
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);
 
-    runtime.block_on(async {
-        fedimint_core::util::handle_version_hash_command(fedimint_build_code_version_env!());
-        TracingSetup::default().init()?;
+    // 2. Open database
+    runtime.block_on(install_crypto_provider());
 
-        // 1. Parse CLI args
-        let opts = GatewayOpts::parse();
+    let gateway_db = runtime
+        .block_on(RocksDb::build(opts.data_dir.join(DB_FILE)).open())
+        .map(|db| Database::new(db, ModuleDecoderRegistry::default()))?;
 
-        // 2. Open database
-        install_crypto_provider().await;
+    // 3. Load or init client factory (mnemonic)
+    let mut registry = ClientModuleInitRegistry::new();
+    registry.attach(MintClientInit);
+    registry.attach(WalletClientInit);
 
-        let gateway_db = Database::new(
-            RocksDb::build(opts.data_dir.join(DB_FILE)).open().await?,
-            ModuleDecoderRegistry::default(),
-        );
-
-        // 3. Load or init client factory (mnemonic)
-        let mut registry = ClientModuleInitRegistry::new();
-        registry.attach(MintClientInit);
-        registry.attach(WalletClientInit);
-
-        let client_factory =
-            match GatewayClientFactory::try_load(gateway_db.clone(), registry.clone()).await? {
-                Some(factory) => factory,
-                None => {
-                    GatewayClientFactory::init(
-                        gateway_db.clone(),
-                        Bip39RootSecretStrategy::<12>::random(&mut OsRng),
-                        registry,
-                    )
-                    .await?
-                }
-            };
-
-        let mnemonic = client_factory.mnemonic().clone();
-
-        // 4. Build LDK node
-        let ldk_data_dir = opts
-            .data_dir
-            .join(LDK_NODE_DB_FOLDER)
-            .to_str()
-            .expect("Invalid data dir path")
-            .to_string();
-
-        let mut node_builder = ldk_node::Builder::new();
-
-        node_builder.set_network(opts.network);
-        node_builder.set_node_alias("fedimint-gateway-daemon".to_string())?;
-        node_builder.set_listening_addresses(vec![opts.ldk_bind.into()])?;
-        node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
-        node_builder.set_storage_dir_path(ldk_data_dir);
-
-        match (opts.bitcoind_url.clone(), opts.esplora_url.clone()) {
-            (Some(url), _) => {
-                node_builder.set_chain_source_bitcoind_rpc(
-                    url.host_str().expect("Missing bitcoind host").to_string(),
-                    url.port().expect("Missing bitcoind port"),
-                    opts.bitcoind_username
-                        .clone()
-                        .expect("FM_BITCOIND_USERNAME is required"),
-                    opts.bitcoind_password
-                        .clone()
-                        .expect("FM_BITCOIND_PASSWORD is required"),
-                );
-            }
-            (None, Some(url)) => {
-                node_builder.set_chain_source_esplora(url.to_string(), None);
-            }
-            _ => unreachable!("ArgGroup enforces at least one chain source"),
-        }
-
-        info!(target: LOG_LIGHTNING, "Starting LDK Node...");
-
-        let node = Arc::new(node_builder.build()?);
-
-        node.start_with_runtime(runtime.clone())?;
-
-        info!("Successfully started LDK Node");
-
-        // 5. Construct AppState
-        let state = AppState {
-            clients: Arc::new(RwLock::new(BTreeMap::new())),
-            node: node.clone(),
-            client_factory,
-            gateway_db,
-            api_bind: opts.api_bind,
-            cli_bind: opts.cli_bind,
-            network: opts.network,
-            routing_fees: PaymentFee {
-                base: Amount::from_msats(opts.routing_fee_base_msat),
-                parts_per_million: opts.routing_fee_ppm,
-            },
-            transaction_fees: PaymentFee {
-                base: Amount::from_msats(opts.transaction_fee_base_msat),
-                parts_per_million: opts.transaction_fee_ppm,
-            },
-            outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
+    let client_factory =
+        match runtime.block_on(GatewayClientFactory::try_load(gateway_db.clone(), registry.clone()))? {
+            Some(factory) => factory,
+            None => runtime.block_on(GatewayClientFactory::init(
+                gateway_db.clone(),
+                Bip39RootSecretStrategy::<12>::random(&mut OsRng),
+                registry,
+            ))?,
         };
 
-        // 8. Load federation clients
-        state.load_clients().await?;
+    let mnemonic = client_factory.mnemonic().clone();
 
-        // 9. Create task group for graceful shutdown
-        let task_group = fedimint_core::task::TaskGroup::new();
+    // 4. Build LDK node
+    let ldk_data_dir = opts
+        .data_dir
+        .join(LDK_NODE_DB_FOLDER)
+        .to_str()
+        .expect("Invalid data dir path")
+        .to_string();
 
-        // 10. Spawn tasks
-        let public_task =
-            runtime.spawn(public::run_public(state.clone(), task_group.make_handle()));
+    let mut node_builder = ldk_node::Builder::new();
 
-        let cli_task = runtime.spawn(cli::run_cli(state.clone(), task_group.make_handle()));
+    node_builder.set_network(opts.network);
+    node_builder.set_node_alias("fedimint-gateway-daemon".to_string())?;
+    node_builder.set_listening_addresses(vec![opts.ldk_bind.into()])?;
+    node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
+    node_builder.set_storage_dir_path(ldk_data_dir);
 
-        let events_task =
-            runtime.spawn(process_ldk_events(state.clone(), task_group.make_handle()));
-
-        // 11. Wait for shutdown signal
-        shutdown_signal().await;
-
-        info!(target: LOG_GATEWAY, "Gatewayd shutting down...");
-
-        task_group.shutdown_join_all(None).await?;
-
-        if let Err(e) = public_task.await {
-            warn!(target: LOG_GATEWAY, err = %e, "Failed to join public webserver task");
+    match (opts.bitcoind_url.clone(), opts.esplora_url.clone()) {
+        (Some(url), _) => {
+            node_builder.set_chain_source_bitcoind_rpc(
+                url.host_str().expect("Missing bitcoind host").to_string(),
+                url.port().expect("Missing bitcoind port"),
+                opts.bitcoind_username
+                    .clone()
+                    .expect("FM_BITCOIND_USERNAME is required"),
+                opts.bitcoind_password
+                    .clone()
+                    .expect("FM_BITCOIND_PASSWORD is required"),
+            );
         }
-
-        if let Err(e) = cli_task.await {
-            warn!(target: LOG_GATEWAY, err = %e, "Failed to join CLI webserver task");
+        (None, Some(url)) => {
+            node_builder.set_chain_source_esplora(url.to_string(), None);
         }
+        _ => unreachable!("ArgGroup enforces at least one chain source"),
+    }
 
-        if let Err(e) = events_task.await {
-            warn!(target: LOG_GATEWAY, err = %e, "Failed to join LDK events task");
-        }
+    info!(target: LOG_LIGHTNING, "Starting LDK Node...");
 
-        info!(target: LOG_GATEWAY, "Gatewayd exiting...");
+    let node = Arc::new(node_builder.build()?);
 
-        Ok(())
-    })
+    node.start_with_runtime(runtime.clone())?;
+
+    info!("Successfully started LDK Node");
+
+    // 5. Construct AppState
+    let state = AppState {
+        clients: Arc::new(RwLock::new(BTreeMap::new())),
+        node: node.clone(),
+        client_factory,
+        gateway_db,
+        api_bind: opts.api_bind,
+        cli_bind: opts.cli_bind,
+        network: opts.network,
+        routing_fees: PaymentFee {
+            base: Amount::from_msats(opts.routing_fee_base_msat),
+            parts_per_million: opts.routing_fee_ppm,
+        },
+        transaction_fees: PaymentFee {
+            base: Amount::from_msats(opts.transaction_fee_base_msat),
+            parts_per_million: opts.transaction_fee_ppm,
+        },
+        outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
+    };
+
+    // 8. Load federation clients
+    runtime.block_on(state.load_clients())?;
+
+    // 9. Create task group for graceful shutdown
+    let task_group = fedimint_core::task::TaskGroup::new();
+
+    // 10. Spawn tasks
+    let public_task = runtime.spawn(public::run_public(state.clone(), task_group.make_handle()));
+    let cli_task = runtime.spawn(cli::run_cli(state.clone(), task_group.make_handle()));
+    let events_task = runtime.spawn(process_ldk_events(state.clone(), task_group.make_handle()));
+
+    // 11. Wait for shutdown signal
+    runtime.block_on(shutdown_signal());
+
+    info!(target: LOG_GATEWAY, "Gatewayd shutting down...");
+
+    runtime.block_on(task_group.shutdown_join_all(None))?;
+
+    if let Err(e) = runtime.block_on(public_task) {
+        warn!(target: LOG_GATEWAY, err = %e, "Failed to join public webserver task");
+    }
+
+    if let Err(e) = runtime.block_on(cli_task) {
+        warn!(target: LOG_GATEWAY, err = %e, "Failed to join CLI webserver task");
+    }
+
+    if let Err(e) = runtime.block_on(events_task) {
+        warn!(target: LOG_GATEWAY, err = %e, "Failed to join LDK events task");
+    }
+
+    info!(target: LOG_GATEWAY, "Gatewayd exiting...");
+
+    Ok(())
 }
 
 async fn shutdown_signal() {
