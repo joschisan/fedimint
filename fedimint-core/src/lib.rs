@@ -64,8 +64,6 @@ pub use {bitcoin, hex, secp256k1};
 use crate::encoding::{Decodable, DecodeError, Encodable};
 use crate::module::registry::ModuleDecoderRegistry;
 
-/// Admin (guardian) client types
-pub mod admin_client;
 /// Bitcoin amount types
 mod amount;
 /// Federation-stored client backups

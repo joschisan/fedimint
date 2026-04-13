@@ -1,7 +1,7 @@
 mod error;
 pub mod global_api;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::future::pending;
 use std::pin::Pin;
@@ -16,13 +16,10 @@ pub use fedimint_connectors::error::ServerError;
 use fedimint_connectors::{
     ConnectionPool, ConnectorRegistry, DynGuaridianConnection, IGuardianConnection,
 };
-use fedimint_core::admin_client::{GuardianConfigBackup, ServerStatusLegacy, SetupStatus};
-use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
+use fedimint_core::backup::ClientBackupSnapshot;
 use fedimint_core::core::backup::SignedBackupRequest;
-use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, ModuleKind, OutputOutcome};
+use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, OutputOutcome};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::invite_code::InviteCode;
-use fedimint_core::module::audit::AuditSummary;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::module::{
     ApiAuth, ApiMethod, ApiRequestErased, ApiVersion, SerdeModuleEncoding,
@@ -375,26 +372,6 @@ pub trait FederationApiExt: IRawFederationApi {
         self.request_single_peer_federation(method.into(), params.with_auth(auth), self_peer_id)
             .await
     }
-
-    async fn request_admin_no_auth<Ret>(
-        &self,
-        method: &str,
-        params: ApiRequestErased,
-    ) -> FederationResult<Ret>
-    where
-        Ret: DeserializeOwned + Eq + Debug + Clone + MaybeSend,
-    {
-        let Some(self_peer_id) = self.self_peer() else {
-            return Err(FederationError::general(
-                method,
-                params,
-                anyhow::format_err!("Admin peer_id not set"),
-            ));
-        };
-
-        self.request_single_peer_federation(method.into(), params, self_peer_id)
-            .await
-    }
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -490,71 +467,6 @@ pub trait IGlobalFederationApi: IRawFederationApi {
         &self,
         id: &secp256k1::PublicKey,
     ) -> FederationResult<BTreeMap<PeerId, Option<ClientBackupSnapshot>>>;
-
-    /// Sets the password used to decrypt the configs and authenticate
-    ///
-    /// Must be called first before any other calls to the API
-    async fn set_password(&self, auth: ApiAuth) -> FederationResult<()>;
-
-    async fn setup_status(&self, auth: ApiAuth) -> FederationResult<SetupStatus>;
-
-    async fn set_local_params(
-        &self,
-        name: String,
-        federation_name: Option<String>,
-        disable_base_fees: Option<bool>,
-        enabled_modules: Option<BTreeSet<ModuleKind>>,
-        federation_size: Option<u32>,
-        auth: ApiAuth,
-    ) -> FederationResult<String>;
-
-    async fn add_peer_connection_info(
-        &self,
-        info: String,
-        auth: ApiAuth,
-    ) -> FederationResult<String>;
-
-    /// Reset the peer setup codes during the federation setup process
-    async fn reset_peer_setup_codes(&self, auth: ApiAuth) -> FederationResult<()>;
-
-    /// Returns the setup code if `set_local_params` was already called
-    async fn get_setup_code(&self, auth: ApiAuth) -> FederationResult<Option<String>>;
-
-    /// Runs DKG, can only be called once after configs have been generated in
-    /// `get_consensus_config_gen_params`.  If DKG fails this returns a 500
-    /// error and config gen must be restarted.
-    async fn start_dkg(&self, auth: ApiAuth) -> FederationResult<()>;
-
-    /// Returns the status of the server
-    async fn status(&self) -> FederationResult<StatusResponse>;
-
-    /// Show an audit across all modules
-    async fn audit(&self, auth: ApiAuth) -> FederationResult<AuditSummary>;
-
-    /// Download the guardian config to back it up
-    async fn guardian_config_backup(&self, auth: ApiAuth)
-    -> FederationResult<GuardianConfigBackup>;
-
-    /// Check auth credentials
-    async fn auth(&self, auth: ApiAuth) -> FederationResult<()>;
-
-    async fn restart_federation_setup(&self, auth: ApiAuth) -> FederationResult<()>;
-
-    async fn shutdown(&self, session: Option<u64>, auth: ApiAuth) -> FederationResult<()>;
-
-    /// Returns the fedimintd version a peer is running
-    async fn fedimintd_version(&self, peer_id: PeerId) -> ServerResult<String>;
-
-    /// Fetch the backup statistics from the federation (admin endpoint)
-    async fn backup_statistics(&self, auth: ApiAuth) -> FederationResult<BackupStatistics>;
-
-    /// Get the invite code for the federation guardian.
-    /// For instance, useful after DKG
-    async fn get_invite_code(&self, guardian: PeerId) -> ServerResult<InviteCode>;
-
-    /// Change the password used to encrypt the configs and for guardian
-    /// authentication
-    async fn change_password(&self, auth: ApiAuth, new_password: &str) -> FederationResult<()>;
 
     /// Returns the chain ID (bitcoin block hash at height 1) from the
     /// federation
@@ -758,42 +670,6 @@ impl IRawFederationApi for FederationApi {
         self.get_or_create_connection(url, self.api_secret.as_deref())
             .await
     }
-}
-
-/// The status of a server, including how it views its peers
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LegacyFederationStatus {
-    pub session_count: u64,
-    pub status_by_peer: HashMap<PeerId, LegacyPeerStatus>,
-    pub peers_online: u64,
-    pub peers_offline: u64,
-    /// This should always be 0 if everything is okay, so a monitoring tool
-    /// should generate an alert if this is not the case.
-    pub peers_flagged: u64,
-    pub scheduled_shutdown: Option<u64>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LegacyPeerStatus {
-    pub last_contribution: Option<u64>,
-    pub connection_status: LegacyP2PConnectionStatus,
-    /// Indicates that this peer needs attention from the operator since
-    /// it has not contributed to the consensus in a long time
-    pub flagged: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LegacyP2PConnectionStatus {
-    #[default]
-    Disconnected,
-    Connected,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct StatusResponse {
-    pub server: ServerStatusLegacy,
-    pub federation: Option<LegacyFederationStatus>,
 }
 
 #[cfg(test)]

@@ -7,13 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
-use fedimint_api_client::api::{
-    LegacyFederationStatus, LegacyP2PConnectionStatus, LegacyPeerStatus, StatusResponse,
-};
-use fedimint_core::admin_client::{GuardianConfigBackup, ServerStatusLegacy, SetupStatus};
-use fedimint_core::backup::{
-    BackupStatistics, ClientBackupKey, ClientBackupKeyPrefix, ClientBackupSnapshot,
-};
+use fedimint_core::backup::{ClientBackupKey, ClientBackupSnapshot};
 use fedimint_core::config::{ClientConfig, JsonClientConfig, META_FEDERATION_NAME_KEY};
 use fedimint_core::core::backup::{BACKUP_REQUEST_MAX_PAYLOAD_SIZE_BYTES, SignedBackupRequest};
 use fedimint_core::core::{DynOutputOutcome, ModuleInstanceId, ModuleKind};
@@ -29,8 +23,8 @@ use fedimint_core::endpoint_constants::{
     CONSENSUS_ORD_LATENCY_ENDPOINT, FEDERATION_ID_ENDPOINT, FEDIMINTD_VERSION_ENDPOINT,
     INVITE_CODE_ENDPOINT, P2P_CONNECTION_STATUS_ENDPOINT, RECOVER_ENDPOINT,
     SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT, SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT,
-    SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT, STATUS_ENDPOINT,
-    SUBMIT_TRANSACTION_ENDPOINT, VERSION_ENDPOINT,
+    SESSION_STATUS_V2_ENDPOINT, SETUP_STATUS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
+    VERSION_ENDPOINT,
 };
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::{Audit, AuditSummary};
@@ -52,7 +46,7 @@ use fedimint_core::{ChainId, OutPoint, OutPointRange, PeerId, TransactionId};
 use fedimint_logging::LOG_NET_API;
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::dashboard_ui::{
-    IDashboardApi, P2PConnectionStatus, ServerBitcoinRpcStatus,
+    GuardianConfigBackup, IDashboardApi, P2PConnectionStatus, ServerBitcoinRpcStatus, SetupStatus,
 };
 use fedimint_server_core::{DynServerModule, ServerModuleRegistry, ServerModuleRegistryExt};
 use futures::StreamExt;
@@ -249,54 +243,6 @@ impl ConsensusApi {
                     .expect("There are no gaps in session outcomes"),
             ),
         }
-    }
-
-    pub async fn get_federation_status(&self) -> ApiResult<LegacyFederationStatus> {
-        let session_count = self.session_count().await;
-        let scheduled_shutdown = self.shutdown_receiver.borrow().to_owned();
-
-        let status_by_peer = self
-            .p2p_status_receivers
-            .iter()
-            .map(|(peer, p2p_receiver)| {
-                let ci_receiver = self.ci_status_receivers.get(peer).unwrap();
-
-                let consensus_status = LegacyPeerStatus {
-                    connection_status: match *p2p_receiver.borrow() {
-                        Some(..) => LegacyP2PConnectionStatus::Connected,
-                        None => LegacyP2PConnectionStatus::Disconnected,
-                    },
-                    last_contribution: *ci_receiver.borrow(),
-                    flagged: ci_receiver.borrow().unwrap_or(0) + 1 < session_count,
-                };
-
-                (*peer, consensus_status)
-            })
-            .collect::<HashMap<PeerId, LegacyPeerStatus>>();
-
-        let peers_flagged = status_by_peer
-            .values()
-            .filter(|status| status.flagged)
-            .count() as u64;
-
-        let peers_online = status_by_peer
-            .values()
-            .filter(|status| status.connection_status == LegacyP2PConnectionStatus::Connected)
-            .count() as u64;
-
-        let peers_offline = status_by_peer
-            .values()
-            .filter(|status| status.connection_status == LegacyP2PConnectionStatus::Disconnected)
-            .count() as u64;
-
-        Ok(LegacyFederationStatus {
-            session_count,
-            status_by_peer,
-            peers_online,
-            peers_offline,
-            peers_flagged,
-            scheduled_shutdown,
-        })
     }
 
     async fn get_federation_audit(&self) -> ApiResult<AuditSummary> {
@@ -632,15 +578,6 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
             }
         },
         api_endpoint! {
-            STATUS_ENDPOINT,
-            ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, _context, _v: ()| -> StatusResponse {
-                Ok(StatusResponse {
-                    server: ServerStatusLegacy::ConsensusRunning,
-                    federation: Some(fedimint.get_federation_status().await?)
-                })}
-        },
-        api_endpoint! {
             SETUP_STATUS_ENDPOINT,
             ApiVersion::new(0, 0),
             async |_f: &ConsensusApi, _c, _v: ()| -> SetupStatus {
@@ -741,37 +678,4 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
             }
         },
     ]
-}
-
-pub(crate) async fn backup_statistics_static(
-    dbtx: &mut DatabaseTransaction<'_>,
-) -> BackupStatistics {
-    const DAY_SECS: u64 = 24 * 60 * 60;
-    const WEEK_SECS: u64 = 7 * DAY_SECS;
-    const MONTH_SECS: u64 = 30 * DAY_SECS;
-    const QUARTER_SECS: u64 = 3 * MONTH_SECS;
-
-    let mut backup_stats = BackupStatistics::default();
-
-    let mut all_backups_stream = dbtx.find_by_prefix(&ClientBackupKeyPrefix).await;
-    while let Some((_, backup)) = all_backups_stream.next().await {
-        backup_stats.num_backups += 1;
-        backup_stats.total_size += backup.data.len();
-
-        let age_secs = backup.timestamp.elapsed().unwrap_or_default().as_secs();
-        if age_secs < DAY_SECS {
-            backup_stats.refreshed_1d += 1;
-        }
-        if age_secs < WEEK_SECS {
-            backup_stats.refreshed_1w += 1;
-        }
-        if age_secs < MONTH_SECS {
-            backup_stats.refreshed_1m += 1;
-        }
-        if age_secs < QUARTER_SECS {
-            backup_stats.refreshed_3m += 1;
-        }
-    }
-
-    backup_stats
 }

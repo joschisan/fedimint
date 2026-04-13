@@ -1,5 +1,4 @@
-// Re-export from fedimint-core
-pub use fedimint_core::admin_client::SetupStatus;
+pub use fedimint_server_core::dashboard_ui::SetupStatus;
 use serde::{Deserialize, Serialize};
 
 // Setup routes

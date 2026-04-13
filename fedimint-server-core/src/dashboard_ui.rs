@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use fedimint_core::admin_client::GuardianConfigBackup;
 use fedimint_core::bitcoin::Network;
 use fedimint_core::core::ModuleKind;
 use fedimint_core::module::ApiAuth;
@@ -119,4 +118,23 @@ pub struct ServerBitcoinRpcStatus {
     pub block_count: u64,
     pub fee_rate: Feerate,
     pub sync_progress: Option<f64>,
+}
+
+/// The state of the server returned via APIs
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SetupStatus {
+    /// Waiting for guardian to set the local parameters
+    AwaitingLocalParams,
+    /// Sharing the connection codes with our peers
+    SharingConnectionCodes,
+    /// Consensus is running
+    ConsensusIsRunning,
+}
+
+/// Archive of all the guardian config files that can be used to recover a lost
+/// guardian node.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GuardianConfigBackup {
+    #[serde(with = "fedimint_core::hex::serde")]
+    pub tar_archive_bytes: Vec<u8>,
 }

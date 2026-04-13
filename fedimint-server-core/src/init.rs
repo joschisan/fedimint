@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::{any, marker};
 
 use bitcoin::Network;
+pub use fedimint_api_client::api::DynGlobalApi;
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_core::config::{
     ClientModuleConfig, CommonModuleInitRegistry, ModuleInitRegistry, ServerModuleConfig,

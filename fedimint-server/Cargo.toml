@@ -30,7 +30,6 @@ bitcoin = { workspace = true }
 bls12_381 = { workspace = true }
 bytes = { workspace = true }
 fedimint-aead = { workspace = true }
-fedimint-api-client = { workspace = true }
 fedimint-server-cli-core = { workspace = true }
 fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }

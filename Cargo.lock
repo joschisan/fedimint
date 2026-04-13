@@ -3397,7 +3397,6 @@ dependencies = [
  "bytes",
  "fedimint-aead",
  "fedimint-aleph-bft",
- "fedimint-api-client",
  "fedimint-build",
  "fedimint-connectors",
  "fedimint-core",
@@ -3469,7 +3468,7 @@ dependencies = [
 name = "fedimint-server-cli-core"
 version = "0.11.0-alpha"
 dependencies = [
- "fedimint-core",
+ "fedimint-server-core",
  "serde",
 ]
 

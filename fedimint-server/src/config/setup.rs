@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, ensure};
 use async_trait::async_trait;
-use fedimint_core::admin_client::SetupStatus;
 use fedimint_core::base32::FEDIMINT_PREFIX;
 use fedimint_core::config::META_FEDERATION_NAME_KEY;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
@@ -16,6 +15,7 @@ use fedimint_core::module::{
 };
 use fedimint_core::setup_code::PeerEndpoints;
 use fedimint_core::{PeerId, base32};
+use fedimint_server_core::dashboard_ui::SetupStatus;
 use fedimint_server_core::setup_ui::ISetupApi;
 use iroh::SecretKey;
 use rand::rngs::OsRng;

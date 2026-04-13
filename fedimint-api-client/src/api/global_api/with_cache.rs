@@ -6,25 +6,17 @@ use std::sync::Arc;
 use anyhow::{anyhow, format_err};
 use bitcoin::secp256k1;
 use fedimint_connectors::{DynGuaridianConnection, ServerResult};
-use fedimint_core::admin_client::{GuardianConfigBackup, SetLocalParamsRequest, SetupStatus};
-use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
+use fedimint_core::backup::ClientBackupSnapshot;
+use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::core::backup::SignedBackupRequest;
-use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::endpoint_constants::{
-    ADD_PEER_SETUP_CODE_ENDPOINT, AUDIT_ENDPOINT, AUTH_ENDPOINT, AWAIT_SESSION_OUTCOME_ENDPOINT,
-    AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT, BACKUP_STATISTICS_ENDPOINT, CHAIN_ID_ENDPOINT,
-    CHANGE_PASSWORD_ENDPOINT, FEDIMINTD_VERSION_ENDPOINT, GET_SETUP_CODE_ENDPOINT,
-    GUARDIAN_CONFIG_BACKUP_ENDPOINT, INVITE_CODE_ENDPOINT, RECOVER_ENDPOINT,
-    RESET_PEER_SETUP_CODES_ENDPOINT, RESTART_FEDERATION_SETUP_ENDPOINT, SESSION_COUNT_ENDPOINT,
-    SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT, SET_LOCAL_PARAMS_ENDPOINT,
-    SET_PASSWORD_ENDPOINT, SETUP_STATUS_ENDPOINT, SHUTDOWN_ENDPOINT, START_DKG_ENDPOINT,
-    STATUS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
+    AWAIT_SESSION_OUTCOME_ENDPOINT, AWAIT_TRANSACTION_ENDPOINT, BACKUP_ENDPOINT, CHAIN_ID_ENDPOINT,
+    RECOVER_ENDPOINT, SESSION_COUNT_ENDPOINT, SESSION_STATUS_ENDPOINT, SESSION_STATUS_V2_ENDPOINT,
+    SUBMIT_TRANSACTION_ENDPOINT,
 };
-use fedimint_core::invite_code::InviteCode;
-use fedimint_core::module::audit::AuditSummary;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::module::{
-    ApiAuth, ApiRequestErased, ApiVersion, SerdeModuleEncoding, SerdeModuleEncodingBase64,
+    ApiRequestErased, ApiVersion, SerdeModuleEncoding, SerdeModuleEncodingBase64,
 };
 use fedimint_core::session_outcome::{
     AcceptedItem, SessionOutcome, SessionStatus, SessionStatusV2,
@@ -40,7 +32,7 @@ use serde_json::Value;
 use tokio::sync::OnceCell;
 use tracing::{debug, trace};
 
-use super::super::{DynModuleApi, IGlobalFederationApi, IRawFederationApi, StatusResponse};
+use super::super::{DynModuleApi, IGlobalFederationApi, IRawFederationApi};
 use crate::api::{
     FederationApiExt, FederationResult, VERSION_THAT_INTRODUCED_GET_SESSION_STATUS_V2,
 };
@@ -360,148 +352,6 @@ where
             FilterMapThreshold::new(|_, snapshot| Ok(snapshot), self.all_peers().to_num_peers()),
             RECOVER_ENDPOINT.to_owned(),
             ApiRequestErased::new(id),
-        )
-        .await
-    }
-
-    async fn set_password(&self, auth: ApiAuth) -> FederationResult<()> {
-        self.request_admin(SET_PASSWORD_ENDPOINT, ApiRequestErased::default(), auth)
-            .await
-    }
-
-    async fn setup_status(&self, auth: ApiAuth) -> FederationResult<SetupStatus> {
-        self.request_admin(SETUP_STATUS_ENDPOINT, ApiRequestErased::default(), auth)
-            .await
-    }
-
-    async fn set_local_params(
-        &self,
-        name: String,
-        federation_name: Option<String>,
-        disable_base_fees: Option<bool>,
-        enabled_modules: Option<BTreeSet<ModuleKind>>,
-        federation_size: Option<u32>,
-        auth: ApiAuth,
-    ) -> FederationResult<String> {
-        self.request_admin(
-            SET_LOCAL_PARAMS_ENDPOINT,
-            ApiRequestErased::new(SetLocalParamsRequest {
-                name,
-                federation_name,
-                disable_base_fees,
-                enabled_modules,
-                federation_size,
-            }),
-            auth,
-        )
-        .await
-    }
-
-    async fn add_peer_connection_info(
-        &self,
-        info: String,
-        auth: ApiAuth,
-    ) -> FederationResult<String> {
-        self.request_admin(
-            ADD_PEER_SETUP_CODE_ENDPOINT,
-            ApiRequestErased::new(info),
-            auth,
-        )
-        .await
-    }
-
-    async fn reset_peer_setup_codes(&self, auth: ApiAuth) -> FederationResult<()> {
-        self.request_admin(
-            RESET_PEER_SETUP_CODES_ENDPOINT,
-            ApiRequestErased::default(),
-            auth,
-        )
-        .await
-    }
-
-    async fn get_setup_code(&self, auth: ApiAuth) -> FederationResult<Option<String>> {
-        self.request_admin(GET_SETUP_CODE_ENDPOINT, ApiRequestErased::default(), auth)
-            .await
-    }
-
-    async fn start_dkg(&self, auth: ApiAuth) -> FederationResult<()> {
-        self.request_admin(START_DKG_ENDPOINT, ApiRequestErased::default(), auth)
-            .await
-    }
-
-    async fn status(&self) -> FederationResult<StatusResponse> {
-        self.request_admin_no_auth(STATUS_ENDPOINT, ApiRequestErased::default())
-            .await
-    }
-
-    async fn audit(&self, auth: ApiAuth) -> FederationResult<AuditSummary> {
-        self.request_admin(AUDIT_ENDPOINT, ApiRequestErased::default(), auth)
-            .await
-    }
-
-    async fn guardian_config_backup(
-        &self,
-        auth: ApiAuth,
-    ) -> FederationResult<GuardianConfigBackup> {
-        self.request_admin(
-            GUARDIAN_CONFIG_BACKUP_ENDPOINT,
-            ApiRequestErased::default(),
-            auth,
-        )
-        .await
-    }
-
-    async fn auth(&self, auth: ApiAuth) -> FederationResult<()> {
-        self.request_admin(AUTH_ENDPOINT, ApiRequestErased::default(), auth)
-            .await
-    }
-
-    async fn restart_federation_setup(&self, auth: ApiAuth) -> FederationResult<()> {
-        self.request_admin(
-            RESTART_FEDERATION_SETUP_ENDPOINT,
-            ApiRequestErased::default(),
-            auth,
-        )
-        .await
-    }
-
-    async fn shutdown(&self, session: Option<u64>, auth: ApiAuth) -> FederationResult<()> {
-        self.request_admin(SHUTDOWN_ENDPOINT, ApiRequestErased::new(session), auth)
-            .await
-    }
-
-    async fn backup_statistics(&self, auth: ApiAuth) -> FederationResult<BackupStatistics> {
-        self.request_admin(
-            BACKUP_STATISTICS_ENDPOINT,
-            ApiRequestErased::default(),
-            auth,
-        )
-        .await
-    }
-
-    async fn fedimintd_version(&self, peer_id: PeerId) -> ServerResult<String> {
-        self.request_single_peer(
-            FEDIMINTD_VERSION_ENDPOINT.to_owned(),
-            ApiRequestErased::default(),
-            peer_id,
-        )
-        .await
-    }
-
-    async fn get_invite_code(&self, guardian: PeerId) -> ServerResult<InviteCode> {
-        self.request_single_peer(
-            INVITE_CODE_ENDPOINT.to_owned(),
-            ApiRequestErased::default(),
-            guardian,
-        )
-        .await
-    }
-
-    async fn change_password(&self, auth: ApiAuth, new_password: &str) -> FederationResult<()> {
-        self.request_admin(
-            CHANGE_PASSWORD_ENDPOINT,
-            ApiRequestErased::new(new_password),
-            auth,
         )
         .await
     }
