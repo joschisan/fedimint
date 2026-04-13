@@ -8,18 +8,18 @@ use clap::{Parser, Subcommand};
 use fedimint_core::config::FederationId;
 use fedimint_core::{Amount, BitcoinAmountOrAll};
 use fedimint_gateway_cli_core::{
-    FederationConfigRequest, FederationJoinRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
-    LdkInvoiceCreateRequest, LdkInvoicePayRequest, LdkOnchainSendRequest, LdkPeerConnectRequest,
-    LdkPeerDisconnectRequest, LdkTransactionListRequest, MintCountRequest, MintReceiveRequest,
-    MintSendRequest, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN,
-    ROUTE_FEDERATION_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
-    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE,
-    ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
-    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_COUNT, ROUTE_MODULE_MINT_RECEIVE,
-    ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_INFO, ROUTE_MODULE_WALLET_RECEIVE,
-    ROUTE_MODULE_WALLET_SEND, ROUTE_MODULE_WALLET_SEND_FEE, WalletInfoRequest,
-    WalletReceiveRequest, WalletSendFeeRequest, WalletSendRequest,
+    FederationBalanceRequest, FederationConfigRequest, FederationJoinRequest,
+    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkInvoiceCreateRequest, LdkInvoicePayRequest,
+    LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest, MintCountRequest,
+    MintReceiveRequest, MintSendRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
+    ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
+    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    ROUTE_MNEMONIC, ROUTE_MODULE_MINT_COUNT, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND,
+    ROUTE_MODULE_WALLET_INFO, ROUTE_MODULE_WALLET_RECEIVE, ROUTE_MODULE_WALLET_SEND,
+    ROUTE_MODULE_WALLET_SEND_FEE, WalletInfoRequest, WalletReceiveRequest, WalletSendFeeRequest,
+    WalletSendRequest,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -28,12 +28,7 @@ use serde_json::Value;
 #[command(version)]
 struct Cli {
     /// Gateway admin API address
-    #[arg(
-        short,
-        long,
-        env = "FM_GATEWAY_ADDR",
-        default_value = "http://127.0.0.1:80"
-    )]
+    #[arg(short, long, default_value = "http://127.0.0.1:8176")]
     address: String,
 
     #[command(subcommand)]
@@ -84,11 +79,6 @@ enum LdkCommands {
     Peer {
         #[command(subcommand)]
         command: LdkPeerCommands,
-    },
-    /// Transaction operations
-    Transaction {
-        #[command(subcommand)]
-        command: LdkTransactionCommands,
     },
 }
 
@@ -154,30 +144,17 @@ enum LdkPeerCommands {
 }
 
 #[derive(Subcommand)]
-enum LdkTransactionCommands {
-    /// List transactions
-    List {
-        #[arg(long)]
-        start_secs: u64,
-        #[arg(long)]
-        end_secs: u64,
-    },
-}
-
-#[derive(Subcommand)]
 enum FederationCommands {
     /// Join a federation
-    Join {
-        invite_code: String,
-        #[arg(long)]
-        recover: Option<bool>,
-    },
+    Join { invite: String },
     /// List connected federations
     List,
     /// Get a connected federation's JSON client config
     Config { federation_id: FederationId },
     /// Get invite code for a federation
     Invite { federation_id: FederationId },
+    /// Get a federation's ecash balance
+    Balance { federation_id: FederationId },
 }
 
 #[derive(Subcommand)]
@@ -340,32 +317,13 @@ fn main() -> Result<()> {
                 )?,
                 LdkPeerCommands::List => request(addr, ROUTE_LDK_PEER_LIST, ())?,
             },
-            LdkCommands::Transaction { command } => match command {
-                LdkTransactionCommands::List {
-                    start_secs,
-                    end_secs,
-                } => request(
-                    addr,
-                    ROUTE_LDK_TRANSACTION_LIST,
-                    LdkTransactionListRequest {
-                        start_secs,
-                        end_secs,
-                    },
-                )?,
-            },
         },
 
         Commands::Federation(cmd) => match cmd {
-            FederationCommands::Join {
-                invite_code,
-                recover,
-            } => request(
+            FederationCommands::Join { invite } => request(
                 addr,
                 ROUTE_FEDERATION_JOIN,
-                FederationJoinRequest {
-                    invite_code,
-                    recover,
-                },
+                FederationJoinRequest { invite },
             )?,
             FederationCommands::List => request(addr, ROUTE_FEDERATION_LIST, ())?,
             FederationCommands::Config { federation_id } => request(
@@ -379,6 +337,11 @@ fn main() -> Result<()> {
                 addr,
                 ROUTE_FEDERATION_INVITE,
                 serde_json::json!({ "federation_id": federation_id }),
+            )?,
+            FederationCommands::Balance { federation_id } => request(
+                addr,
+                ROUTE_FEDERATION_BALANCE,
+                FederationBalanceRequest { federation_id },
             )?,
         },
 

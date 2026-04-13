@@ -7,26 +7,25 @@ use axum::extract::{Json, State};
 use axum::response::IntoResponse;
 use axum::routing::post;
 use bitcoin::FeeRate;
+use fedimint_core::BitcoinAmountOrAll;
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::task::TaskHandle;
-use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
-use fedimint_core::{Amount, BitcoinAmountOrAll};
+use fedimint_core::util::FmtCompact;
 use fedimint_gateway_cli_core::{
-    ChannelInfo, FederationBalanceInfo, FederationConfigRequest, FederationConfigResponse,
-    FederationInfo, FederationInviteResponse, FederationJoinRequest, FederationListResponse,
-    InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelCloseResponse,
-    LdkChannelListResponse, LdkChannelOpenRequest, LdkInvoiceCreateRequest,
-    LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
+    ChannelInfo, FederationBalanceRequest, FederationBalanceResponse, FederationConfigRequest,
+    FederationConfigResponse, FederationInviteResponse, FederationJoinRequest,
+    FederationListResponse, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
+    LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest,
+    LdkInvoiceCreateRequest, LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse,
-    LdkTransactionListRequest, LdkTransactionListResponse, MintReceiveRequest, MintReceiveResponse,
-    MintSendRequest, MintSendResponse, MnemonicResponse, PaymentDetails, PeerInfo,
-    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
-    ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST,
-    ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY,
-    ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT,
-    ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_LDK_TRANSACTION_LIST, ROUTE_MNEMONIC,
-    ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_RECEIVE,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MintReceiveRequest,
+    MintReceiveResponse, MintSendRequest, MintSendResponse, MnemonicResponse, PeerInfo,
+    ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
+    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES,
+    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
+    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_RECEIVE,
     WalletReceiveRequest, WalletReceiveResponse,
 };
 use fedimint_gwv2_client::Preimage;
@@ -35,14 +34,14 @@ use fedimint_mintv2_client::MintClientModule;
 use hex::ToHex;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
-use ldk_node::payment::{PaymentDirection, PaymentKind, PaymentStatus};
+use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use reqwest::StatusCode;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
-use tracing::{debug, error, info, info_span, instrument, warn};
+use tracing::{debug, error, info, info_span, instrument};
 
-use crate::{AppState, get_preimage_and_payment_hash};
+use crate::AppState;
 
 /// Simple error type for CLI/admin endpoints.
 #[derive(Debug)]
@@ -126,12 +125,12 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_PEER_CONNECT, post(ldk_peer_connect))
         .route(ROUTE_LDK_PEER_DISCONNECT, post(ldk_peer_disconnect))
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
-        .route(ROUTE_LDK_TRANSACTION_LIST, post(ldk_transaction_list))
         // Federation management
         .route(ROUTE_FEDERATION_JOIN, post(federation_join))
         .route(ROUTE_FEDERATION_LIST, post(federation_list))
         .route(ROUTE_FEDERATION_CONFIG, post(federation_config))
         .route(ROUTE_FEDERATION_INVITE, post(federation_invite))
+        .route(ROUTE_FEDERATION_BALANCE, post(federation_balance))
         // Per-federation module commands
         .route(ROUTE_MODULE_MINT_SEND, post(module_mint_send))
         .route(ROUTE_MODULE_MINT_RECEIVE, post(module_mint_receive))
@@ -177,40 +176,30 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse
 // LDK node management handlers
 // ---------------------------------------------------------------------------
 
-/// Returns the ecash, lightning, and onchain balances (LDK-specific)
+/// Returns the onchain and lightning channel capacity balances
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_balances(
     State(state): State<AppState>,
 ) -> Result<Json<LdkBalancesResponse>, CliError> {
-    let federation_infos = state.federation_info_all().await;
-
-    let ecash_balances: Vec<FederationBalanceInfo> = federation_infos
-        .iter()
-        .map(|federation_info| FederationBalanceInfo {
-            federation_id: federation_info.federation_id,
-            ecash_balance_msats: Amount {
-                msats: federation_info.balance_msat.msats,
-            },
-        })
-        .collect();
-
     let node_balances = state.node.list_balances();
-    let total_inbound_liquidity_msats: u64 = state
-        .node
-        .list_channels()
+
+    let channels = state.node.list_channels();
+    let total_inbound_capacity_msat: u64 = channels
         .iter()
         .filter(|chan| chan.is_usable)
         .map(|channel| channel.inbound_capacity_msat)
         .sum();
+    let total_outbound_capacity_msat: u64 = channels
+        .iter()
+        .filter(|chan| chan.is_usable)
+        .map(|channel| channel.outbound_capacity_msat)
+        .sum();
 
-    let balances = LdkBalancesResponse {
-        onchain_balance_sats: node_balances.total_onchain_balance_sats,
-        lightning_balance_msats: node_balances.total_lightning_balance_sats * 1000,
-        ecash_balances,
-        inbound_lightning_liquidity_msats: total_inbound_liquidity_msats,
-    };
-
-    Ok(Json(balances))
+    Ok(Json(LdkBalancesResponse {
+        total_onchain_balance_sats: node_balances.total_onchain_balance_sats,
+        total_inbound_capacity_msat,
+        total_outbound_capacity_msat,
+    }))
 }
 
 /// Opens a Lightning channel to a peer
@@ -502,51 +491,6 @@ async fn ldk_peer_list(
     Ok(Json(LdkPeerListResponse { peers }))
 }
 
-/// Lists LN payment transactions
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn ldk_transaction_list(
-    State(state): State<AppState>,
-    Json(payload): Json<LdkTransactionListRequest>,
-) -> Result<Json<LdkTransactionListResponse>, CliError> {
-    let transactions = state
-        .node
-        .list_payments_with_filter(|details| {
-            !matches!(details.kind, PaymentKind::Onchain { .. })
-                && details.latest_update_timestamp >= payload.start_secs
-                && details.latest_update_timestamp < payload.end_secs
-        })
-        .iter()
-        .map(|details| {
-            let (preimage, payment_hash, payment_kind) =
-                get_preimage_and_payment_hash(&details.kind);
-            let direction = match details.direction {
-                PaymentDirection::Outbound => fedimint_gateway_cli_core::PaymentDirection::Outbound,
-                PaymentDirection::Inbound => fedimint_gateway_cli_core::PaymentDirection::Inbound,
-            };
-            let status = match details.status {
-                PaymentStatus::Failed => fedimint_gateway_cli_core::PaymentStatus::Failed,
-                PaymentStatus::Succeeded => fedimint_gateway_cli_core::PaymentStatus::Succeeded,
-                PaymentStatus::Pending => fedimint_gateway_cli_core::PaymentStatus::Pending,
-            };
-            PaymentDetails {
-                payment_hash,
-                preimage: preimage.map(|p| p.to_string()),
-                payment_kind,
-                amount: Amount::from_msats(
-                    details
-                        .amount_msat
-                        .expect("amountless invoices are not supported"),
-                ),
-                direction,
-                status,
-                timestamp_secs: details.latest_update_timestamp,
-            }
-        })
-        .collect::<Vec<_>>();
-    let response = LdkTransactionListResponse { transactions };
-    Ok(Json(response))
-}
-
 // ---------------------------------------------------------------------------
 // Federation management handlers
 // ---------------------------------------------------------------------------
@@ -556,8 +500,8 @@ async fn ldk_transaction_list(
 async fn federation_join(
     State(state): State<AppState>,
     Json(payload): Json<FederationJoinRequest>,
-) -> Result<Json<FederationInfo>, CliError> {
-    let invite_code = fedimint_core::invite_code::InviteCode::from_str(&payload.invite_code)
+) -> Result<Json<()>, CliError> {
+    let invite_code = fedimint_core::invite_code::InviteCode::from_str(&payload.invite)
         .map_err(|e| CliError::bad_request(format!("Invalid federation member string {e:?}")))?;
 
     let federation_id = invite_code.federation_id();
@@ -575,20 +519,6 @@ async fn federation_join(
 
     AppState::check_federation_network(&client, state.network).await?;
 
-    let federation_info = FederationInfo {
-        federation_id,
-        federation_name: AppState::federation_name(&client).await,
-        balance_msat: client.get_balance().await.unwrap_or_else(|err| {
-            warn!(
-                target: LOG_GATEWAY,
-                err = %err.fmt_compact_anyhow(),
-                %federation_id,
-                "Balance not immediately available after joining."
-            );
-            Amount::default()
-        }),
-    };
-
     let spanned = fedimint_core::util::Spanned::new(
         info_span!(target: LOG_GATEWAY, "client", %federation_id),
         async { client },
@@ -598,7 +528,7 @@ async fn federation_join(
 
     debug!(target: LOG_GATEWAY, %federation_id, "Federation connected");
 
-    Ok(Json(federation_info))
+    Ok(Json(()))
 }
 
 /// List connected federations
@@ -618,6 +548,26 @@ async fn federation_config(
 ) -> Result<Json<FederationConfigResponse>, CliError> {
     let federations = state.all_federation_configs().await;
     Ok(Json(FederationConfigResponse { federations }))
+}
+
+/// Get a federation's ecash balance
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn federation_balance(
+    State(state): State<AppState>,
+    Json(payload): Json<FederationBalanceRequest>,
+) -> Result<Json<FederationBalanceResponse>, CliError> {
+    let client = state
+        .select_client(payload.federation_id)
+        .await
+        .ok_or(CliError::bad_request("Federation not connected"))?;
+
+    let balance_msat = client
+        .value()
+        .get_balance()
+        .await
+        .map_err(|e| CliError::internal(format!("Failed to read balance: {e}")))?;
+
+    Ok(Json(FederationBalanceResponse { balance_msat }))
 }
 
 /// Export invite codes for all connected federations

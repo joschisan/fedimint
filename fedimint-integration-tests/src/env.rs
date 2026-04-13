@@ -13,7 +13,7 @@ use fedimint_client::{Client, ClientHandleArc, RootSecret};
 use fedimint_core::Amount;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_gateway_cli_core::{
-    InfoResponse, LdkBalancesResponse, LdkChannelListResponse, LdkOnchainReceiveResponse,
+    FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkOnchainReceiveResponse,
     WalletReceiveResponse,
 };
 use fedimint_walletv2_client::WalletClientModule;
@@ -237,21 +237,12 @@ impl TestEnv {
             let gw_addr = gw_addr.to_string();
             let fed_id = fed_id.clone();
             async move {
-                let balances = gateway_cmd(&gw_addr)
-                    .arg("ldk")
-                    .arg("balances")
-                    .run_gateway_cli::<LdkBalancesResponse>()?;
+                let balance = gateway_cmd(&gw_addr)
+                    .args(["federation", "balance", &fed_id])
+                    .run_gateway_cli::<FederationBalanceResponse>()?
+                    .balance_msat;
 
-                let fed_balance = balances
-                    .ecash_balances
-                    .iter()
-                    .find(|b| b.federation_id.to_string() == fed_id)
-                    .context("federation not found")?;
-
-                ensure!(
-                    fed_balance.ecash_balance_msats.msats > 0,
-                    "gateway balance is zero"
-                );
+                ensure!(balance.msats > 0, "gateway balance is zero");
                 Ok(())
             }
         })

@@ -15,12 +15,7 @@ use serde_json::Value;
 #[command(version)]
 struct Cli {
     /// Server admin API address
-    #[arg(
-        short,
-        long,
-        env = "FM_SERVER_ADDR",
-        default_value = "http://127.0.0.1:8177"
-    )]
+    #[arg(short, long, default_value = "http://127.0.0.1:8177")]
     address: String,
 
     #[command(subcommand)]

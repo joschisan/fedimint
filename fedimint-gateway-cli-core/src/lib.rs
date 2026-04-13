@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use bitcoin::address::NetworkUnchecked;
-use bitcoin::hashes::sha256;
 use fedimint_core::config::{FederationId, JsonClientConfig};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::{Amount, BitcoinAmountOrAll, PeerId, secp256k1};
@@ -24,13 +23,13 @@ pub const ROUTE_LDK_INVOICE_PAY: &str = "/ldk/invoice/pay";
 pub const ROUTE_LDK_PEER_CONNECT: &str = "/ldk/peer/connect";
 pub const ROUTE_LDK_PEER_DISCONNECT: &str = "/ldk/peer/disconnect";
 pub const ROUTE_LDK_PEER_LIST: &str = "/ldk/peer/list";
-pub const ROUTE_LDK_TRANSACTION_LIST: &str = "/ldk/transaction/list";
 
 // Federation management
 pub const ROUTE_FEDERATION_JOIN: &str = "/federation/join";
 pub const ROUTE_FEDERATION_LIST: &str = "/federation/list";
 pub const ROUTE_FEDERATION_CONFIG: &str = "/federation/config";
 pub const ROUTE_FEDERATION_INVITE: &str = "/federation/invite";
+pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
 
 // Per-federation module commands
 pub const ROUTE_MODULE_MINT_COUNT: &str = "/module/mintv2/count";
@@ -61,18 +60,14 @@ pub struct MnemonicResponse {
 
 // --- /ldk/balances ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LdkBalancesResponse {
-    pub onchain_balance_sats: u64,
-    pub lightning_balance_msats: u64,
-    pub ecash_balances: Vec<FederationBalanceInfo>,
-    pub inbound_lightning_liquidity_msats: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationBalanceInfo {
-    pub federation_id: FederationId,
-    pub ecash_balance_msats: Amount,
+    /// The total balance in the on-chain wallet
+    pub total_onchain_balance_sats: u64,
+    /// The total inbound capacity across all channels
+    pub total_inbound_capacity_msat: u64,
+    /// The total outbound capacity across all channels
+    pub total_outbound_capacity_msat: u64,
 }
 
 // --- /ldk/channel/open ---
@@ -196,63 +191,22 @@ pub struct PeerInfo {
     pub is_connected: bool,
 }
 
-// --- /ldk/transaction/list ---
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LdkTransactionListRequest {
-    pub start_secs: u64,
-    pub end_secs: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LdkTransactionListResponse {
-    pub transactions: Vec<PaymentDetails>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PaymentDetails {
-    pub payment_hash: Option<sha256::Hash>,
-    pub preimage: Option<String>,
-    pub payment_kind: PaymentKind,
-    pub amount: Amount,
-    pub direction: PaymentDirection,
-    pub status: PaymentStatus,
-    pub timestamp_secs: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
-pub enum PaymentKind {
-    Bolt11,
-    Bolt12Offer,
-    Bolt12Refund,
-    Onchain,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
-pub enum PaymentDirection {
-    Outbound,
-    Inbound,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
-pub enum PaymentStatus {
-    Pending,
-    Succeeded,
-    Failed,
-}
-
 // --- /federation/join ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FederationJoinRequest {
-    pub invite_code: String,
-    pub recover: Option<bool>,
+    pub invite: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FederationInfo {
+// --- /federation/balance ---
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FederationBalanceRequest {
     pub federation_id: FederationId,
-    pub federation_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FederationBalanceResponse {
     pub balance_msat: Amount,
 }
 
@@ -261,6 +215,12 @@ pub struct FederationInfo {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FederationListResponse {
     pub federations: Vec<FederationInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FederationInfo {
+    pub federation_id: FederationId,
+    pub federation_name: Option<String>,
 }
 
 // --- /federation/config ---

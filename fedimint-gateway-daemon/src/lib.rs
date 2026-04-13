@@ -39,12 +39,12 @@ use fedimint_core::module::CommonModuleInit;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_core::time::duration_since_epoch;
-use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, Spanned};
+use fedimint_core::util::{FmtCompact, Spanned};
 use fedimint_core::{Amount, PeerId, crit};
 use fedimint_gateway_cli_core::FederationInfo;
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
-    LightningRpcError, PaymentAction, Preimage,
+    LightningRpcError, PaymentAction,
 };
 use fedimint_lnurl::VerifyResponse;
 use fedimint_lnv2_common::Bolt11InvoiceDescription;
@@ -217,21 +217,9 @@ impl AppState {
         let clients = self.clients.read().await;
         let mut infos = Vec::new();
         for (federation_id, client) in clients.iter() {
-            let balance_msat = match client.borrow().with(|c| c.get_balance()).await {
-                Ok(balance) => balance,
-                Err(err) => {
-                    warn!(
-                        target: LOG_GATEWAY,
-                        err = %err.fmt_compact_anyhow(),
-                        "Skipped federation due to lack of primary module"
-                    );
-                    continue;
-                }
-            };
             infos.push(FederationInfo {
                 federation_id: *federation_id,
                 federation_name: Self::federation_name(client.value()).await,
-                balance_msat,
             });
         }
         infos
@@ -661,69 +649,5 @@ impl IGatewayClientV2 for AppState {
         _invoice: &Bolt11Invoice,
     ) -> anyhow::Result<FinalReceiveState> {
         Err(anyhow!("LNv1 swaps are not supported"))
-    }
-}
-
-/// Maps LDK's `PaymentKind` to an optional preimage and an optional payment
-/// hash depending on the type of payment.
-pub fn get_preimage_and_payment_hash(
-    kind: &PaymentKind,
-) -> (
-    Option<Preimage>,
-    Option<sha256::Hash>,
-    fedimint_gateway_cli_core::PaymentKind,
-) {
-    match kind {
-        PaymentKind::Bolt11 {
-            hash,
-            preimage,
-            secret: _,
-        } => (
-            preimage.map(|p| Preimage(p.0)),
-            Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_cli_core::PaymentKind::Bolt11,
-        ),
-        PaymentKind::Bolt11Jit {
-            hash,
-            preimage,
-            secret: _,
-            lsp_fee_limits: _,
-            ..
-        } => (
-            preimage.map(|p| Preimage(p.0)),
-            Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_cli_core::PaymentKind::Bolt11,
-        ),
-        PaymentKind::Bolt12Offer {
-            hash,
-            preimage,
-            secret: _,
-            offer_id: _,
-            payer_note: _,
-            quantity: _,
-        } => (
-            preimage.map(|p| Preimage(p.0)),
-            hash.map(|h| sha256::Hash::from_slice(&h.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_cli_core::PaymentKind::Bolt12Offer,
-        ),
-        PaymentKind::Bolt12Refund {
-            hash,
-            preimage,
-            secret: _,
-            payer_note: _,
-            quantity: _,
-        } => (
-            preimage.map(|p| Preimage(p.0)),
-            hash.map(|h| sha256::Hash::from_slice(&h.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_cli_core::PaymentKind::Bolt12Refund,
-        ),
-        PaymentKind::Spontaneous { hash, preimage } => (
-            preimage.map(|p| Preimage(p.0)),
-            Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_cli_core::PaymentKind::Bolt11,
-        ),
-        PaymentKind::Onchain { .. } => {
-            (None, None, fedimint_gateway_cli_core::PaymentKind::Onchain)
-        }
     }
 }
