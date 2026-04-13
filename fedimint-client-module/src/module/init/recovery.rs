@@ -58,7 +58,6 @@ pub trait RecoveryFromHistory: std::fmt::Debug + MaybeSend + MaybeSync + Clone {
     async fn new(
         init: &Self::Init,
         args: &ClientModuleRecoverArgs<Self::Init>,
-        snapshot: Option<&<<Self::Init as ClientModuleInit>::Module as ClientModule>::Backup>,
     ) -> anyhow::Result<(Self, u64)>;
 
     /// Try to load the existing state previously stored with
@@ -236,11 +235,7 @@ where
     /// state. This function implement such a recovery by being generic
     /// over [`RecoveryFromHistory`] trait, which provides module-specific
     /// parts of recovery logic.
-    pub async fn recover_from_history<Recovery>(
-        &self,
-        init: &Init,
-        snapshot: Option<&<<Init as ClientModuleInit>::Module as ClientModule>::Backup>,
-    ) -> anyhow::Result<()>
+    pub async fn recover_from_history<Recovery>(&self, init: &Init) -> anyhow::Result<()>
     where
         Recovery: RecoveryFromHistory<Init = Init> + std::fmt::Debug,
     {
@@ -418,7 +413,7 @@ where
             if let Some((state, common_state)) = Recovery::load_dbtx(init, &mut db.begin_transaction_nc().await, self).await? {
                 (state, common_state)
             } else {
-                let (state, start_session) = Recovery::new(init, self, snapshot).await?;
+                let (state, start_session) = Recovery::new(init, self).await?;
 
                 debug!(target: LOG_CLIENT_RECOVERY, start_session, "Recovery start session");
                 (state,

@@ -304,16 +304,11 @@ pub trait ClientModuleInit: ModuleInit + Sized {
         <Self::Module as ClientModule>::kind()
     }
 
-    /// Recover the state of the client module, optionally from an existing
-    /// snapshot.
+    /// Recover the state of the client module.
     ///
     /// If `Err` is returned, the higher level client/application might try
     /// again at a different time (client restarted, code version changed, etc.)
-    async fn recover(
-        &self,
-        _args: &ClientModuleRecoverArgs<Self>,
-        _snapshot: Option<&<Self::Module as ClientModule>::Backup>,
-    ) -> anyhow::Result<()> {
+    async fn recover(&self, _args: &ClientModuleRecoverArgs<Self>) -> anyhow::Result<()> {
         warn!(
             target: LOG_CLIENT,
             kind = %<Self::Module as ClientModule>::kind(),

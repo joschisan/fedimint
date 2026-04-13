@@ -77,14 +77,13 @@ use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, warn};
 
 use crate::ClientBuilder;
-use crate::backup::Metadata;
 use crate::client::event_log::DefaultApplicationEventLogKey;
 use crate::db::{
     ApiSecretKey, CachedApiVersionSet, CachedApiVersionSetKey, ChainIdKey,
     ChronologicalOperationLogKey, ClientConfigKey, ClientMetadataKey, ClientModuleRecovery,
-    ClientModuleRecoveryState, EncodedClientSecretKey, OperationLogKey, PeerLastApiVersionsSummary,
-    PeerLastApiVersionsSummaryKey, PendingClientConfigKey, apply_migrations_core_client_dbtx,
-    get_decoded_client_secret, verify_client_db_integrity_dbtx,
+    ClientModuleRecoveryState, EncodedClientSecretKey, Metadata, OperationLogKey,
+    PeerLastApiVersionsSummary, PeerLastApiVersionsSummaryKey, PendingClientConfigKey,
+    apply_migrations_core_client_dbtx, get_decoded_client_secret, verify_client_db_integrity_dbtx,
 };
 use crate::meta::MetaService;
 use crate::module_init::{ClientModuleInitRegistry, DynClientModuleInit, IClientModuleInit};
@@ -536,10 +535,6 @@ impl Client {
     /// Get metadata value from the federation config itself
     pub fn get_config_meta(&self, key: &str) -> Option<String> {
         self.federation_config_meta.get(key).cloned()
-    }
-
-    pub(crate) fn root_secret(&self) -> DerivableSecret {
-        self.root_secret.clone()
     }
 
     pub async fn add_state_machines(
@@ -1916,16 +1911,6 @@ impl Client {
                             "progress": progress
                         });
                     }
-                }
-                #[allow(deprecated)]
-                "backup_to_federation" => {
-                    let metadata = if params.is_null() {
-                        Metadata::from_json_serialized(serde_json::json!({}))
-                    } else {
-                        Metadata::from_json_serialized(params)
-                    };
-                    self.backup_to_federation(metadata).await?;
-                    yield serde_json::Value::Null;
                 }
                 _ => {
                     Err(anyhow::format_err!("Unknown method: {}", method))?;

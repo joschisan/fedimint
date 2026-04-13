@@ -17,7 +17,6 @@ use events::{IncomingPaymentStarted, OutgoingPaymentStarted};
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client::ClientHandleArc;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
-use fedimint_client_module::module::recovery::NoModuleBackup;
 use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule, OutPointRange};
 use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
 use fedimint_client_module::transaction::{
@@ -131,7 +130,6 @@ impl Context for GatewayClientContextV2 {
 impl ClientModule for GatewayClientModuleV2 {
     type Init = GatewayClientInitV2;
     type Common = LightningModuleTypes;
-    type Backup = NoModuleBackup;
     type ModuleStateMachineContext = GatewayClientContextV2;
     type States = GatewayClientStateMachinesV2;
 

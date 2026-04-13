@@ -147,15 +147,6 @@ impl SafeUrl {
         self.0.join(input).map(SafeUrl)
     }
 
-    // It can be removed to use `is_onion_address()` implementation,
-    // once https://gitlab.torproject.org/tpo/core/arti/-/merge_requests/2214 lands.
-    #[allow(clippy::case_sensitive_file_extension_comparisons)]
-    pub fn is_onion_address(&self) -> bool {
-        let host = self.host_str().unwrap_or_default();
-
-        host.ends_with(".onion")
-    }
-
     pub fn fragment(&self) -> Option<&str> {
         self.0.fragment()
     }

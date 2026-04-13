@@ -13,11 +13,9 @@ const TYPE_PRE_ROOT_SECRET_HASH: ChildId = ChildId(0);
 
 // Derived from federation-root-secret
 const TYPE_MODULE: ChildId = ChildId(0);
-const TYPE_BACKUP: ChildId = ChildId(1);
 
 pub trait DeriveableSecretClientExt {
     fn derive_module_secret(&self, module_instance_id: ModuleInstanceId) -> DerivableSecret;
-    fn derive_backup_secret(&self) -> DerivableSecret;
     fn derive_pre_root_secret_hash(&self) -> [u8; 8];
 }
 
@@ -26,11 +24,6 @@ impl DeriveableSecretClientExt for DerivableSecret {
         assert_eq!(self.level(), 0);
         self.child_key(TYPE_MODULE)
             .child_key(ChildId(u64::from(module_instance_id)))
-    }
-
-    fn derive_backup_secret(&self) -> DerivableSecret {
-        assert_eq!(self.level(), 0);
-        self.child_key(TYPE_BACKUP)
     }
 
     fn derive_pre_root_secret_hash(&self) -> [u8; 8] {

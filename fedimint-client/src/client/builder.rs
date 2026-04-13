@@ -51,11 +51,10 @@ use tracing::{debug, trace, warn};
 
 use super::handle::ClientHandle;
 use super::{Client, client_decoders};
-use crate::backup::{ClientBackup, Metadata};
 use crate::client::PrimaryModuleCandidates;
 use crate::db::{
     self, ApiSecretKey, ChainIdKey, ClientInitStateKey, ClientMetadataKey, ClientModuleRecovery,
-    ClientModuleRecoveryState, ClientPreRootSecretHashKey, InitMode, InitState,
+    ClientModuleRecoveryState, ClientPreRootSecretHashKey, InitMode, InitState, Metadata,
     PendingClientConfigKey, apply_migrations_client_module_dbtx,
 };
 use crate::meta::MetaService;
@@ -369,12 +368,8 @@ impl ClientBuilder {
             let init_state = InitState::Pending(init_mode);
             dbtx.insert_entry(&ClientInitStateKey, &init_state).await;
 
-            let metadata = init_state
-                .does_require_recovery()
-                .flatten()
-                .map_or(Metadata::empty(), |s| s.metadata);
-
-            dbtx.insert_new_entry(&ClientMetadataKey, &metadata).await;
+            dbtx.insert_new_entry(&ClientMetadataKey, &Metadata::empty())
+                .await;
 
             dbtx.commit_tx_result().await?;
         }
@@ -725,26 +720,25 @@ impl ClientBuilder {
 
                 // since the exact logic of when to start recovery is a bit gnarly,
                 // the recovery call is extracted here.
-                let start_module_recover_fn =
-                    |snapshot: Option<ClientBackup>, progress: RecoveryProgress| {
-                        let module_config = module_config.clone();
-                        let num_peers = NumPeers::from(config.global.api_endpoints.len());
-                        let db = db.clone();
-                        let kind = kind.clone();
-                        let notifier = notifier.clone();
-                        let api = api.clone();
-                        let root_secret = root_secret.clone();
-                        let admin_auth = self.admin_creds.as_ref().map(|creds| creds.auth.clone());
-                        let final_client = final_client.clone();
-                        let (progress_tx, progress_rx) = tokio::sync::watch::channel(progress);
-                        let task_group = task_group.clone();
-                        let module_init = module_init.clone();
-                        let user_bitcoind_rpc = user_bitcoind_rpc.clone();
-                        let user_bitcoind_rpc_no_chain_id =
-                            self.bitcoind_rpc_no_chain_id_factory.clone();
-                        (
-                            Box::pin(async move {
-                                module_init
+                let start_module_recover_fn = |progress: RecoveryProgress| {
+                    let module_config = module_config.clone();
+                    let num_peers = NumPeers::from(config.global.api_endpoints.len());
+                    let db = db.clone();
+                    let kind = kind.clone();
+                    let notifier = notifier.clone();
+                    let api = api.clone();
+                    let root_secret = root_secret.clone();
+                    let admin_auth = self.admin_creds.as_ref().map(|creds| creds.auth.clone());
+                    let final_client = final_client.clone();
+                    let (progress_tx, progress_rx) = tokio::sync::watch::channel(progress);
+                    let task_group = task_group.clone();
+                    let module_init = module_init.clone();
+                    let user_bitcoind_rpc = user_bitcoind_rpc.clone();
+                    let user_bitcoind_rpc_no_chain_id =
+                        self.bitcoind_rpc_no_chain_id_factory.clone();
+                    (
+                        Box::pin(async move {
+                            module_init
                                     .recover(
                                         final_client.clone(),
                                         fed_id,
@@ -758,7 +752,6 @@ impl ClientBuilder {
                                         notifier.clone(),
                                         api.clone(),
                                         admin_auth,
-                                        snapshot.as_ref().and_then(|s| s.modules.get(&module_instance_id)),
                                         progress_tx,
                                         task_group,
                                         user_bitcoind_rpc,
@@ -771,65 +764,61 @@ impl ClientBuilder {
                                             module_id = module_instance_id, %kind, err = %err.fmt_compact_anyhow(), "Module failed to recover"
                                         );
                                     })
-                            }),
-                            progress_rx,
-                        )
-                    };
+                        }),
+                        progress_rx,
+                    )
+                };
 
-                let recovery = match init_state.does_require_recovery() {
-                    Some(snapshot) => {
-                        match db
-                            .begin_transaction_nc()
-                            .await
-                            .get_value(&ClientModuleRecovery { module_instance_id })
-                            .await
-                        {
-                            Some(module_recovery_state) => {
-                                if module_recovery_state.is_done() {
-                                    debug!(
-                                        id = %module_instance_id,
-                                        %kind, "Module recovery already complete"
-                                    );
-                                    None
-                                } else {
-                                    debug!(
-                                        id = %module_instance_id,
-                                        %kind,
-                                        progress = %module_recovery_state.progress,
-                                        "Starting module recovery with an existing progress"
-                                    );
-                                    Some(start_module_recover_fn(
-                                        snapshot,
-                                        module_recovery_state.progress,
-                                    ))
-                                }
-                            }
-                            _ => {
-                                let progress = RecoveryProgress::none();
-                                let mut dbtx = db.begin_transaction().await;
-                                dbtx.log_event(
-                                    log_ordering_wakeup_tx.clone(),
-                                    None,
-                                    ModuleRecoveryStarted::new(module_instance_id),
-                                )
-                                .await;
-                                dbtx.insert_entry(
-                                    &ClientModuleRecovery { module_instance_id },
-                                    &ClientModuleRecoveryState { progress },
-                                )
-                                .await;
-
-                                dbtx.commit_tx().await;
-
+                let recovery = if init_state.does_require_recovery() {
+                    match db
+                        .begin_transaction_nc()
+                        .await
+                        .get_value(&ClientModuleRecovery { module_instance_id })
+                        .await
+                    {
+                        Some(module_recovery_state) => {
+                            if module_recovery_state.is_done() {
                                 debug!(
                                     id = %module_instance_id,
-                                    %kind, "Starting new module recovery"
+                                    %kind, "Module recovery already complete"
                                 );
-                                Some(start_module_recover_fn(snapshot, progress))
+                                None
+                            } else {
+                                debug!(
+                                    id = %module_instance_id,
+                                    %kind,
+                                    progress = %module_recovery_state.progress,
+                                    "Starting module recovery with an existing progress"
+                                );
+                                Some(start_module_recover_fn(module_recovery_state.progress))
                             }
                         }
+                        _ => {
+                            let progress = RecoveryProgress::none();
+                            let mut dbtx = db.begin_transaction().await;
+                            dbtx.log_event(
+                                log_ordering_wakeup_tx.clone(),
+                                None,
+                                ModuleRecoveryStarted::new(module_instance_id),
+                            )
+                            .await;
+                            dbtx.insert_entry(
+                                &ClientModuleRecovery { module_instance_id },
+                                &ClientModuleRecoveryState { progress },
+                            )
+                            .await;
+
+                            dbtx.commit_tx().await;
+
+                            debug!(
+                                id = %module_instance_id,
+                                %kind, "Starting new module recovery"
+                            );
+                            Some(start_module_recover_fn(progress))
+                        }
                     }
-                    _ => None,
+                } else {
+                    None
                 };
 
                 match recovery {
@@ -1362,7 +1351,6 @@ impl ClientPreview {
         self,
         db_no_decoders: Database,
         pre_root_secret: RootSecret,
-        backup: Option<ClientBackup>,
     ) -> anyhow::Result<ClientHandle> {
         let pre_root_secret = pre_root_secret.to_inner(self.config.calculate_federation_id());
 
@@ -1374,44 +1362,12 @@ impl ClientPreview {
                 pre_root_secret,
                 self.config,
                 self.api_secret,
-                InitMode::Recover {
-                    snapshot: backup.clone(),
-                },
+                InitMode::Recover,
                 self.preview_prefetch_api_version_set,
                 self.prefetch_chain_id,
             )
             .await?;
 
         Ok(client)
-    }
-
-    /// Download most recent valid backup found from the Federation
-    #[deprecated(
-        note = "Recovery is now efficient enough that backups are no longer necessary. Backups will be removed in v0.13.0 due to backups being inherently complicated and brittle."
-    )]
-    #[allow(deprecated)]
-    pub async fn download_backup_from_federation(
-        &self,
-        pre_root_secret: RootSecret,
-    ) -> anyhow::Result<Option<ClientBackup>> {
-        let pre_root_secret = pre_root_secret.to_inner(self.config.calculate_federation_id());
-        let api = DynGlobalApi::new(
-            self.connectors.clone(),
-            // TODO: change join logic to use FederationId v2
-            self.config
-                .global
-                .api_endpoints
-                .iter()
-                .map(|(peer_id, peer_url)| (*peer_id, peer_url.url.clone()))
-                .collect(),
-            self.api_secret.as_deref(),
-        )?;
-
-        Client::download_backup_from_federation_static(
-            &api,
-            &ClientBuilder::federation_root_secret(&pre_root_secret, &self.config),
-            &self.inner.decoders(&self.config),
-        )
-        .await
     }
 }

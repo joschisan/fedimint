@@ -89,7 +89,6 @@ aleph-bft = { package = "fedimint-aleph-bft", version = "0.36.0", default-featur
 anyhow = "1.0.98"
 aquamarine = "0.5.0"
 argon2 = "0.5.3"
-arti-client = { version = "0.38.0", default-features = false }
 assert_matches = "1.5.0"
 async-channel = "2.5.0"
 async-lock = "3.4"
@@ -125,9 +124,6 @@ clap_complete = "4.5.66"
 console-subscriber = "0.4.1"
 console_error_panic_hook = "0.1.7"
 criterion = "0.5.1"
-# We need to pin this arti's `curve25519-dalek` dependency, due to `https://rustsec.org/advisories/RUSTSEC-2024-0344` vulnerability
-# It's been updated by https://gitlab.torproject.org/tpo/core/arti/-/merge_requests/2211, should be removed in next release.
-curve25519-dalek = ">=4.1.3"
 dirs = "6.0.0"
 erased-serde = "0.4"
 esplora-client = { version = "0.12.3", default-features = false, features = [
@@ -284,7 +280,6 @@ tonic_lnd = { version = "0.4.0", package = "fedimint-tonic-lnd", features = [
     "lightningrpc",
     "routerrpc",
 ] }
-tor-rtcompat = { version = "0.38.0", features = ["tokio", "rustls"] }
 tower = { version = "0.4.13", default-features = false }
 tower-http = { version = "0.6.8", features = ["cors"] }
 tpe = { package = "fedimint-tpe", path = "./crypto/tpe", version = "=0.11.0-alpha" }

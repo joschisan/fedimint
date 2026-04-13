@@ -29,7 +29,48 @@ use strum::IntoEnumIterator as _;
 use strum_macros::EnumIter;
 use tracing::{debug, info, trace, warn};
 
-use crate::backup::{ClientBackup, Metadata};
+/// Client metadata
+///
+/// A client can have a blob of extra data encoded in it. We provide methods to
+/// use json encoding, but clients are free to use their own encoding.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Encodable, Decodable, Clone)]
+pub struct Metadata(Vec<u8>);
+
+impl Metadata {
+    /// Create empty metadata
+    pub fn empty() -> Self {
+        Self(vec![])
+    }
+
+    pub fn from_raw(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    pub fn into_raw(self) -> Vec<u8> {
+        self.0
+    }
+
+    /// Is metadata empty
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Create metadata as json from typed `val`
+    pub fn from_json_serialized<T: Serialize>(val: T) -> Self {
+        Self(serde_json::to_vec(&val).expect("serializing to vec can't fail"))
+    }
+
+    /// Attempt to deserialize metadata as typed json
+    pub fn to_json_deserialized<T: serde::de::DeserializeOwned>(&self) -> anyhow::Result<T> {
+        Ok(serde_json::from_slice(&self.0)?)
+    }
+
+    /// Attempt to deserialize metadata as untyped json (`serde_json::Value`)
+    pub fn to_json_value(&self) -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::from_slice(&self.0)?)
+    }
+}
+
 use crate::sm::executor::{
     ActiveStateKeyBytes, ActiveStateKeyPrefixBytes, ExecutorDbPrefixes, InactiveStateKeyBytes,
     InactiveStateKeyPrefixBytes,
@@ -49,7 +90,6 @@ pub enum DbKeyPrefix {
     ClientInviteCode = 0x30, // Unused; clean out remnant data before re-using!
     ClientInitState = 0x31,
     ClientMetadata = 0x32,
-    ClientLastBackup = 0x33,
     ClientMetaField = 0x34,
     ClientMetaServiceInfo = 0x35,
     ApiSecret = 0x36,
@@ -318,7 +358,7 @@ pub enum InitMode {
     Fresh,
     /// Should be used with root secrets provided by the user to recover a
     /// (even if just possibly) already used secret.
-    Recover { snapshot: Option<ClientBackup> },
+    Recover,
 }
 
 /// Like `InitMode`, but without no longer required data.
@@ -347,20 +387,14 @@ impl InitState {
         match self {
             InitState::Pending(p) => InitState::Complete(match p {
                 InitMode::Fresh => InitModeComplete::Fresh,
-                InitMode::Recover { .. } => InitModeComplete::Recover,
+                InitMode::Recover => InitModeComplete::Recover,
             }),
             InitState::Complete(t) => InitState::Complete(t),
         }
     }
 
-    pub fn does_require_recovery(&self) -> Option<Option<ClientBackup>> {
-        match self {
-            InitState::Pending(p) => match p {
-                InitMode::Fresh => None,
-                InitMode::Recover { snapshot } => Some(snapshot.clone()),
-            },
-            InitState::Complete(_) => None,
-        }
+    pub fn does_require_recovery(&self) -> bool {
+        matches!(self, InitState::Pending(InitMode::Recover))
     }
 
     pub fn is_pending(&self) -> bool {
@@ -420,19 +454,6 @@ impl_db_record!(
     value = ClientModuleRecoveryState,
     // This was wrong and we keep it wrong for a migration.
     db_prefix = DbKeyPrefix::ClientInitState,
-);
-
-/// Last valid backup the client attempted to make
-///
-/// Can be used to find previous valid versions of
-/// module backup.
-#[derive(Debug, Encodable, Decodable)]
-pub struct LastBackupKey;
-
-impl_db_record!(
-    key = LastBackupKey,
-    value = ClientBackup,
-    db_prefix = DbKeyPrefix::ClientLastBackup
 );
 
 #[derive(Encodable, Decodable, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]

@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 use db::DbKeyPrefix;
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
-use fedimint_client_module::module::recovery::NoModuleBackup;
 use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule};
 use fedimint_client_module::sm::Context;
 use fedimint_core::core::{Decoder, ModuleKind};
@@ -50,7 +49,6 @@ impl Context for EmptyClientContext {
 impl ClientModule for EmptyClientModule {
     type Init = EmptyClientInit;
     type Common = EmptyModuleTypes;
-    type Backup = NoModuleBackup;
     type ModuleStateMachineContext = EmptyClientContext;
     type States = EmptyStateMachine;
 

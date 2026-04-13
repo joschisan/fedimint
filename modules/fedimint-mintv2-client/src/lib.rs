@@ -37,7 +37,7 @@ use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
-use fedimint_client_module::module::recovery::{NoModuleBackup, RecoveryProgress};
+use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
     ClientContext, OutPointRange, PrimaryModulePriority, PrimaryModuleSupport,
 };
@@ -150,11 +150,7 @@ impl ClientModuleInit for MintClientInit {
             .expect("no version conflicts")
     }
 
-    async fn recover(
-        &self,
-        args: &ClientModuleRecoverArgs<Self>,
-        _snapshot: Option<&NoModuleBackup>,
-    ) -> anyhow::Result<()> {
+    async fn recover(&self, args: &ClientModuleRecoverArgs<Self>) -> anyhow::Result<()> {
         let mut state = if let Some(state) = args
             .db()
             .begin_transaction_nc()
@@ -352,7 +348,6 @@ impl Context for MintClientContext {
 impl ClientModule for MintClientModule {
     type Init = MintClientInit;
     type Common = MintModuleTypes;
-    type Backup = NoModuleBackup;
     type ModuleStateMachineContext = MintClientContext;
     type States = MintClientStateMachines;
 

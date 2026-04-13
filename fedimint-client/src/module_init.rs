@@ -8,7 +8,7 @@ use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{
     BitcoindRpcNoChainIdFactory, ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
-use fedimint_client_module::module::recovery::{DynModuleBackup, RecoveryProgress};
+use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{ClientContext, DynClientModule, FinalClientIface};
 use fedimint_client_module::{ClientModule, ModuleInstanceId, ModuleKind};
 use fedimint_connectors::ConnectorRegistry;
@@ -53,7 +53,6 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
         notifier: Notifier,
         api: DynGlobalApi,
         admin_auth: Option<ApiAuth>,
-        snapshot: Option<&DynModuleBackup>,
         progress_tx: watch::Sender<RecoveryProgress>,
         task_group: TaskGroup,
         user_bitcoind_rpc: Option<DynBitcoindRpc>,
@@ -123,19 +122,12 @@ where
         notifier: Notifier,
         api: DynGlobalApi,
         admin_auth: Option<ApiAuth>,
-        snapshot: Option<&DynModuleBackup>,
         progress_tx: watch::Sender<RecoveryProgress>,
         task_group: TaskGroup,
         user_bitcoind_rpc: Option<DynBitcoindRpc>,
         user_bitcoind_rpc_no_chain_id: Option<BitcoindRpcNoChainIdFactory>,
     ) -> anyhow::Result<()> {
         let typed_cfg: &<<T as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig = cfg.cast()?;
-        let snapshot: Option<&<<Self as ClientModuleInit>::Module as ClientModule>::Backup> =
-            snapshot.map(|s| {
-                s.as_any()
-                    .downcast_ref()
-                    .expect("can't convert client module backup to desired type")
-            });
 
         let (module_db, global_dbtx_access_token) = db.with_prefix_module_id(instance_id);
         Ok(<Self as ClientModuleInit>::recover(
@@ -163,7 +155,6 @@ where
                 user_bitcoind_rpc,
                 user_bitcoind_rpc_no_chain_id,
             },
-            snapshot,
         )
         .await?)
     }

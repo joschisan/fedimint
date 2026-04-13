@@ -32,7 +32,6 @@ use serde::de::DeserializeOwned;
 use tracing::warn;
 
 use self::init::ClientModuleInit;
-use crate::module::recovery::{DynModuleBackup, ModuleBackup};
 use crate::oplog::{IOperationLog, OperationLogEntry, UpdateStreamOrOutcome};
 use crate::sm::executor::{ActiveStateKey, IExecutor, InactiveStateKey};
 use crate::sm::{self, ActiveStateMeta, Context, DynContext, DynState, InactiveStateMeta, State};
@@ -781,10 +780,6 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// Common module types shared between client and server
     type Common: ModuleCommon;
 
-    /// Data stored in regular backups so that restoring doesn't have to start
-    /// from epoch 0
-    type Backup: ModuleBackup;
-
     /// Data and API clients available to state machine transitions of this
     /// module
     type ModuleStateMachineContext: Context;
@@ -796,7 +791,6 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     fn decoder() -> Decoder {
         let mut decoder_builder = Self::Common::decoder_builder();
         decoder_builder.with_decodable_type::<Self::States>();
-        decoder_builder.with_decodable_type::<Self::Backup>();
         decoder_builder.build()
     }
 
@@ -850,14 +844,6 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
         amount: &Amounts,
         output: &<Self::Common as ModuleCommon>::Output,
     ) -> Option<Amounts>;
-
-    fn supports_backup(&self) -> bool {
-        false
-    }
-
-    async fn backup(&self) -> anyhow::Result<Self::Backup> {
-        anyhow::bail!("Backup not supported");
-    }
 
     /// Does this module support being a primary module
     ///
@@ -1013,11 +999,6 @@ pub trait IClientModule: Debug {
 
     fn output_fee(&self, amount: &Amounts, output: &DynOutput) -> Option<Amounts>;
 
-    fn supports_backup(&self) -> bool;
-
-    async fn backup(&self, module_instance_id: ModuleInstanceId)
-    -> anyhow::Result<DynModuleBackup>;
-
     fn supports_being_primary(&self) -> PrimaryModuleSupport;
 
     async fn create_final_inputs_and_outputs(
@@ -1095,20 +1076,6 @@ where
                 .downcast_ref()
                 .expect("Dispatched to correct module"),
         )
-    }
-
-    fn supports_backup(&self) -> bool {
-        <T as ClientModule>::supports_backup(self)
-    }
-
-    async fn backup(
-        &self,
-        module_instance_id: ModuleInstanceId,
-    ) -> anyhow::Result<DynModuleBackup> {
-        Ok(DynModuleBackup::from_typed(
-            module_instance_id,
-            <T as ClientModule>::backup(self).await?,
-        ))
     }
 
     fn supports_being_primary(&self) -> PrimaryModuleSupport {

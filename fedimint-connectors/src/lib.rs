@@ -2,8 +2,6 @@ pub mod error;
 pub mod http;
 pub mod iroh;
 pub mod metrics;
-#[cfg(all(feature = "tor", not(target_family = "wasm")))]
-pub mod tor;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{self, Debug};
 use std::pin::Pin;

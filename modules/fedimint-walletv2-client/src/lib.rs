@@ -30,7 +30,6 @@ use fedimint_client::transaction::{
 };
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
-use fedimint_client_module::module::recovery::NoModuleBackup;
 use fedimint_client_module::module::{ClientContext, ClientModule, OutPointRange};
 use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
 use fedimint_client_module::sm_enum_variant_translation;
@@ -118,7 +117,6 @@ impl Context for WalletClientContext {
 impl ClientModule for WalletClientModule {
     type Init = WalletClientInit;
     type Common = WalletModuleTypes;
-    type Backup = NoModuleBackup;
     type ModuleStateMachineContext = WalletClientContext;
     type States = WalletClientStateMachines;
 

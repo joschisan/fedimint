@@ -78,9 +78,6 @@
 /// Core [`Client`]
 mod client;
 
-/// Client backup
-pub mod backup;
-
 /// Database keys used by the client
 pub mod db;
 

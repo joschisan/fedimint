@@ -21,7 +21,6 @@ use bitcoin::secp256k1;
 use db::{DbKeyPrefix, GatewayKey, IncomingContractStreamIndexKey};
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
-use fedimint_client_module::module::recovery::NoModuleBackup;
 use fedimint_client_module::module::{ClientContext, ClientModule, OutPointRange};
 use fedimint_client_module::oplog::UpdateStreamOrOutcome;
 use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
@@ -322,7 +321,6 @@ pub struct LightningClientModule {
 impl ClientModule for LightningClientModule {
     type Init = LightningClientInit;
     type Common = LightningModuleTypes;
-    type Backup = NoModuleBackup;
     type ModuleStateMachineContext = LightningClientContext;
     type States = LightningClientStateMachines;
 
