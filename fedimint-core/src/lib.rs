@@ -56,8 +56,6 @@ pub use macro_rules_attribute::apply;
 pub use peer_id::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
-pub use tiered::Tiered;
-pub use tiered_multi::*;
 use util::SafeUrl;
 pub use {bitcoin, hex, secp256k1};
 
@@ -106,10 +104,6 @@ pub mod rustls;
 pub mod setup_code;
 /// Task handling, including wasm safe logic
 pub mod task;
-/// Types handling per-denomination values
-pub mod tiered;
-/// Types handling multiple per-denomination values
-pub mod tiered_multi;
 /// Time handling, wasm safe functionality
 pub mod time;
 /// Timing helpers

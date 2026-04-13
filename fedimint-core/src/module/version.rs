@@ -58,8 +58,7 @@ use std::{cmp, result};
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::{ModuleInstanceId, ModuleKind};
-use crate::db::DatabaseVersion;
+use crate::core::ModuleInstanceId;
 use crate::encoding::{Decodable, Encodable};
 
 /// Consensus version of a core server
@@ -461,17 +460,4 @@ impl SupportedModuleApiVersions {
 pub struct SupportedApiVersionsSummary {
     pub core: SupportedCoreApiVersions,
     pub modules: BTreeMap<ModuleInstanceId, SupportedModuleApiVersions>,
-}
-
-/// A summary of server API versions for core and all registered modules.
-#[derive(Serialize)]
-pub struct ServerApiVersionsSummary {
-    pub core: MultiApiVersion,
-    pub modules: BTreeMap<ModuleKind, MultiApiVersion>,
-}
-
-/// A summary of server database versions for all registered modules.
-#[derive(Serialize)]
-pub struct ServerDbVersionsSummary {
-    pub modules: BTreeMap<ModuleKind, DatabaseVersion>,
 }
