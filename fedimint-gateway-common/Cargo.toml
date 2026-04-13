@@ -15,17 +15,10 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 bitcoin = { workspace = true }
-clap = { workspace = true }
-fedimint-api-client = { workspace = true }
 fedimint-core = { workspace = true }
-fedimint-eventlog = { workspace = true }
-futures = { workspace = true }
 lightning-invoice = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
 
 [lints]
 workspace = true

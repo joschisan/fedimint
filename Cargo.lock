@@ -2404,17 +2404,10 @@ version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
  "bitcoin",
- "clap",
- "fedimint-api-client",
  "fedimint-core",
- "fedimint-eventlog",
- "futures",
  "lightning-invoice",
- "reqwest 0.12.22",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
