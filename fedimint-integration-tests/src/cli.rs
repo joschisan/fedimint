@@ -2,8 +2,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use fedimint_gateway_cli_core::{
-    FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkInvoiceCreateResponse,
-    LdkOnchainReceiveResponse, WalletReceiveResponse,
+    FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkOnchainReceiveResponse,
+    WalletReceiveResponse,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -110,31 +110,6 @@ pub fn gatewayd_ldk_channel_list(gw_addr: &str) -> Result<LdkChannelListResponse
         .arg("channel")
         .arg("list")
         .run_cli::<LdkChannelListResponse>()
-}
-
-pub fn gatewayd_ldk_invoice_create(
-    gw_addr: &str,
-    amount_msat: u64,
-) -> Result<LdkInvoiceCreateResponse> {
-    Command::new("target-nix/debug/gatewayd-cli")
-        .arg("-a")
-        .arg(gw_addr)
-        .arg("ldk")
-        .arg("invoice")
-        .arg("create")
-        .arg(amount_msat.to_string())
-        .run_cli::<LdkInvoiceCreateResponse>()
-}
-
-pub fn gatewayd_ldk_invoice_pay(gw_addr: &str, invoice: &str) -> Result<Value> {
-    Command::new("target-nix/debug/gatewayd-cli")
-        .arg("-a")
-        .arg(gw_addr)
-        .arg("ldk")
-        .arg("invoice")
-        .arg("pay")
-        .arg(invoice)
-        .run_cli::<Value>()
 }
 
 pub fn fedimintd_lnv2_gateway_add(peer: usize, gateway: &str) -> Result<bool> {

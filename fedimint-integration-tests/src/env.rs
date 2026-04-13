@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, ensure};
+use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
@@ -25,12 +27,10 @@ pub const BTC_RPC_PORT: u16 = 18443;
 pub const GUARDIAN_BASE_PORT: u16 = 17000;
 pub const PORTS_PER_GUARDIAN: u16 = 5;
 pub const NUM_GUARDIANS: usize = 4;
-pub const GW1_PORT: u16 = 28175;
-pub const GW1_LN_PORT: u16 = 9735;
-pub const GW1_METRICS_PORT: u16 = 29175;
-pub const GW2_PORT: u16 = 28177;
-pub const GW2_LN_PORT: u16 = 9736;
-pub const GW2_METRICS_PORT: u16 = 29177;
+pub const GW_PORT: u16 = 28175;
+pub const GW_LN_PORT: u16 = 9735;
+pub const GW_METRICS_PORT: u16 = 29175;
+pub const TEST_LDK_PORT: u16 = 9736;
 
 pub const PASSWORD: &str = "theresnosecondbest";
 const BTC_RPC_USER: &str = "bitcoin";
@@ -45,13 +45,13 @@ fn dummy_address() -> bitcoin::Address {
 }
 
 pub struct TestEnv {
+    pub ldk_node: Arc<ldk_node::Node>,
+    _ldk_runtime: Arc<tokio::runtime::Runtime>,
     pub data_dir: tempfile::TempDir,
     pub bitcoind: bitcoincore_rpc::Client,
     pub invite_code: InviteCode,
-    pub gw1_addr: String,
-    pub gw2_addr: String,
-    pub gw1_public: String,
-    pub gw2_public: String,
+    pub gw_addr: String,
+    pub gw_public: String,
     client_counter: AtomicU64,
 }
 
@@ -86,44 +86,37 @@ impl TestEnv {
         let invite_code: InviteCode = invite_code_str.trim().parse()?;
         info!("Federation ready");
 
-        start_gatewayd(base, "gw1", GW1_PORT, GW1_LN_PORT, GW1_METRICS_PORT).await?;
-        start_gatewayd(base, "gw2", GW2_PORT, GW2_LN_PORT, GW2_METRICS_PORT).await?;
+        start_gatewayd(base, "gw", GW_PORT, GW_LN_PORT, GW_METRICS_PORT).await?;
 
         // Admin API is on port+1, bound to localhost
-        let gw1_addr = format!("http://127.0.0.1:{}", GW1_PORT + 1);
-        let gw2_addr = format!("http://127.0.0.1:{}", GW2_PORT + 1);
+        let gw_addr = format!("http://127.0.0.1:{}", GW_PORT + 1);
         // Public API is on the base port (for LNv2 protocol)
-        let gw1_public = format!("http://127.0.0.1:{GW1_PORT}");
-        let gw2_public = format!("http://127.0.0.1:{GW2_PORT}");
+        let gw_public = format!("http://127.0.0.1:{GW_PORT}");
 
-        info!("Waiting for gateways...");
-        retry("gw1 ready", || async {
-            cli::gatewayd_info(&gw1_addr).map(|_| ())
-        })
-        .await?;
-        retry("gw2 ready", || async {
-            cli::gatewayd_info(&gw2_addr).map(|_| ())
-        })
-        .await?;
-        info!("Gateways ready");
+        info!("Waiting for gateway...");
+        retry("gw ready", || async { cli::gatewayd_info(&gw_addr).map(|_| ()) }).await?;
+        info!("Gateway ready");
 
-        info!("Connecting gateways to federation...");
-        cli::gatewayd_federation_join(&gw1_addr, invite_code_str.trim())?;
-        cli::gatewayd_federation_join(&gw2_addr, invite_code_str.trim())?;
-        info!("Gateways connected");
+        info!("Connecting gateway to federation...");
+        cli::gatewayd_federation_join(&gw_addr, invite_code_str.trim())?;
+        info!("Gateway connected");
 
-        info!("Funding gateways and opening channel...");
-        open_channel_between_gateways(&bitcoind, &gw1_addr, &gw2_addr).await?;
+        info!("Building freestanding LDK node...");
+        let (ldk_node, ldk_runtime) = block_in_place(|| build_ldk_node(base))?;
+        info!("LDK node built: {}", ldk_node.node_id());
+
+        info!("Funding gateway and opening channel to LDK node...");
+        open_channel(&bitcoind, &gw_addr, &ldk_node).await?;
         info!("Channel opened");
 
         Ok(Self {
+            ldk_node,
+            _ldk_runtime: ldk_runtime,
             data_dir,
             bitcoind,
             invite_code,
-            gw1_addr,
-            gw2_addr,
-            gw1_public,
-            gw2_public,
+            gw_addr,
+            gw_public,
             client_counter: AtomicU64::new(0),
         })
     }
@@ -192,14 +185,10 @@ impl TestEnv {
         })?)
     }
 
-    pub async fn pegin_gateway(
-        &self,
-        gw_addr: &str,
-        amount: bitcoin::Amount,
-    ) -> anyhow::Result<()> {
+    pub async fn pegin_gateway(&self, amount: bitcoin::Amount) -> anyhow::Result<()> {
         let fed_id = self.invite_code.federation_id().to_string();
 
-        let addr = cli::gatewayd_wallet_receive(gw_addr, &fed_id)?
+        let addr = cli::gatewayd_wallet_receive(&self.gw_addr, &fed_id)?
             .address
             .assume_checked();
 
@@ -207,10 +196,10 @@ impl TestEnv {
         self.mine_blocks(10);
 
         retry("gateway pegin balance", || {
-            let gw_addr = gw_addr.to_string();
             let fed_id = fed_id.clone();
             async move {
-                let balance = cli::gatewayd_federation_balance(&gw_addr, &fed_id)?.balance_msat;
+                let balance =
+                    cli::gatewayd_federation_balance(&self.gw_addr, &fed_id)?.balance_msat;
 
                 ensure!(balance.msats > 0, "gateway balance is zero");
                 Ok(())
@@ -218,7 +207,7 @@ impl TestEnv {
         })
         .await?;
 
-        info!("Pegged in gateway {gw_addr}");
+        info!("Pegged in gateway");
         Ok(())
     }
 
@@ -432,73 +421,97 @@ async fn run_dkg(base: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn open_channel_between_gateways(
+fn build_ldk_node(
+    base: &Path,
+) -> anyhow::Result<(Arc<ldk_node::Node>, Arc<tokio::runtime::Runtime>)> {
+    let mut builder = ldk_node::Builder::new();
+
+    builder.set_network(Network::Regtest);
+    builder.set_node_alias("test-ldk-node".to_string())?;
+    builder.set_listening_addresses(vec![
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, TEST_LDK_PORT).into(),
+    ])?;
+    builder.set_storage_dir_path(
+        base.join("test-ldk-node")
+            .to_str()
+            .context("ldk storage path")?
+            .to_string(),
+    );
+    builder.set_chain_source_bitcoind_rpc(
+        "127.0.0.1".to_string(),
+        BTC_RPC_PORT,
+        BTC_RPC_USER.to_string(),
+        BTC_RPC_PASS.to_string(),
+    );
+
+    let node = Arc::new(builder.build()?);
+    let runtime = Arc::new(tokio::runtime::Runtime::new()?);
+    node.start_with_runtime(runtime.clone())?;
+
+    Ok((node, runtime))
+}
+
+async fn open_channel(
     bitcoind: &bitcoincore_rpc::Client,
-    gw1_addr: &str,
-    gw2_addr: &str,
+    gw_addr: &str,
+    ldk_node: &ldk_node::Node,
 ) -> anyhow::Result<()> {
-    let gw2_info = cli::gatewayd_info(gw2_addr)?;
+    let addr = cli::gatewayd_ldk_onchain_receive(gw_addr)?
+        .address
+        .assume_checked();
 
-    for gw_addr in [gw1_addr, gw2_addr] {
-        let addr = cli::gatewayd_ldk_onchain_receive(gw_addr)?
-            .address
-            .assume_checked();
-
-        block_in_place(|| bitcoind.generate_to_address(1, &addr))?;
-        block_in_place(|| bitcoind.generate_to_address(100, &dummy_address()))?;
-    }
+    block_in_place(|| bitcoind.generate_to_address(1, &addr))?;
+    block_in_place(|| bitcoind.generate_to_address(100, &dummy_address()))?;
 
     let target_height = block_in_place(|| bitcoind.get_block_count())? - 1;
-    for gw_addr in [gw1_addr, gw2_addr] {
-        retry("gateway sync", || {
-            let gw_addr = gw_addr.to_string();
-            async move {
-                let info = cli::gatewayd_info(&gw_addr)?;
-                ensure!(
-                    info.block_height >= target_height,
-                    "not synced: {} < {target_height}",
-                    info.block_height,
-                );
-                Ok(())
-            }
-        })
-        .await?;
-    }
+    retry("gateway sync", || async {
+        let info = cli::gatewayd_info(gw_addr)?;
+        ensure!(
+            info.block_height >= target_height,
+            "not synced: {} < {target_height}",
+            info.block_height,
+        );
+        Ok(())
+    })
+    .await?;
 
-    let gw2_pubkey = gw2_info.public_key.to_string();
-    let gw2_ln_addr = format!("127.0.0.1:{GW2_LN_PORT}");
+    let ldk_pubkey = ldk_node.node_id().to_string();
+    let ldk_ln_addr = format!("127.0.0.1:{TEST_LDK_PORT}");
 
-    cli::gatewayd_ldk_channel_open(gw1_addr, &gw2_pubkey, &gw2_ln_addr, 10_000_000, 5_000_000)?;
+    cli::gatewayd_ldk_channel_open(gw_addr, &ldk_pubkey, &ldk_ln_addr, 10_000_000, 5_000_000)?;
 
     // Wait for the funding tx to be negotiated
-    retry("funding tx", || {
-        let gw1_addr = gw1_addr.to_string();
-        async move {
-            let channels = cli::gatewayd_ldk_channel_list(&gw1_addr)?.channels;
-            ensure!(!channels.is_empty(), "no channels yet");
-            Ok(())
-        }
+    let funding_txid = retry("funding tx", || async {
+        cli::gatewayd_ldk_channel_list(gw_addr)?
+            .channels
+            .into_iter()
+            .find_map(|c| c.funding_txid)
+            .context("no funding txid yet")
+    })
+    .await?;
+
+    // Wait for the funding tx to enter the mempool
+    retry("funding tx in mempool", || async {
+        block_in_place(|| bitcoind.get_mempool_entry(&funding_txid))
+            .map(|_| ())
+            .context("funding tx not in mempool")
     })
     .await?;
 
     // Mine to confirm channel
     block_in_place(|| bitcoind.generate_to_address(10, &dummy_address()))?;
 
-    // Wait for channel to be active on both sides
-    for gw_addr in [gw1_addr, gw2_addr] {
-        retry("channel active", || {
-            let gw_addr = gw_addr.to_string();
-            async move {
-                let channels = cli::gatewayd_ldk_channel_list(&gw_addr)?.channels;
-                ensure!(
-                    channels.iter().any(|c| c.is_usable),
-                    "no active channels yet"
-                );
-                Ok(())
-            }
-        })
-        .await?;
-    }
+    // Wait for channel to be active on the gateway side
+    retry("channel active", || async {
+        let channels = cli::gatewayd_ldk_channel_list(gw_addr)?.channels;
+        info!("channel list: {channels:?}");
+        ensure!(
+            channels.iter().any(|c| c.is_usable),
+            "no active channels yet"
+        );
+        Ok(())
+    })
+    .await?;
 
     Ok(())
 }

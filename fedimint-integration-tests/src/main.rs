@@ -18,8 +18,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Test environment ready!");
     info!("Invite code: {}", env.invite_code);
-    info!("Gateway 1: {}", env.gw1_addr);
-    info!("Gateway 2: {}", env.gw2_addr);
+    info!("Gateway: {}", env.gw_addr);
 
     info!("Running lnv2 tests...");
     lnv2::run_tests(&env).await?;

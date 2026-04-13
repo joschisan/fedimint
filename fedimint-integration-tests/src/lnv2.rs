@@ -23,30 +23,26 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
     let client = env.new_client().await?;
     let lnv2 = client.get_first_module::<LightningClientModule>()?;
 
-    let gateways = [env.gw1_public.clone(), env.gw2_public.clone()];
+    let gateway = env.gw_public.clone();
 
-    info!("Testing registration of gateways...");
+    info!("Testing registration of gateway...");
 
-    for gateway in &gateways {
-        for peer in 0..NUM_GUARDIANS {
-            assert!(cli::fedimintd_lnv2_gateway_add(peer, gateway)?);
-        }
+    for peer in 0..NUM_GUARDIANS {
+        assert!(cli::fedimintd_lnv2_gateway_add(peer, &gateway)?);
     }
 
     let listed = lnv2.list_gateways(None).await?;
-    assert_eq!(listed.len(), 2);
+    assert_eq!(listed.len(), 1);
 
     let listed = lnv2
         .list_gateways(Some(fedimint_core::PeerId::from(0)))
         .await?;
-    assert_eq!(listed.len(), 2);
+    assert_eq!(listed.len(), 1);
 
-    info!("Testing deregistration of gateways...");
+    info!("Testing deregistration of gateway...");
 
-    for gateway in &gateways {
-        for peer in 0..NUM_GUARDIANS {
-            assert!(cli::fedimintd_lnv2_gateway_remove(peer, gateway)?);
-        }
+    for peer in 0..NUM_GUARDIANS {
+        assert!(cli::fedimintd_lnv2_gateway_remove(peer, &gateway)?);
     }
 
     let listed = lnv2.list_gateways(None).await?;
@@ -61,6 +57,7 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
 
     Ok(())
 }
+
 async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
     info!("lnv2: test_payments");
 
@@ -71,92 +68,30 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
 
     let lnv2 = client.get_first_module::<LightningClientModule>()?;
 
-    let gw1: SafeUrl = env.gw1_public.parse()?;
-    let gw2: SafeUrl = env.gw2_public.parse()?;
+    let gw: SafeUrl = env.gw_public.parse()?;
 
-    // Since both gateways are LDK, same-gateway and cross-gateway are the only
-    // unique combinations.
-    let gateway_pairs = [(&gw1, &gw2), (&gw2, &gw1)];
+    info!("Pegging in gateway...");
 
-    info!("Testing refund of circular payments...");
-
-    for (gw_send, gw_receive) in &gateway_pairs {
-        info!(
-            gw_send = %gw_send,
-            gw_receive = %gw_receive,
-            "Testing refund: client -> gw_send -> gw_receive -> client"
-        );
-
-        let (invoice, _receive_op) = lnv2
-            .receive(
-                Amount::from_msats(1_000_000),
-                300,
-                Bolt11InvoiceDescription::Direct(String::new()),
-                Some((*gw_receive).clone()),
-                Value::Null,
-            )
-            .await?;
-
-        let send_op = lnv2
-            .send(invoice, Some((*gw_send).clone()), Value::Null)
-            .await?;
-
-        let state = lnv2.await_final_send_operation_state(send_op).await?;
-
-        assert_eq!(state, FinalSendOperationState::Refunded);
-    }
-
-    info!("Pegging in gateways...");
-
-    env.pegin_gateway(&env.gw1_addr, bitcoin::Amount::from_sat(100_000_000))
-        .await?;
-    env.pegin_gateway(&env.gw2_addr, bitcoin::Amount::from_sat(100_000_000))
+    env.pegin_gateway(bitcoin::Amount::from_sat(100_000_000))
         .await?;
 
-    info!("Testing circular payments...");
-
-    for (gw_send, gw_receive) in &gateway_pairs {
-        info!(
-            gw_send = %gw_send,
-            gw_receive = %gw_receive,
-            "Testing payment: client -> gw_send -> gw_receive -> client"
-        );
-
-        let (invoice, receive_op) = lnv2
-            .receive(
-                Amount::from_msats(1_000_000),
-                300,
-                Bolt11InvoiceDescription::Direct(String::new()),
-                Some((*gw_receive).clone()),
-                Value::Null,
-            )
-            .await?;
-
-        let send_op = lnv2
-            .send(invoice, Some((*gw_send).clone()), Value::Null)
-            .await?;
-
-        let send_state = lnv2.await_final_send_operation_state(send_op).await?;
-        assert_eq!(send_state, FinalSendOperationState::Success);
-
-        let receive_state = lnv2.await_final_receive_operation_state(receive_op).await?;
-        assert_eq!(receive_state, FinalReceiveOperationState::Claimed);
-    }
-
-    info!("Testing payment from client to gateway...");
+    info!("Testing payment from client to LDK node...");
 
     {
-        let invoice_str = cli::gatewayd_ldk_invoice_create(&env.gw2_addr, 1_000_000)?.invoice;
+        let invoice = env.ldk_node.bolt11_payment().receive(
+            1_000_000,
+            &lightning_invoice::Bolt11InvoiceDescription::Direct(
+                lightning_invoice::Description::new(String::new())?,
+            ),
+            3600,
+        )?;
 
-        let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
-
-        let send_op = lnv2.send(invoice, Some(gw1.clone()), Value::Null).await?;
-
+        let send_op = lnv2.send(invoice, Some(gw.clone()), Value::Null).await?;
         let state = lnv2.await_final_send_operation_state(send_op).await?;
         assert_eq!(state, FinalSendOperationState::Success);
     }
 
-    info!("Testing payment from gateway to client...");
+    info!("Testing payment from LDK node to client...");
 
     {
         let (invoice, receive_op) = lnv2
@@ -164,15 +99,39 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
                 Amount::from_msats(1_000_000),
                 300,
                 Bolt11InvoiceDescription::Direct(String::new()),
-                Some(gw1.clone()),
+                Some(gw.clone()),
                 Value::Null,
             )
             .await?;
 
-        cli::gatewayd_ldk_invoice_pay(&env.gw2_addr, &invoice.to_string())?;
+        env.ldk_node.bolt11_payment().send(&invoice, None)?;
 
         let state = lnv2.await_final_receive_operation_state(receive_op).await?;
         assert_eq!(state, FinalReceiveOperationState::Claimed);
+    }
+
+    info!("Testing refund when the payee fails the payment...");
+
+    {
+        let payment_hash = lightning_types::payment::PaymentHash([0; 32]);
+
+        let invoice = env.ldk_node.bolt11_payment().receive_for_hash(
+            1_000_000,
+            &lightning_invoice::Bolt11InvoiceDescription::Direct(
+                lightning_invoice::Description::new(String::new())?,
+            ),
+            3600,
+            payment_hash,
+        )?;
+
+        let send_op = lnv2.send(invoice, Some(gw.clone()), Value::Null).await?;
+
+        // Give the HTLC a moment to reach the payee, then fail it.
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        env.ldk_node.bolt11_payment().fail_for_hash(payment_hash)?;
+
+        let state = lnv2.await_final_send_operation_state(send_op).await?;
+        assert_eq!(state, FinalSendOperationState::Refunded);
     }
 
     info!("lnv2: test_payments passed");
