@@ -9,6 +9,7 @@ pub const ROUTE_SETUP_ADD_PEER: &str = "/setup/add-peer";
 pub const ROUTE_SETUP_START_DKG: &str = "/setup/start-dkg";
 
 // Dashboard routes
+pub const ROUTE_INVITE: &str = "/invite";
 pub const ROUTE_AUDIT: &str = "/audit";
 
 // Module routes
@@ -52,6 +53,13 @@ pub struct SetupAddPeerResponse {
 
 // --- /setup/start-dkg ---
 // No request/response types (unit)
+
+// --- /invite ---
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InviteResponse {
+    pub invite_code: String,
+}
 
 // --- /audit ---
 

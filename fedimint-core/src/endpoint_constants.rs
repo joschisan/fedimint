@@ -1,12 +1,4 @@
 pub const CLIENT_CONFIG_ENDPOINT: &str = "client_config";
-pub const CLIENT_CONFIG_JSON_ENDPOINT: &str = "client_config_json";
-pub const SERVER_CONFIG_CONSENSUS_HASH_ENDPOINT: &str = "server_config_consensus_hash";
-pub const SETUP_STATUS_ENDPOINT: &str = "setup_status";
-pub const CONSENSUS_ORD_LATENCY_ENDPOINT: &str = "consensus_ord_latency";
-pub const P2P_CONNECTION_STATUS_ENDPOINT: &str = "p2p_connection_status";
 pub const SUBMIT_TRANSACTION_ENDPOINT: &str = "submit_transaction";
 pub const AWAIT_TRANSACTION_ENDPOINT: &str = "await_transaction";
-pub const INVITE_CODE_ENDPOINT: &str = "invite_code";
-pub const FEDERATION_ID_ENDPOINT: &str = "federation_id";
-pub const FEDIMINTD_VERSION_ENDPOINT: &str = "fedimintd_version";
 pub const CHAIN_ID_ENDPOINT: &str = "chain_id";

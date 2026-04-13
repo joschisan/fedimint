@@ -198,7 +198,8 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
     use fedimint_lnv2_server::Lightning;
     use fedimint_server::cli::CliError;
     use fedimint_server_cli_core::{
-        Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_MODULE_LNV2_GATEWAY_ADD,
+        InviteResponse, Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_INVITE,
+        ROUTE_MODULE_LNV2_GATEWAY_ADD,
         ROUTE_MODULE_LNV2_GATEWAY_LIST, ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
         ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
         ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
@@ -207,6 +208,14 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
     };
     use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi};
     use fedimint_walletv2_server::Wallet;
+
+    async fn invite(
+        State(api): State<DynDashboardApi>,
+    ) -> Result<Json<InviteResponse>, CliError> {
+        Ok(Json(InviteResponse {
+            invite_code: api.federation_invite_code().await,
+        }))
+    }
 
     async fn audit(
         State(api): State<DynDashboardApi>,
@@ -308,6 +317,7 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
     }
 
     axum::Router::new()
+        .route(ROUTE_INVITE, post(invite))
         .route(ROUTE_AUDIT, post(audit))
         .route(ROUTE_MODULE_WALLET_TOTAL_VALUE, post(wallet_total_value))
         .route(ROUTE_MODULE_WALLET_BLOCK_COUNT, post(wallet_block_count))

@@ -115,30 +115,6 @@ pub struct PeerIrohEndpoints {
     pub p2p_pk: iroh::PublicKey,
 }
 
-pub fn legacy_consensus_config_hash(cfg: &ServerConfigConsensus) -> sha256::Hash {
-    #[derive(Encodable)]
-    struct LegacyServerConfigConsensusHashMap {
-        code_version: String,
-        version: CoreConsensusVersion,
-        broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
-        broadcast_rounds_per_session: u16,
-        api_endpoints: BTreeMap<PeerId, PeerUrl>,
-        modules: BTreeMap<ModuleInstanceId, ServerModuleConsensusConfig>,
-        meta: BTreeMap<String, String>,
-    }
-
-    LegacyServerConfigConsensusHashMap {
-        code_version: cfg.code_version.clone(),
-        version: cfg.version,
-        broadcast_public_keys: cfg.broadcast_public_keys.clone(),
-        broadcast_rounds_per_session: cfg.broadcast_rounds_per_session,
-        api_endpoints: cfg.api_endpoints(),
-        modules: cfg.modules.clone(),
-        meta: cfg.meta.clone(),
-    }
-    .consensus_hash_sha256()
-}
-
 // FIXME: (@leonardo) Should this have another field for the expected transport
 // ? (e.g. clearnet/tor/...)
 #[derive(Debug, Clone, Serialize, Deserialize)]

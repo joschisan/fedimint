@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use fedimint_server_cli_core::{
-    Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_MODULE_LNV2_GATEWAY_ADD,
+    Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_INVITE, ROUTE_MODULE_LNV2_GATEWAY_ADD,
     ROUTE_MODULE_LNV2_GATEWAY_LIST, ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
     ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
     ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
@@ -32,6 +32,8 @@ enum Commands {
     /// Setup commands (DKG)
     #[command(subcommand)]
     Setup(SetupCommands),
+    /// Get federation invite code
+    Invite,
     /// Show federation audit summary
     Audit,
     /// Module admin commands
@@ -138,6 +140,7 @@ fn main() -> Result<()> {
     let addr = &cli.address;
 
     let result = match cli.command {
+        Commands::Invite => request(addr, ROUTE_INVITE, ())?,
         Commands::Audit => request(addr, ROUTE_AUDIT, ())?,
         Commands::Setup(cmd) => match cmd {
             SetupCommands::Status => request(addr, ROUTE_SETUP_STATUS, ())?,

@@ -8,11 +8,8 @@ use fedimint_core::base32::FEDIMINT_PREFIX;
 use fedimint_core::config::META_FEDERATION_NAME_KEY;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::Database;
-use fedimint_core::endpoint_constants::SETUP_STATUS_ENDPOINT;
 use fedimint_core::envs::{FM_DISABLE_BASE_FEES_ENV, is_env_var_set};
-use fedimint_core::module::{
-    ApiAuth, ApiEndpoint, ApiEndpointContext, ApiRequestErased, ApiVersion, api_endpoint,
-};
+use fedimint_core::module::{ApiAuth, ApiEndpoint, ApiEndpointContext, ApiRequestErased};
 use fedimint_core::setup_code::PeerEndpoints;
 use fedimint_core::{PeerId, base32};
 use fedimint_server_core::dashboard_ui::SetupStatus;
@@ -436,11 +433,5 @@ impl HasApiContext<SetupApi> for SetupApi {
 }
 
 pub fn server_endpoints() -> Vec<ApiEndpoint<SetupApi>> {
-    vec![api_endpoint! {
-        SETUP_STATUS_ENDPOINT,
-        ApiVersion::new(0, 0),
-        async |config: &SetupApi, _c, _v: ()| -> SetupStatus {
-            Ok(config.setup_status().await)
-        }
-    }]
+    vec![]
 }
