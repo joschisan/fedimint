@@ -63,6 +63,11 @@ else
     exit 1
 fi
 
+# Read and set password
+FM_UI_PASSWORD=$(yq '.password' /start-os/start9/config.yaml)
+export FM_UI_PASSWORD
+echo "FM_UI_PASSWORD is set"
+
 # Read and set RUST_LOG from config
 RUST_LOG_LEVEL=$(yq '.advanced.rust-log-level' /start-os/start9/config.yaml)
 export RUST_LOG="${RUST_LOG_LEVEL}"

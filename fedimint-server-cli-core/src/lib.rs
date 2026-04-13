@@ -25,7 +25,6 @@ pub const ROUTE_MODULE_LNV2_GATEWAY_LIST: &str = "/module/lnv2/gateway/list";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SetLocalParamsRequest {
-    pub password: String,
     pub name: String,
     pub federation_name: Option<String>,
     pub federation_size: Option<u32>,

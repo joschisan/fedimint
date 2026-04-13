@@ -5,7 +5,6 @@ use axum::extract::{Json, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
-use fedimint_core::module::ApiAuth;
 use fedimint_core::task::TaskHandle;
 use fedimint_server_cli_core::{
     AddPeerRequest, AddPeerResponse, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_SET_LOCAL_PARAMS,
@@ -105,7 +104,6 @@ async fn setup_set_local_params(
     let setup_code = state
         .setup_api
         .set_local_parameters(
-            ApiAuth::new(payload.password),
             payload.name,
             payload.federation_name,
             None,

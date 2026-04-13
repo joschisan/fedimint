@@ -44,7 +44,7 @@ use fedimintd_envs::{
     FM_BITCOIND_URL_ENV, FM_BITCOIND_URL_PASSWORD_FILE_ENV, FM_BITCOIND_USERNAME_ENV,
     FM_DATA_DIR_ENV, FM_DB_CHECKPOINT_RETENTION_ENV, FM_ENABLE_IROH_ENV, FM_ESPLORA_URL_ENV,
     FM_FORCE_API_SECRETS_ENV, FM_IROH_API_MAX_CONNECTIONS_ENV,
-    FM_IROH_API_MAX_REQUESTS_PER_CONNECTION_ENV, FM_P2P_URL_ENV,
+    FM_IROH_API_MAX_REQUESTS_PER_CONNECTION_ENV, FM_P2P_URL_ENV, FM_UI_PASSWORD_ENV,
 };
 use futures::FutureExt as _;
 use tracing::{debug, error, info};
@@ -137,6 +137,10 @@ struct ServerOpts {
     /// Address we bind to for the CLI admin API (localhost-only, no auth)
     #[arg(long, env = "FM_BIND_CLI", default_value = "127.0.0.1:8177")]
     bind_cli: SocketAddr,
+
+    /// Password for the web UI (setup and dashboard)
+    #[arg(long, env = FM_UI_PASSWORD_ENV)]
+    ui_password: String,
 
     /// Our external address for communicating with our peers
     ///
@@ -423,10 +427,13 @@ pub async fn run(
 
     install_crypto_provider().await;
 
+    let ui_password = fedimint_core::module::ApiAuth::new(server_opts.ui_password);
+
     let task_group = root_task_group.clone();
     root_task_group.spawn_cancellable("main", async move {
         fedimint_server::run(
             server_opts.data_dir,
+            ui_password,
             server_opts.force_api_secrets,
             settings,
             db,

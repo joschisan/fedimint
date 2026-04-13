@@ -7,7 +7,6 @@ use axum::routing::{get, post};
 use axum_extra::extract::Form;
 use axum_extra::extract::cookie::CookieJar;
 use fedimint_core::core::ModuleKind;
-use fedimint_core::module::ApiAuth;
 use fedimint_server_core::setup_ui::DynSetupApi;
 use fedimint_ui_common::assets::WithStaticRoutesExt;
 use fedimint_ui_common::auth::UserAuth;
@@ -28,7 +27,6 @@ pub const START_DKG_ROUTE: &str = "/start_dkg";
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct SetupInput {
-    pub password: String,
     pub name: String,
     #[serde(default)]
     pub is_lead: bool,
@@ -187,10 +185,6 @@ fn setup_form_content(
 
             div class="form-group mb-4" {
                 input type="text" class="form-control" id="name" name="name" placeholder="Your Guardian Name" required;
-            }
-
-            div class="form-group mb-4" {
-                input type="password" class="form-control" id="password" name="password" placeholder="Your Password" required;
             }
 
             div class="alert alert-warning mb-3" style="font-size: 0.875rem;" {
@@ -368,7 +362,6 @@ async fn setup_submit(
     match state
         .api
         .set_local_parameters(
-            ApiAuth::new(input.password),
             input.name,
             federation_name,
             disable_base_fees,
@@ -405,13 +398,8 @@ async fn login_submit(
     jar: CookieJar,
     Form(input): Form<LoginInput>,
 ) -> impl IntoResponse {
-    let auth = match state.api.auth().await {
-        Some(auth) => auth,
-        None => return Redirect::to(ROOT_ROUTE).into_response(),
-    };
-
     login_submit_response(
-        auth,
+        state.api.auth().await,
         state.auth_cookie_name,
         state.auth_cookie_value,
         jar,

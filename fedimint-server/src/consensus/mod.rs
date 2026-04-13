@@ -23,7 +23,9 @@ use fedimint_core::db::{Database, apply_migrations_dbtx, verify_module_db_integr
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::registry::ModuleRegistry;
-use fedimint_core::module::{ApiEndpoint, ApiError, ApiMethod, FEDIMINT_API_ALPN, IrohApiRequest};
+use fedimint_core::module::{
+    ApiAuth, ApiEndpoint, ApiError, ApiMethod, FEDIMINT_API_ALPN, IrohApiRequest,
+};
 use fedimint_core::net::iroh::build_iroh_endpoint;
 use fedimint_core::net::peers::DynP2PConnections;
 use fedimint_core::task::{TaskGroup, sleep};
@@ -63,6 +65,7 @@ const TRANSACTION_BUFFER: usize = 1000;
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     connectors: ConnectorRegistry,
+    auth: ApiAuth,
     connections: DynP2PConnections<P2PMessage>,
     p2p_status_receivers: P2PStatusReceivers,
     api_bind: SocketAddr,
@@ -191,7 +194,6 @@ pub async fn run(
 
     let consensus_api = ConsensusApi {
         cfg: cfg.clone(),
-        cfg_dir: data_dir.clone(),
         db: db.clone(),
         modules: module_registry.clone(),
         client_cfg: client_cfg.clone(),
@@ -207,6 +209,7 @@ pub async fn run(
         ord_latency_receiver,
         bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
         force_api_secret: force_api_secrets.get_active(),
+        auth,
         code_version_str,
         task_group: task_group.clone(),
     };

@@ -17,8 +17,8 @@ pub trait ISetupApi {
     /// Get our guardian name
     async fn guardian_name(&self) -> Option<String>;
 
-    /// Get the auth token for API calls
-    async fn auth(&self) -> Option<ApiAuth>;
+    /// Get the guardian's authentication details
+    async fn auth(&self) -> ApiAuth;
 
     /// Get list of names of connected peers
     async fn connected_peers(&self) -> Vec<String>;
@@ -35,7 +35,6 @@ pub trait ISetupApi {
     /// Set local guardian parameters
     async fn set_local_parameters(
         &self,
-        auth: ApiAuth,
         name: String,
         federation_name: Option<String>,
         disable_base_fees: Option<bool>,

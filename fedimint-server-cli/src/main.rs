@@ -40,9 +40,6 @@ enum SetupCommands {
     SetLocalParams {
         /// Guardian name
         name: String,
-        /// Guardian password
-        #[arg(long)]
-        password: String,
         /// Federation name (leader only)
         #[arg(long)]
         federation_name: Option<String>,
@@ -122,14 +119,12 @@ fn main() -> Result<()> {
             SetupCommands::Status => request(addr, ROUTE_SETUP_STATUS, ())?,
             SetupCommands::SetLocalParams {
                 name,
-                password,
                 federation_name,
                 federation_size,
             } => request(
                 addr,
                 ROUTE_SETUP_SET_LOCAL_PARAMS,
                 SetLocalParamsRequest {
-                    password,
                     name,
                     federation_name,
                     federation_size,

@@ -81,7 +81,6 @@ pub trait IDashboardApi {
     /// Download a backup of the guardian's configuration
     async fn download_guardian_config_backup(
         &self,
-        password: &str,
         guardian_auth: &GuardianAuthToken,
     ) -> GuardianConfigBackup;
 
@@ -90,14 +89,6 @@ pub trait IDashboardApi {
 
     /// Get the fedimintd version
     async fn fedimintd_version(&self) -> String;
-
-    /// Change the guardian password
-    async fn change_password(
-        &self,
-        new_password: &str,
-        current_password: &str,
-        guardian_auth: &GuardianAuthToken,
-    ) -> Result<(), String>;
 
     /// Create a trait object
     fn into_dyn(self) -> DynDashboardApi

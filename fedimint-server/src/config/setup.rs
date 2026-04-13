@@ -44,8 +44,6 @@ pub struct SetupState {
 #[derive(Clone, Debug)]
 /// Connection information sent between peers in order to start config gen
 pub struct LocalParams {
-    /// Our auth string
-    auth: ApiAuth,
     /// Our TLS private key
     tls_key: Option<Arc<rustls::pki_types::PrivateKeyDer<'static>>>,
     /// Optional secret key for our iroh api endpoint
@@ -92,15 +90,23 @@ pub struct SetupApi {
     db: Database,
     /// Triggers the distributed key generation
     sender: Sender<ConfigGenParams>,
+    /// Guardian auth for authentication
+    auth: ApiAuth,
 }
 
 impl SetupApi {
-    pub fn new(settings: ConfigGenSettings, db: Database, sender: Sender<ConfigGenParams>) -> Self {
+    pub fn new(
+        settings: ConfigGenSettings,
+        db: Database,
+        sender: Sender<ConfigGenParams>,
+        auth: ApiAuth,
+    ) -> Self {
         Self {
             settings,
             state: Arc::new(Mutex::new(SetupState::default())),
             db,
             sender,
+            auth,
         }
     }
 
@@ -132,13 +138,8 @@ impl ISetupApi for SetupApi {
             .map(|lp| lp.name.clone())
     }
 
-    async fn auth(&self) -> Option<ApiAuth> {
-        self.state
-            .lock()
-            .await
-            .local_params
-            .as_ref()
-            .map(|lp| lp.auth.clone())
+    async fn auth(&self) -> ApiAuth {
+        self.auth.clone()
     }
 
     async fn connected_peers(&self) -> Vec<String> {
@@ -166,7 +167,6 @@ impl ISetupApi for SetupApi {
 
     async fn set_local_parameters(
         &self,
-        auth: ApiAuth,
         name: String,
         federation_name: Option<String>,
         disable_base_fees: Option<bool>,
@@ -174,7 +174,6 @@ impl ISetupApi for SetupApi {
         federation_size: Option<u32>,
     ) -> anyhow::Result<String> {
         if let Some(existing_local_parameters) = self.state.lock().await.local_params.clone()
-            && existing_local_parameters.auth.as_str() == auth.as_str()
             && existing_local_parameters.name == name
             && existing_local_parameters.federation_name == federation_name
             && existing_local_parameters.disable_base_fees == disable_base_fees
@@ -188,13 +187,6 @@ impl ISetupApi for SetupApi {
         }
 
         ensure!(!name.is_empty(), "The guardian name is empty");
-
-        ensure!(!auth.as_str().is_empty(), "The password is empty");
-
-        ensure!(
-            auth.as_str().trim() == auth.as_str(),
-            "The password contains leading/trailing whitespace",
-        );
 
         if let Some(federation_name) = federation_name.as_ref() {
             ensure!(!federation_name.is_empty(), "The federation name is empty");
@@ -234,7 +226,6 @@ impl ISetupApi for SetupApi {
             };
 
             LocalParams {
-                auth,
                 tls_key: None,
                 iroh_api_sk: Some(iroh_api_sk.clone()),
                 iroh_p2p_sk: Some(iroh_p2p_sk.clone()),
@@ -253,7 +244,6 @@ impl ISetupApi for SetupApi {
                 gen_cert_and_key(&name).expect("Failed to generate TLS for given guardian name");
 
             LocalParams {
-                auth,
                 tls_key: Some(tls_key),
                 iroh_api_sk: None,
                 iroh_p2p_sk: None,
@@ -419,7 +409,6 @@ impl ISetupApi for SetupApi {
             tls_key: local_params.tls_key,
             iroh_api_sk: local_params.iroh_api_sk,
             iroh_p2p_sk: local_params.iroh_p2p_sk,
-            api_auth: local_params.auth,
             peers: (0..)
                 .map(|i| PeerId::from(i as u16))
                 .zip(state.setup_codes.clone().into_iter())
@@ -493,13 +482,10 @@ impl HasApiContext<SetupApi> for SetupApi {
 
         let db = self.db.clone();
 
-        let is_authenticated = match self.state.lock().await.local_params {
-            None => false,
-            Some(ref params) => match request.auth.as_ref() {
-                Some(auth) => params.auth.verify(auth.as_str()),
-                None => false,
-            },
-        };
+        let is_authenticated = request
+            .auth
+            .as_ref()
+            .is_some_and(|auth| self.auth.verify(auth.as_str()));
 
         let context = ApiEndpointContext::new(db, is_authenticated, request.auth.clone());
 

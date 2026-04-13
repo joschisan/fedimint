@@ -297,6 +297,7 @@ async fn start_fedimintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
         .env("FM_BIND_UI", format!("127.0.0.1:{ui_port}"))
         .env("FM_BIND_METRICS", format!("127.0.0.1:{metrics_port}"))
         .env("FM_BIND_CLI", format!("127.0.0.1:{cli_port}"))
+        .env("FM_UI_PASSWORD", PASSWORD)
         .env("FM_P2P_URL", format!("fedimint://127.0.0.1:{p2p_port}"))
         .env("FM_API_URL", format!("ws://127.0.0.1:{api_port}"))
         .env("FM_ENABLE_MODULE_WALLETV2", "true")
@@ -393,7 +394,6 @@ async fn run_dkg(base: &Path) -> anyhow::Result<()> {
     let mut setup_codes = BTreeMap::new();
     for (peer, addr) in &cli_addrs {
         let request = SetLocalParamsRequest {
-            password: PASSWORD.to_string(),
             name: format!("Guardian {peer}"),
             federation_name: if *peer == 0 {
                 Some("Test Federation".to_string())

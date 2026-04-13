@@ -27,9 +27,7 @@ use maud::html;
 use {fedimint_lnv2_server, fedimint_mintv2_server, fedimint_walletv2_server};
 
 use crate::dashboard::modules::{lnv2, mintv2, walletv2};
-use crate::{
-    CHANGE_PASSWORD_ROUTE, DOWNLOAD_BACKUP_ROUTE, EXPLORER_IDX_ROUTE, EXPLORER_ROUTE, METRICS_ROUTE,
-};
+use crate::{DOWNLOAD_BACKUP_ROUTE, EXPLORER_IDX_ROUTE, EXPLORER_ROUTE, METRICS_ROUTE};
 
 // Dashboard login form handler
 async fn login_form_handler() -> impl IntoResponse {
@@ -56,10 +54,9 @@ async fn download_backup(
     State(state): State<UiState<DynDashboardApi>>,
     user_auth: UserAuth,
 ) -> impl IntoResponse {
-    let api_auth = state.api.auth().await;
     let backup = state
         .api
-        .download_guardian_config_backup(api_auth.as_str(), &user_auth.guardian_auth_token)
+        .download_guardian_config_backup(&user_auth.guardian_auth_token)
         .await;
     let filename = "guardian-backup.tar";
 
@@ -90,79 +87,6 @@ async fn metrics_handler(_user_auth: UserAuth) -> impl IntoResponse {
         )
             .into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")).into_response(),
-    }
-}
-
-// Password change handler
-async fn change_password(
-    State(state): State<UiState<DynDashboardApi>>,
-    user_auth: UserAuth,
-    Form(input): Form<crate::PasswordChangeInput>,
-) -> impl IntoResponse {
-    let api_auth = state.api.auth().await;
-
-    // Verify current password
-    if !api_auth.verify(&input.current_password) {
-        let content = html! {
-            div class="alert alert-danger" { "Current password is incorrect" }
-            a href="/" class="btn btn-primary w-100 py-2" { "Return to Dashboard" }
-        };
-        return Html(single_card_layout("Password Change Failed", content).into_string())
-            .into_response();
-    }
-
-    // Verify new password confirmation
-    if input.new_password != input.confirm_password {
-        let content = html! {
-            div class="alert alert-danger" { "New passwords do not match" }
-            a href="/" class="btn btn-primary w-100 py-2" { "Return to Dashboard" }
-        };
-        return Html(single_card_layout("Password Change Failed", content).into_string())
-            .into_response();
-    }
-
-    // Check that new password is not empty
-    if input.new_password.is_empty() {
-        let content = html! {
-            div class="alert alert-danger" { "New password cannot be empty" }
-            a href="/" class="btn btn-primary w-100 py-2" { "Return to Dashboard" }
-        };
-        return Html(single_card_layout("Password Change Failed", content).into_string())
-            .into_response();
-    }
-
-    // Call the API to change the password
-    match state
-        .api
-        .change_password(
-            &input.new_password,
-            &input.current_password,
-            &user_auth.guardian_auth_token,
-        )
-        .await
-    {
-        Ok(()) => {
-            let content = html! {
-                div class="alert alert-success" {
-                    "Password changed successfully! The server will restart now."
-                }
-                div class="alert alert-info" {
-                    "You will need to log in again with your new password once the server restarts."
-                }
-                a href="/login" class="btn btn-primary w-100 py-2" { "Go to Login" }
-            };
-            Html(single_card_layout("Password Changed", content).into_string()).into_response()
-        }
-        Err(err) => {
-            let content = html! {
-                div class="alert alert-danger" {
-                    "Failed to change password: " (err)
-                }
-                a href="/" class="btn btn-primary w-100 py-2" { "Return to Dashboard" }
-            };
-            Html(single_card_layout("Password Change Failed", content).into_string())
-                .into_response()
-        }
     }
 }
 
@@ -232,7 +156,7 @@ async fn dashboard_view(
             }
         }
 
-        // Guardian Backup and Password Change side by side
+        // Guardian Backup
         div class="row gy-4 mt-2" {
             div class="col-lg-6" {
                 div class="card h-100" {
@@ -243,34 +167,6 @@ async fn dashboard_view(
                         }
                         a href="/download-backup" class="btn btn-primary" {
                             "Download"
-                        }
-                    }
-                }
-            }
-
-            div class="col-lg-6" {
-                div class="card h-100" {
-                    div class="card-header dashboard-header" { "Change Password" }
-                    div class="card-body" {
-                        div class="alert alert-warning mb-3" {
-                            "After changing your password, the server will restart and you will need to log in again. Depending on your setup, a manual restart may be required."
-                        }
-                        form method="post" action="/change-password" {
-                            div class="form-group mb-3" {
-                                label for="current_password" class="form-label" { "Current Password" }
-                                input type="password" class="form-control" id="current_password" name="current_password" placeholder="Enter current password" required;
-                            }
-                            div class="form-group mb-3" {
-                                label for="new_password" class="form-label" { "New Password" }
-                                input type="password" class="form-control" id="new_password" name="new_password" placeholder="Enter new password" required;
-                            }
-                            div class="form-group mb-3" {
-                                label for="confirm_password" class="form-label" { "Confirm New Password" }
-                                input type="password" class="form-control" id="confirm_password" name="confirm_password" placeholder="Confirm new password" required;
-                            }
-                            button type="submit" class="btn btn-primary" {
-                                "Change Password"
-                            }
                         }
                     }
                 }
@@ -288,7 +184,6 @@ pub fn router(api: DynDashboardApi) -> Router {
         .route(EXPLORER_ROUTE, get(consensus_explorer_view))
         .route(EXPLORER_IDX_ROUTE, get(consensus_explorer_view))
         .route(DOWNLOAD_BACKUP_ROUTE, get(download_backup))
-        .route(CHANGE_PASSWORD_ROUTE, post(change_password))
         .route(METRICS_ROUTE, get(metrics_handler))
         .route(
             CONNECTIVITY_CHECK_ROUTE,

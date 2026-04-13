@@ -7,7 +7,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
-use fedimint_aead::{encrypt, get_encryption_key, random_salt};
 use fedimint_api_client::api::{
     LegacyFederationStatus, LegacyP2PConnectionStatus, LegacyPeerStatus, StatusResponse,
 };
@@ -64,10 +63,7 @@ use futures::StreamExt;
 use tokio::sync::watch::{self, Receiver, Sender};
 use tracing::{debug, info, warn};
 
-use crate::config::io::{
-    CONSENSUS_CONFIG, ENCRYPTED_EXT, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG, SALT_FILE,
-    reencrypt_private_config,
-};
+use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG};
 use crate::config::{ServerConfig, legacy_consensus_config_hash};
 use crate::consensus::db::{AcceptedItemPrefix, AcceptedTransactionKey, SignedSessionOutcomeKey};
 use crate::consensus::engine::get_finished_session_count_static;
@@ -81,8 +77,6 @@ use crate::net::p2p::P2PStatusReceivers;
 pub struct ConsensusApi {
     /// Our server configuration
     pub cfg: ServerConfig,
-    /// Directory where config files are stored
-    pub cfg_dir: PathBuf,
     /// Database for serving the API
     pub db: Database,
     /// Modules registered with the federation
@@ -99,6 +93,7 @@ pub struct ConsensusApi {
     pub ci_status_receivers: BTreeMap<PeerId, Receiver<Option<u64>>>,
     pub bitcoin_rpc_connection: ServerBitcoinRpcMonitor,
     pub supported_api_versions: SupportedApiVersionsSummary,
+    pub auth: ApiAuth,
     pub code_version_str: String,
     pub task_group: TaskGroup,
 }
@@ -336,14 +331,9 @@ impl ConsensusApi {
     }
 
     /// Uses the in-memory config to write a config backup tar archive that
-    /// guardians can download. Private keys are encrypted with the guardian
-    /// password, so it should be safe to store anywhere, this also means the
-    /// backup is useless without the password.
-    fn get_guardian_config_backup(
-        &self,
-        password: &str,
-        _auth: &GuardianAuthToken,
-    ) -> GuardianConfigBackup {
+    /// guardians can download. Private keys are stored as plaintext JSON.
+    /// Operators should rely on disk encryption for at-rest protection.
+    fn get_guardian_config_backup(&self, _auth: &GuardianAuthToken) -> GuardianConfigBackup {
         let mut tar_archive_builder = tar::Builder::new(Vec::new());
 
         let mut append = |name: &Path, data: &[u8]| {
@@ -367,23 +357,9 @@ impl ConsensusApi {
             &serde_json::to_vec(&self.cfg.consensus).expect("Error encoding consensus config"),
         );
 
-        // Note that the encrypted config returned here uses a different salt than the
-        // on-disk version. While this may be confusing it shouldn't be a problem since
-        // the content and encryption key are the same. It's unpractical to read the
-        // on-disk version here since the server/api aren't aware of the config dir and
-        // ideally we can keep it that way.
-        let encryption_salt = random_salt();
-        append(&PathBuf::from(SALT_FILE), encryption_salt.as_bytes());
-
-        let private_config_bytes =
-            serde_json::to_vec(&self.cfg.private).expect("Error encoding private config");
-        let encryption_key = get_encryption_key(password, &encryption_salt)
-            .expect("Generating key from password failed");
-        let private_config_encrypted =
-            hex::encode(encrypt(private_config_bytes, &encryption_key).expect("Encryption failed"));
         append(
-            &PathBuf::from(PRIVATE_CONFIG).with_extension(ENCRYPTED_EXT),
-            private_config_encrypted.as_bytes(),
+            &PathBuf::from(PRIVATE_CONFIG).with_extension(JSON_EXT),
+            &serde_json::to_vec(&self.cfg.private).expect("Error encoding private config"),
         );
 
         let tar_archive_bytes = tar_archive_builder
@@ -578,23 +554,6 @@ impl ConsensusApi {
 
         Ok(())
     }
-
-    /// Changes the guardian password by re-encrypting the private config and
-    /// changing the on-disk password file if present. `fedimintd` is shut down
-    /// afterward, the user's service manager (e.g. `systemd` is expected to
-    /// restart it).
-    fn change_guardian_password(
-        &self,
-        new_password: &str,
-        _auth: &GuardianAuthToken,
-    ) -> Result<(), ApiError> {
-        reencrypt_private_config(&self.cfg_dir, &self.cfg.private, new_password)
-            .map_err(|e| ApiError::server_error(format!("Failed to change password: {e}")))?;
-
-        info!(target: LOG_NET_API, "Successfully changed guardian password");
-
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -615,7 +574,7 @@ impl HasApiContext<ConsensusApi> for ConsensusApi {
                 request
                     .auth
                     .as_ref()
-                    .is_some_and(|auth| self.cfg.private.api_auth.verify(auth.as_str())),
+                    .is_some_and(|a| self.auth.verify(a.as_str())),
                 request.auth.clone(),
             ),
         )
@@ -640,7 +599,7 @@ impl HasApiContext<DynServerModule> for ConsensusApi {
 #[async_trait]
 impl IDashboardApi for ConsensusApi {
     async fn auth(&self) -> ApiAuth {
-        self.cfg.private.api_auth.clone()
+        self.auth.clone()
     }
 
     async fn guardian_id(&self) -> PeerId {
@@ -706,10 +665,9 @@ impl IDashboardApi for ConsensusApi {
 
     async fn download_guardian_config_backup(
         &self,
-        password: &str,
         guardian_auth: &GuardianAuthToken,
     ) -> GuardianConfigBackup {
-        self.get_guardian_config_backup(password, guardian_auth)
+        self.get_guardian_config_backup(guardian_auth)
     }
 
     fn get_module_by_kind(&self, kind: ModuleKind) -> Option<&DynServerModule> {
@@ -726,20 +684,6 @@ impl IDashboardApi for ConsensusApi {
 
     async fn fedimintd_version(&self) -> String {
         self.code_version_str.clone()
-    }
-
-    async fn change_password(
-        &self,
-        new_password: &str,
-        current_password: &str,
-        guardian_auth: &GuardianAuthToken,
-    ) -> Result<(), String> {
-        let auth = self.auth().await;
-        if !auth.verify(current_password) {
-            return Err("Current password is incorrect".into());
-        }
-        self.change_guardian_password(new_password, guardian_auth)
-            .map_err(|e| e.to_string())
     }
 }
 
