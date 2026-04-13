@@ -119,7 +119,7 @@ pub struct ChannelInfo {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LdkOnchainReceiveResponse {
-    pub address: String,
+    pub address: bitcoin::Address<NetworkUnchecked>,
 }
 
 // --- /ldk/onchain/send ---
@@ -128,7 +128,7 @@ pub struct LdkOnchainReceiveResponse {
 pub struct LdkOnchainSendRequest {
     pub address: bitcoin::Address<NetworkUnchecked>,
     pub amount: BitcoinAmountOrAll,
-    pub fee_rate_sats_per_vbyte: u64,
+    pub sats_per_vbyte: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -93,7 +93,7 @@ enum LdkOnchainCommands {
         #[arg(long)]
         amount: BitcoinAmountOrAll,
         #[arg(long)]
-        fee_rate_sats_per_vbyte: u64,
+        sats_per_vbyte: u64,
     },
 }
 
@@ -238,14 +238,14 @@ fn main() -> Result<()> {
                 LdkOnchainCommands::Send {
                     address,
                     amount,
-                    fee_rate_sats_per_vbyte,
+                    sats_per_vbyte,
                 } => request(
                     addr,
                     ROUTE_LDK_ONCHAIN_SEND,
                     LdkOnchainSendRequest {
                         address,
                         amount,
-                        fee_rate_sats_per_vbyte,
+                        sats_per_vbyte,
                     },
                 )?,
             },

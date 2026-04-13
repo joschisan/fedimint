@@ -340,7 +340,7 @@ async fn ldk_onchain_receive(
         .map_err(|e| CliError::internal(format!("Failed to get onchain address: {e}")))?;
 
     Ok(Json(LdkOnchainReceiveResponse {
-        address: address.to_string(),
+        address: address.as_unchecked().clone(),
     }))
 }
 
@@ -358,14 +358,14 @@ async fn ldk_onchain_send(
             .send_all_to_address(
                 &checked_address,
                 retain_reserves,
-                FeeRate::from_sat_per_vb(payload.fee_rate_sats_per_vbyte),
+                FeeRate::from_sat_per_vb(payload.sats_per_vbyte),
             )
             .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
         BitcoinAmountOrAll::Amount(amount_sats) => onchain
             .send_to_address(
                 &checked_address,
                 amount_sats.to_sat(),
-                FeeRate::from_sat_per_vb(payload.fee_rate_sats_per_vbyte),
+                FeeRate::from_sat_per_vb(payload.sats_per_vbyte),
             )
             .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
     };

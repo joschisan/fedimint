@@ -475,10 +475,9 @@ async fn open_channel_between_gateways(
         let addr = gateway_cmd(gw_addr)
             .args(["ldk", "onchain", "receive"])
             .run_gateway_cli::<LdkOnchainReceiveResponse>()?
-            .address;
+            .address
+            .assume_checked();
 
-        let addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = addr.parse()?;
-        let addr = addr.assume_checked();
         block_in_place(|| bitcoind.generate_to_address(1, &addr))?;
         block_in_place(|| bitcoind.generate_to_address(100, &dummy_address()))?;
     }
