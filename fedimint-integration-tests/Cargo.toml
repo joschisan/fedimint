@@ -18,6 +18,7 @@ bitcoincore-rpc = { workspace = true }
 fedimint-bip39 = { workspace = true }
 fedimint-client = { workspace = true }
 fedimint-api-client = { workspace = true }
+iroh = { workspace = true, default-features = false }
 fedimint-core = { workspace = true }
 fedimint-gateway-common = { workspace = true }
 fedimint-server-cli-core = { workspace = true }

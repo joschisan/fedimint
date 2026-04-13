@@ -31,9 +31,7 @@ use anyhow::Context;
 use config::ServerConfig;
 use config::io::read_server_config;
 pub use connection_limits::ConnectionLimits;
-use fedimint_api_client::connection::{
-    ConnectionPool, create_iroh_endpoint, load_iroh_connection_overrides,
-};
+use fedimint_api_client::connection::ConnectionPool;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped as _};
 use fedimint_core::epoch::ConsensusItem;
@@ -46,6 +44,7 @@ use fedimint_server_core::ServerModuleInitRegistry;
 use fedimint_server_core::bitcoin_rpc::DynServerBitcoinRpc;
 use fedimint_server_core::dashboard_ui::DynDashboardApi;
 use fedimint_server_core::setup_ui::{DynSetupApi, ISetupApi};
+use iroh::Endpoint;
 use net::p2p::P2PStatusReceivers;
 use net::p2p_connector::IrohConnector;
 use tokio::net::TcpListener;
@@ -96,8 +95,6 @@ pub async fn run(
             let connector = IrohConnector::new(
                 cfg.private.iroh_p2p_sk.clone(),
                 settings.p2p_bind,
-                settings.iroh_dns.clone(),
-                settings.iroh_relays.clone(),
                 cfg.consensus
                     .iroh_endpoints
                     .iter()
@@ -146,17 +143,16 @@ pub async fn run(
 
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 
-    let endpoint = create_iroh_endpoint(None, true).await?;
-    let connection_overrides = load_iroh_connection_overrides()?;
-    let connectors = ConnectionPool::new(endpoint, connection_overrides);
+    let client_endpoint = Endpoint::builder(iroh::endpoint::presets::N0DisableRelay)
+        .bind()
+        .await?;
+    let connectors = ConnectionPool::new(client_endpoint);
 
     Box::pin(consensus::run(
         connectors,
         auth,
         connections,
         p2p_status_receivers,
-        settings.iroh_dns,
-        settings.iroh_relays,
         cfg,
         db,
         module_init_registry.clone(),
@@ -263,8 +259,6 @@ pub async fn run_config_gen(
     let connector = IrohConnector::new(
         cg_params.iroh_p2p_sk.clone(),
         settings.p2p_bind,
-        settings.iroh_dns,
-        settings.iroh_relays,
         cg_params
             .iroh_endpoints()
             .iter()

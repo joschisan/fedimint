@@ -59,8 +59,6 @@ pub async fn run(
     auth: ApiAuth,
     connections: DynP2PConnections<P2PMessage>,
     p2p_status_receivers: P2PStatusReceivers,
-    iroh_dns: Option<SafeUrl>,
-    iroh_relays: Vec<SafeUrl>,
     cfg: ServerConfig,
     db: Database,
     module_init_registry: ServerModuleInitRegistry,
@@ -205,8 +203,6 @@ pub async fn run(
 
     Box::pin(start_iroh_api(
         cfg.private.iroh_api_sk.clone(),
-        iroh_dns,
-        iroh_relays,
         consensus_api.clone(),
         task_group,
         iroh_api_limits,
@@ -356,8 +352,6 @@ fn submit_module_ci_proposals(
 
 async fn start_iroh_api(
     secret_key: iroh::SecretKey,
-    iroh_dns: Option<SafeUrl>,
-    iroh_relays: Vec<SafeUrl>,
     consensus_api: ConsensusApi,
     task_group: &TaskGroup,
     iroh_api_limits: ConnectionLimits,
@@ -365,8 +359,6 @@ async fn start_iroh_api(
     let endpoint = build_iroh_endpoint(
         secret_key,
         SocketAddr::from(([0, 0, 0, 0], 0)),
-        iroh_dns,
-        iroh_relays,
         FEDIMINT_API_ALPN,
     )
     .await?;

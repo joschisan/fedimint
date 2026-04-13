@@ -201,8 +201,8 @@ impl ISetupApi for SetupApi {
             "Local parameters have already been set"
         );
 
-        let iroh_api_sk = SecretKey::generate(&mut OsRng);
-        let iroh_p2p_sk = SecretKey::generate(&mut OsRng);
+        let iroh_api_sk = SecretKey::from_bytes(&rand::random());
+        let iroh_p2p_sk = SecretKey::from_bytes(&rand::random());
 
         let lp = LocalParams {
             iroh_api_sk: iroh_api_sk.clone(),

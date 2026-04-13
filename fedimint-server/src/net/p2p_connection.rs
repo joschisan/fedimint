@@ -3,6 +3,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
+use iroh::Watcher as _;
 use iroh::endpoint::{Connection, RecvStream};
 
 /// Maximum size of a p2p message in bytes. The largest message we expect to
@@ -79,6 +80,11 @@ where
     }
 
     fn rtt(&self) -> Option<Duration> {
-        Some(Connection::rtt(self))
+        let paths = self.paths();
+        paths
+            .peek()
+            .iter()
+            .find(|p| p.is_selected())
+            .and_then(|p| p.rtt())
     }
 }

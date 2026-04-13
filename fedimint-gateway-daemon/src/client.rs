@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use fedimint_api_client::connection::{
-    ConnectionPool, create_iroh_endpoint, load_iroh_connection_overrides,
-};
+use fedimint_api_client::connection::ConnectionPool;
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::{Client, ClientBuilder, RootSecret};
@@ -11,6 +9,8 @@ use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_gwv2_client::GatewayClientInitV2;
+use iroh::Endpoint;
+use iroh::endpoint::presets::N0DisableRelay;
 
 use crate::AppState;
 use crate::db::{ClientConfigKey, DbKeyPrefix, RootEntropyKey};
@@ -37,11 +37,13 @@ impl GatewayClientFactory {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to store mnemonic: {e}"))?;
 
-        let endpoint = create_iroh_endpoint(None, false).await?;
-        let connection_overrides = load_iroh_connection_overrides()?;
+        let endpoint = Endpoint::builder(N0DisableRelay)
+            .relay_mode(iroh::RelayMode::Disabled)
+            .bind()
+            .await?;
 
         Ok(Self {
-            connectors: ConnectionPool::new(endpoint, connection_overrides),
+            connectors: ConnectionPool::new(endpoint),
             db,
             mnemonic,
             registry,
@@ -64,11 +66,13 @@ impl GatewayClientFactory {
                 let mnemonic = Mnemonic::from_entropy(&entropy)
                     .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {e}"))?;
 
-                let endpoint = create_iroh_endpoint(None, false).await?;
-                let connection_overrides = load_iroh_connection_overrides()?;
+                let endpoint = Endpoint::builder(N0DisableRelay)
+                    .relay_mode(iroh::RelayMode::Disabled)
+                    .bind()
+                    .await?;
 
                 Ok(Some(Self {
-                    connectors: ConnectionPool::new(endpoint, connection_overrides),
+                    connectors: ConnectionPool::new(endpoint),
                     db,
                     mnemonic,
                     registry,

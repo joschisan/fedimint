@@ -1,9 +1,6 @@
 //! Connection infrastructure for fedimint API clients
-//!
-//! Provides connection pooling, error types, and iroh-based guardian
-//! connections.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -11,25 +8,19 @@ use std::time::Duration;
 
 use anyhow::{Context, bail};
 use fedimint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
-use fedimint_core::envs::{
-    FM_IROH_N0_DISCOVERY_ENABLE_ENV, FM_IROH_PKARR_RESOLVER_ENABLE_ENV, is_env_var_set_opt,
-    parse_kv_list_from_env,
-};
 use fedimint_core::module::{
     ApiError, ApiMethod, ApiRequestErased, FEDIMINT_API_ALPN, IrohApiRequest,
 };
 use fedimint_core::util::SafeUrl;
 use fedimint_core::util::backoff_util::{FibonacciBackoff, custom_backoff};
 use fedimint_core::{PeerId, apply, async_trait_maybe_send};
-use fedimint_logging::{LOG_CLIENT_NET_API, LOG_NET_IROH};
-use iroh::discovery::pkarr::PkarrResolver;
+use fedimint_logging::LOG_CLIENT_NET_API;
 use iroh::endpoint::Connection;
-use iroh::{Endpoint, NodeAddr, NodeId, PublicKey};
-use iroh_base::ticket::NodeTicket;
+use iroh::{Endpoint, PublicKey};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::{OnceCell, broadcast, watch};
-use tracing::{debug, trace, warn};
+use tracing::{trace, warn};
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
@@ -107,17 +98,14 @@ pub type ServerResult<T> = Result<T, ServerError>;
 
 // ── Connection traits ───────────────────────────────────────────────────────
 
-/// Generic connection trait
 #[apply(async_trait_maybe_send!)]
 pub trait IConnection: Debug + Send + Sync + 'static {
     fn is_connected(&self) -> bool;
     async fn await_disconnection(&self);
 }
 
-/// A connection from api client to a federation guardian (type erased)
 pub type DynGuaridianConnection = Arc<dyn IGuardianConnection>;
 
-/// A connection from api client to a federation guardian
 #[async_trait::async_trait]
 pub trait IGuardianConnection: IConnection + Debug + Send + Sync + 'static {
     async fn request(&self, method: ApiMethod, request: ApiRequestErased) -> ServerResult<Value>;
@@ -135,7 +123,6 @@ pub trait IGuardianConnection: IConnection + Debug + Send + Sync + 'static {
 #[derive(Debug)]
 pub struct ConnectionPool {
     endpoint: Endpoint,
-    connection_overrides: BTreeMap<NodeId, NodeAddr>,
 
     active_connections: watch::Sender<BTreeSet<SafeUrl>>,
 
@@ -148,7 +135,6 @@ impl Clone for ConnectionPool {
     fn clone(&self) -> Self {
         Self {
             endpoint: self.endpoint.clone(),
-            connection_overrides: self.connection_overrides.clone(),
             connections: self.connections.clone(),
             active_connections: self.active_connections.clone(),
         }
@@ -156,10 +142,9 @@ impl Clone for ConnectionPool {
 }
 
 impl ConnectionPool {
-    pub fn new(endpoint: Endpoint, connection_overrides: BTreeMap<NodeId, NodeAddr>) -> Self {
+    pub fn new(endpoint: Endpoint) -> Self {
         Self {
             endpoint,
-            connection_overrides,
             connections: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             active_connections: watch::channel(BTreeSet::new()).0,
         }
@@ -224,7 +209,6 @@ impl ConnectionPool {
         };
 
         let endpoint = self.endpoint.clone();
-        let overrides = self.connection_overrides.clone();
 
         let conn = pool_entry_arc
             .connection
@@ -233,7 +217,7 @@ impl ConnectionPool {
                 fedimint_core::runtime::sleep(retry_delay).await;
 
                 trace!(target: LOG_CLIENT_NET_API, %url, "Attempting to create a new connection");
-                let res = connect_guardian(&endpoint, url, &overrides).await;
+                let res = connect_guardian(&endpoint, url).await;
 
                 let _ = leader_tx.send(
                     res.as_ref()
@@ -321,76 +305,10 @@ impl<T: ?Sized> ConnectionState<T> {
 
 // ── Iroh helpers ────────────────────────────────────────────────────────────
 
-/// The maximum number of bytes we are willing to buffer when reading an API
-/// response from an iroh QUIC stream.
 const IROH_MAX_RESPONSE_BYTES: usize = ALEPH_BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
 
-/// Create an iroh endpoint with the given configuration.
-pub async fn create_iroh_endpoint(
-    iroh_dns: Option<SafeUrl>,
-    enable_dht: bool,
-) -> anyhow::Result<Endpoint> {
-    let mut builder = Endpoint::builder();
-
-    if let Some(iroh_dns) = iroh_dns.map(SafeUrl::to_unsafe) {
-        builder = builder.add_discovery(|_| Some(PkarrResolver::new(iroh_dns)));
-    }
-
-    let mut builder = builder.relay_mode(iroh::RelayMode::Disabled);
-
-    #[cfg(not(target_family = "wasm"))]
-    if enable_dht {
-        builder = builder.discovery_dht();
-    }
-
-    {
-        if is_env_var_set_opt(FM_IROH_PKARR_RESOLVER_ENABLE_ENV).unwrap_or(true) {
-            #[cfg(target_family = "wasm")]
-            {
-                builder = builder.add_discovery(move |_| Some(PkarrResolver::n0_dns()));
-            }
-        } else {
-            warn!(target: LOG_NET_IROH, "Iroh pkarr resolver is disabled");
-        }
-
-        if is_env_var_set_opt(FM_IROH_N0_DISCOVERY_ENABLE_ENV).unwrap_or(true) {
-            #[cfg(not(target_family = "wasm"))]
-            {
-                builder = builder
-                    .add_discovery(move |_| Some(iroh::discovery::dns::DnsDiscovery::n0_dns()));
-            }
-        } else {
-            warn!(target: LOG_NET_IROH, "Iroh n0 discovery is disabled");
-        }
-    }
-
-    let endpoint = builder.bind().await?;
-    debug!(
-        target: LOG_NET_IROH,
-        node_id = %endpoint.node_id(),
-        node_id_pkarr = %z32::encode(endpoint.node_id().as_bytes()),
-        "Iroh endpoint bound"
-    );
-    Ok(endpoint)
-}
-
-/// Load iroh connection overrides from environment variables.
-pub fn load_iroh_connection_overrides() -> anyhow::Result<BTreeMap<NodeId, NodeAddr>> {
-    const FM_IROH_CONNECT_OVERRIDES_ENV: &str = "FM_IROH_CONNECT_OVERRIDES";
-    const FM_GW_IROH_CONNECT_OVERRIDES_ENV: &str = "FM_GW_IROH_CONNECT_OVERRIDES";
-
-    let mut overrides = BTreeMap::new();
-    for (k, v) in parse_kv_list_from_env::<_, NodeTicket>(FM_IROH_CONNECT_OVERRIDES_ENV)? {
-        overrides.insert(k, v.into());
-    }
-    for (k, v) in parse_kv_list_from_env::<_, NodeTicket>(FM_GW_IROH_CONNECT_OVERRIDES_ENV)? {
-        overrides.insert(k, v.into());
-    }
-    Ok(overrides)
-}
-
 /// Parse a node ID from an iroh:// URL.
-pub fn node_id_from_url(url: &SafeUrl) -> anyhow::Result<NodeId> {
+pub fn node_id_from_url(url: &SafeUrl) -> anyhow::Result<PublicKey> {
     if url.scheme() != "iroh" {
         bail!("Unsupported scheme: {}, expected iroh://", url.scheme());
     }
@@ -402,44 +320,18 @@ pub fn node_id_from_url(url: &SafeUrl) -> anyhow::Result<NodeId> {
 pub async fn connect_guardian(
     endpoint: &Endpoint,
     url: &SafeUrl,
-    connection_overrides: &BTreeMap<NodeId, NodeAddr>,
 ) -> ServerResult<DynGuaridianConnection> {
     let node_id = node_id_from_url(url).map_err(|source| ServerError::InvalidPeerUrl {
         source,
         url: url.to_owned(),
     })?;
 
-    let conn = match connection_overrides.get(&node_id).cloned() {
-        Some(node_addr) => {
-            trace!(target: LOG_NET_IROH, %node_id, "Using a connectivity override for connection");
-            let conn = endpoint.connect(node_addr, FEDIMINT_API_ALPN).await;
-
-            #[cfg(not(target_family = "wasm"))]
-            if conn.is_ok() {
-                spawn_connection_monitoring(endpoint, node_id);
-            }
-            conn
-        }
-        None => endpoint.connect(node_id, FEDIMINT_API_ALPN).await,
-    }
-    .map_err(ServerError::Connection)?;
+    let conn = endpoint
+        .connect(node_id, FEDIMINT_API_ALPN)
+        .await
+        .map_err(|e| ServerError::Connection(e.into()))?;
 
     Ok(IGuardianConnection::into_dyn(conn))
-}
-
-#[cfg(not(target_family = "wasm"))]
-fn spawn_connection_monitoring(endpoint: &Endpoint, node_id: NodeId) {
-    if let Ok(mut conn_type_watcher) = endpoint.conn_type(node_id) {
-        #[allow(clippy::let_underscore_future)]
-        let _ = fedimint_core::task::spawn("iroh connection", async move {
-            if let Ok(conn_type) = conn_type_watcher.get() {
-                debug!(target: LOG_NET_IROH, %node_id, type = %conn_type, "Connection type (initial)");
-            }
-            while let Ok(event) = conn_type_watcher.updated().await {
-                debug!(target: LOG_NET_IROH, %node_id, type = %event, "Connection type (changed)");
-            }
-        });
-    }
 }
 
 // ── Iroh IConnection / IGuardianConnection impls ────────────────────────────
