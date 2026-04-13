@@ -33,7 +33,7 @@ use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, Operati
 use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{
-    Amounts, ApiAuth, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
+    ApiAuth, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
 };
 use fedimint_core::secp256k1::SECP256K1;
 use fedimint_core::task::TaskGroup;
@@ -334,22 +334,18 @@ impl ClientModule for LightningClientModule {
 
     fn input_fee(
         &self,
-        amounts: &Amounts,
+        _amount: Amount,
         _input: &<Self::Common as ModuleCommon>::Input,
-    ) -> Option<Amounts> {
-        Some(Amounts::new_bitcoin(
-            self.cfg.fee_consensus.fee(amounts.expect_only_bitcoin()),
-        ))
+    ) -> Option<Amount> {
+        Some(self.cfg.input_fee)
     }
 
     fn output_fee(
         &self,
-        amounts: &Amounts,
+        _amount: Amount,
         _output: &<Self::Common as ModuleCommon>::Output,
-    ) -> Option<Amounts> {
-        Some(Amounts::new_bitcoin(
-            self.cfg.fee_consensus.fee(amounts.expect_only_bitcoin()),
-        ))
+    ) -> Option<Amount> {
+        Some(self.cfg.output_fee)
     }
 }
 
@@ -588,7 +584,7 @@ impl LightningClientModule {
 
         let client_output = ClientOutput::<LightningOutput> {
             output: LightningOutput::V0(LightningOutputV0::Outgoing(contract.clone())),
-            amounts: Amounts::new_bitcoin(contract.amount),
+            amount: contract.amount,
         };
 
         let client_output_sm = ClientOutputSM::<LightningClientStateMachines> {

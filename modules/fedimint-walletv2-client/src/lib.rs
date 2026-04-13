@@ -39,7 +39,7 @@ use fedimint_core::db::{
 };
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{
-    AmountUnit, Amounts, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
+    ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
 };
 use fedimint_core::task::{TaskGroup, block_in_place, sleep};
 use fedimint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_send};
@@ -128,22 +128,18 @@ impl ClientModule for WalletClientModule {
 
     fn input_fee(
         &self,
-        amount: &Amounts,
+        _amount: Amount,
         _input: &<Self::Common as ModuleCommon>::Input,
-    ) -> Option<Amounts> {
-        amount
-            .get(&AmountUnit::BITCOIN)
-            .map(|a| Amounts::new_bitcoin(self.cfg.fee_consensus.fee(*a)))
+    ) -> Option<Amount> {
+        Some(self.cfg.input_fee)
     }
 
     fn output_fee(
         &self,
-        amount: &Amounts,
+        _amount: Amount,
         _output: &<Self::Common as ModuleCommon>::Output,
-    ) -> Option<Amounts> {
-        amount
-            .get(&AmountUnit::BITCOIN)
-            .map(|a| Amounts::new_bitcoin(self.cfg.fee_consensus.fee(*a)))
+    ) -> Option<Amount> {
+        Some(self.cfg.output_fee)
     }
 }
 
@@ -264,7 +260,7 @@ impl WalletClientModule {
                 value,
                 fee,
             }),
-            amounts: Amounts::new_bitcoin(Amount::from_sats((value + fee).to_sat())),
+            amount: Amount::from_sats((value + fee).to_sat()),
         };
 
         let client_output_sm = ClientOutputSM::<WalletClientStateMachines> {
@@ -411,7 +407,7 @@ impl WalletClientModule {
                 tweak: self.derive_tweak(address_index).public_key(),
             }),
             keys: vec![self.derive_tweak(address_index)],
-            amounts: Amounts::new_bitcoin(Amount::from_sats((value - fee).to_sat())),
+            amount: Amount::from_sats((value - fee).to_sat()),
         };
 
         let client_input_sm = ClientInputSM::<WalletClientStateMachines> {

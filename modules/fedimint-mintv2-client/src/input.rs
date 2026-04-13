@@ -5,7 +5,6 @@ use fedimint_client_module::sm::{ClientSMDatabaseTransaction, State, StateTransi
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::Amounts;
 use fedimint_mintv2_common::MintInput;
 
 use crate::{MintClientContext, SpendableNote};
@@ -93,7 +92,7 @@ impl InputStateMachine {
             .map(|spendable_note| ClientInput::<MintInput> {
                 input: MintInput::new_v0(spendable_note.note()),
                 keys: vec![spendable_note.keypair],
-                amounts: Amounts::new_bitcoin(spendable_note.amount()),
+                amount: spendable_note.amount(),
             })
             .collect();
 

@@ -721,7 +721,6 @@ impl ConsensusEngine {
                     self.modules.clone(),
                     dbtx,
                     &transaction,
-                    self.cfg.consensus.version,
                     TxProcessingMode::Consensus,
                 )
                 .await

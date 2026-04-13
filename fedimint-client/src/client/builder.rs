@@ -51,7 +51,6 @@ use tracing::{debug, trace, warn};
 
 use super::handle::ClientHandle;
 use super::{Client, client_decoders};
-use crate::client::PrimaryModuleCandidates;
 use crate::db::{
     self, ApiSecretKey, ChainIdKey, ClientInitStateKey, ClientMetadataKey, ClientModuleRecovery,
     ClientModuleRecoveryState, ClientPreRootSecretHashKey, InitMode, InitState, Metadata,
@@ -868,28 +867,13 @@ impl ClientBuilder {
             dbtx.commit_tx().await;
         }
 
-        let mut primary_modules: BTreeMap<PrimaryModulePriority, PrimaryModuleCandidates> =
+        let mut primary_modules: BTreeMap<PrimaryModulePriority, Vec<ModuleInstanceId>> =
             BTreeMap::new();
 
         for (module_id, _kind, module) in modules.iter_modules() {
             match module.supports_being_primary() {
-                PrimaryModuleSupport::Any { priority } => {
-                    primary_modules
-                        .entry(priority)
-                        .or_default()
-                        .wildcard
-                        .push(module_id);
-                }
-                PrimaryModuleSupport::Selected { priority, units } => {
-                    for unit in units {
-                        primary_modules
-                            .entry(priority)
-                            .or_default()
-                            .specific
-                            .entry(unit)
-                            .or_default()
-                            .push(module_id);
-                    }
+                PrimaryModuleSupport::Yes { priority } => {
+                    primary_modules.entry(priority).or_default().push(module_id);
                 }
                 PrimaryModuleSupport::None => {}
             }

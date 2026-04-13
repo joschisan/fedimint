@@ -21,19 +21,19 @@ use fedimint_core::db::{
 use fedimint_core::envs::{FM_ENABLE_MODULE_LNV2_ENV, is_env_var_set_opt};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
-    Amounts, ApiEndpoint, ApiError, ApiVersion, CORE_CONSENSUS_VERSION, CoreConsensusVersion,
-    InputMeta, ModuleConsensusVersion, ModuleInit, SupportedModuleApiVersions,
-    TransactionItemAmounts, api_endpoint,
+    ApiEndpoint, ApiError, ApiVersion, CORE_CONSENSUS_VERSION, CoreConsensusVersion, InputMeta,
+    ModuleConsensusVersion, ModuleInit, SupportedModuleApiVersions, TransactionItemAmounts,
+    api_endpoint,
 };
 use fedimint_core::task::timeout;
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{
-    InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send, push_db_pair_items,
+    Amount, InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send,
+    push_db_pair_items,
 };
 use fedimint_lnv2_common::config::{
-    FeeConsensus, LightningClientConfig, LightningConfig, LightningConfigConsensus,
-    LightningConfigPrivate,
+    LightningClientConfig, LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
 use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract};
 use fedimint_lnv2_common::endpoint_constants::{
@@ -252,10 +252,15 @@ impl ServerModuleInit for LightningInit {
                     .peer_ids()
                     .map(|peer| (peer, PublicKeyShare(eval_poly_g1(&polynomial, &peer))))
                     .collect(),
-                fee_consensus: if args.disable_base_fees {
-                    FeeConsensus::zero()
+                input_fee: if args.disable_base_fees {
+                    Amount::ZERO
                 } else {
-                    FeeConsensus::new(0).expect("Relative fee is within range")
+                    Amount::from_sats(1)
+                },
+                output_fee: if args.disable_base_fees {
+                    Amount::ZERO
+                } else {
+                    Amount::from_sats(1)
                 },
                 network: args.network,
             },
@@ -291,7 +296,8 @@ impl ServerModuleInit for LightningInit {
         Ok(LightningClientConfig {
             tpe_agg_pk: config.tpe_agg_pk,
             tpe_pks: config.tpe_pks,
-            fee_consensus: config.fee_consensus,
+            input_fee: config.input_fee,
+            output_fee: config.output_fee,
             network: config.network,
         })
     }
@@ -455,8 +461,8 @@ impl ServerModule for Lightning {
 
         Ok(InputMeta {
             amount: TransactionItemAmounts {
-                amounts: Amounts::new_bitcoin(amount),
-                fees: Amounts::new_bitcoin(self.cfg.consensus.fee_consensus.fee(amount)),
+                amount,
+                fee: self.cfg.consensus.input_fee,
             },
             pub_key,
         })
@@ -517,8 +523,8 @@ impl ServerModule for Lightning {
         };
 
         Ok(TransactionItemAmounts {
-            amounts: Amounts::new_bitcoin(amount),
-            fees: Amounts::new_bitcoin(self.cfg.consensus.fee_consensus.fee(amount)),
+            amount,
+            fee: self.cfg.consensus.output_fee,
         })
     }
 

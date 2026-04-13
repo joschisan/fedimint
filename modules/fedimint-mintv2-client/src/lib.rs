@@ -49,14 +49,14 @@ use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, Operati
 use fedimint_core::db::{DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{
-    AmountUnit, Amounts, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
+    ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
 };
 use fedimint_core::secp256k1::rand::{Rng, thread_rng};
 use fedimint_core::secp256k1::{Keypair, PublicKey};
 use fedimint_core::util::{BoxStream, NextOrPending};
 use fedimint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::DerivableSecret;
-use fedimint_mintv2_common::config::{FeeConsensus, MintClientConfig, client_denominations};
+use fedimint_mintv2_common::config::{MintClientConfig, client_denominations};
 use fedimint_mintv2_common::{
     Denomination, KIND, MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, RecoveryItem,
 };
@@ -362,47 +362,36 @@ impl ClientModule for MintClientModule {
 
     fn input_fee(
         &self,
-        amounts: &Amounts,
+        _amount: Amount,
         _input: &<Self::Common as ModuleCommon>::Input,
-    ) -> Option<Amounts> {
-        let unit = self.cfg.amount_unit;
-        let amount = amounts.get(&unit).copied().unwrap_or_default();
-        let fee = self.cfg.fee_consensus.fee(amount);
-
-        Some(Amounts::new_custom(unit, fee))
+    ) -> Option<Amount> {
+        Some(self.cfg.input_fee)
     }
 
     fn output_fee(
         &self,
-        amounts: &Amounts,
+        _amount: Amount,
         _output: &<Self::Common as ModuleCommon>::Output,
-    ) -> Option<Amounts> {
-        let unit = self.cfg.amount_unit;
-        let amount = amounts.get(&unit).copied().unwrap_or_default();
-        let fee = self.cfg.fee_consensus.fee(amount);
-
-        Some(Amounts::new_custom(unit, fee))
+    ) -> Option<Amount> {
+        Some(self.cfg.output_fee)
     }
 
     fn supports_being_primary(&self) -> PrimaryModuleSupport {
-        PrimaryModuleSupport::selected(PrimaryModulePriority::HIGH, [self.cfg.amount_unit])
+        PrimaryModuleSupport::Yes {
+            priority: PrimaryModulePriority::HIGH,
+        }
     }
 
     async fn create_final_inputs_and_outputs(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         operation_id: OperationId,
-        unit: AmountUnit,
         mut input_amount: Amount,
         mut output_amount: Amount,
     ) -> anyhow::Result<(
         ClientInputBundle<MintInput, MintClientStateMachines>,
         ClientOutputBundle<MintOutput, MintClientStateMachines>,
     )> {
-        if unit != self.cfg.amount_unit {
-            anyhow::bail!("Module can only handle its configured amount unit");
-        }
-
         let funding_notes = self
             .select_funding_input(dbtx, output_amount.saturating_sub(input_amount))
             .await
@@ -414,15 +403,12 @@ impl ClientModule for MintClientModule {
 
         input_amount += funding_notes.iter().map(SpendableNote::amount).sum();
 
-        output_amount += funding_notes
-            .iter()
-            .map(|input| self.cfg.fee_consensus.fee(input.amount()))
-            .sum();
+        output_amount += self.cfg.input_fee * funding_notes.len() as u64;
 
         assert!(output_amount <= input_amount);
 
         let (input_notes, output_amounts) = self
-            .rebalance(dbtx, &self.cfg.fee_consensus, input_amount - output_amount)
+            .rebalance(dbtx, self.cfg.output_fee, input_amount - output_amount)
             .await;
 
         for note in &input_notes {
@@ -431,16 +417,11 @@ impl ClientModule for MintClientModule {
 
         input_amount += input_notes.iter().map(SpendableNote::amount).sum();
 
-        output_amount += input_notes
-            .iter()
-            .map(|note| self.cfg.fee_consensus.fee(note.amount()))
-            .sum();
+        output_amount += self.cfg.input_fee * input_notes.len() as u64;
 
         output_amount += output_amounts
             .iter()
-            .map(|denomination| {
-                denomination.amount() + self.cfg.fee_consensus.fee(denomination.amount())
-            })
+            .map(|denomination| denomination.amount() + self.cfg.output_fee)
             .sum();
 
         assert!(output_amount <= input_amount);
@@ -453,12 +434,11 @@ impl ClientModule for MintClientModule {
         // We sort the notes by denomination to minimize the leaked information.
         spendable_notes.sort_by_key(|note| note.denomination);
 
-        let input_bundle =
-            Self::create_input_bundle(operation_id, spendable_notes, false, self.cfg.amount_unit);
+        let input_bundle = Self::create_input_bundle(operation_id, spendable_notes, false);
 
         let mut denominations = represent_amount_with_fees(
             input_amount.saturating_sub(output_amount),
-            &self.cfg.fee_consensus,
+            self.cfg.output_fee,
         )
         .into_iter()
         .chain(output_amounts)
@@ -483,11 +463,7 @@ impl ClientModule for MintClientModule {
         self.await_output_sm_success(operation_id, outpoint).await
     }
 
-    async fn get_balance(&self, dbtx: &mut DatabaseTransaction<'_>, unit: AmountUnit) -> Amount {
-        if unit != self.cfg.amount_unit {
-            return Amount::ZERO;
-        }
-
+    async fn get_balance(&self, dbtx: &mut DatabaseTransaction<'_>) -> Amount {
         self.get_count_by_denomination_dbtx(dbtx)
             .await
             .into_iter()
@@ -524,11 +500,9 @@ impl MintClientModule {
 
             if notes_amount.len() > 2 * TARGET_PER_DENOMINATION {
                 for note in notes_amount.into_iter().skip(TARGET_PER_DENOMINATION) {
-                    let note_fee = self.cfg.fee_consensus.fee(note.amount());
-
                     let note_value = note
                         .amount()
-                        .checked_sub(note_fee)
+                        .checked_sub(self.cfg.input_fee)
                         .expect("All our notes are economical");
 
                     excess_output = excess_output.saturating_sub(note_value);
@@ -545,9 +519,9 @@ impl MintClientModule {
         }
 
         for note in excess_notes.into_iter().chain(target_notes) {
-            let note_amount = note.amount();
-            let note_value = note_amount
-                .checked_sub(self.cfg.fee_consensus.fee(note_amount))
+            let note_value = note
+                .amount()
+                .checked_sub(self.cfg.input_fee)
                 .expect("All our notes are economical");
 
             excess_output = excess_output.saturating_sub(note_value);
@@ -565,7 +539,7 @@ impl MintClientModule {
     async fn rebalance(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
-        fee: &FeeConsensus,
+        output_fee: Amount,
         mut excess_input: Amount,
     ) -> (Vec<SpendableNote>, Vec<Denomination>) {
         let n_denominations = self.get_count_by_denomination_dbtx(dbtx).await;
@@ -585,15 +559,15 @@ impl MintClientModule {
             let n_missing = TARGET_PER_DENOMINATION.saturating_sub(n_denomination as usize);
 
             for _ in 0..n_missing {
-                match excess_input.checked_sub(d.amount() + fee.fee(d.amount())) {
+                match excess_input.checked_sub(d.amount() + output_fee) {
                     Some(remaining_excess) => excess_input = remaining_excess,
                     None => match notes.next().await {
                         Some(note) => {
-                            if note.amount() <= d.amount() + fee.fee(d.amount()) {
+                            if note.amount() <= d.amount() + output_fee {
                                 break;
                             }
 
-                            excess_input += note.amount() - (d.amount() + fee.fee(d.amount()));
+                            excess_input += note.amount() - (d.amount() + output_fee);
 
                             input_notes.push(note);
                         }
@@ -612,14 +586,13 @@ impl MintClientModule {
         operation_id: OperationId,
         notes: Vec<SpendableNote>,
         include_receive_sm: bool,
-        amount_unit: AmountUnit,
     ) -> ClientInputBundle<MintInput, MintClientStateMachines> {
         let inputs = notes
             .iter()
             .map(|spendable_note| ClientInput {
                 input: MintInput::new_v0(spendable_note.note()),
                 keys: vec![spendable_note.keypair],
-                amounts: Amounts::new_custom(amount_unit, spendable_note.amount()),
+                amount: spendable_note.amount(),
             })
             .collect();
 
@@ -662,12 +635,11 @@ impl MintClientModule {
             .collect::<Vec<NoteIssuanceRequest>>()
             .await;
 
-        let amount_unit = self.cfg.amount_unit;
         let outputs = issuance_requests
             .iter()
             .map(|request| ClientOutput {
                 output: request.output(),
-                amounts: Amounts::new_custom(amount_unit, request.denomination.amount()),
+                amount: request.denomination.amount(),
             })
             .collect();
 
@@ -890,13 +862,12 @@ impl MintClientModule {
         if ecash
             .notes()
             .iter()
-            .any(|note| note.amount() <= self.cfg.fee_consensus.base_fee())
+            .any(|note| note.amount() <= self.cfg.input_fee)
         {
             return Err(ReceiveECashError::UneconomicalDenomination);
         }
 
-        let input =
-            Self::create_input_bundle(operation_id, ecash.notes(), true, self.cfg.amount_unit);
+        let input = Self::create_input_bundle(operation_id, ecash.notes(), true);
         let input = self.client_ctx.make_client_inputs(input);
         let ec = base32::encode_prefixed(FEDIMINT_PREFIX, &ecash);
 
@@ -1131,19 +1102,17 @@ fn round_to_multiple(amount: Amount, min_denomiation: Amount) -> Amount {
 
 fn represent_amount_with_fees(
     mut remaining_amount: Amount,
-    fee_consensus: &FeeConsensus,
+    output_fee: Amount,
 ) -> Vec<Denomination> {
     let mut denominations = Vec::new();
 
     // Add denominations with a greedy algorithm
     for denomination in client_denominations().rev() {
-        let n_add =
-            remaining_amount / (denomination.amount() + fee_consensus.fee(denomination.amount()));
+        let n_add = remaining_amount / (denomination.amount() + output_fee);
 
         denominations.extend(std::iter::repeat_n(denomination, n_add as usize));
 
-        remaining_amount -=
-            n_add * (denomination.amount() + fee_consensus.fee(denomination.amount()));
+        remaining_amount -= n_add * (denomination.amount() + output_fee);
     }
 
     // We sort the notes by amount to minimize the leaked information.

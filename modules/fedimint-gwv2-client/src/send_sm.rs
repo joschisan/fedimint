@@ -6,7 +6,6 @@ use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::Amounts;
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::{Amount, OutPoint};
 use fedimint_lnv2_common::contracts::OutgoingContract;
@@ -265,7 +264,7 @@ impl SendStateMachine {
                         old_state.common.outpoint,
                         OutgoingWitness::Claim(payment_response.preimage),
                     )),
-                    amounts: Amounts::new_bitcoin(old_state.common.contract.amount),
+                    amount: old_state.common.contract.amount,
                     keys: vec![old_state.common.claim_keypair],
                 };
 

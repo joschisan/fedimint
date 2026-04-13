@@ -28,7 +28,7 @@ use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind
 use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{
-    Amounts, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
+    ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
 };
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::time::now;
@@ -144,25 +144,18 @@ impl ClientModule for GatewayClientModuleV2 {
     }
     fn input_fee(
         &self,
-        amount: &Amounts,
+        _amount: Amount,
         _input: &<Self::Common as ModuleCommon>::Input,
-    ) -> Option<Amounts> {
-        Some(Amounts::new_bitcoin(
-            self.cfg.fee_consensus.fee(amount.expect_only_bitcoin()),
-        ))
+    ) -> Option<Amount> {
+        Some(self.cfg.input_fee)
     }
 
     fn output_fee(
         &self,
-        _amount: &Amounts,
-        output: &<Self::Common as ModuleCommon>::Output,
-    ) -> Option<Amounts> {
-        let amount = match output.ensure_v0_ref().ok()? {
-            LightningOutputV0::Outgoing(contract) => contract.amount,
-            LightningOutputV0::Incoming(contract) => contract.commitment.amount,
-        };
-
-        Some(Amounts::new_bitcoin(self.cfg.fee_consensus.fee(amount)))
+        _amount: Amount,
+        _output: &<Self::Common as ModuleCommon>::Output,
+    ) -> Option<Amount> {
+        Some(self.cfg.output_fee)
     }
 }
 
@@ -416,7 +409,7 @@ impl GatewayClientModuleV2 {
 
         let client_output = ClientOutput::<LightningOutput> {
             output: LightningOutput::V0(LightningOutputV0::Incoming(contract.clone())),
-            amounts: Amounts::new_bitcoin(contract.commitment.amount),
+            amount: contract.commitment.amount,
         };
         let commitment = contract.commitment.clone();
         let client_output_sm = ClientOutputSM::<GatewayClientStateMachinesV2> {
@@ -494,7 +487,7 @@ impl GatewayClientModuleV2 {
 
         let client_output = ClientOutput::<LightningOutput> {
             output: LightningOutput::V0(LightningOutputV0::Incoming(contract.clone())),
-            amounts: Amounts::new_bitcoin(contract.commitment.amount),
+            amount: contract.commitment.amount,
         };
         let commitment = contract.commitment.clone();
         let client_output_sm = ClientOutputSM::<GatewayClientStateMachinesV2> {

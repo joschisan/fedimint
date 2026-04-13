@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use bitcoin::key::Keypair;
 use bitcoin::secp256k1;
+use fedimint_core::Amount;
 use fedimint_core::core::{
     DynInput, DynOutput, IInput, IOutput, IntoDynInstance, ModuleInstanceId,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::Amounts;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::transaction::{Transaction, TransactionSignature};
 use fedimint_logging::LOG_CLIENT;
@@ -29,7 +29,7 @@ use crate::{
 pub struct ClientInput<I = DynInput> {
     pub input: I,
     pub keys: Vec<Keypair>,
-    pub amounts: Amounts,
+    pub amount: Amount,
 }
 
 #[derive(Clone)]
@@ -132,7 +132,7 @@ where
                 .map(|input| InstancelessDynClientInput {
                     input: Box::new(input.input),
                     keys: input.keys,
-                    amounts: input.amounts,
+                    amount: input.amount,
                 })
                 .collect(),
             sm_gens: self
@@ -163,7 +163,7 @@ where
         ClientInput {
             input: self.input.into_dyn(module_instance_id),
             keys: self.keys,
-            amounts: self.amounts,
+            amount: self.amount,
         }
     }
 }
@@ -216,7 +216,7 @@ impl IntoDynInstance for InstancelessDynClientInputBundle {
                 .map(|input| ClientInput {
                     input: DynInput::from_parts(module_instance_id, input.input),
                     keys: input.keys,
-                    amounts: input.amounts,
+                    amount: input.amount,
                 })
                 .collect::<Vec<ClientInput>>(),
 
@@ -243,7 +243,7 @@ pub struct ClientOutputBundle<O = DynOutput, S = DynState> {
 #[derive(Clone, Debug)]
 pub struct ClientOutput<O = DynOutput> {
     pub output: O,
-    pub amounts: Amounts,
+    pub amount: Amount,
 }
 
 #[derive(Clone)]
@@ -304,7 +304,7 @@ where
                 .into_iter()
                 .map(|output| InstancelessDynClientOutput {
                     output: Box::new(output.output),
-                    amounts: output.amounts,
+                    amount: output.amount,
                 })
                 .collect(),
             sm_gens: self
@@ -359,7 +359,7 @@ impl IntoDynInstance for InstancelessDynClientOutputBundle {
                 .into_iter()
                 .map(|output| ClientOutput {
                     output: DynOutput::from_parts(module_instance_id, output.output),
-                    amounts: output.amounts,
+                    amount: output.amount,
                 })
                 .collect::<Vec<ClientOutput>>(),
 
@@ -386,7 +386,7 @@ where
     fn into_dyn(self, module_instance_id: ModuleInstanceId) -> ClientOutput {
         ClientOutput {
             output: self.output.into_dyn(module_instance_id),
-            amounts: self.amounts,
+            amount: self.amount,
         }
     }
 }

@@ -1,7 +1,7 @@
 use fedimint_core::db::DatabaseTransaction;
-use fedimint_core::module::{Amounts, CoreConsensusVersion, TransactionItemAmounts};
+use fedimint_core::module::TransactionItemAmounts;
 use fedimint_core::transaction::{TRANSACTION_OVERFLOW_ERROR, Transaction, TransactionError};
-use fedimint_core::{InPoint, OutPoint};
+use fedimint_core::{Amount, InPoint, OutPoint};
 use fedimint_server_core::ServerModuleRegistry;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
@@ -15,7 +15,6 @@ pub async fn process_transaction_with_dbtx(
     modules: ServerModuleRegistry,
     dbtx: &mut DatabaseTransaction<'_>,
     transaction: &Transaction,
-    version: CoreConsensusVersion,
     mode: TxProcessingMode,
 ) -> Result<(), TransactionError> {
     // We can not return the error here as errors are not returned in a specified
@@ -103,16 +102,16 @@ pub async fn process_transaction_with_dbtx(
         funding_verifier.add_output(amount)?;
     }
 
-    funding_verifier.verify_funding(version)?;
+    funding_verifier.verify_funding()?;
 
     Ok(())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FundingVerifier {
-    inputs: Amounts,
-    outputs: Amounts,
-    fees: Amounts,
+    inputs: Amount,
+    outputs: Amount,
+    fees: Amount,
 }
 
 impl FundingVerifier {
@@ -120,11 +119,13 @@ impl FundingVerifier {
         &mut self,
         input: TransactionItemAmounts,
     ) -> Result<&mut Self, TransactionError> {
-        self.inputs
-            .checked_add_mut(&input.amounts)
+        self.inputs = self
+            .inputs
+            .checked_add(input.amount)
             .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
-        self.fees
-            .checked_add_mut(&input.fees)
+        self.fees = self
+            .fees
+            .checked_add(input.fee)
             .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
 
         Ok(self)
@@ -134,65 +135,33 @@ impl FundingVerifier {
         &mut self,
         output_amounts: TransactionItemAmounts,
     ) -> Result<&mut Self, TransactionError> {
-        self.outputs
-            .checked_add_mut(&output_amounts.amounts)
+        self.outputs = self
+            .outputs
+            .checked_add(output_amounts.amount)
             .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
-        self.fees
-            .checked_add_mut(&output_amounts.fees)
+        self.fees = self
+            .fees
+            .checked_add(output_amounts.fee)
             .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
 
         Ok(self)
     }
 
-    pub fn verify_funding(mut self, version: CoreConsensusVersion) -> Result<(), TransactionError> {
-        // In early versions we did not allow any overpaying
-        const OVERPAY_MIN_VERSION: CoreConsensusVersion = CoreConsensusVersion::new(2, 1);
-
+    pub fn verify_funding(self) -> Result<(), TransactionError> {
         let outputs_and_fees = self
             .outputs
-            .clone()
-            .checked_add(&self.fees)
+            .checked_add(self.fees)
             .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
 
-        for (out_unit, out_amount) in outputs_and_fees {
-            let input_amount = self.inputs.get(&out_unit).copied().unwrap_or_default();
-
-            if input_amount < out_amount
-                // In early versions we did not allow any overpaying
-                ||  (input_amount != out_amount  && version < OVERPAY_MIN_VERSION)
-            {
-                return Err(TransactionError::UnbalancedTransaction {
-                    inputs: input_amount,
-                    outputs: self.outputs.get(&out_unit).copied().unwrap_or_default(),
-                    fee: self.fees.get(&out_unit).copied().unwrap_or_default(),
-                });
-            }
-
-            // Explicitly remove for the check below to
-            self.inputs.remove(&out_unit);
-        }
-
-        if version < OVERPAY_MIN_VERSION
-            && let Some((inputs_unit, inputs_amount)) = self.inputs.into_iter().next()
-        {
+        if self.inputs < outputs_and_fees {
             return Err(TransactionError::UnbalancedTransaction {
-                inputs: inputs_amount,
-                outputs: self.outputs.get(&inputs_unit).copied().unwrap_or_default(),
-                fee: self.fees.get(&inputs_unit).copied().unwrap_or_default(),
+                inputs: self.inputs,
+                outputs: self.outputs,
+                fee: self.fees,
             });
         }
 
         Ok(())
-    }
-}
-
-impl Default for FundingVerifier {
-    fn default() -> Self {
-        FundingVerifier {
-            inputs: Amounts::ZERO,
-            outputs: Amounts::ZERO,
-            fees: Amounts::ZERO,
-        }
     }
 }
 

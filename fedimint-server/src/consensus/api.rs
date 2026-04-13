@@ -126,7 +126,6 @@ impl ConsensusApi {
             self.modules.clone(),
             &mut dbtx,
             &transaction,
-            self.cfg.consensus.version,
             TxProcessingMode::Submission,
         )
         .await

@@ -6,7 +6,6 @@ use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::Amounts;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::util::backoff_util::api_networking_backoff;
 use fedimint_core::{OutPoint, TransactionId, crit, secp256k1, util};
@@ -241,7 +240,7 @@ impl SendStateMachine {
                         old_state.common.outpoint,
                         OutgoingWitness::Cancel(signature),
                     )),
-                    amounts: Amounts::new_bitcoin(old_state.common.contract.amount),
+                    amount: old_state.common.contract.amount,
                     keys: vec![old_state.common.refund_keypair],
                 };
 
@@ -311,7 +310,7 @@ impl SendStateMachine {
                 old_state.common.outpoint,
                 OutgoingWitness::Refund,
             )),
-            amounts: Amounts::new_bitcoin(old_state.common.contract.amount),
+            amount: old_state.common.contract.amount,
             keys: vec![old_state.common.refund_keypair],
         };
 

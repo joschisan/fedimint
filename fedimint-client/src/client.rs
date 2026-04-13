@@ -48,8 +48,8 @@ use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{
-    AmountUnit, Amounts, ApiRequestErased, ApiVersion, MultiApiVersion,
-    SupportedApiVersionsSummary, SupportedCoreApiVersions, SupportedModuleApiVersions,
+    ApiRequestErased, ApiVersion, MultiApiVersion, SupportedApiVersionsSummary,
+    SupportedCoreApiVersions, SupportedModuleApiVersions,
 };
 use fedimint_core::runtime::sleep;
 use fedimint_core::task::{Elapsed, MaybeSend, MaybeSync, TaskGroup};
@@ -104,15 +104,6 @@ pub(crate) mod handle;
 const SUPPORTED_CORE_API_VERSIONS: &[fedimint_core::module::ApiVersion] =
     &[ApiVersion { major: 0, minor: 0 }];
 
-/// Primary module candidates at specific priority level
-#[derive(Default)]
-pub(crate) struct PrimaryModuleCandidates {
-    /// Modules that listed specific units they handle
-    specific: BTreeMap<AmountUnit, Vec<ModuleInstanceId>>,
-    /// Modules handling any unit
-    wildcard: Vec<ModuleInstanceId>,
-}
-
 /// Main client type
 ///
 /// A handle and API to interacting with a single federation. End user
@@ -135,7 +126,7 @@ pub struct Client {
     db: Database,
     federation_id: FederationId,
     federation_config_meta: BTreeMap<String, String>,
-    primary_modules: BTreeMap<PrimaryModulePriority, PrimaryModuleCandidates>,
+    primary_modules: BTreeMap<PrimaryModulePriority, Vec<ModuleInstanceId>>,
     pub(crate) modules: ClientModuleRegistry,
     module_inits: ClientModuleInitRegistry,
     executor: Executor,
@@ -186,10 +177,7 @@ pub struct GetOperationIdRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetBalanceChangesRequest {
-    #[serde(default = "AmountUnit::bitcoin")]
-    unit: AmountUnit,
-}
+pub struct GetBalanceChangesRequest {}
 
 impl Client {
     /// Initialize a client builder that can be configured to create a new
@@ -496,36 +484,36 @@ impl Client {
     /// # Panics
     /// If any of the input or output versions in the transaction builder are
     /// unknown by the respective module.
-    fn transaction_builder_get_balance(&self, builder: &TransactionBuilder) -> (Amounts, Amounts) {
+    fn transaction_builder_get_balance(&self, builder: &TransactionBuilder) -> (Amount, Amount) {
         // FIXME: prevent overflows, currently not suitable for untrusted input
-        let mut in_amounts = Amounts::ZERO;
-        let mut out_amounts = Amounts::ZERO;
-        let mut fee_amounts = Amounts::ZERO;
+        let mut in_amount = Amount::ZERO;
+        let mut out_amount = Amount::ZERO;
+        let mut fee_amount = Amount::ZERO;
 
         for input in builder.inputs() {
             let module = self.get_module(input.input.module_instance_id());
 
-            let item_fees = module.input_fee(&input.amounts, &input.input).expect(
+            let item_fee = module.input_fee(input.amount, &input.input).expect(
                 "We only build transactions with input versions that are supported by the module",
             );
 
-            in_amounts.checked_add_mut(&input.amounts);
-            fee_amounts.checked_add_mut(&item_fees);
+            in_amount += input.amount;
+            fee_amount += item_fee;
         }
 
         for output in builder.outputs() {
             let module = self.get_module(output.output.module_instance_id());
 
-            let item_fees = module.output_fee(&output.amounts, &output.output).expect(
+            let item_fee = module.output_fee(output.amount, &output.output).expect(
                 "We only build transactions with output versions that are supported by the module",
             );
 
-            out_amounts.checked_add_mut(&output.amounts);
-            fee_amounts.checked_add_mut(&item_fees);
+            out_amount += output.amount;
+            fee_amount += item_fee;
         }
 
-        out_amounts.checked_add_mut(&fee_amounts);
-        (in_amounts, out_amounts)
+        out_amount += fee_amount;
+        (in_amount, out_amount)
     }
 
     pub fn get_internal_payment_markers(&self) -> anyhow::Result<(PublicKey, u64)> {
@@ -589,40 +577,23 @@ impl Client {
         operation_id: OperationId,
         mut partial_transaction: TransactionBuilder,
     ) -> anyhow::Result<(Transaction, Vec<DynState>, Range<u64>)> {
-        let (in_amounts, out_amounts) = self.transaction_builder_get_balance(&partial_transaction);
+        let (in_amount, out_amount) = self.transaction_builder_get_balance(&partial_transaction);
 
         let mut added_inputs_bundles = vec![];
         let mut added_outputs_bundles = vec![];
 
-        // The way currently things are implemented is OK for modules which can
-        // collect a fee relative to one being used, but will break down in any
-        // fancy scenarios. Future TODOs:
-        //
-        // * create_final_inputs_and_outputs needs to get broken down, so we can use
-        //   primary modules using priorities (possibly separate prios for inputs and
-        //   outputs to be able to drain modules, etc.); we need the split "check if
-        //   possible" and "take" steps,
-        // * extra inputs and outputs adding fees needs to be taken into account,
-        //   possibly with some looping
-        for unit in in_amounts.units().union(&out_amounts.units()) {
-            let input_amount = in_amounts.get(unit).copied().unwrap_or_default();
-            let output_amount = out_amounts.get(unit).copied().unwrap_or_default();
-            if input_amount == output_amount {
-                continue;
-            }
-
-            let Some((module_id, module)) = self.primary_module_for_unit(*unit) else {
-                bail!("No module to balance a partial transaction (affected unit: {unit:?}");
-            };
+        if in_amount != out_amount {
+            let (module_id, module) = self
+                .primary_module()
+                .ok_or_else(|| anyhow!("No primary module to balance a partial transaction"))?;
 
             let (added_input_bundle, added_output_bundle) = module
                 .create_final_inputs_and_outputs(
                     module_id,
                     dbtx,
                     operation_id,
-                    *unit,
-                    input_amount,
-                    output_amount,
+                    in_amount,
+                    out_amount,
                 )
                 .await?;
 
@@ -650,14 +621,10 @@ impl Client {
             partial_transaction = partial_transaction.with_outputs(added_outputs);
         }
 
-        let (input_amounts, output_amounts) =
+        let (input_amount, output_amount) =
             self.transaction_builder_get_balance(&partial_transaction);
 
-        for (unit, output_amount) in output_amounts {
-            let input_amount = input_amounts.get(&unit).copied().unwrap_or_default();
-
-            assert!(input_amount >= output_amount, "Transaction is underfunded");
-        }
+        assert!(input_amount >= output_amount, "Transaction is underfunded");
 
         let (tx, states) = partial_transaction.build(&self.secp_ctx, thread_rng());
 
@@ -876,7 +843,7 @@ impl Client {
         operation_id: OperationId,
         out_point: OutPoint,
     ) -> anyhow::Result<()> {
-        self.primary_module_for_unit(AmountUnit::BITCOIN)
+        self.primary_module()
             .ok_or_else(|| anyhow!("No primary module available"))?
             .1
             .await_primary_module_output(operation_id, out_point)
@@ -974,28 +941,25 @@ impl Client {
     /// Like [`Self::get_balance`] but returns an error if primary module is not
     /// available
     pub async fn get_balance_for_btc(&self) -> anyhow::Result<Amount> {
-        self.get_balance_for_unit(AmountUnit::BITCOIN).await
+        self.get_balance().await
     }
 
-    pub async fn get_balance_for_unit(&self, unit: AmountUnit) -> anyhow::Result<Amount> {
+    pub async fn get_balance(&self) -> anyhow::Result<Amount> {
         let (id, module) = self
-            .primary_module_for_unit(unit)
+            .primary_module()
             .ok_or_else(|| anyhow!("Primary module not available"))?;
         Ok(module
-            .get_balance(id, &mut self.db().begin_transaction_nc().await, unit)
+            .get_balance(id, &mut self.db().begin_transaction_nc().await)
             .await)
     }
 
     /// Returns a stream that yields the current client balance every time it
     /// changes.
-    pub async fn subscribe_balance_changes(&self, unit: AmountUnit) -> BoxStream<'static, Amount> {
+    pub async fn subscribe_balance_changes(&self) -> BoxStream<'static, Amount> {
         let primary_module_things =
-            if let Some((primary_module_id, primary_module)) = self.primary_module_for_unit(unit) {
+            if let Some((primary_module_id, primary_module)) = self.primary_module() {
                 let balance_changes = primary_module.subscribe_balance_changes().await;
-                let initial_balance = self
-                    .get_balance_for_unit(unit)
-                    .await
-                    .expect("Primary is present");
+                let initial_balance = self.get_balance().await.expect("Primary is present");
 
                 Some((
                     primary_module_id,
@@ -1021,7 +985,7 @@ impl Client {
             while let Some(()) = balance_changes.next().await {
                 let mut dbtx = db.begin_transaction_nc().await;
                 let balance = primary_module
-                     .get_balance(primary_module_id, &mut dbtx, unit)
+                     .get_balance(primary_module_id, &mut dbtx)
                     .await;
 
                 // Deduplicate in case modules cannot always tell if the balance actually changed
@@ -1847,12 +1811,12 @@ impl Client {
         Box::pin(try_stream! {
             match method.as_str() {
                 "get_balance" => {
-                    let balance = self.get_balance_for_btc().await.unwrap_or_default();
+                    let balance = self.get_balance().await.unwrap_or_default();
                     yield serde_json::to_value(balance)?;
                 }
                 "subscribe_balance_changes" => {
-                    let req: GetBalanceChangesRequest= serde_json::from_value(params)?;
-                    let mut stream = self.subscribe_balance_changes(req.unit).await;
+                    let _req: GetBalanceChangesRequest = serde_json::from_value(params)?;
+                    let mut stream = self.subscribe_balance_changes().await;
                     while let Some(balance) = stream.next().await {
                         yield serde_json::to_value(balance)?;
                     }
@@ -2129,40 +2093,18 @@ impl Client {
         Ok(())
     }
 
-    /// Iterator over primary modules for a given `unit`
-    fn primary_modules_for_unit(
-        &self,
-        unit: AmountUnit,
-    ) -> impl Iterator<Item = (ModuleInstanceId, &DynClientModule)> {
+    /// Returns the highest-priority primary module, if any
+    pub fn primary_module(&self) -> Option<(ModuleInstanceId, &DynClientModule)> {
         self.primary_modules
             .iter()
-            .flat_map(move |(_prio, candidates)| {
-                candidates
-                    .specific
-                    .get(&unit)
-                    .into_iter()
-                    .flatten()
-                    .copied()
-                    // within same priority, wildcard matches come last
-                    .chain(candidates.wildcard.iter().copied())
-            })
+            .flat_map(|(_prio, ids)| ids.iter().copied())
             .map(|id| (id, self.modules.get_expect(id)))
+            .next()
     }
 
-    /// Primary module to use for `unit`
-    ///
-    /// Currently, just pick the first (highest priority) match
-    pub fn primary_module_for_unit(
-        &self,
-        unit: AmountUnit,
-    ) -> Option<(ModuleInstanceId, &DynClientModule)> {
-        self.primary_modules_for_unit(unit).next()
-    }
-
-    /// [`Self::primary_module_for_unit`] for Bitcoin
+    /// Returns the primary module, panicking if none is available
     pub fn primary_module_for_btc(&self) -> (ModuleInstanceId, &DynClientModule) {
-        self.primary_module_for_unit(AmountUnit::BITCOIN)
-            .expect("No primary module for Bitcoin")
+        self.primary_module().expect("No primary module available")
     }
 }
 

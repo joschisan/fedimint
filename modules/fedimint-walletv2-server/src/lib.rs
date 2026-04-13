@@ -43,7 +43,7 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::envs::{FM_ENABLE_MODULE_WALLETV2_ENV, is_env_var_set_opt};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
-    Amounts, ApiEndpoint, ApiVersion, CORE_CONSENSUS_VERSION, CoreConsensusVersion, InputMeta,
+    ApiEndpoint, ApiVersion, CORE_CONSENSUS_VERSION, CoreConsensusVersion, InputMeta,
     ModuleConsensusVersion, ModuleInit, SupportedModuleApiVersions, TransactionItemAmounts,
     api_endpoint,
 };
@@ -61,9 +61,7 @@ use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
 pub use fedimint_walletv2_common as common;
-use fedimint_walletv2_common::config::{
-    FeeConsensus, WalletClientConfig, WalletConfig, WalletConfigPrivate,
-};
+use fedimint_walletv2_common::config::{WalletClientConfig, WalletConfig, WalletConfigPrivate};
 use fedimint_walletv2_common::endpoint_constants::{
     CONSENSUS_BLOCK_COUNT_ENDPOINT, CONSENSUS_FEERATE_ENDPOINT, FEDERATION_WALLET_ENDPOINT,
     OUTPUT_INFO_SLICE_ENDPOINT, PENDING_TRANSACTION_CHAIN_ENDPOINT, RECEIVE_FEE_ENDPOINT,
@@ -295,8 +293,6 @@ impl ServerModuleInit for WalletInit {
         peers: &(dyn PeerHandleOps + Send + Sync),
         args: &ConfigGenModuleArgs,
     ) -> anyhow::Result<ServerModuleConfig> {
-        let fee_consensus = FeeConsensus::new(0).expect("Relative fee is within range");
-
         let (bitcoin_sk, bitcoin_pk) = secp256k1::generate_keypair(&mut OsRng);
 
         let bitcoin_pks: BTreeMap<PeerId, PublicKey> = peers
@@ -305,9 +301,12 @@ impl ServerModuleInit for WalletInit {
             .into_iter()
             .collect();
 
+        let input_fee = fedimint_core::Amount::from_sats(1);
+        let output_fee = fedimint_core::Amount::from_sats(1);
+
         let config = WalletConfig {
             private: WalletConfigPrivate { bitcoin_sk },
-            consensus: WalletConfigConsensus::new(bitcoin_pks, fee_consensus, args.network),
+            consensus: WalletConfigConsensus::new(bitcoin_pks, input_fee, output_fee, args.network),
         };
 
         Ok(config.to_erased())
@@ -341,7 +340,8 @@ impl ServerModuleInit for WalletInit {
             receive_tx_vbytes: config.receive_tx_vbytes,
             feerate_base: config.feerate_base,
             dust_limit: config.dust_limit,
-            fee_consensus: config.fee_consensus,
+            input_fee: config.input_fee,
+            output_fee: config.output_fee,
             network: config.network,
         })
     }
@@ -589,8 +589,8 @@ impl ServerModule for Wallet {
 
         Ok(InputMeta {
             amount: TransactionItemAmounts {
-                amounts: Amounts::new_bitcoin(amount),
-                fees: Amounts::new_bitcoin(self.cfg.consensus.fee_consensus.fee(amount)),
+                amount,
+                fee: self.cfg.consensus.input_fee,
             },
             pub_key: input.tweak,
         })
@@ -721,8 +721,8 @@ impl ServerModule for Wallet {
             .ok_or(WalletOutputError::ArithmeticOverflow)?;
 
         Ok(TransactionItemAmounts {
-            amounts: Amounts::new_bitcoin(amount),
-            fees: Amounts::new_bitcoin(self.cfg.consensus.fee_consensus.fee(amount)),
+            amount,
+            fee: self.cfg.consensus.output_fee,
         })
     }
 
