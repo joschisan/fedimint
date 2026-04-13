@@ -165,8 +165,21 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
 
         let send_op = lnv2.send(invoice, Some(gw.clone()), Value::Null).await?;
 
-        // Give the HTLC a moment to reach the payee, then fail it.
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // Wait until the HTLC is actually held by LDK, then fail it. Failing
+        // before the HTLC arrives is a no-op in LDK's ChannelManager, so the
+        // HTLC would sit held and the contract would never cancel.
+        loop {
+            let event = env.ldk_node.next_event_async().await;
+            env.ldk_node.event_handled()?;
+            if let ldk_node::Event::PaymentClaimable {
+                payment_hash: hash, ..
+            } = event
+            {
+                if hash == payment_hash {
+                    break;
+                }
+            }
+        }
         env.ldk_node.bolt11_payment().fail_for_hash(payment_hash)?;
 
         let state = lnv2.await_final_send_operation_state(send_op).await?;

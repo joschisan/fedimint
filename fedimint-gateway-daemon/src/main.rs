@@ -149,15 +149,17 @@ fn main() -> anyhow::Result<()> {
     registry.attach(MintClientInit);
     registry.attach(WalletClientInit);
 
-    let client_factory =
-        match runtime.block_on(GatewayClientFactory::try_load(gateway_db.clone(), registry.clone()))? {
-            Some(factory) => factory,
-            None => runtime.block_on(GatewayClientFactory::init(
-                gateway_db.clone(),
-                Bip39RootSecretStrategy::<12>::random(&mut OsRng),
-                registry,
-            ))?,
-        };
+    let client_factory = match runtime.block_on(GatewayClientFactory::try_load(
+        gateway_db.clone(),
+        registry.clone(),
+    ))? {
+        Some(factory) => factory,
+        None => runtime.block_on(GatewayClientFactory::init(
+            gateway_db.clone(),
+            Bip39RootSecretStrategy::<12>::random(&mut OsRng),
+            registry,
+        ))?,
+    };
 
     let mnemonic = client_factory.mnemonic().clone();
 

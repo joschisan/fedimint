@@ -238,7 +238,7 @@ impl TestEnv {
         })
         .await?;
 
-        info!("Pegged in (1 block to {addr})");
+        info!("Pegged in to {addr}");
         Ok(())
     }
 }
