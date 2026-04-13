@@ -22,7 +22,6 @@
 
 extern crate fedimint_core;
 pub mod cli;
-pub mod connection_limits;
 pub mod db;
 
 use std::path::{Path, PathBuf};
@@ -30,7 +29,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use config::ServerConfig;
 use config::io::read_server_config;
-pub use connection_limits::ConnectionLimits;
+pub use consensus::ConnectionLimits;
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped as _};

@@ -42,7 +42,6 @@ use tokio::sync::{Semaphore, watch};
 use tracing::{info, warn};
 
 use crate::config::ServerConfig;
-use crate::connection_limits::ConnectionLimits;
 use crate::consensus::api::{ConsensusApi, server_endpoints};
 use crate::consensus::engine::ConsensusEngine;
 use crate::db::verify_server_db_integrity_dbtx;
@@ -348,6 +347,24 @@ fn submit_module_ci_proposals(
             }
         },
     );
+}
+
+/// Configuration for connection and request limits
+#[derive(Debug, Clone, Copy)]
+pub struct ConnectionLimits {
+    /// Maximum number of concurrent connections
+    pub max_connections: usize,
+    /// Maximum number of parallel requests per connection
+    pub max_requests_per_connection: usize,
+}
+
+impl ConnectionLimits {
+    pub fn new(max_connections: usize, max_requests_per_connection: usize) -> Self {
+        Self {
+            max_connections,
+            max_requests_per_connection,
+        }
+    }
 }
 
 async fn start_iroh_api(
