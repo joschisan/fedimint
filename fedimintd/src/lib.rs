@@ -10,6 +10,7 @@ mod metrics;
 
 use std::convert::Infallible;
 use std::env;
+use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -272,7 +273,7 @@ pub async fn run(
         let mut module_env_help = String::from("\nModule environment variables:\n");
         for (_kind, module_init) in module_init_registry.iter() {
             for doc in module_init.get_documented_env_vars() {
-                module_env_help.push_str(&format!("  {:40}  {}\n", doc.name, doc.description));
+                let _ = writeln!(module_env_help, "  {:40}  {}", doc.name, doc.description);
             }
         }
         let matches = ServerOpts::command()
