@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
 use crate::config::{ConfigGenParams, ConfigGenSettings, PeerSetupCode};
-use crate::net::api::HasApiContext;
+use crate::net::HasApiContext;
 
 /// State held by the API after receiving a `ConfigGenConnectionsRequest`
 #[derive(Debug, Clone, Default)]

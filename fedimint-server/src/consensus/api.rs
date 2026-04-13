@@ -58,7 +58,7 @@ use crate::config::{ServerConfig, legacy_consensus_config_hash};
 use crate::consensus::db::{AcceptedItemPrefix, AcceptedTransactionKey, SignedSessionOutcomeKey};
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::transaction::process_transaction_with_dbtx;
-use crate::net::api::HasApiContext;
+use crate::net::HasApiContext;
 use crate::net::p2p::P2PStatusReceivers;
 
 #[derive(Clone)]

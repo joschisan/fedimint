@@ -46,7 +46,7 @@ use crate::connection_limits::ConnectionLimits;
 use crate::consensus::api::{ConsensusApi, server_endpoints};
 use crate::consensus::engine::ConsensusEngine;
 use crate::db::verify_server_db_integrity_dbtx;
-use crate::net::api::HasApiContext;
+use crate::net::HasApiContext;
 use crate::net::p2p::P2PStatusReceivers;
 use crate::{DashboardUiRouter, update_server_info_version_dbtx};
 
