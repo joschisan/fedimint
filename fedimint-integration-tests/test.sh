@@ -31,7 +31,7 @@ sleep 3
 echo "Creating wallet..."
 docker exec "$CONTAINER_NAME" bitcoin-cli \
     -regtest -rpcuser=bitcoin -rpcpassword=bitcoin \
-    createwallet "" || true
+    createwallet "" > /dev/null || true
 
 echo "Building workspace..."
 cargo build -p fedimintd -p fedimint-cli -p fedimint-gateway-server -p fedimint-gateway-client -p fedimint-integration-tests

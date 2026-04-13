@@ -37,7 +37,7 @@ sleep 3
 echo "Creating wallet..."
 docker exec "$CONTAINER_NAME" bitcoin-cli \
     -regtest -rpcuser=bitcoin -rpcpassword=bitcoin \
-    createwallet "" || true
+    createwallet "" > /dev/null || true
 
 echo "Building workspace..."
 just build
