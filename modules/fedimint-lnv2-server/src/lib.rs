@@ -18,7 +18,6 @@ use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{
     Database, DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped,
 };
-use fedimint_core::envs::{FM_ENABLE_MODULE_LNV2_ENV, is_env_var_set_opt};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta, ModuleConsensusVersion,
@@ -211,10 +210,6 @@ impl ServerModuleInit for LightningInit {
 
     fn versions(&self, _core: CoreConsensusVersion) -> &[ModuleConsensusVersion] {
         &[MODULE_CONSENSUS_VERSION]
-    }
-
-    fn is_enabled_by_default(&self) -> bool {
-        is_env_var_set_opt(FM_ENABLE_MODULE_LNV2_ENV).unwrap_or(true)
     }
 
     async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
