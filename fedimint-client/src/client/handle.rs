@@ -113,15 +113,7 @@ impl ClientHandle {
         self.shutdown().await;
 
         builder
-            .build(
-                endpoints,
-                db,
-                root_secret,
-                config,
-                api_secret,
-                false,
-                None, // chain_id should already be cached
-            )
+            .build(endpoints, db, root_secret, config, api_secret, false)
             .await
     }
 }

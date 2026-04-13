@@ -121,10 +121,8 @@ impl WalletConfigConsensus {
             // doubling kicks in.
             feerate_base: 250,
             dust_limit: bitcoin::Amount::from_sat(10_000),
-
-            input_fee: fedimint_core::Amount::from_sats(1),
-            output_fee: fedimint_core::Amount::from_sats(1),
-
+            input_fee: fedimint_core::Amount::from_sats(10),
+            output_fee: fedimint_core::Amount::from_sats(10),
             network,
         }
     }

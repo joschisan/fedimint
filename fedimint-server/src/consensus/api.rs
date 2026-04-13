@@ -28,7 +28,7 @@ use fedimint_core::transaction::{
     SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
 };
 use fedimint_core::util::{FmtCompact, SafeUrl};
-use fedimint_core::{ChainId, PeerId, TransactionId};
+use fedimint_core::{PeerId, TransactionId};
 use fedimint_logging::LOG_NET_API;
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::dashboard_ui::{

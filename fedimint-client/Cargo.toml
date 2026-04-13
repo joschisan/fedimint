@@ -26,7 +26,6 @@ async-stream = { workspace = true }
 async-trait = { workspace = true }
 bitcoin = { workspace = true, features = ["rand-std"] }
 fedimint-api-client = { workspace = true }
-fedimint-bitcoind = { workspace = true }
 fedimint-client-module = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-derive-secret = { workspace = true }
