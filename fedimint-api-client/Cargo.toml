@@ -22,10 +22,9 @@ async-trait = { workspace = true }
 bitcoin = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-logging = { workspace = true }
+futures = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false }
-z32 = { workspace = true }
-futures = { workspace = true }
 jsonrpsee-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -33,6 +32,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tracing = { workspace = true }
+z32 = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }

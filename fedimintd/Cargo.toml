@@ -28,12 +28,12 @@ clap = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 fedimint-lnv2-server = { workspace = true }
-fedimint-server-cli-core = { workspace = true }
 fedimint-logging = { workspace = true, features = ["telemetry"] }
 fedimint-mintv2-server = { workspace = true }
 fedimint-rocksdb = { workspace = true }
 fedimint-server = { workspace = true }
 fedimint-server-bitcoin-rpc = { workspace = true }
+fedimint-server-cli-core = { workspace = true }
 fedimint-server-core = { workspace = true }
 fedimint-server-ui = { workspace = true }
 fedimint-unknown-common = { workspace = true }
