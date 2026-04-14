@@ -38,24 +38,12 @@ pub async fn download_from_invite_code(
     );
 
     let federation_id = invite.federation_id();
-    let api_from_invite = DynGlobalApi::new(
-        endpoint.clone(),
-        invite.peers(),
-        invite.api_secret().as_deref(),
-    )?;
-    let api_secret = invite.api_secret();
+    let api_from_invite = DynGlobalApi::new(endpoint.clone(), invite.peers());
 
     fedimint_core::util::retry(
         "Downloading client config",
         backoff_util::aggressive_backoff(),
-        || {
-            try_download_client_config(
-                endpoint,
-                &api_from_invite,
-                federation_id,
-                api_secret.clone(),
-            )
-        },
+        || try_download_client_config(endpoint, &api_from_invite, federation_id),
     )
     .await
     .context("Failed to download client config")
@@ -66,7 +54,6 @@ pub async fn try_download_client_config(
     endpoint: &Endpoint,
     api_from_invite: &DynGlobalApi,
     federation_id: FederationId,
-    api_secret: Option<String>,
 ) -> anyhow::Result<(ClientConfig, DynGlobalApi)> {
     debug!(target: LOG_CLIENT_NET, "Downloading client config from peer");
     let query_strategy = FilterMap::new(move |cfg: ClientConfig| {
@@ -94,7 +81,7 @@ pub async fn try_download_client_config(
 
     debug!(target: LOG_CLIENT_NET, "Verifying client config with all peers");
 
-    let api_full = DynGlobalApi::new(endpoint.clone(), api_endpoints, api_secret.as_deref())?;
+    let api_full = DynGlobalApi::new(endpoint.clone(), api_endpoints);
     let client_config = api_full
         .request_current_consensus::<ClientConfig>(
             CLIENT_CONFIG_ENDPOINT.to_owned(),

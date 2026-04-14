@@ -375,8 +375,7 @@ impl ClientBuilder {
             .iter()
             .map(|(peer, endpoint)| (*peer, endpoint.url.clone()))
             .collect();
-        let api: DynGlobalApi =
-            FederationApi::new(connectors.clone(), peer_urls, None, api_secret.as_deref()).into();
+        let api: DynGlobalApi = FederationApi::new(connectors.clone(), peer_urls).into();
 
         let task_group = TaskGroup::new();
 

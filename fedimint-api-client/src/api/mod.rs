@@ -13,7 +13,7 @@ use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, OutputOut
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };
-use fedimint_core::module::{ApiAuth, ApiMethod, ApiRequestErased, SerdeModuleEncoding};
+use fedimint_core::module::{ApiMethod, ApiRequestErased, SerdeModuleEncoding};
 use fedimint_core::runtime::sleep;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::transaction::{SerdeTransaction, Transaction, TransactionSubmissionOutcome};
@@ -58,12 +58,6 @@ pub trait IRawFederationApi: Debug + MaybeSend + MaybeSync {
     /// have some idea as well, but passing this set across every
     /// API call to the federation would be inconvenient.
     fn all_peers(&self) -> &BTreeSet<PeerId>;
-
-    /// `PeerId` of the Guardian node, if set
-    ///
-    /// This is for using Client in a "Admin" mode, making authenticated
-    /// calls to own `fedimintd` instance.
-    fn self_peer(&self) -> Option<PeerId>;
 
     fn with_module(&self, id: ModuleInstanceId) -> DynModuleApi;
 
@@ -324,26 +318,6 @@ pub trait FederationApiExt: IRawFederationApi {
         .await
     }
 
-    async fn request_admin<Ret>(
-        &self,
-        method: &str,
-        params: ApiRequestErased,
-        auth: ApiAuth,
-    ) -> FederationResult<Ret>
-    where
-        Ret: DeserializeOwned + Eq + Debug + Clone + MaybeSend,
-    {
-        let Some(self_peer_id) = self.self_peer() else {
-            return Err(FederationError::general(
-                method,
-                params,
-                anyhow::format_err!("Admin peer_id not set"),
-            ));
-        };
-
-        self.request_single_peer_federation(method.into(), params.with_auth(auth), self_peer_id)
-            .await
-    }
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -366,25 +340,8 @@ impl AsRef<dyn IGlobalFederationApi + 'static> for DynGlobalApi {
 }
 
 impl DynGlobalApi {
-    pub fn new(
-        endpoint: Endpoint,
-        peers: BTreeMap<PeerId, SafeUrl>,
-        api_secret: Option<&str>,
-    ) -> anyhow::Result<Self> {
-        Ok(FederationApi::new(endpoint, peers, None, api_secret).into())
-    }
-
-    pub fn new_admin(
-        endpoint: Endpoint,
-        peer: PeerId,
-        url: SafeUrl,
-        api_secret: Option<&str>,
-    ) -> anyhow::Result<DynGlobalApi> {
-        Ok(FederationApi::new(endpoint, [(peer, url)].into(), Some(peer), api_secret).into())
-    }
-
-    pub fn new_admin_setup(endpoint: Endpoint, url: SafeUrl) -> anyhow::Result<Self> {
-        Self::new_admin(endpoint, PeerId::from(1024), url, None)
+    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, SafeUrl>) -> Self {
+        FederationApi::new(endpoint, peers).into()
     }
 }
 
@@ -452,19 +409,12 @@ where
 pub struct FederationApi {
     peers: BTreeMap<PeerId, SafeUrl>,
     peers_keys: BTreeSet<PeerId>,
-    admin_id: Option<PeerId>,
     module_id: Option<ModuleInstanceId>,
-    api_secret: Option<String>,
     states: BTreeMap<PeerId, watch::Receiver<Option<PeerState>>>,
 }
 
 impl FederationApi {
-    pub fn new(
-        endpoint: Endpoint,
-        peers: BTreeMap<PeerId, SafeUrl>,
-        admin_peer_id: Option<PeerId>,
-        api_secret: Option<&str>,
-    ) -> Self {
+    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, SafeUrl>) -> Self {
         let mut states = BTreeMap::new();
 
         for (peer_id, url) in &peers {
@@ -480,9 +430,7 @@ impl FederationApi {
         Self {
             peers_keys: peers.keys().copied().collect(),
             peers,
-            admin_id: admin_peer_id,
             module_id: None,
-            api_secret: api_secret.map(ToOwned::to_owned),
             states,
         }
     }
@@ -560,16 +508,10 @@ impl IRawFederationApi for FederationApi {
         &self.peers_keys
     }
 
-    fn self_peer(&self) -> Option<PeerId> {
-        self.admin_id
-    }
-
     fn with_module(&self, id: ModuleInstanceId) -> DynModuleApi {
         FederationApi {
-            api_secret: self.api_secret.clone(),
             peers: self.peers.clone(),
             peers_keys: self.peers_keys.clone(),
-            admin_id: self.admin_id,
             module_id: Some(id),
             states: self.states.clone(),
         }

@@ -90,7 +90,6 @@ pub async fn run(
 
     let mut modules = BTreeMap::new();
 
-    // TODO: make it work with all transports and federation secrets
     let global_api = DynGlobalApi::new(
         connectors.clone(),
         cfg.consensus
@@ -98,8 +97,7 @@ pub async fn run(
             .iter()
             .map(|(&peer_id, url)| (peer_id, url.url.clone()))
             .collect(),
-        None,
-    )?;
+    );
 
     let bitcoin_rpc_connection = ServerBitcoinRpcMonitor::new(
         dyn_server_bitcoin_rpc,
