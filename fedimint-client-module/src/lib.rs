@@ -45,7 +45,6 @@ pub mod api;
 
 pub mod db;
 
-pub mod backup;
 /// Environment variables
 pub mod envs;
 pub mod meta;
