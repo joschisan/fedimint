@@ -64,7 +64,7 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<MintEvent> {
 }
 
 pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
-    info!("mintv2: double_spend_is_rejected");
+    info!("mintv2: send_and_receive (10 iterations) + double_spend_is_rejected");
 
     let client_send = env.new_client().await?;
     let client_receive = env.new_client().await?;
@@ -74,6 +74,39 @@ pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
 
     let mut send_events = pin!(mint_event_stream(&client_send));
     let mut receive_events = pin!(mint_event_stream(&client_receive));
+
+    for i in 0..10 {
+        info!("Sending ecash payment {} of 10", i + 1);
+
+        let ecash = client_send
+            .get_first_module::<MintClientModule>()?
+            .send(Amount::from_sats(1_000))
+            .await?;
+
+        let Some(MintEvent::Send(_)) = send_events.next().await else {
+            panic!("Expected Send event");
+        };
+
+        let operation_id = client_receive
+            .get_first_module::<MintClientModule>()?
+            .receive(ecash)
+            .await?;
+
+        let Some(MintEvent::Receive(receive)) = receive_events.next().await else {
+            panic!("Expected Receive event");
+        };
+        assert_eq!(receive.operation_id, operation_id);
+
+        let Some(MintEvent::ReceiveUpdate(update)) = receive_events.next().await else {
+            panic!("Expected ReceiveUpdate event");
+        };
+        assert_eq!(update.operation_id, operation_id);
+        assert_eq!(update.status, ReceivePaymentStatus::Success);
+    }
+
+    info!("mintv2: send_and_receive passed");
+
+    info!("mintv2: double_spend_is_rejected");
 
     let ecash = client_send
         .get_first_module::<MintClientModule>()?
