@@ -529,7 +529,6 @@ async fn open_channel(
     // Wait for channel to be active on the gateway side
     retry("channel active", || async {
         let channels = cli::gatewayd_ldk_channel_list(gw_addr)?.channels;
-        info!("channel list: {channels:?}");
         ensure!(
             channels.iter().any(|c| c.is_usable),
             "no active channels yet"
