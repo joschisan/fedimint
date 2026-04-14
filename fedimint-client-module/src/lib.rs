@@ -41,8 +41,6 @@ use crate::sm::executor::ContextGen;
 use crate::sm::{ClientSMDatabaseTransaction, DynState, IState, State};
 use crate::transaction::{ClientInput, ClientOutputBundle, TxSubmissionStates};
 
-pub mod api;
-
 pub mod db;
 
 /// Environment variables

@@ -11,7 +11,6 @@ use async_stream::try_stream;
 use bitcoin::key::Secp256k1;
 use bitcoin::key::rand::thread_rng;
 use bitcoin::secp256k1::{self, PublicKey};
-use fedimint_api_client::api::global_api::with_request_hook::ApiRequestHook;
 use fedimint_api_client::api::{DynGlobalApi, IGlobalFederationApi};
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_client_module::module::recovery::RecoveryProgress;
@@ -122,7 +121,6 @@ pub struct Client {
     /// Receiver for events fired every time (ordered) log event is added.
     log_event_added_rx: watch::Receiver<()>,
     log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
-    request_hook: ApiRequestHook,
     iroh_enable_dht: bool,
     iroh_enable_next: bool,
 }

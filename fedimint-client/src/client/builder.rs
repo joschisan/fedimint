@@ -5,13 +5,9 @@ use std::sync::Arc;
 use anyhow::{bail, ensure};
 use bitcoin::key::Secp256k1;
 use fedimint_api_client::api::global_api::with_cache::GlobalFederationApiWithCacheExt as _;
-use fedimint_api_client::api::global_api::with_request_hook::{
-    ApiRequestHook, RawFederationApiWithRequestHookExt as _,
-};
 use fedimint_api_client::api::{DynGlobalApi, FederationApi};
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_api_client::download_from_invite_code;
-use fedimint_client_module::api::ClientRawFederationApiExt as _;
 use fedimint_client_module::meta::LegacyMetaSource;
 use fedimint_client_module::module::init::ClientModuleInit;
 use fedimint_client_module::module::recovery::RecoveryProgress;
@@ -106,7 +102,6 @@ pub struct ClientBuilder {
     meta_service: Arc<crate::meta::MetaService>,
     stopped: bool,
     log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
-    request_hook: ApiRequestHook,
     iroh_enable_dht: bool,
     iroh_enable_next: bool,
 }
@@ -127,7 +122,6 @@ impl ClientBuilder {
             stopped: false,
             meta_service,
             log_event_added_transient_tx,
-            request_hook: Arc::new(|api| api),
             iroh_enable_dht: true,
             iroh_enable_next: true,
         }
@@ -140,7 +134,6 @@ impl ClientBuilder {
             // non unique
             meta_service: client.meta_service.clone(),
             log_event_added_transient_tx: client.log_event_added_transient_tx.clone(),
-            request_hook: client.request_hook.clone(),
             iroh_enable_dht: client.iroh_enable_dht,
             iroh_enable_next: client.iroh_enable_next,
         }
@@ -158,18 +151,6 @@ impl ClientBuilder {
 
     pub fn stopped(&mut self) {
         self.stopped = true;
-    }
-    /// Build the [`Client`] with a custom wrapper around its api request logic
-    ///
-    /// This is intended to be used by downstream applications, e.g. to:
-    ///
-    /// * simulate offline mode,
-    /// * save battery when the OS indicates lack of connectivity,
-    /// * inject faults and delays for testing purposes,
-    /// * collect statistics and emit notifications.
-    pub fn with_api_request_hook(mut self, hook: ApiRequestHook) -> Self {
-        self.request_hook = hook;
-        self
     }
 
     pub fn with_meta_service(&mut self, meta_service: Arc<MetaService>) {
@@ -367,7 +348,6 @@ impl ClientBuilder {
 
         let api_secret = Client::get_api_secret_from_db(&db_no_decoders).await;
         let stopped = self.stopped;
-        let request_hook = self.request_hook.clone();
 
         let log_event_added_transient_tx = self.log_event_added_transient_tx.clone();
         let client = self
@@ -378,7 +358,6 @@ impl ClientBuilder {
                 &config,
                 api_secret,
                 log_event_added_transient_tx,
-                request_hook,
             )
             .await?;
         if !stopped {
@@ -399,7 +378,6 @@ impl ClientBuilder {
         stopped: bool,
     ) -> anyhow::Result<ClientHandle> {
         let log_event_added_transient_tx = self.log_event_added_transient_tx.clone();
-        let request_hook = self.request_hook.clone();
         let client = self
             .build_stopped(
                 connectors,
@@ -408,7 +386,6 @@ impl ClientBuilder {
                 &config,
                 api_secret,
                 log_event_added_transient_tx,
-                request_hook,
             )
             .await?;
         if !stopped {
@@ -420,7 +397,6 @@ impl ClientBuilder {
 
     // TODO: remove config argument
     /// Build a [`Client`] but do not start the executor
-    #[allow(clippy::too_many_arguments)]
     async fn build_stopped(
         self,
         connectors: ConnectionPool,
@@ -429,7 +405,6 @@ impl ClientBuilder {
         config: &ClientConfig,
         api_secret: Option<String>,
         log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
-        request_hook: ApiRequestHook,
     ) -> anyhow::Result<ClientHandle> {
         debug!(
             target: LOG_CLIENT,
@@ -451,8 +426,6 @@ impl ClientBuilder {
             .collect();
         let api: DynGlobalApi =
             FederationApi::new(connectors.clone(), peer_urls, None, api_secret.as_deref())
-                .with_client_ext(db.clone(), log_ordering_wakeup_tx.clone())
-                .with_request_hook(&request_hook)
                 .with_cache()
                 .into();
 
@@ -684,7 +657,6 @@ impl ClientBuilder {
             log_ordering_wakeup_tx,
             log_event_added_rx,
             log_event_added_transient_tx: log_event_added_transient_tx.clone(),
-            request_hook,
             executor,
             api,
             secp_ctx: Secp256k1::new(),
