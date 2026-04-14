@@ -261,34 +261,6 @@ where
         Clone::clone(self.client.get().decoders())
     }
 
-    pub fn input_from_dyn<'i>(
-        &self,
-        input: &'i DynInput,
-    ) -> Option<&'i <M::Common as ModuleCommon>::Input> {
-        (input.module_instance_id() == self.module_instance_id).then(|| {
-            input
-                .as_any()
-                .downcast_ref::<<M::Common as ModuleCommon>::Input>()
-                .unwrap_or_else(|| {
-                    panic!("instance_id {} just checked", input.module_instance_id())
-                })
-        })
-    }
-
-    pub fn output_from_dyn<'o>(
-        &self,
-        output: &'o DynOutput,
-    ) -> Option<&'o <M::Common as ModuleCommon>::Output> {
-        (output.module_instance_id() == self.module_instance_id).then(|| {
-            output
-                .as_any()
-                .downcast_ref::<<M::Common as ModuleCommon>::Output>()
-                .unwrap_or_else(|| {
-                    panic!("instance_id {} just checked", output.module_instance_id())
-                })
-        })
-    }
-
     pub fn map_dyn<'s, 'i, 'o, I>(
         &'s self,
         typed: impl IntoIterator<Item = I> + 'i,
@@ -299,16 +271,6 @@ where
         's: 'o,
     {
         typed.into_iter().map(|i| self.make_dyn(i))
-    }
-
-    /// Turn a typed output into a dyn version
-    pub fn make_dyn_output(&self, output: <M::Common as ModuleCommon>::Output) -> DynOutput {
-        self.make_dyn(output)
-    }
-
-    /// Turn a typed input into a dyn version
-    pub fn make_dyn_input(&self, input: <M::Common as ModuleCommon>::Input) -> DynInput {
-        self.make_dyn(input)
     }
 
     /// Turn a `typed` into a dyn version
