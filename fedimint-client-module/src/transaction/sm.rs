@@ -5,7 +5,7 @@ use std::time::Duration;
 use fedimint_api_client::api::DynGlobalApi;
 use fedimint_core::TransactionId;
 use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::{DatabaseTransaction, GlobalDBTxAccessToken};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::transaction::{Transaction, TransactionSubmissionOutcome};
@@ -232,6 +232,9 @@ pub struct TxSubmissionSmContext {
     pub api: DynGlobalApi,
     pub decoders: ModuleDecoderRegistry,
     pub client: FinalClientIface,
+    /// Access token for escaping the executor's prefix back to the
+    /// global dbtx (needed by `log_event_json`).
+    pub access_token: GlobalDBTxAccessToken,
 }
 
 impl StateMachine for TxSubmissionStatesSM {
@@ -313,10 +316,12 @@ async fn log_tx_event<E: Event + Send>(
     dbtx: &mut DatabaseTransaction<'_>,
     event: E,
 ) {
+    // `log_event_json` asserts the dbtx is global (unprefixed); escape
+    // the executor's prefix via our stored access token.
     ctx.client
         .get()
         .log_event_json(
-            &mut dbtx.to_ref_nc(),
+            &mut dbtx.global_dbtx(ctx.access_token).to_ref_nc(),
             E::MODULE,
             TRANSACTION_SUBMISSION_MODULE_INSTANCE,
             E::KIND,
