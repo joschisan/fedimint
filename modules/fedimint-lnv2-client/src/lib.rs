@@ -36,7 +36,7 @@ use fedimint_core::secp256k1::SECP256K1;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::SafeUrl;
-use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send};
+use fedimint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_lnv2_common::config::LightningClientConfig;
 use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract, PaymentImage};
@@ -468,7 +468,10 @@ impl LightningClientModule {
                 SendStateMachine {
                     common: SendSMCommon {
                         operation_id,
-                        outpoint: range.into_iter().next().unwrap(),
+                        outpoint: OutPoint {
+                            txid: range.txid(),
+                            out_idx: 0,
+                        },
                         contract,
                         gateway_api: Some(gateway_api),
                         invoice: Some(LightningInvoice::Bolt11(invoice.clone())),
