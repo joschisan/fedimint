@@ -56,7 +56,7 @@ use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, eval_poly_g1};
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
-    ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
+    ConfigGenModuleArgs, EnvVarDoc, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
 use futures::StreamExt;
 use group::Curve;
@@ -237,6 +237,13 @@ impl ServerModuleInit for LightningInit {
 
     fn is_enabled_by_default(&self) -> bool {
         is_env_var_set_opt(FM_ENABLE_MODULE_LNV2_ENV).unwrap_or(true)
+    }
+
+    fn get_documented_env_vars(&self) -> Vec<EnvVarDoc> {
+        vec![EnvVarDoc {
+            name: FM_ENABLE_MODULE_LNV2_ENV,
+            description: "Set to 0/false to disable the LNv2 Lightning module. Enabled by default.",
+        }]
     }
 
     async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {

@@ -53,8 +53,10 @@ use fedimint_core::db::{
 use fedimint_core::encoding::btc::NetworkLegacyEncodingWrapper;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::envs::{
-    BitcoinRpcConfig, FM_ENABLE_MODULE_WALLET_ENV, is_automatic_consensus_version_voting_disabled,
-    is_env_var_set_opt, is_rbf_withdrawal_enabled, is_running_in_test_env,
+    BitcoinRpcConfig, FM_ENABLE_MODULE_WALLET_ENV,
+    FM_WALLET_DISABLE_AUTOMATIC_CONSENSUS_VERSION_VOTING_ENV, FM_WALLET_FEERATE_SOURCES_ENV,
+    is_automatic_consensus_version_voting_disabled, is_env_var_set_opt, is_rbf_withdrawal_enabled,
+    is_running_in_test_env,
 };
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
@@ -76,7 +78,7 @@ use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
-    ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
+    ConfigGenModuleArgs, EnvVarDoc, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
 pub use fedimint_wallet_common as common;
 use fedimint_wallet_common::config::{FeeConsensus, WalletClientConfig, WalletConfig};
@@ -331,6 +333,27 @@ impl ServerModuleInit for WalletInit {
 
     fn is_enabled_by_default(&self) -> bool {
         is_env_var_set_opt(FM_ENABLE_MODULE_WALLET_ENV).unwrap_or(true)
+    }
+
+    fn get_documented_env_vars(&self) -> Vec<EnvVarDoc> {
+        vec![
+            EnvVarDoc {
+                name: FM_ENABLE_MODULE_WALLET_ENV,
+                description: "Set to 0/false to disable the wallet (on-chain Bitcoin) module. Enabled by default.",
+            },
+            EnvVarDoc {
+                name: FM_WALLET_DISABLE_AUTOMATIC_CONSENSUS_VERSION_VOTING_ENV,
+                description: "Set to 1/true to disable automatic consensus version voting. Useful for testing and development.",
+            },
+            EnvVarDoc {
+                name: envs::FM_WALLET_FEERATE_MULTIPLIER_ENV,
+                description: "Multiplier applied to fee rate estimates (float, clamped 1.0–32.0). Defaults to 1.0.",
+            },
+            EnvVarDoc {
+                name: FM_WALLET_FEERATE_SOURCES_ENV,
+                description: "Semicolon-separated list of JSON API URLs (with optional `#<jq-filter>`) used as fee rate sources.",
+            },
+        ]
     }
 
     async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {

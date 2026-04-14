@@ -10,13 +10,14 @@ mod metrics;
 
 use std::convert::Infallible;
 use std::env;
+use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context as _;
 use bitcoin::Network;
-use clap::{ArgGroup, Parser};
+use clap::{ArgGroup, CommandFactory, FromArgMatches, Parser};
 use fedimint_core::db::Database;
 use fedimint_core::envs::{
     FM_IROH_DNS_ENV, FM_IROH_RELAY_ENV, FM_USE_UNKNOWN_MODULE_ENV, is_env_var_set,
@@ -272,7 +273,21 @@ pub async fn run(
         .with_label_values(&[fedimint_version, code_version_hash])
         .set(fedimint_core::time::duration_since_epoch().as_secs() as i64);
 
-    let server_opts = ServerOpts::parse();
+    let server_opts = {
+        // Collect env vars from all registered modules and append them to the
+        // long-help text so operators can discover them via `fedimintd --help`.
+        let mut module_env_help = String::from("\nModule environment variables:\n");
+        for (_kind, module_init) in module_init_registry.iter() {
+            for doc in module_init.get_documented_env_vars() {
+                let _ = writeln!(module_env_help, "  {:40}  {}", doc.name, doc.description);
+            }
+        }
+        let matches = ServerOpts::command()
+            .after_long_help(module_env_help)
+            .get_matches();
+        ServerOpts::from_arg_matches(&matches)
+            .expect("clap arg matches must be valid after parsing")
+    };
 
     let mut tracing_builder = TracingSetup::default();
 
