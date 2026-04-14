@@ -9,12 +9,13 @@ use fedimint_api_client::api::{DynGlobalApi, FederationApi};
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_api_client::download_from_invite_code;
 use fedimint_client_module::ModuleRecoveryStarted;
+use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::ClientModuleInit;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{ClientModuleRegistry, FinalClientIface};
 use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use fedimint_client_module::transaction::{
-    TRANSACTION_SUBMISSION_MODULE_INSTANCE, TxSubmissionContext, tx_submission_sm_decoder,
+    TRANSACTION_SUBMISSION_MODULE_INSTANCE, TxSubmissionSmContext, tx_submission_sm_decoder,
 };
 use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
@@ -558,8 +559,6 @@ impl ClientBuilder {
 
         let executor = {
             let mut executor_builder = Executor::builder();
-            executor_builder
-                .with_module(TRANSACTION_SUBMISSION_MODULE_INSTANCE, TxSubmissionContext);
 
             for (module_instance_id, _, module) in modules.iter_modules() {
                 executor_builder.with_module_dyn(module.context(module_instance_id));
@@ -583,6 +582,16 @@ impl ClientBuilder {
         let (client_recovery_progress_sender, client_recovery_progress_receiver) =
             watch::channel(recovery_receiver_init_val);
 
+        let tx_submission_executor = ModuleExecutor::new(
+            db.with_prefix(vec![0xfa]),
+            TxSubmissionSmContext {
+                api: api.clone(),
+                decoders: decoders.clone(),
+                client: final_client.clone(),
+            },
+            task_group.clone(),
+        );
+
         let client_inner = Arc::new(Client {
             config: tokio::sync::RwLock::new(config.clone()),
             api_secret,
@@ -597,6 +606,7 @@ impl ClientBuilder {
             log_event_added_rx,
             log_event_added_transient_tx: log_event_added_transient_tx.clone(),
             executor,
+            tx_submission_executor,
             api,
             secp_ctx: Secp256k1::new(),
             task_group,
@@ -626,6 +636,8 @@ impl ClientBuilder {
         }
 
         final_client.set(client_iface.clone());
+
+        client_arc.tx_submission_executor.start().await;
 
         if !module_recoveries.is_empty() {
             client_arc.spawn_module_recoveries_task(

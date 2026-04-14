@@ -19,9 +19,9 @@ use fedimint_client_module::module::{
 use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy as _};
 use fedimint_client_module::sm::DynState;
 use fedimint_client_module::sm::executor::IExecutor;
+use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::transaction::{
-    TRANSACTION_SUBMISSION_MODULE_INSTANCE, TransactionBuilder, TxSubmissionStates,
-    TxSubmissionStatesSM,
+    TransactionBuilder, TxSubmissionStates, TxSubmissionStatesSM,
 };
 use fedimint_client_module::{
     AddStateMachinesResult, ClientModuleInstance, ModuleGlobalContextGen, ModuleRecoveryCompleted,
@@ -96,6 +96,7 @@ pub struct Client {
     primary_module: Option<ModuleInstanceId>,
     pub(crate) modules: ClientModuleRegistry,
     executor: Executor,
+    tx_submission_executor: ModuleExecutor<TxSubmissionStatesSM>,
     pub(crate) api: DynGlobalApi,
     secp_ctx: Secp256k1<secp256k1::All>,
 
@@ -538,7 +539,7 @@ impl Client {
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
-        let (transaction, mut states, change_range) = self
+        let (transaction, states, change_range) = self
             .finalize_transaction(&mut dbtx.to_ref_nc(), operation_id, tx_builder)
             .await?;
 
@@ -576,16 +577,23 @@ impl Client {
             "Finalized and submitting transaction",
         );
 
-        let tx_submission_sm = DynState::from_typed(
-            TRANSACTION_SUBMISSION_MODULE_INSTANCE,
-            TxSubmissionStatesSM {
-                operation_id,
-                state: TxSubmissionStates::Created(transaction),
-            },
-        );
-        states.push(tx_submission_sm);
-
         self.executor.add_state_machines_dbtx(dbtx, states).await?;
+
+        // Tx submission state machine lives in its own typed ModuleExecutor.
+        // Its DB namespace is nested under prefix 0xfa; re-prefix this dbtx
+        // accordingly so the write lands in the right place atomically.
+        {
+            let mut tx_sub_dbtx = dbtx.to_ref_with_prefix(vec![0xfa]);
+            self.tx_submission_executor
+                .add_state_machine_dbtx(
+                    &mut tx_sub_dbtx,
+                    TxSubmissionStatesSM {
+                        operation_id,
+                        state: TxSubmissionStates::Created(transaction),
+                    },
+                )
+                .await;
+        }
 
         self.log_event_dbtx(dbtx, None, TxCreatedEvent { txid, operation_id })
             .await;

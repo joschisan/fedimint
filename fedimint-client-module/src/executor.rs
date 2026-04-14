@@ -162,20 +162,27 @@ struct Inner<S: StateMachine> {
 }
 
 impl<S: StateMachine> ModuleExecutor<S> {
-    /// Create the executor. Spawns a driver task for each state machine
-    /// already persisted from a previous run.
-    pub async fn new(db: Database, context: S::Context, task_group: TaskGroup) -> Self {
+    /// Create the executor. Call [`Self::start`] after all circular
+    /// client references are resolved to begin driving persisted state
+    /// machines.
+    pub fn new(db: Database, context: S::Context, task_group: TaskGroup) -> Self {
         let inner = Arc::new(Inner {
             db,
             context,
             task_group,
         });
 
-        for state in inner.get_active_states().await {
-            inner.clone().spawn_drive(state);
-        }
-
         Self { inner }
+    }
+
+    /// Spawn driver tasks for state machines already persisted from a
+    /// previous run. Must be called exactly once per executor, after the
+    /// owning client's `FinalClientIface` (and similar late-bound refs
+    /// used by `S::Context`) have been resolved.
+    pub async fn start(&self) {
+        for state in self.inner.get_active_states().await {
+            self.inner.clone().spawn_drive(state);
+        }
     }
 
     /// Atomically insert `state` as a new active state machine. A
