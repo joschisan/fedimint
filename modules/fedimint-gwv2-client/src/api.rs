@@ -1,4 +1,4 @@
-use fedimint_api_client::api::{FederationApiExt, FederationResult, IModuleFederationApi};
+use fedimint_api_client::api::{FederationApiExt, FederationResult, IRawFederationApi};
 use fedimint_core::module::ApiRequestErased;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::{OutPoint, apply, async_trait_maybe_send};
@@ -16,7 +16,7 @@ pub trait GatewayFederationApi {
 #[apply(async_trait_maybe_send!)]
 impl<T: ?Sized> GatewayFederationApi for T
 where
-    T: IModuleFederationApi + MaybeSend + MaybeSync + 'static,
+    T: IRawFederationApi + MaybeSend + MaybeSync + 'static,
 {
     async fn outgoing_contract_expiration(
         &self,

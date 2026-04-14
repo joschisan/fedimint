@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use anyhow::{bail, ensure};
 use bitcoin::key::Secp256k1;
-use fedimint_api_client::api::global_api::with_cache::GlobalFederationApiWithCacheExt as _;
 use fedimint_api_client::api::{DynGlobalApi, FederationApi};
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_api_client::download_from_invite_code;
@@ -377,9 +376,7 @@ impl ClientBuilder {
             .map(|(peer, endpoint)| (*peer, endpoint.url.clone()))
             .collect();
         let api: DynGlobalApi =
-            FederationApi::new(connectors.clone(), peer_urls, None, api_secret.as_deref())
-                .with_cache()
-                .into();
+            FederationApi::new(connectors.clone(), peer_urls, None, api_secret.as_deref()).into();
 
         let task_group = TaskGroup::new();
 

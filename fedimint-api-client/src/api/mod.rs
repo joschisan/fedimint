@@ -1,5 +1,4 @@
 mod error;
-pub mod global_api;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
@@ -11,9 +10,12 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 pub use error::{FederationError, OutputOutcomeError};
 use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, OutputOutcome};
+use fedimint_core::endpoint_constants::{
+    AWAIT_TRANSACTION_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
+};
 use fedimint_core::module::{ApiAuth, ApiMethod, ApiRequestErased, SerdeModuleEncoding};
 use fedimint_core::task::{MaybeSend, MaybeSync};
-use fedimint_core::transaction::{Transaction, TransactionSubmissionOutcome};
+use fedimint_core::transaction::{SerdeTransaction, Transaction, TransactionSubmissionOutcome};
 use fedimint_core::util::backoff_util::api_networking_backoff;
 use fedimint_core::util::{FmtCompact as _, SafeUrl};
 use fedimint_core::{
@@ -22,7 +24,6 @@ use fedimint_core::{
 use fedimint_logging::LOG_CLIENT_NET_API;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{Future, StreamExt};
-use global_api::with_cache::GlobalFederationApiWithCache;
 use jsonrpsee_core::DeserializeOwned;
 use serde_json::Value;
 use tokio::sync::watch;
@@ -348,12 +349,9 @@ pub trait FederationApiExt: IRawFederationApi {
 #[apply(async_trait_maybe_send!)]
 impl<T: ?Sized> FederationApiExt for T where T: IRawFederationApi {}
 
-/// Trait marker for the module (non-global) endpoints
-pub trait IModuleFederationApi: IRawFederationApi {}
-
 dyn_newtype_define! {
     #[derive(Clone)]
-    pub DynModuleApi(Arc<IModuleFederationApi>)
+    pub DynModuleApi(Arc<IRawFederationApi>)
 }
 
 dyn_newtype_define! {
@@ -373,13 +371,7 @@ impl DynGlobalApi {
         peers: BTreeMap<PeerId, SafeUrl>,
         api_secret: Option<&str>,
     ) -> anyhow::Result<Self> {
-        Ok(GlobalFederationApiWithCache::new(FederationApi::new(
-            connection_pool,
-            peers,
-            None,
-            api_secret,
-        ))
-        .into())
+        Ok(FederationApi::new(connection_pool, peers, None, api_secret).into())
     }
 
     pub fn new_admin(
@@ -388,12 +380,12 @@ impl DynGlobalApi {
         url: SafeUrl,
         api_secret: Option<&str>,
     ) -> anyhow::Result<DynGlobalApi> {
-        Ok(GlobalFederationApiWithCache::new(FederationApi::new(
+        Ok(FederationApi::new(
             connection_pool,
             [(peer, url)].into(),
             Some(peer),
             api_secret,
-        ))
+        )
         .into())
     }
 
@@ -408,14 +400,32 @@ pub trait IGlobalFederationApi: IRawFederationApi {
     async fn submit_transaction(
         &self,
         tx: Transaction,
-    ) -> SerdeModuleEncoding<TransactionSubmissionOutcome>;
+    ) -> SerdeModuleEncoding<TransactionSubmissionOutcome> {
+        self.request_current_consensus_retry(
+            SUBMIT_TRANSACTION_ENDPOINT.to_owned(),
+            ApiRequestErased::new(SerdeTransaction::from(&tx)),
+        )
+        .await
+    }
 
-    async fn await_transaction(&self, txid: TransactionId) -> TransactionId;
+    async fn await_transaction(&self, txid: TransactionId) -> TransactionId {
+        self.request_current_consensus_retry(
+            AWAIT_TRANSACTION_ENDPOINT.to_owned(),
+            ApiRequestErased::new(txid),
+        )
+        .await
+    }
 
     /// Lightweight liveness check — returns Ok(()) if the federation is
     /// reachable
-    async fn liveness(&self) -> FederationResult<()>;
+    async fn liveness(&self) -> FederationResult<()> {
+        self.request_current_consensus(LIVENESS_ENDPOINT.to_owned(), ApiRequestErased::default())
+            .await
+    }
 }
+
+#[apply(async_trait_maybe_send!)]
+impl<T: ?Sized> IGlobalFederationApi for T where T: IRawFederationApi + MaybeSend + MaybeSync {}
 
 pub fn deserialize_outcome<R>(
     outcome: &SerdeOutputOutcome,
@@ -519,8 +529,6 @@ impl FederationApi {
         self.connection_pool.get_active_connection_receiver()
     }
 }
-
-impl IModuleFederationApi for FederationApi {}
 
 #[apply(async_trait_maybe_send!)]
 impl IRawFederationApi for FederationApi {

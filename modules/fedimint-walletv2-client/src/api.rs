@@ -1,4 +1,4 @@
-use fedimint_api_client::api::{FederationApiExt, FederationResult, IModuleFederationApi};
+use fedimint_api_client::api::{FederationApiExt, FederationResult, IRawFederationApi};
 use fedimint_core::module::ApiRequestErased;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::{OutPoint, apply, async_trait_maybe_send};
@@ -35,7 +35,7 @@ pub trait WalletFederationApi {
 #[apply(async_trait_maybe_send!)]
 impl<T: ?Sized> WalletFederationApi for T
 where
-    T: IModuleFederationApi + MaybeSend + MaybeSync + 'static,
+    T: IRawFederationApi + MaybeSend + MaybeSync + 'static,
 {
     async fn consensus_block_count(&self) -> FederationResult<u64> {
         self.request_current_consensus(

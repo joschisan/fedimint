@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fedimint_api_client::api::{
-    FederationApiExt, FederationResult, IModuleFederationApi, ServerResult,
+    FederationApiExt, FederationResult, IRawFederationApi, ServerResult,
 };
 use fedimint_api_client::query::FilterMapThreshold;
 use fedimint_core::module::ApiRequestErased;
@@ -38,7 +38,7 @@ pub trait LightningFederationApi {
 #[apply(async_trait_maybe_send!)]
 impl<T: ?Sized> LightningFederationApi for T
 where
-    T: IModuleFederationApi + MaybeSend + MaybeSync + 'static,
+    T: IRawFederationApi + MaybeSend + MaybeSync + 'static,
 {
     async fn consensus_block_count(&self) -> FederationResult<u64> {
         self.request_current_consensus(

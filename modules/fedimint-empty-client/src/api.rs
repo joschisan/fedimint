@@ -1,4 +1,4 @@
-use fedimint_api_client::api::IModuleFederationApi;
+use fedimint_api_client::api::IRawFederationApi;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::{apply, async_trait_maybe_send};
 
@@ -6,7 +6,5 @@ use fedimint_core::{apply, async_trait_maybe_send};
 pub trait DummyFederationApi {}
 
 #[apply(async_trait_maybe_send!)]
-impl<T: ?Sized> DummyFederationApi for T where
-    T: IModuleFederationApi + MaybeSend + MaybeSync + 'static
-{
-}
+impl<T: ?Sized> DummyFederationApi for T where T: IRawFederationApi + MaybeSend + MaybeSync + 'static
+{}
