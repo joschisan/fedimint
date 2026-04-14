@@ -267,8 +267,6 @@ pub struct MintSendResponse {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MintReceiveRequest {
     pub notes: String,
-    #[serde(default)]
-    pub wait: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

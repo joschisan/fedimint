@@ -634,19 +634,9 @@ async fn module_mint_receive(
         .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
     let amount = ecash.amount();
 
-    let operation_id = mint
-        .receive(ecash)
+    mint.receive(ecash)
         .await
         .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
-
-    if payload.wait {
-        match mint.await_final_receive_operation_state(operation_id).await {
-            fedimint_mintv2_client::FinalReceiveOperationState::Success => {}
-            fedimint_mintv2_client::FinalReceiveOperationState::Rejected => {
-                return Err(CliError::internal("ECash receive was rejected"));
-            }
-        }
-    }
 
     let response = MintReceiveResponse { amount };
     Ok(Json(response))

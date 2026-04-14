@@ -366,10 +366,7 @@ fn main() -> Result<()> {
                 MintCommands::Receive { ecash } => request(
                     addr,
                     ROUTE_MODULE_MINT_RECEIVE,
-                    MintReceiveRequest {
-                        notes: ecash,
-                        wait: false,
-                    },
+                    MintReceiveRequest { notes: ecash },
                 )?,
             },
             ModuleCommands::Walletv2(cmd) => match cmd {

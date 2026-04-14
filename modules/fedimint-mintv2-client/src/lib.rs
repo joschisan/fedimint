@@ -59,7 +59,6 @@ use fedimint_mintv2_common::{
 use futures::{StreamExt, pin_mut};
 use itertools::Itertools;
 use rand::seq::IteratorRandom;
-use serde::{Deserialize, Serialize};
 use tbs::AggregatePublicKey;
 use thiserror::Error;
 
@@ -69,7 +68,7 @@ pub use crate::ecash::ECash;
 use crate::input::{InputSMCommon, InputSMState, InputStateMachine};
 use crate::issuance::NoteIssuanceRequest;
 use crate::output::{MintOutputStateMachine, OutputSMCommon, OutputSMState};
-use crate::receive::{ReceiveSMState, ReceiveStateMachine};
+use crate::receive::ReceiveStateMachine;
 
 const TARGET_PER_DENOMINATION: usize = 3;
 const SLICE_SIZE: u64 = 10000;
@@ -833,26 +832,6 @@ impl MintClientModule {
         Ok(operation_id)
     }
 
-    /// Await the final state of the receive operation.
-    pub async fn await_final_receive_operation_state(
-        &self,
-        operation_id: OperationId,
-    ) -> FinalReceiveOperationState {
-        let mut stream = self.notifier.subscribe(operation_id).await;
-
-        loop {
-            let Some(MintClientStateMachines::Receive(state)) = stream.next().await else {
-                continue;
-            };
-
-            match state.state {
-                ReceiveSMState::Pending => {}
-                ReceiveSMState::Success => return FinalReceiveOperationState::Success,
-                ReceiveSMState::Rejected(..) => return FinalReceiveOperationState::Rejected,
-            }
-        }
-    }
-
     async fn remove_spendable_note(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
@@ -963,14 +942,6 @@ pub enum ReceiveECashError {
     UneconomicalDenomination,
     #[error("Receiving ecash requires additional funds")]
     InsufficientFunds,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum FinalReceiveOperationState {
-    // The ecash notes have been reissued
-    Success,
-    // The ecash notes were already spent
-    Rejected,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]

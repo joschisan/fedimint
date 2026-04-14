@@ -52,7 +52,6 @@ use futures::StreamExt;
 use receive_sm::{ReceiveSMCommon, ReceiveSMState, ReceiveStateMachine};
 use secp256k1::Keypair;
 use send_sm::{SendSMCommon, SendSMState, SendStateMachine};
-use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator as _;
 use thiserror::Error;
 use tracing::warn;
@@ -60,21 +59,11 @@ use tracing::warn;
 /// Number of output info entries to scan per batch.
 const SLICE_SIZE: u64 = 1000;
 
-/// The final state of an operation sending bitcoin onchain.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FinalSendOperationState {
-    /// The transaction was successful.
-    Success(bitcoin::Txid),
-    /// The funding transaction was aborted.
-    Aborted,
-    /// A programming error has occurred or the federation is malicious.
-    Failure,
-}
-
 #[derive(Debug, Clone)]
 pub struct WalletClientModule {
     root_secret: DerivableSecret,
     cfg: WalletClientConfig,
+    #[allow(dead_code)]
     notifier: ModuleNotifier<WalletClientStateMachines>,
     client_ctx: ClientContext<Self>,
     db: Database,
@@ -282,27 +271,6 @@ impl WalletClientModule {
         dbtx.commit_tx().await;
 
         Ok(operation_id)
-    }
-
-    /// Await the final state of the send operation.
-    pub async fn await_final_send_operation_state(
-        &self,
-        operation_id: OperationId,
-    ) -> FinalSendOperationState {
-        let mut stream = self.notifier.subscribe(operation_id).await;
-
-        loop {
-            let Some(WalletClientStateMachines::Send(state)) = stream.next().await else {
-                panic!("stream must produce a terminal send state");
-            };
-
-            match state.state {
-                SendSMState::Funding => {}
-                SendSMState::Success(txid) => return FinalSendOperationState::Success(txid),
-                SendSMState::Aborted(..) => return FinalSendOperationState::Aborted,
-                SendSMState::Failure => return FinalSendOperationState::Failure,
-            }
-        }
     }
 
     /// Returns the next unused receive address, polling until the initial

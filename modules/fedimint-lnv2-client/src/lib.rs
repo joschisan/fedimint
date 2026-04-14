@@ -95,37 +95,7 @@ pub enum SendOperationState {
     Failure,
 }
 
-/// The final state of an operation sending a payment over lightning.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum FinalSendOperationState {
-    /// The payment was successful.
-    Success,
-    /// The payment failed and the refund transaction was submitted.
-    Refunding,
-    /// The funding transaction was rejected.
-    Failure,
-}
-
 pub type SendResult = Result<OperationId, SendPaymentError>;
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ReceiveOperationState {
-    /// We are waiting for the payment.
-    Pending,
-    /// The payment request has expired.
-    Expired,
-    /// The payment has been confirmed and the claim transaction was submitted.
-    Claiming,
-}
-
-/// The final state of an operation receiving a payment over lightning.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum FinalReceiveOperationState {
-    /// The payment request has expired.
-    Expired,
-    /// The payment was confirmed and the claim transaction was submitted.
-    Claiming,
-}
 
 pub type ReceiveResult = Result<(Bolt11Invoice, OperationId), ReceiveError>;
 
@@ -590,33 +560,6 @@ impl LightningClientModule {
         })
     }
 
-    /// Await the final state of the send operation.
-    pub async fn await_final_send_operation_state(
-        &self,
-        operation_id: OperationId,
-    ) -> anyhow::Result<FinalSendOperationState> {
-        let mut stream = self
-            .subscribe_send_operation_state_updates(operation_id)
-            .await;
-
-        let mut final_state = None;
-
-        while let Some(state) = stream.next().await {
-            match state {
-                SendOperationState::Success(_) => {
-                    final_state = Some(FinalSendOperationState::Success);
-                }
-                SendOperationState::Refunding => {
-                    final_state = Some(FinalSendOperationState::Refunding);
-                }
-                SendOperationState::Failure => final_state = Some(FinalSendOperationState::Failure),
-                _ => {}
-            }
-        }
-
-        Ok(final_state.expect("Stream contains one final state"))
-    }
-
     /// Request an invoice. For testing you can optionally specify a gateway to
     /// generate the invoice, otherwise a random online gateway will be selected
     /// automatically.
@@ -811,58 +754,6 @@ impl LightningClientModule {
         Some((claim_keypair, agg_decryption_key))
     }
 
-    /// Subscribe to all state updates of the receive operation.
-    pub async fn subscribe_receive_operation_state_updates(
-        &self,
-        operation_id: OperationId,
-    ) -> BoxStream<'static, ReceiveOperationState> {
-        let mut stream = self.notifier.subscribe(operation_id).await;
-
-        Box::pin(stream! {
-            loop {
-                if let Some(LightningClientStateMachines::Receive(state)) = stream.next().await {
-                    match state.state {
-                        ReceiveSMState::Pending => yield ReceiveOperationState::Pending,
-                        ReceiveSMState::Claiming(_) => {
-                            yield ReceiveOperationState::Claiming;
-                            return;
-                        },
-                        ReceiveSMState::Expired => {
-                            yield ReceiveOperationState::Expired;
-                            return;
-                        }
-                    }
-                }
-            }
-        })
-    }
-
-    /// Await the final state of the receive operation.
-    pub async fn await_final_receive_operation_state(
-        &self,
-        operation_id: OperationId,
-    ) -> anyhow::Result<FinalReceiveOperationState> {
-        let mut stream = self
-            .subscribe_receive_operation_state_updates(operation_id)
-            .await;
-
-        let mut final_state = None;
-
-        while let Some(state) = stream.next().await {
-            match state {
-                ReceiveOperationState::Expired => {
-                    final_state = Some(FinalReceiveOperationState::Expired);
-                }
-                ReceiveOperationState::Claiming => {
-                    final_state = Some(FinalReceiveOperationState::Claiming);
-                }
-                ReceiveOperationState::Pending => {}
-            }
-        }
-
-        Ok(final_state.expect("Stream contains one final state"))
-    }
-
     /// Generate an lnurl for the client. You can optionally specify a gateway
     /// to use for testing purposes.
     pub async fn generate_lnurl(
@@ -925,14 +816,8 @@ impl LightningClientModule {
             .await;
 
         for contract in &contracts {
-            if let Some(operation_id) = self
-                .receive_incoming_contract(self.lnurl_keypair.secret_key(), contract.clone())
-                .await
-            {
-                self.await_final_receive_operation_state(operation_id)
-                    .await
-                    .ok();
-            }
+            self.receive_incoming_contract(self.lnurl_keypair.secret_key(), contract.clone())
+                .await;
         }
 
         dbtx.insert_entry(&IncomingContractStreamIndexKey, &next_index)
