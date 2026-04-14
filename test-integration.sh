@@ -13,6 +13,9 @@ cleanup() {
 
 trap cleanup EXIT
 
+echo "Building workspace..."
+just build
+
 # Clean up any leftover container from previous run
 docker stop "$CONTAINER_NAME" 2>/dev/null || true
 docker rm "$CONTAINER_NAME" 2>/dev/null || true
@@ -38,9 +41,6 @@ echo "Creating wallet..."
 docker exec "$CONTAINER_NAME" bitcoin-cli \
     -regtest -rpcuser=bitcoin -rpcpassword=bitcoin \
     createwallet "" > /dev/null || true
-
-echo "Building workspace..."
-just build
 
 echo "Running integration tests..."
 RUST_LOG="${RUST_LOG:-info}" ./target-nix/debug/fedimint-integration-tests
