@@ -5,7 +5,7 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::module::OutPointRange;
 use fedimint_core::PeerId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::db::{IWriteDatabaseTransactionOpsTyped, WriteDatabaseTransaction};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_mintv2_common::{Denomination, verify_note};
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
@@ -96,7 +96,7 @@ async fn await_signature_shares_sm(
 
 async fn transition_outcome_ready_sm(
     ctx: MintSmContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     signature_shares: Result<
         std::collections::BTreeMap<PeerId, Vec<BlindedSignatureShare>>,
         String,

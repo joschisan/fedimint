@@ -25,7 +25,9 @@ use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_client_module::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::db::{
+    IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped, WriteDatabaseTransaction,
+};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::SECP256K1;
@@ -85,7 +87,7 @@ impl ModuleInit for LightningClientInit {
 
     async fn dump_database(
         &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
+        _dbtx: &mut WriteDatabaseTransaction<'_>,
         _prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
         Box::new(BTreeMap::new().into_iter())
@@ -240,7 +242,7 @@ impl LightningClientModule {
         // fees and latency.
 
         if let Ok(gateways) = self.module_api.gateways().await {
-            let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+            let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
             for gateway in gateways {
                 if let Ok(Some(routing_info)) = self
@@ -281,7 +283,7 @@ impl LightningClientModule {
             && let Some(gateway) = self
                 .client_ctx
                 .module_db()
-                .begin_transaction_nc()
+                .begin_write_transaction()
                 .await
                 .get_value(&GatewayKey(invoice.recover_payee_pub_key()))
                 .await
@@ -428,7 +430,7 @@ impl LightningClientModule {
 
         let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
         if dbtx
             .insert_entry(&SendOperationKey(operation_id), &())
@@ -508,7 +510,7 @@ impl LightningClientModule {
             )
             .await?;
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
         let operation_id = self
             .receive_incoming_contract(&mut dbtx.to_ref_nc(), self.keypair.secret_key(), contract)
@@ -618,7 +620,7 @@ impl LightningClientModule {
     // index in [`Self::receive_lnurl`]).
     async fn receive_incoming_contract(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         sk: SecretKey,
         contract: IncomingContract,
     ) -> Option<OperationId> {
@@ -725,7 +727,7 @@ impl LightningClientModule {
     }
 
     async fn receive_lnurl(&self) {
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
         let stream_index = dbtx
             .get_value(&IncomingContractStreamIndexKey)

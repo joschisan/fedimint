@@ -31,7 +31,8 @@ use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArg
 use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{
-    Database, DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped,
+    Database, DatabaseVersion, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+    WriteDatabaseTransaction,
 };
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
@@ -106,7 +107,7 @@ impl ModuleInit for WalletClientInit {
 
     async fn dump_database(
         &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
+        _dbtx: &mut WriteDatabaseTransaction<'_>,
         _prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
         Box::new(BTreeMap::new().into_iter())
@@ -230,7 +231,7 @@ impl WalletClientModule {
             self.client_ctx
                 .make_client_outputs(ClientOutputBundle::<WalletOutput>::new(vec![client_output]));
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
         let range = self
             .client_ctx
@@ -283,7 +284,7 @@ impl WalletClientModule {
         loop {
             if let Some(entry) = self
                 .db
-                .begin_transaction_nc()
+                .begin_write_transaction()
                 .await
                 .find_by_prefix_sorted_descending(&ValidAddressIndexPrefix)
                 .await
@@ -347,7 +348,7 @@ impl WalletClientModule {
             self.client_ctx
                 .make_client_inputs(ClientInputBundle::<WalletInput>::new(vec![client_input]));
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
         let range = self
             .client_ctx
@@ -395,7 +396,7 @@ impl WalletClientModule {
         let module = self.clone();
 
         task_group.spawn_cancellable("output-scanner", async move {
-            let mut dbtx = module.db.begin_transaction().await;
+            let mut dbtx = module.db.begin_write_transaction().await;
 
             if dbtx
                 .find_by_prefix(&ValidAddressIndexPrefix)
@@ -428,7 +429,7 @@ impl WalletClientModule {
     }
 
     async fn check_outputs(&self) -> anyhow::Result<bool> {
-        let mut dbtx = self.db.begin_transaction_nc().await;
+        let mut dbtx = self.db.begin_write_transaction().await;
 
         let next_output_index = dbtx.get_value(&NextOutputIndexKey).await.unwrap_or(0);
 
@@ -460,7 +461,7 @@ impl WalletClientModule {
                 if address_index == next_address_index {
                     let index = self.next_valid_index(next_address_index + 1);
 
-                    let mut dbtx = self.db.begin_transaction().await;
+                    let mut dbtx = self.db.begin_write_transaction().await;
 
                     dbtx.insert_entry(&ValidAddressIndexKey(index), &()).await;
 
@@ -497,7 +498,7 @@ impl WalletClientModule {
                 }
             }
 
-            let mut dbtx = self.db.begin_transaction().await;
+            let mut dbtx = self.db.begin_write_transaction().await;
 
             dbtx.insert_entry(&NextOutputIndexKey, &(output.index + 1))
                 .await;

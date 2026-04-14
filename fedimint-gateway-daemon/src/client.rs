@@ -5,7 +5,9 @@ use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::{Client, ClientBuilder, RootSecret};
 use fedimint_client_module::secret::RootSecretStrategy;
 use fedimint_core::config::{ClientConfig, FederationId};
-use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::db::{
+    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_gwv2_client::GatewayClientInitV2;
 use iroh::Endpoint;
@@ -29,7 +31,7 @@ impl GatewayClientFactory {
         mnemonic: Mnemonic,
         registry: ClientModuleInitRegistry,
     ) -> anyhow::Result<Self> {
-        let mut dbtx = db.begin_transaction().await;
+        let mut dbtx = db.begin_write_transaction().await;
         dbtx.insert_new_entry(&RootEntropyKey, &mnemonic.to_entropy())
             .await;
         dbtx.commit_tx_result()
@@ -52,7 +54,7 @@ impl GatewayClientFactory {
         registry: ClientModuleInitRegistry,
     ) -> anyhow::Result<Option<Self>> {
         let entropy = db
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .get_value(&RootEntropyKey)
             .await;
@@ -105,7 +107,7 @@ impl GatewayClientFactory {
     }
 
     async fn save_config(&self, config: &ClientConfig) {
-        let mut dbtx = self.db.begin_transaction().await;
+        let mut dbtx = self.db.begin_write_transaction().await;
         dbtx.insert_entry(&ClientConfigKey(config.calculate_federation_id()), config)
             .await;
         dbtx.commit_tx().await;
@@ -171,7 +173,7 @@ impl GatewayClientFactory {
         use crate::db::ClientConfigPrefix;
 
         self.db
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .find_by_prefix(&ClientConfigPrefix)
             .await

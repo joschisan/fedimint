@@ -33,7 +33,9 @@ use client::GatewayClientFactory;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::db::{
+    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::CommonModuleInit;
 use fedimint_core::secp256k1::PublicKey;
@@ -377,7 +379,7 @@ impl AppState {
             )
             .await?;
 
-        let mut dbtx = self.gateway_db.begin_transaction().await;
+        let mut dbtx = self.gateway_db.begin_write_transaction().await;
 
         if dbtx
             .insert_entry(
@@ -440,7 +442,7 @@ impl AppState {
     ) -> std::result::Result<VerifyResponse, String> {
         let registered_contract = self
             .gateway_db
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .get_value(&RegisteredIncomingContractKey(PaymentImage::Hash(
                 payment_hash,
@@ -489,7 +491,7 @@ impl AppState {
     ) -> anyhow::Result<(IncomingContract, ClientHandleArc)> {
         let registered_incoming_contract = self
             .gateway_db
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .get_value(&RegisteredIncomingContractKey(payment_image))
             .await

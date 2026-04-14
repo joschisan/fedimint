@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_api_client::Endpoint;
+use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::ModuleKind;
 use fedimint_core::db::{Database, DatabaseVersion};

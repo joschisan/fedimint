@@ -25,7 +25,7 @@ use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_client_module::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::db::{IWriteDatabaseTransactionOpsTyped, WriteDatabaseTransaction};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::hex::ToHex;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
@@ -65,7 +65,7 @@ impl ModuleInit for GatewayClientInitV2 {
 
     async fn dump_database(
         &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
+        _dbtx: &mut WriteDatabaseTransaction<'_>,
         _prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
         Box::new(vec![].into_iter())
@@ -249,7 +249,7 @@ impl GatewayClientModuleV2 {
             .min_contract_amount(&payload.federation_id, amount)
             .await?;
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
         if dbtx
             .insert_entry(&db::OperationKey(operation_id), &())
@@ -321,7 +321,7 @@ impl GatewayClientModuleV2 {
         ]));
         let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
         if dbtx
             .insert_entry(&db::OperationKey(operation_id), &())
@@ -397,7 +397,7 @@ impl GatewayClientModuleV2 {
         ]));
         let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
         if dbtx
             .insert_entry(&db::OperationKey(operation_id), &())

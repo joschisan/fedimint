@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::db::{
+    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+};
 use futures::StreamExt as _;
 use tracing::info;
 
@@ -19,7 +21,7 @@ impl BackupReader {
 #[async_trait]
 impl aleph_bft::BackupReader for BackupReader {
     async fn read(&mut self) -> std::io::Result<Vec<u8>> {
-        let mut dbtx = self.db.begin_transaction_nc().await;
+        let mut dbtx = self.db.begin_write_transaction().await;
 
         let units = dbtx
             .find_by_prefix(&AlephUnitsPrefix)
@@ -44,7 +46,7 @@ pub struct BackupWriter {
 impl BackupWriter {
     pub async fn new(db: Database) -> Self {
         let units_index = db
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .find_by_prefix_sorted_descending(&AlephUnitsPrefix)
             .await
@@ -59,7 +61,7 @@ impl BackupWriter {
 #[async_trait]
 impl aleph_bft::BackupWriter for BackupWriter {
     async fn append(&mut self, data: &[u8]) -> std::io::Result<()> {
-        let mut dbtx = self.db.begin_transaction().await;
+        let mut dbtx = self.db.begin_write_transaction().await;
 
         dbtx.insert_new_entry(&AlephUnitsKey(self.units_index), &data.to_owned())
             .await;

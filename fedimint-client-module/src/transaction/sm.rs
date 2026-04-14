@@ -5,7 +5,7 @@ use std::time::Duration;
 use fedimint_api_client::api::{DynGlobalApi, FederationApiExt as _};
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::transaction::{Transaction, TransactionSubmissionOutcome};
@@ -144,7 +144,7 @@ impl StateMachine for TxSubmissionStatesSM {
 
 async fn log_tx_event<E: Event + Send>(
     ctx: &TxSubmissionSmContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     event: E,
 ) {
     ctx.client

@@ -5,8 +5,7 @@ use std::sync::Arc;
 use anyhow::{bail, ensure};
 use bitcoin::key::Secp256k1;
 use fedimint_api_client::api::{DynGlobalApi, FederationApi};
-use fedimint_api_client::Endpoint;
-use fedimint_api_client::download_from_invite_code;
+use fedimint_api_client::{Endpoint, download_from_invite_code};
 use fedimint_client_module::ModuleRecoveryStarted;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::ClientModuleInit;
@@ -17,7 +16,8 @@ use fedimint_client_module::transaction::TxSubmissionSmContext;
 use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{
-    Database, IDatabaseTransactionOpsCoreTyped as _, verify_module_db_integrity_dbtx,
+    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped as _,
+    verify_module_db_integrity_dbtx,
 };
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
@@ -143,7 +143,7 @@ impl ClientBuilder {
                 continue;
             };
 
-            let mut dbtx = db.begin_transaction().await;
+            let mut dbtx = db.begin_write_transaction().await;
             apply_migrations_client_module_dbtx(
                 &mut dbtx.to_ref_nc(),
                 kind.to_string(),
@@ -196,7 +196,7 @@ impl ClientBuilder {
         // transaction to avoid half-initialized client state.
         {
             debug!(target: LOG_CLIENT, "Initializing client database");
-            let mut dbtx = db_no_decoders.begin_transaction().await;
+            let mut dbtx = db_no_decoders.begin_write_transaction().await;
             // Save config to DB
             dbtx.insert_new_entry(&crate::db::ClientConfigKey, &config)
                 .await;
@@ -273,7 +273,7 @@ impl ClientBuilder {
         let pre_root_secret = pre_root_secret.to_inner(config.calculate_federation_id());
 
         match db_no_decoders
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .get_value(&ClientPreRootSecretHashKey)
             .await
@@ -287,7 +287,7 @@ impl ClientBuilder {
             _ => {
                 debug!(target: LOG_CLIENT, "Backfilling secret hash");
                 // Note: no need for dbtx autocommit, we are the only writer ATM
-                let mut dbtx = db_no_decoders.begin_transaction().await;
+                let mut dbtx = db_no_decoders.begin_write_transaction().await;
                 dbtx.insert_entry(
                     &ClientPreRootSecretHashKey,
                     &pre_root_secret.derive_pre_root_secret_hash(),
@@ -453,7 +453,7 @@ impl ClientBuilder {
 
                 let recovery = if init_state.does_require_recovery() {
                     match db
-                        .begin_transaction_nc()
+                        .begin_write_transaction()
                         .await
                         .get_value(&ClientModuleRecovery { module_instance_id })
                         .await
@@ -477,7 +477,7 @@ impl ClientBuilder {
                         }
                         _ => {
                             let progress = RecoveryProgress::none();
-                            let mut dbtx = db.begin_transaction().await;
+                            let mut dbtx = db.begin_write_transaction().await;
                             dbtx.log_event(
                                 log_ordering_wakeup_tx.clone(),
                                 None,
@@ -539,7 +539,7 @@ impl ClientBuilder {
         };
 
         if init_state.is_pending() && module_recoveries.is_empty() {
-            let mut dbtx = db.begin_transaction().await;
+            let mut dbtx = db.begin_write_transaction().await;
             dbtx.insert_entry(&ClientInitStateKey, &init_state.into_complete())
                 .await;
             dbtx.commit_tx().await;
@@ -628,7 +628,7 @@ impl ClientBuilder {
     }
 
     async fn load_init_state(db: &Database) -> InitState {
-        let mut dbtx = db.begin_transaction_nc().await;
+        let mut dbtx = db.begin_write_transaction().await;
         dbtx.get_value(&ClientInitStateKey)
             .await
             .unwrap_or_else(|| {

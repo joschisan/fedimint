@@ -7,7 +7,7 @@ use fedimint_api_client::query::FilterMapThreshold;
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::core::OperationId;
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::ApiRequestErased;
 use fedimint_core::secp256k1::Keypair;
@@ -156,7 +156,7 @@ async fn await_decryption_shares_sm(
 
 async fn transition_decryption_shares_sm(
     ctx: GwV2SmContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     old_state: ReceiveStateMachine,
     decryption_shares: Result<BTreeMap<PeerId, DecryptionKeyShare>, String>,
 ) -> ReceiveStateMachine {

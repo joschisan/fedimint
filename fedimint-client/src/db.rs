@@ -7,9 +7,10 @@ use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_core::config::ClientConfig;
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{
-    Database, DatabaseTransaction, DatabaseVersion, DatabaseVersionKey,
-    IDatabaseTransactionOpsCore, IDatabaseTransactionOpsCoreTyped, MODULE_GLOBAL_PREFIX,
-    apply_migrations_dbtx, create_database_version_dbtx, get_current_database_version,
+    Database, DatabaseVersion, DatabaseVersionKey, IReadDatabaseTransactionOps,
+    IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped, MODULE_GLOBAL_PREFIX,
+    NonCommittable, WriteDatabaseTransaction, apply_migrations_dbtx, create_database_version_dbtx,
+    get_current_database_version,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleRegistry;
@@ -69,7 +70,9 @@ pub(crate) enum DbKeyPrefixInternalReserved {
     DefaultApplicationEventLogPos = 0xd0,
 }
 
-pub(crate) async fn verify_client_db_integrity_dbtx(dbtx: &mut DatabaseTransaction<'_>) {
+pub(crate) async fn verify_client_db_integrity_dbtx(
+    dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+) {
     let prefixes: BTreeSet<u8> = DbKeyPrefix::iter().map(|prefix| prefix as u8).collect();
 
     let mut records = dbtx.raw_find_by_prefix(&[]).await.expect("DB fail");
@@ -245,7 +248,7 @@ pub fn get_core_client_database_migrations()
 ///
 /// TODO: This should be private.
 pub async fn apply_migrations_core_client_dbtx(
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     kind: String,
 ) -> Result<(), anyhow::Error> {
     apply_migrations_dbtx(
@@ -274,7 +277,7 @@ pub async fn apply_migrations_client_module(
     migrations: BTreeMap<DatabaseVersion, ClientModuleMigrationFn>,
     module_instance_id: ModuleInstanceId,
 ) -> Result<(), anyhow::Error> {
-    let mut dbtx = db.begin_transaction().await;
+    let mut dbtx = db.begin_write_transaction().await;
     apply_migrations_client_module_dbtx(
         &mut dbtx.to_ref_nc(),
         kind,
@@ -288,7 +291,7 @@ pub async fn apply_migrations_client_module(
 }
 
 pub async fn apply_migrations_client_module_dbtx(
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     kind: String,
     migrations: BTreeMap<DatabaseVersion, ClientModuleMigrationFn>,
     module_instance_id: ModuleInstanceId,
@@ -389,7 +392,7 @@ pub async fn apply_migrations_client_module_dbtx(
 /// If an encoded client secret is not present in the database, or if
 /// decoding fails, an error is returned.
 pub async fn get_decoded_client_secret<T: Decodable>(db: &Database) -> anyhow::Result<T> {
-    let mut tx = db.begin_transaction_nc().await;
+    let mut tx = db.begin_write_transaction().await;
     let client_secret = tx.get_value(&EncodedClientSecretKey).await;
 
     match client_secret {

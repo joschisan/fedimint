@@ -16,7 +16,8 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{
-    Database, DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped,
+    Database, DatabaseVersion, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+    NonCommittable, WriteDatabaseTransaction,
 };
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
@@ -75,7 +76,7 @@ impl ModuleInit for LightningInit {
     #[allow(clippy::too_many_lines)]
     async fn dump_database(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
         let mut lightning: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> =
@@ -310,7 +311,7 @@ impl ServerModule for Lightning {
 
     async fn consensus_proposal(
         &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
+        _dbtx: &mut WriteDatabaseTransaction<'_>,
     ) -> Vec<LightningConsensusItem> {
         // We reduce the time granularity to deduplicate votes more often and not save
         // one consensus item every second.
@@ -328,7 +329,7 @@ impl ServerModule for Lightning {
 
     async fn process_consensus_item<'a, 'b>(
         &'a self,
-        dbtx: &mut DatabaseTransaction<'b>,
+        dbtx: &mut WriteDatabaseTransaction<'b>,
         consensus_item: LightningConsensusItem,
         peer: PeerId,
     ) -> anyhow::Result<()> {
@@ -363,7 +364,7 @@ impl ServerModule for Lightning {
 
     async fn process_input<'a, 'b, 'c>(
         &'a self,
-        dbtx: &mut DatabaseTransaction<'c>,
+        dbtx: &mut WriteDatabaseTransaction<'c>,
         input: &'b LightningInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, LightningInputError> {
@@ -445,7 +446,7 @@ impl ServerModule for Lightning {
 
     async fn process_output<'a, 'b>(
         &'a self,
-        dbtx: &mut DatabaseTransaction<'b>,
+        dbtx: &mut WriteDatabaseTransaction<'b>,
         output: &'a LightningOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, LightningOutputError> {
@@ -505,7 +506,7 @@ impl ServerModule for Lightning {
 
     async fn audit(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         audit: &mut Audit,
         module_instance_id: ModuleInstanceId,
     ) {
@@ -537,7 +538,7 @@ impl ServerModule for Lightning {
                 ApiVersion::new(0, 0),
                 async |module: &Lightning, context, _params : () | -> u64 {
                     let db = context.db();
-                    let mut dbtx = db.begin_transaction_nc().await;
+                    let mut dbtx = db.begin_write_transaction().await.into_nc();
 
                     Ok(module.consensus_block_count(&mut dbtx).await)
                 }
@@ -566,7 +567,7 @@ impl ServerModule for Lightning {
                 async |_module: &Lightning, context, params: OutPoint| -> DecryptionKeyShare {
                     let share = context
                         .db()
-                        .begin_transaction_nc()
+                        .begin_write_transaction()
                         .await
                         .get_value(&DecryptionKeyShareKey(params))
                         .await
@@ -618,7 +619,10 @@ impl Lightning {
             .context("Block count not available yet")
     }
 
-    async fn consensus_block_count(&self, dbtx: &mut DatabaseTransaction<'_>) -> u64 {
+    async fn consensus_block_count(
+        &self,
+        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+    ) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut counts = dbtx
@@ -641,7 +645,10 @@ impl Lightning {
         counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    async fn consensus_unix_time(&self, dbtx: &mut DatabaseTransaction<'_>) -> u64 {
+    async fn consensus_unix_time(
+        &self,
+        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+    ) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut times = dbtx
@@ -680,7 +687,7 @@ impl Lightning {
 
             // to avoid race conditions we have to check for the contract and
             // its expiration in the same database transaction
-            let mut dbtx = db.begin_transaction_nc().await;
+            let mut dbtx = db.begin_write_transaction().await.into_nc();
 
             if let Some(outpoint) = dbtx
                 .get_value(&IncomingContractOutpointKey(contract_id))
@@ -711,7 +718,7 @@ impl Lightning {
 
             // to avoid race conditions we have to check for the preimage and
             // the contracts expiration in the same database transaction
-            let mut dbtx = db.begin_transaction_nc().await;
+            let mut dbtx = db.begin_write_transaction().await.into_nc();
 
             if let Some(preimage) = dbtx.get_value(&PreimageKey(outpoint)).await {
                 return Some(preimage);
@@ -728,7 +735,7 @@ impl Lightning {
         db: Database,
         outpoint: OutPoint,
     ) -> Option<(ContractId, u64)> {
-        let mut dbtx = db.begin_transaction_nc().await;
+        let mut dbtx = db.begin_write_transaction().await.into_nc();
 
         let contract = dbtx.get_value(&OutgoingContractKey(outpoint)).await?;
 
@@ -770,7 +777,7 @@ impl Lightning {
     }
 
     async fn add_gateway(db: Database, gateway: SafeUrl) -> bool {
-        let mut dbtx = db.begin_transaction().await;
+        let mut dbtx = db.begin_write_transaction().await;
 
         let is_new_entry = dbtx.insert_entry(&GatewayKey(gateway), &()).await.is_none();
 
@@ -780,7 +787,7 @@ impl Lightning {
     }
 
     async fn remove_gateway(db: Database, gateway: SafeUrl) -> bool {
-        let mut dbtx = db.begin_transaction().await;
+        let mut dbtx = db.begin_write_transaction().await;
 
         let entry_existed = dbtx.remove_entry(&GatewayKey(gateway)).await.is_some();
 
@@ -790,7 +797,7 @@ impl Lightning {
     }
 
     async fn gateways(db: Database) -> Vec<SafeUrl> {
-        db.begin_transaction_nc()
+        db.begin_write_transaction()
             .await
             .find_by_prefix(&GatewayPrefix)
             .await
@@ -800,12 +807,12 @@ impl Lightning {
     }
 
     pub async fn consensus_block_count_ui(&self) -> u64 {
-        self.consensus_block_count(&mut self.db.begin_transaction_nc().await)
+        self.consensus_block_count(&mut self.db.begin_write_transaction().await.to_ref_nc())
             .await
     }
 
     pub async fn consensus_unix_time_ui(&self) -> u64 {
-        self.consensus_unix_time(&mut self.db.begin_transaction_nc().await)
+        self.consensus_unix_time(&mut self.db.begin_write_transaction().await.to_ref_nc())
             .await
     }
 

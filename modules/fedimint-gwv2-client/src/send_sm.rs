@@ -4,7 +4,7 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::{Amount, OutPoint};
@@ -219,7 +219,7 @@ async fn send_payment_sm(
 
 async fn transition_send_payment_sm(
     ctx: GwV2SmContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     old_state: SendStateMachine,
     result: Result<PaymentResponse, Cancelled>,
 ) -> SendStateMachine {

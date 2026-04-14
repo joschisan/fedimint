@@ -12,7 +12,7 @@ use fedimint_core::core::{
     Decoder, DynInput, DynOutput, IInput, IntoDynInstance, ModuleInstanceId, ModuleKind,
     OperationId,
 };
-use fedimint_core::db::{Database, DatabaseTransaction, NonCommittable};
+use fedimint_core::db::{Database, NonCommittable, WriteDatabaseTransaction};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
@@ -50,7 +50,7 @@ pub struct FinalContribution<I, O> {
 pub type SpawnSms = Box<
     maybe_add_send_sync!(
         dyn for<'a> FnOnce(
-                &'a mut DatabaseTransaction<'_>,
+                &'a mut WriteDatabaseTransaction<'_>,
                 TransactionId,
                 IdxRange,
                 IdxRange,
@@ -93,14 +93,14 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
 
     async fn finalize_and_submit_transaction_dbtx(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
 
     async fn finalize_and_submit_transaction_inner(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
@@ -124,7 +124,7 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
     #[allow(clippy::too_many_arguments)]
     async fn log_event_json(
         &self,
-        dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
+        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
         module_kind: Option<ModuleKind>,
         module_id: ModuleInstanceId,
         kind: EventKind,
@@ -318,7 +318,7 @@ where
 
     pub async fn finalize_and_submit_transaction_dbtx(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
@@ -365,7 +365,7 @@ where
 
     pub async fn claim_inputs<I>(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         inputs: ClientInputBundle<I>,
         operation_id: OperationId,
     ) -> anyhow::Result<OutPointRange>
@@ -378,7 +378,7 @@ where
 
     async fn claim_inputs_dyn(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         inputs: InstancelessDynClientInputBundle,
         operation_id: OperationId,
     ) -> anyhow::Result<OutPointRange> {
@@ -417,7 +417,7 @@ where
         self.client.get().get_event_log(pos, limit).await
     }
 
-    pub async fn log_event<E, Cap>(&self, dbtx: &mut DatabaseTransaction<'_, Cap>, event: E)
+    pub async fn log_event<E, Cap>(&self, dbtx: &mut WriteDatabaseTransaction<'_, Cap>, event: E)
     where
         E: Event + Send,
         Cap: Send,
@@ -525,7 +525,7 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     ///   of calling `create_change_output` and have to be injected later.
     async fn create_final_inputs_and_outputs(
         &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
+        _dbtx: &mut WriteDatabaseTransaction<'_>,
         _operation_id: OperationId,
         _input_amount: Amount,
         _output_amount: Amount,
@@ -540,7 +540,10 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
 
     /// Returns the balance held by this module and available for funding
     /// transactions.
-    async fn get_balance(&self, _dbtx: &mut DatabaseTransaction<'_>) -> Amount {
+    async fn get_balance(
+        &self,
+        _dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+    ) -> Amount {
         unimplemented!()
     }
 
@@ -605,7 +608,10 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// Calling code should allow the user to override and ignore any
     /// outstanding errors, after sufficient amount of warnings. Ideally,
     /// this should be done on per-module basis, to avoid mistakes.
-    async fn leave(&self, _dbtx: &mut DatabaseTransaction<'_>) -> anyhow::Result<()> {
+    async fn leave(
+        &self,
+        _dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+    ) -> anyhow::Result<()> {
         bail!("Unable to determine if safe to leave the federation: Not implemented")
     }
 }
@@ -628,7 +634,7 @@ pub trait IClientModule: Debug {
     async fn create_final_inputs_and_outputs(
         &self,
         module_instance: ModuleInstanceId,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         input_amount: Amount,
         output_amount: Amount,
@@ -637,7 +643,7 @@ pub trait IClientModule: Debug {
     async fn get_balance(
         &self,
         module_instance: ModuleInstanceId,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
     ) -> Amount;
 
     async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()>;
@@ -689,7 +695,7 @@ where
     async fn create_final_inputs_and_outputs(
         &self,
         module_instance: ModuleInstanceId,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         input_amount: Amount,
         output_amount: Amount,
@@ -726,7 +732,7 @@ where
     async fn get_balance(
         &self,
         module_instance: ModuleInstanceId,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
     ) -> Amount {
         <T as ClientModule>::get_balance(
             self,

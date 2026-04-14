@@ -2,7 +2,7 @@ use tokio::sync::oneshot;
 
 use super::mem_impl::MemDatabase;
 use super::{
-    Database, IDatabaseTransactionOpsCoreTyped, IRawDatabaseExt, TestKey, TestVal,
+    Database, IRawDatabaseExt, IWriteDatabaseTransactionOpsTyped, TestKey, TestVal,
     future_returns_shortly,
 };
 use crate::runtime::spawn;
@@ -27,7 +27,7 @@ async fn test_wait_key_before_transaction() {
 
     let key_task = waiter(&db, TestKey(1)).await;
 
-    let mut tx = db.begin_transaction().await;
+    let mut tx = db.begin_write_transaction().await;
     tx.insert_new_entry(&key, &val).await;
     tx.commit_tx().await;
 
@@ -44,7 +44,7 @@ async fn test_wait_key_before_insert() {
     let val = TestVal(2);
     let db = MemDatabase::new().into_database();
 
-    let mut tx = db.begin_transaction().await;
+    let mut tx = db.begin_write_transaction().await;
     let key_task = waiter(&db, TestKey(1)).await;
     tx.insert_new_entry(&key, &val).await;
     tx.commit_tx().await;
@@ -62,7 +62,7 @@ async fn test_wait_key_after_insert() {
     let val = TestVal(2);
     let db = MemDatabase::new().into_database();
 
-    let mut tx = db.begin_transaction().await;
+    let mut tx = db.begin_write_transaction().await;
     tx.insert_new_entry(&key, &val).await;
 
     let key_task = waiter(&db, TestKey(1)).await;
@@ -82,7 +82,7 @@ async fn test_wait_key_after_commit() {
     let val = TestVal(2);
     let db = MemDatabase::new().into_database();
 
-    let mut tx = db.begin_transaction().await;
+    let mut tx = db.begin_write_transaction().await;
     tx.insert_new_entry(&key, &val).await;
     tx.commit_tx().await;
 
@@ -104,7 +104,7 @@ async fn test_wait_key_isolated_db() {
 
     let key_task = waiter(&db, TestKey(1)).await;
 
-    let mut tx = db.begin_transaction().await;
+    let mut tx = db.begin_write_transaction().await;
     tx.insert_new_entry(&key, &val).await;
     tx.commit_tx().await;
 
@@ -124,7 +124,7 @@ async fn test_wait_key_isolated_tx() {
 
     let key_task = waiter(&db.with_prefix_module_id(module_instance_id), TestKey(1)).await;
 
-    let mut tx = db.begin_transaction().await;
+    let mut tx = db.begin_write_transaction().await;
     let mut tx_mod = tx.to_ref_with_prefix_module_id(module_instance_id);
     tx_mod.insert_new_entry(&key, &val).await;
     drop(tx_mod);
@@ -147,33 +147,4 @@ async fn test_wait_key_no_transaction() {
         None,
         "should not notify"
     );
-}
-
-#[tokio::test]
-async fn test_prefix_global_dbtx() {
-    let module_instance_id = 10;
-    let db = MemDatabase::new().into_database();
-
-    {
-        let db = db.with_prefix_module_id(module_instance_id);
-
-        let mut tx = db.begin_transaction().await;
-        let mut tx = tx.global_dbtx();
-        tx.insert_new_entry(&TestKey(1), &TestVal(1)).await;
-        tx.commit_tx().await;
-    }
-
-    assert_eq!(
-        db.begin_transaction_nc().await.get_value(&TestKey(1)).await,
-        Some(TestVal(1))
-    );
-}
-
-#[tokio::test]
-#[should_panic(expected = "Illegal to call global_dbtx on BaseDatabaseTransaction")]
-async fn test_prefix_global_dbtx_panics_on_global_db() {
-    let db = MemDatabase::new().into_database();
-
-    let mut tx = db.begin_transaction().await;
-    let _tx = tx.global_dbtx();
 }

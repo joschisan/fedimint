@@ -15,7 +15,8 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{
-    Database, DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped,
+    Database, DatabaseVersion, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+    NonCommittable, WriteDatabaseTransaction,
 };
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::audit::Audit;
@@ -62,7 +63,7 @@ impl ModuleInit for MintInit {
 
     async fn dump_database(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
         let mut mint: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> = BTreeMap::new();
@@ -219,7 +220,7 @@ pub struct Mint {
 impl Mint {
     pub async fn note_distribution_ui(&self) -> BTreeMap<Denomination, u64> {
         self.db
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .find_by_prefix(&IssuanceCounterPrefix)
             .await
@@ -237,14 +238,14 @@ impl ServerModule for Mint {
 
     async fn consensus_proposal(
         &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
+        _dbtx: &mut WriteDatabaseTransaction<'_>,
     ) -> Vec<MintConsensusItem> {
         Vec::new()
     }
 
     async fn process_consensus_item<'a, 'b>(
         &'a self,
-        _dbtx: &mut DatabaseTransaction<'b>,
+        _dbtx: &mut WriteDatabaseTransaction<'b>,
         _consensus_item: MintConsensusItem,
         _peer_id: PeerId,
     ) -> anyhow::Result<()> {
@@ -253,7 +254,7 @@ impl ServerModule for Mint {
 
     async fn process_input<'a, 'b, 'c>(
         &'a self,
-        dbtx: &mut DatabaseTransaction<'c>,
+        dbtx: &mut WriteDatabaseTransaction<'c>,
         input: &'b MintInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, MintInputError> {
@@ -311,7 +312,7 @@ impl ServerModule for Mint {
 
     async fn process_output<'a, 'b>(
         &'a self,
-        dbtx: &mut DatabaseTransaction<'b>,
+        dbtx: &mut WriteDatabaseTransaction<'b>,
         output: &'a MintOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, MintOutputError> {
@@ -365,7 +366,7 @@ impl ServerModule for Mint {
 
     async fn audit(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         audit: &mut Audit,
         module_instance_id: ModuleInstanceId,
     ) {
@@ -383,7 +384,7 @@ impl ServerModule for Mint {
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, range: fedimint_core::OutPointRange| -> Vec<BlindedSignatureShare> {
                     let db = context.db();
-                    let mut dbtx = db.begin_transaction_nc().await;
+                    let mut dbtx = db.begin_write_transaction().await.into_nc();
                     Ok(get_signature_shares(&mut dbtx, range).await)
                 }
             },
@@ -392,7 +393,7 @@ impl ServerModule for Mint {
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, messages: Vec<tbs::BlindedMessage>| -> Vec<BlindedSignatureShare> {
                     let db = context.db();
-                    let mut dbtx = db.begin_transaction_nc().await;
+                    let mut dbtx = db.begin_write_transaction().await.into_nc();
                     get_signature_shares_recovery(&mut dbtx, messages).await
                 }
             },
@@ -401,7 +402,7 @@ impl ServerModule for Mint {
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, range: (u64, u64)| -> Vec<RecoveryItem> {
                     let db = context.db();
-                    let mut dbtx = db.begin_transaction_nc().await;
+                    let mut dbtx = db.begin_write_transaction().await.into_nc();
                     Ok(get_recovery_slice(&mut dbtx, range).await)
                 }
             },
@@ -410,7 +411,7 @@ impl ServerModule for Mint {
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, range: (u64, u64)| -> bitcoin::hashes::sha256::Hash {
                     let db = context.db();
-                    let mut dbtx = db.begin_transaction_nc().await;
+                    let mut dbtx = db.begin_write_transaction().await.into_nc();
                     Ok(get_recovery_slice(&mut dbtx, range).await.consensus_hash())
                 }
             },
@@ -419,7 +420,7 @@ impl ServerModule for Mint {
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, _params: ()| -> u64 {
                     let db = context.db();
-                    let mut dbtx = db.begin_transaction_nc().await;
+                    let mut dbtx = db.begin_write_transaction().await.into_nc();
                     Ok(get_recovery_count(&mut dbtx).await)
                 }
             },
@@ -428,7 +429,7 @@ impl ServerModule for Mint {
 }
 
 async fn get_signature_shares(
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     range: fedimint_core::OutPointRange,
 ) -> Vec<BlindedSignatureShare> {
     let start_key = BlindedSignatureShareKey(range.start_out_point());
@@ -442,7 +443,7 @@ async fn get_signature_shares(
 }
 
 async fn get_signature_shares_recovery(
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     messages: Vec<tbs::BlindedMessage>,
 ) -> Result<Vec<BlindedSignatureShare>, ApiError> {
     let mut shares = Vec::new();
@@ -461,7 +462,7 @@ async fn get_signature_shares_recovery(
     Ok(shares)
 }
 
-async fn get_recovery_count(dbtx: &mut DatabaseTransaction<'_>) -> u64 {
+async fn get_recovery_count(dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>) -> u64 {
     dbtx.find_by_prefix_sorted_descending(&RecoveryItemPrefix)
         .await
         .next()
@@ -470,7 +471,7 @@ async fn get_recovery_count(dbtx: &mut DatabaseTransaction<'_>) -> u64 {
 }
 
 async fn get_recovery_slice(
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     range: (u64, u64),
 ) -> Vec<RecoveryItem> {
     dbtx.find_by_range(RecoveryItemKey(range.0)..RecoveryItemKey(range.1))

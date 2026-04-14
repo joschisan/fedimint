@@ -42,7 +42,7 @@ use crate::core::{
 };
 use crate::db::{
     Database, DatabaseError, DatabaseKey, DatabaseKeyWithNotify, DatabaseRecord,
-    DatabaseTransaction,
+    WriteDatabaseTransaction,
 };
 use crate::encoding::{Decodable, DecodeError, Encodable};
 use crate::fmt_utils::AbbreviateHexBytes;
@@ -473,7 +473,7 @@ pub trait IDynCommonModuleInit: Debug {
 
     async fn dump_database(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_>;
 }
@@ -484,7 +484,7 @@ pub trait ModuleInit: Debug + Clone + Send + Sync + 'static {
 
     fn dump_database(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         prefix_names: Vec<String>,
     ) -> maybe_add_send!(
         impl Future<
@@ -514,7 +514,7 @@ where
 
     async fn dump_database(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
         <Self as ModuleInit>::dump_database(self, dbtx, prefix_names).await

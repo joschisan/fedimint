@@ -4,7 +4,7 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::util::SafeUrl;
 use fedimint_core::util::backoff_util::api_networking_backoff;
@@ -73,7 +73,7 @@ pub enum SendSMState {
 
 async fn send_update_event_sm(
     ctx: &LightningClientContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     operation_id: OperationId,
     status: SendPaymentStatus,
 ) {
@@ -192,7 +192,7 @@ async fn gateway_send_payment_sm(
 
 async fn transition_gateway_send_payment_sm(
     ctx: LightningClientContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     gateway_response: Result<[u8; 32], Signature>,
     old_state: SendStateMachine,
 ) -> SendStateMachine {
@@ -264,7 +264,7 @@ async fn await_preimage_sm(
 
 async fn transition_preimage_sm(
     ctx: LightningClientContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     old_state: SendStateMachine,
     preimage: Option<[u8; 32]>,
 ) -> SendStateMachine {

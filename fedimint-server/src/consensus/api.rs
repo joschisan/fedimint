@@ -8,9 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use fedimint_core::config::{ClientConfig, META_FEDERATION_NAME_KEY};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::db::{
-    Committable, Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped,
-};
+use fedimint_core::db::{Database, IReadDatabaseTransactionOpsTyped, ReadDatabaseTransaction};
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT,
@@ -89,7 +87,7 @@ impl ConsensusApi {
         debug!(target: LOG_NET_API, %txid, "Received a submitted transaction");
 
         // Create read-only DB tx so that the read state is consistent
-        let mut dbtx = self.db.begin_transaction_nc().await;
+        let mut dbtx = self.db.begin_write_transaction().await;
         // we already processed the transaction before
         if dbtx
             .get_value(&AcceptedTransactionKey(txid))
@@ -102,6 +100,7 @@ impl ConsensusApi {
 
         // We ignore any writes, as we only verify if the transaction is valid here
         dbtx.ignore_uncommitted();
+        let mut dbtx = dbtx.into_nc();
 
         process_transaction_with_dbtx(self.modules.clone(), &mut dbtx, &transaction)
         .await
@@ -123,7 +122,7 @@ impl ConsensusApi {
     pub async fn await_transaction(
         &self,
         txid: TransactionId,
-    ) -> (Vec<ModuleInstanceId>, DatabaseTransaction<'_, Committable>) {
+    ) -> (Vec<ModuleInstanceId>, ReadDatabaseTransaction<'_>) {
         debug!(target: LOG_NET_API, %txid, "Awaiting transaction acceptance");
         self.db
             .wait_key_check(&AcceptedTransactionKey(txid), std::convert::identity)
@@ -131,11 +130,12 @@ impl ConsensusApi {
     }
 
     async fn session_count_internal(&self) -> u64 {
-        get_finished_session_count_static(&mut self.db.begin_transaction_nc().await).await
+        get_finished_session_count_static(&mut self.db.begin_write_transaction().await.to_ref_nc())
+            .await
     }
 
     async fn session_status_internal(&self, session_index: u64) -> SessionStatusV2 {
-        let mut dbtx = self.db.begin_transaction_nc().await;
+        let mut dbtx = self.db.begin_write_transaction().await.into_nc();
 
         match session_index.cmp(&get_finished_session_count_static(&mut dbtx).await) {
             Ordering::Greater => SessionStatusV2::Initial,
@@ -155,11 +155,12 @@ impl ConsensusApi {
     }
 
     async fn get_federation_audit(&self) -> ApiResult<AuditSummary> {
-        let mut dbtx = self.db.begin_transaction_nc().await;
+        let mut dbtx = self.db.begin_write_transaction().await;
         // Writes are related to compacting audit keys, which we can safely ignore
         // within an API request since the compaction will happen when constructing an
         // audit in the consensus server
         dbtx.ignore_uncommitted();
+        let mut dbtx = dbtx.into_nc();
 
         let mut audit = Audit::default();
         let mut module_instance_id_to_kind: HashMap<ModuleInstanceId, String> = HashMap::new();

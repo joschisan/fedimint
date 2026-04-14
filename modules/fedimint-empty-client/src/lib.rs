@@ -7,7 +7,7 @@ use db::DbKeyPrefix;
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
-use fedimint_core::db::{Database, DatabaseTransaction, DatabaseVersion};
+use fedimint_core::db::{Database, DatabaseVersion, NonCommittable, WriteDatabaseTransaction};
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::{Amount, apply, async_trait_maybe_send};
 pub use fedimint_empty_common as common;
@@ -49,7 +49,10 @@ impl ClientModule for EmptyClientModule {
         unreachable!()
     }
 
-    async fn get_balance(&self, _dbtx: &mut DatabaseTransaction<'_>) -> Amount {
+    async fn get_balance(
+        &self,
+        _dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+    ) -> Amount {
         Amount::ZERO
     }
 }
@@ -63,7 +66,7 @@ impl ModuleInit for EmptyClientInit {
 
     async fn dump_database(
         &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
+        _dbtx: &mut WriteDatabaseTransaction<'_>,
         prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
         let items: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> = BTreeMap::new();

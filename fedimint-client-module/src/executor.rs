@@ -11,7 +11,6 @@
 //! history is not retained.
 
 use std::any::Any;
-use std::convert::Infallible;
 use std::fmt::Debug;
 use std::future::Future;
 use std::hash::Hash;
@@ -21,8 +20,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use fedimint_core::db::{
-    Database, DatabaseLookup, DatabaseRecord, DatabaseTransaction,
-    IDatabaseTransactionOpsCoreTyped as _,
+    Database, DatabaseLookup, DatabaseRecord, IReadDatabaseTransactionOpsTyped as _,
+    IWriteDatabaseTransactionOpsTyped as _, WriteDatabaseTransaction,
 };
 use fedimint_core::encoding::{Decodable, DecodeError, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -65,7 +64,7 @@ pub type TriggerFuture = Pin<Box<maybe_add_send!(dyn Future<Output = ErasedValue
 
 pub type TransitionFn<S> = Arc<
     maybe_add_send_sync!(
-        dyn for<'a> Fn(&'a mut DatabaseTransaction<'_>, ErasedValue, S) -> BoxFuture<'a, S>
+        dyn for<'a> Fn(&'a mut WriteDatabaseTransaction<'_>, ErasedValue, S) -> BoxFuture<'a, S>
     ),
 >;
 
@@ -79,7 +78,7 @@ impl<S: StateMachine> StateTransition<S> {
     where
         V: Clone + MaybeSend + MaybeSync + 'static,
         Trigger: Future<Output = V> + MaybeSend + 'static,
-        F: for<'a> Fn(&'a mut DatabaseTransaction<'_>, V, S) -> BoxFuture<'a, S>
+        F: for<'a> Fn(&'a mut WriteDatabaseTransaction<'_>, V, S) -> BoxFuture<'a, S>
             + MaybeSend
             + MaybeSync
             + Clone
@@ -194,7 +193,7 @@ impl<S: StateMachine> ModuleExecutor<S> {
     /// driver task is spawned for it when the DB transaction commits.
     ///
     /// `dbtx` must be the module-prefixed dbtx.
-    pub async fn add_state_machine_dbtx(&self, dbtx: &mut DatabaseTransaction<'_>, state: S) {
+    pub async fn add_state_machine_dbtx(&self, dbtx: &mut WriteDatabaseTransaction<'_>, state: S) {
         let key = ActiveStateKey(state.clone());
 
         if dbtx.get_value(&key).await.is_some() {
@@ -219,7 +218,7 @@ impl<S: StateMachine> ModuleExecutor<S> {
     /// [`Self::start`]. Used by pre-init paths (e.g. recovery) that need
     /// to seed state before the executor exists. `dbtx` must be scoped
     /// to the module's DB namespace.
-    pub async fn add_state_machine_unstarted(dbtx: &mut DatabaseTransaction<'_>, state: S) {
+    pub async fn add_state_machine_unstarted(dbtx: &mut WriteDatabaseTransaction<'_>, state: S) {
         dbtx.insert_new_entry(&ActiveStateKey(state), &()).await;
     }
 }
@@ -227,7 +226,7 @@ impl<S: StateMachine> ModuleExecutor<S> {
 impl<S: StateMachine> Inner<S> {
     async fn get_active_states(&self) -> Vec<S> {
         self.db
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .find_by_prefix(&ActiveStatePrefixAll::<S>::default())
             .await
@@ -237,18 +236,13 @@ impl<S: StateMachine> Inner<S> {
     }
 
     async fn remove_active(&self, state: &S) {
-        self.db
-            .autocommit::<_, _, Infallible>(
-                |dbtx, _| {
-                    Box::pin(async {
-                        dbtx.remove_entry(&ActiveStateKey(state.clone())).await;
-                        Ok(())
-                    })
-                },
-                None,
-            )
-            .await
-            .expect("autocommit retries forever");
+        loop {
+            let mut dbtx = self.db.begin_write_transaction().await;
+            dbtx.remove_entry(&ActiveStateKey(state.clone())).await;
+            if dbtx.commit_tx_result().await.is_ok() {
+                return;
+            }
+        }
     }
 
     fn spawn_drive(self: Arc<Self>, state: S) {
@@ -275,34 +269,22 @@ impl<S: StateMachine> Inner<S> {
             .await
             .0;
 
-            let next = self
-                .db
-                .autocommit::<_, _, Infallible>(
-                    |dbtx, _| {
-                        let state = state.clone();
-                        let transition = transition.clone();
-                        let outcome = outcome.clone();
-                        let ctx = self.context.clone();
-
-                        Box::pin(async move {
-                            let new_state = transition(dbtx, outcome, state.clone()).await;
-
-                            dbtx.remove_entry(&ActiveStateKey(state)).await;
-
-                            if new_state.transitions(&ctx).is_empty() {
-                                Ok(None)
-                            } else {
-                                dbtx.insert_entry(&ActiveStateKey(new_state.clone()), &())
-                                    .await;
-
-                                Ok(Some(new_state))
-                            }
-                        })
-                    },
-                    None,
-                )
-                .await
-                .expect("autocommit retries forever");
+            let next = loop {
+                let mut dbtx = self.db.begin_write_transaction().await;
+                let new_state =
+                    transition.clone()(&mut dbtx.to_ref_nc(), outcome.clone(), state.clone()).await;
+                dbtx.remove_entry(&ActiveStateKey(state.clone())).await;
+                let next = if new_state.transitions(&self.context).is_empty() {
+                    None
+                } else {
+                    dbtx.insert_entry(&ActiveStateKey(new_state.clone()), &())
+                        .await;
+                    Some(new_state)
+                };
+                if dbtx.commit_tx_result().await.is_ok() {
+                    break next;
+                }
+            };
 
             match next {
                 Some(new_state) => state = new_state,

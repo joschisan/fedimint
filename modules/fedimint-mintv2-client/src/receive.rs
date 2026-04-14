@@ -1,7 +1,7 @@
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 
 use crate::MintSmContext;
@@ -61,7 +61,7 @@ impl StateMachine for ReceiveStateMachine {
 
 async fn transition_tx_outcome_sm(
     ctx: MintSmContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     result: Result<(), String>,
     old_state: ReceiveStateMachine,
 ) -> ReceiveStateMachine {

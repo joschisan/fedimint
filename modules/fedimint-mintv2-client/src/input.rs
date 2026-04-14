@@ -3,7 +3,7 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::module::OutPointRange;
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_mintv2_common::MintInput;
 
@@ -58,7 +58,7 @@ async fn await_pending_sm(ctx: MintSmContext, txid: TransactionId) -> Result<(),
 
 async fn transition_pending_sm(
     ctx: MintSmContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     result: Result<(), String>,
     old_state: InputStateMachine,
 ) -> InputStateMachine {

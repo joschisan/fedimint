@@ -2,7 +2,7 @@ use std::fmt;
 
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_core::core::OperationId;
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 
 use super::FinalReceiveState;
@@ -86,7 +86,7 @@ impl StateMachine for CompleteStateMachine {
                 let operation_id = self.common.operation_id;
                 vec![SmStateTransition::new(
                     async move { await_receive_from_log(&ctx_clone.client_ctx, operation_id).await },
-                    |_dbtx: &mut DatabaseTransaction<'_>,
+                    |_dbtx: &mut WriteDatabaseTransaction<'_>,
                      result: FinalReceiveState,
                      old_state: CompleteStateMachine| {
                         Box::pin(
@@ -145,7 +145,7 @@ async fn await_completion_sm(
 
 async fn transition_completion_sm(
     ctx: GwV2SmContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     old_state: CompleteStateMachine,
 ) -> CompleteStateMachine {
     ctx.client_ctx

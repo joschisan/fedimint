@@ -41,7 +41,10 @@ use fedimint_client_module::module::{ClientContext, IdxRange, OutPointRange};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::db::{
+    DatabaseVersion, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+    NonCommittable, WriteDatabaseTransaction,
+};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::rand::{Rng, thread_rng};
@@ -106,7 +109,7 @@ impl ModuleInit for MintClientInit {
 
     async fn dump_database(
         &self,
-        _dbtx: &mut DatabaseTransaction<'_>,
+        _dbtx: &mut WriteDatabaseTransaction<'_>,
         _prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
         Box::new(BTreeMap::new().into_iter())
@@ -120,7 +123,7 @@ impl ClientModuleInit for MintClientInit {
     async fn recover(&self, args: &ClientModuleRecoverArgs<Self>) -> anyhow::Result<()> {
         let mut state = if let Some(state) = args
             .db()
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .get_value(&RecoveryStateKey)
             .await
@@ -215,7 +218,7 @@ impl ClientModuleInit for MintClientInit {
 
             state.next_index += items.len() as u64;
 
-            let mut dbtx = args.db().begin_transaction().await;
+            let mut dbtx = args.db().begin_write_transaction().await;
 
             dbtx.insert_entry(&RecoveryStateKey, &state).await;
 
@@ -375,7 +378,7 @@ impl ClientModule for MintClientModule {
 
     async fn create_final_inputs_and_outputs(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         mut input_amount: Amount,
         mut output_amount: Amount,
@@ -488,7 +491,7 @@ impl ClientModule for MintClientModule {
         })
     }
 
-    async fn get_balance(&self, dbtx: &mut DatabaseTransaction<'_>) -> Amount {
+    async fn get_balance(&self, dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>) -> Amount {
         self.get_count_by_denomination_dbtx(dbtx)
             .await
             .into_iter()
@@ -506,7 +509,7 @@ impl ClientModule for MintClientModule {
 impl MintClientModule {
     async fn select_funding_input(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         mut excess_output: Amount,
     ) -> Option<Vec<SpendableNote>> {
         let mut selected_notes = Vec::new();
@@ -563,7 +566,7 @@ impl MintClientModule {
 
     async fn rebalance(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         output_fee: Amount,
         mut excess_input: Amount,
     ) -> (Vec<SpendableNote>, Vec<Denomination>) {
@@ -644,14 +647,19 @@ impl MintClientModule {
     /// Count the `ECash` notes in the client's database by denomination.
     pub async fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
         self.get_count_by_denomination_dbtx(
-            &mut self.client_ctx.module_db().begin_transaction_nc().await,
+            &mut self
+                .client_ctx
+                .module_db()
+                .begin_write_transaction()
+                .await
+                .to_ref_nc(),
         )
         .await
     }
 
     async fn get_count_by_denomination_dbtx(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
     ) -> BTreeMap<Denomination, u64> {
         dbtx.find_by_prefix(&SpendableNotePrefix)
             .await
@@ -677,16 +685,26 @@ impl MintClientModule {
     pub async fn send(&self, amount: Amount) -> Result<ECash, SendECashError> {
         let amount = round_to_multiple(amount, client_denominations().next().unwrap().amount());
 
-        if let Some(ecash) = self
-            .client_ctx
-            .module_db()
-            .autocommit(
-                |dbtx, _| Box::pin(self.send_ecash_dbtx(dbtx, amount)),
-                Some(100),
-            )
-            .await
-            .expect("Failed to commit dbtx after 100 retries")
-        {
+        let module_db = self.client_ctx.module_db();
+        let maybe_ecash = 'commit: loop {
+            for attempt in 0..100 {
+                let mut dbtx = module_db.begin_write_transaction().await;
+                let ecash = self
+                    .send_ecash_dbtx(&mut dbtx.to_ref_nc(), amount)
+                    .await
+                    .expect("Infallible");
+                match dbtx.commit_tx_result().await {
+                    Ok(()) => break 'commit ecash,
+                    Err(err) => {
+                        if attempt == 99 {
+                            panic!("Failed to commit dbtx after 100 retries: {err}");
+                        }
+                    }
+                }
+            }
+            unreachable!()
+        };
+        if let Some(ecash) = maybe_ecash {
             return Ok(ecash);
         }
 
@@ -707,7 +725,7 @@ impl MintClientModule {
         // Subscribe before submitting so we cannot miss the finalisation event.
         let mut events = self.client_ctx.event_log_transient_receiver();
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
         let finalize_range = self
             .client_ctx
@@ -746,7 +764,7 @@ impl MintClientModule {
 
     async fn send_ecash_dbtx(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         mut remaining_amount: Amount,
     ) -> Result<Option<ECash>, Infallible> {
         let mut stream = dbtx
@@ -819,7 +837,7 @@ impl MintClientModule {
             .client_ctx
             .make_client_inputs(ClientInputBundle::new(inputs));
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
 
         if dbtx
             .insert_entry(&crate::client_db::ReceiveOperationKey(operation_id), &())
@@ -883,7 +901,7 @@ impl MintClientModule {
 
     async fn remove_spendable_note(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         spendable_note: &SpendableNote,
     ) {
         dbtx.remove_entry(&SpendableNoteKey(spendable_note.clone()))

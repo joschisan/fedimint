@@ -8,8 +8,8 @@ use anyhow::{Context as _, anyhow, bail, format_err};
 use bitcoin::key::Secp256k1;
 use bitcoin::key::rand::thread_rng;
 use bitcoin::secp256k1::{self, PublicKey};
-use fedimint_api_client::api::{DynGlobalApi, IRawFederationApi};
 use fedimint_api_client::Endpoint;
+use fedimint_api_client::api::{DynGlobalApi, IRawFederationApi};
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
@@ -26,8 +26,8 @@ use fedimint_client_module::{
 use fedimint_core::config::{ClientConfig, FederationId, JsonClientConfig, ModuleInitRegistry};
 use fedimint_core::core::{DynInput, DynOutput, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{
-    AutocommitError, Database, DatabaseRecord, DatabaseTransaction,
-    IDatabaseTransactionOpsCore as _, IDatabaseTransactionOpsCoreTyped as _, NonCommittable,
+    Database, DatabaseRecord, IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped,
+    IWriteDatabaseTransactionOpsTyped as _, NonCommittable, WriteDatabaseTransaction,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::envs::is_running_in_test_env;
@@ -41,8 +41,9 @@ use fedimint_core::{
     maybe_add_send_sync,
 };
 use fedimint_eventlog::{
-    DBTransactionEventLogExt as _, DynEventLogTrimableTracker, Event, EventKind, EventLogEntry,
-    EventLogId, EventLogTrimableId, EventLogTrimableTracker, EventPersistence, PersistedLogEntry,
+    DBTransactionEventLogExt as _, DBTransactionEventLogReadExt as _, DynEventLogTrimableTracker,
+    Event, EventKind, EventLogEntry, EventLogId, EventLogTrimableId, EventLogTrimableTracker,
+    EventPersistence, PersistedLogEntry,
 };
 use fedimint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
 use futures::{Stream, StreamExt as _};
@@ -131,12 +132,12 @@ impl Client {
     }
 
     pub async fn get_config_from_db(db: &Database) -> Option<ClientConfig> {
-        let mut dbtx = db.begin_transaction_nc().await;
+        let mut dbtx = db.begin_write_transaction().await;
         dbtx.get_value(&ClientConfigKey).await
     }
 
     pub async fn get_api_secret_from_db(db: &Database) -> Option<String> {
-        let mut dbtx = db.begin_transaction_nc().await;
+        let mut dbtx = db.begin_write_transaction().await;
         dbtx.get_value(&ApiSecretKey).await
     }
 
@@ -144,7 +145,7 @@ impl Client {
         db: &Database,
         secret: T,
     ) -> anyhow::Result<()> {
-        let mut dbtx = db.begin_transaction().await;
+        let mut dbtx = db.begin_write_transaction().await;
 
         // Don't overwrite an existing secret
         if dbtx.get_value(&EncodedClientSecretKey).await.is_some() {
@@ -168,7 +169,7 @@ impl Client {
     pub async fn load_decodable_client_secret_opt<T: Decodable>(
         db: &Database,
     ) -> anyhow::Result<Option<T>> {
-        let mut dbtx = db.begin_transaction_nc().await;
+        let mut dbtx = db.begin_write_transaction().await;
 
         let client_secret = dbtx.get_value(&EncodedClientSecretKey).await;
 
@@ -196,7 +197,7 @@ impl Client {
     }
 
     pub async fn is_initialized(db: &Database) -> bool {
-        let mut dbtx = db.begin_transaction_nc().await;
+        let mut dbtx = db.begin_write_transaction().await;
         dbtx.raw_get_bytes(&[ClientConfigKey::DB_PREFIX])
             .await
             .expect("Unrecoverable error occurred while reading and entry from the database")
@@ -294,7 +295,7 @@ impl Client {
     /// spawn callback (if any) and its associated input/output ranges.
     async fn finalize_transaction(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         mut partial_transaction: TransactionBuilder,
     ) -> anyhow::Result<(
@@ -370,37 +371,34 @@ impl Client {
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
-        let autocommit_res = self
-            .db
-            .autocommit(
-                |dbtx, _| {
-                    let tx_builder = tx_builder.clone();
-                    Box::pin(async move {
-                        self.finalize_and_submit_transaction_dbtx(dbtx, operation_id, tx_builder)
-                            .await
-                    })
-                },
-                Some(100), // TODO: handle what happens after 100 retries
-            )
-            .await;
-
-        match autocommit_res {
-            Ok(txid) => Ok(txid),
-            Err(AutocommitError::ClosureError { error, .. }) => Err(error),
-            Err(AutocommitError::CommitFailed {
-                attempts,
-                last_error,
-            }) => panic!(
-                "Failed to commit tx submission dbtx after {attempts} attempts: {last_error}"
-            ),
+        for attempt in 0..100 {
+            let mut dbtx = self.db.begin_write_transaction().await;
+            let result = self
+                .finalize_and_submit_transaction_dbtx(
+                    &mut dbtx.to_ref_nc(),
+                    operation_id,
+                    tx_builder.clone(),
+                )
+                .await?;
+            match dbtx.commit_tx_result().await {
+                Ok(()) => return Ok(result),
+                Err(last_error) => {
+                    if attempt == 99 {
+                        panic!(
+                            "Failed to commit tx submission dbtx after 100 attempts: {last_error}"
+                        );
+                    }
+                }
+            }
         }
+        unreachable!()
     }
 
     /// See [`Self::finalize_and_submit_transaction`], just inside a database
     /// transaction.
     pub async fn finalize_and_submit_transaction_dbtx(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
@@ -410,7 +408,7 @@ impl Client {
 
     async fn finalize_and_submit_transaction_inner(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
@@ -575,7 +573,10 @@ impl Client {
             .primary_module()
             .ok_or_else(|| anyhow!("Primary module not available"))?;
         Ok(module
-            .get_balance(id, &mut self.db().begin_transaction_nc().await)
+            .get_balance(
+                id,
+                &mut self.db().begin_write_transaction().await.to_ref_nc(),
+            )
             .await)
     }
 
@@ -609,9 +610,9 @@ impl Client {
             yield initial_balance;
             let mut prev_balance = initial_balance;
             while let Some(()) = balance_changes.next().await {
-                let mut dbtx = db.begin_transaction_nc().await;
+                let mut dbtx = db.begin_write_transaction().await;
                 let balance = primary_module
-                     .get_balance(primary_module_id, &mut dbtx)
+                     .get_balance(primary_module_id, &mut dbtx.to_ref_nc())
                     .await;
 
                 // Deduplicate in case modules cannot always tell if the balance actually changed
@@ -768,7 +769,7 @@ impl Client {
         );
 
         while let Some((module_instance_id, progress)) = futures.next().await {
-            let mut dbtx = db.begin_transaction().await;
+            let mut dbtx = db.begin_write_transaction().await;
 
             let prev_progress = *recovery_sender
                 .borrow()
@@ -866,14 +867,14 @@ impl Client {
     where
         E: Event + Send,
     {
-        let mut dbtx = self.db.begin_transaction().await;
+        let mut dbtx = self.db.begin_write_transaction().await;
         self.log_event_dbtx(&mut dbtx, module_id, event).await;
         dbtx.commit_tx().await;
     }
 
     pub async fn log_event_dbtx<E, Cap>(
         &self,
-        dbtx: &mut DatabaseTransaction<'_, Cap>,
+        dbtx: &mut WriteDatabaseTransaction<'_, Cap>,
         module_id: Option<ModuleInstanceId>,
         event: E,
     ) where
@@ -886,7 +887,7 @@ impl Client {
 
     pub async fn log_event_raw_dbtx<Cap>(
         &self,
-        dbtx: &mut DatabaseTransaction<'_, Cap>,
+        dbtx: &mut WriteDatabaseTransaction<'_, Cap>,
         kind: EventKind,
         module: Option<(ModuleKind, ModuleInstanceId)>,
         payload: Vec<u8>,
@@ -926,7 +927,7 @@ impl Client {
             // Store position in the event log
             async fn store(
                 &mut self,
-                dbtx: &mut DatabaseTransaction<NonCommittable>,
+                dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
                 pos: EventLogTrimableId,
             ) -> anyhow::Result<()> {
                 dbtx.insert_entry(&DefaultApplicationEventLogKey, &pos)
@@ -937,7 +938,7 @@ impl Client {
             /// Load the last previous stored position (or None if never stored)
             async fn load(
                 &mut self,
-                dbtx: &mut DatabaseTransaction<NonCommittable>,
+                dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
             ) -> anyhow::Result<Option<EventLogTrimableId>> {
                 Ok(dbtx.get_value(&DefaultApplicationEventLogKey).await)
             }
@@ -958,7 +959,7 @@ impl Client {
         handler_fn: F,
     ) -> anyhow::Result<()>
     where
-        F: Fn(&mut DatabaseTransaction<NonCommittable>, EventLogEntry) -> R,
+        F: Fn(&mut WriteDatabaseTransaction<NonCommittable>, EventLogEntry) -> R,
         R: Future<Output = anyhow::Result<()>>,
     {
         fedimint_eventlog::handle_events(
@@ -994,7 +995,7 @@ impl Client {
         handler_fn: F,
     ) -> anyhow::Result<()>
     where
-        F: Fn(&mut DatabaseTransaction<NonCommittable>, EventLogEntry) -> R,
+        F: Fn(&mut WriteDatabaseTransaction<NonCommittable>, EventLogEntry) -> R,
         R: Future<Output = anyhow::Result<()>>,
     {
         fedimint_eventlog::handle_trimable_events(
@@ -1011,8 +1012,12 @@ impl Client {
         pos: Option<EventLogId>,
         limit: u64,
     ) -> Vec<PersistedLogEntry> {
-        self.get_event_log_dbtx(&mut self.db.begin_transaction_nc().await, pos, limit)
-            .await
+        self.get_event_log_dbtx(
+            &mut self.db.begin_write_transaction().await.to_ref_nc(),
+            pos,
+            limit,
+        )
+        .await
     }
 
     pub async fn get_event_log_trimable(
@@ -1020,13 +1025,17 @@ impl Client {
         pos: Option<EventLogTrimableId>,
         limit: u64,
     ) -> Vec<PersistedLogEntry> {
-        self.get_event_log_trimable_dbtx(&mut self.db.begin_transaction_nc().await, pos, limit)
-            .await
+        self.get_event_log_trimable_dbtx(
+            &mut self.db.begin_write_transaction().await.to_ref_nc(),
+            pos,
+            limit,
+        )
+        .await
     }
 
     pub async fn get_event_log_dbtx<Cap>(
         &self,
-        dbtx: &mut DatabaseTransaction<'_, Cap>,
+        dbtx: &mut WriteDatabaseTransaction<'_, Cap>,
         pos: Option<EventLogId>,
         limit: u64,
     ) -> Vec<PersistedLogEntry>
@@ -1038,7 +1047,7 @@ impl Client {
 
     pub async fn get_event_log_trimable_dbtx<Cap>(
         &self,
-        dbtx: &mut DatabaseTransaction<'_, Cap>,
+        dbtx: &mut WriteDatabaseTransaction<'_, Cap>,
         pos: Option<EventLogTrimableId>,
         limit: u64,
     ) -> Vec<PersistedLogEntry>
@@ -1061,7 +1070,7 @@ impl Client {
     pub(crate) async fn run_core_migrations(
         db_no_decoders: &Database,
     ) -> Result<(), anyhow::Error> {
-        let mut dbtx = db_no_decoders.begin_transaction().await;
+        let mut dbtx = db_no_decoders.begin_write_transaction().await;
         apply_migrations_core_client_dbtx(&mut dbtx.to_ref_nc(), "fedimint-client".to_string())
             .await?;
         if is_running_in_test_env() {
@@ -1106,7 +1115,7 @@ impl ClientContextIface for Client {
 
     async fn finalize_and_submit_transaction_dbtx(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
@@ -1115,7 +1124,7 @@ impl ClientContextIface for Client {
 
     async fn finalize_and_submit_transaction_inner(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
@@ -1140,7 +1149,7 @@ impl ClientContextIface for Client {
 
     async fn log_event_json(
         &self,
-        dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
+        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
         module_kind: Option<ModuleKind>,
         module_id: ModuleInstanceId,
         kind: EventKind,

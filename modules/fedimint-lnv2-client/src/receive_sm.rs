@@ -2,7 +2,7 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::OutPoint;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::secp256k1::Keypair;
 use fedimint_lnv2_common::contracts::IncomingContract;
@@ -93,7 +93,7 @@ async fn await_incoming_contract_sm(
 
 async fn transition_incoming_contract_sm(
     ctx: LightningClientContext,
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     old_state: ReceiveStateMachine,
     outpoint: Option<OutPoint>,
 ) -> ReceiveStateMachine {

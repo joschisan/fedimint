@@ -6,7 +6,10 @@ use anyhow::{anyhow, bail};
 use async_channel::Receiver;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::core::DynOutput;
-use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::db::{
+    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped, NonCommittable,
+    WriteDatabaseTransaction,
+};
 use fedimint_core::encoding::Decodable;
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::Audit;
@@ -236,7 +239,7 @@ impl ConsensusEngine {
 
     async fn is_recovery(&self) -> bool {
         self.db
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .find_by_prefix(&AlephUnitsPrefix)
             .await
@@ -530,7 +533,7 @@ impl ConsensusEngine {
 
     pub async fn pending_accepted_items(&self) -> Vec<AcceptedItem> {
         self.db
-            .begin_transaction_nc()
+            .begin_write_transaction()
             .await
             .find_by_prefix(&AcceptedItemPrefix)
             .await
@@ -544,7 +547,7 @@ impl ConsensusEngine {
         session_index: u64,
         signed_session_outcome: SignedSessionOutcome,
     ) {
-        let mut dbtx = self.db.begin_transaction().await;
+        let mut dbtx = self.db.begin_write_transaction().await;
 
         dbtx.remove_by_prefix(&AlephUnitsPrefix).await;
 
@@ -588,7 +591,7 @@ impl ConsensusEngine {
             .expect("No ci status sender for peer")
             .send_replace(Some(session_index));
 
-        let mut dbtx = self.db.begin_transaction().await;
+        let mut dbtx = self.db.begin_write_transaction().await;
 
         dbtx.ignore_uncommitted();
 
@@ -676,7 +679,7 @@ impl ConsensusEngine {
 
     async fn process_consensus_item_with_db_transaction(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
+        dbtx: &mut WriteDatabaseTransaction<'_>,
         consensus_item: ConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()> {
@@ -740,11 +743,14 @@ impl ConsensusEngine {
     /// Returns the number of sessions already saved in the database. This count
     /// **does not** include the currently running session.
     async fn get_finished_session_count(&self) -> u64 {
-        get_finished_session_count_static(&mut self.db.begin_transaction_nc().await).await
+        get_finished_session_count_static(&mut self.db.begin_write_transaction().await.to_ref_nc())
+            .await
     }
 }
 
-pub async fn get_finished_session_count_static(dbtx: &mut DatabaseTransaction<'_>) -> u64 {
+pub async fn get_finished_session_count_static(
+    dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+) -> u64 {
     dbtx.find_by_prefix_sorted_descending(&SignedSessionOutcomePrefix)
         .await
         .next()

@@ -30,7 +30,10 @@ use anyhow::Context;
 use config::ServerConfig;
 use config::io::read_server_config;
 use fedimint_core::config::P2PMessage;
-use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped as _};
+use fedimint_core::db::{
+    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped as _,
+    WriteDatabaseTransaction,
+};
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::ApiAuth;
 use fedimint_core::net::peers::DynP2PConnections;
@@ -172,7 +175,7 @@ pub async fn run(
 }
 
 async fn update_server_info_version_dbtx(
-    dbtx: &mut DatabaseTransaction<'_>,
+    dbtx: &mut WriteDatabaseTransaction<'_>,
     code_version_str: &str,
 ) {
     let mut server_info = dbtx.get_value(&ServerInfoKey).await.unwrap_or(ServerInfo {
