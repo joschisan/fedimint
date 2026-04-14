@@ -31,7 +31,7 @@ use tracing::warn;
 
 use self::init::ClientModuleInit;
 use crate::sm::executor::IExecutor;
-use crate::sm::{self, Context, DynContext, DynState, State};
+use crate::sm::{self, DynState};
 use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
 use crate::{AddStateMachinesResult, InstancelessDynClientInputBundle};
 
@@ -557,25 +557,13 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// Common module types shared between client and server
     type Common: ModuleCommon;
 
-    /// Data and API clients available to state machine transitions of this
-    /// module
-    type ModuleStateMachineContext: Context;
-
-    /// All possible states this client can submit to the executor
-    type States: State<ModuleContext = Self::ModuleStateMachineContext>
-        + IntoDynInstance<DynType = DynState>;
-
     fn decoder() -> Decoder {
-        let mut decoder_builder = Self::Common::decoder_builder();
-        decoder_builder.with_decodable_type::<Self::States>();
-        decoder_builder.build()
+        Self::Common::decoder_builder().build()
     }
 
     fn kind() -> ModuleKind {
         <<<Self as ClientModule>::Init as ModuleInit>::Common as CommonModuleInit>::KIND
     }
-
-    fn context(&self) -> Self::ModuleStateMachineContext;
 
     /// Initialize client.
     ///
@@ -734,8 +722,6 @@ pub trait IClientModule: Debug {
 
     fn decoder(&self) -> Decoder;
 
-    fn context(&self, instance: ModuleInstanceId) -> DynContext;
-
     async fn start(&self);
 
     fn input_fee(&self, amount: Amount, input: &DynInput) -> Option<Amount>;
@@ -773,10 +759,6 @@ where
 
     fn decoder(&self) -> Decoder {
         T::decoder()
-    }
-
-    fn context(&self, instance: ModuleInstanceId) -> DynContext {
-        DynContext::from_typed(instance, <T as ClientModule>::context(self))
     }
 
     async fn start(&self) {

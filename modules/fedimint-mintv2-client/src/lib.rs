@@ -38,11 +38,9 @@ use fedimint_client_module::module::init::{
 };
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{ClientContext, IdxRange, OutPointRange};
-use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
-use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
-use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
+use fedimint_core::core::OperationId;
 use fedimint_core::db::{DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{ModuleCommon, ModuleInit};
@@ -53,7 +51,7 @@ use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::DerivableSecret;
 use fedimint_mintv2_common::config::{MintClientConfig, client_denominations};
 use fedimint_mintv2_common::{
-    Denomination, KIND, MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, RecoveryItem,
+    Denomination, MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, RecoveryItem,
 };
 use futures::StreamExt;
 use rand::seq::IteratorRandom;
@@ -222,26 +220,24 @@ impl ClientModuleInit for MintClientInit {
             dbtx.insert_entry(&RecoveryStateKey, &state).await;
 
             if state.next_index == state.total_items {
-                // Recovery spawns a single Output SM with `range: None` to
-                // signal the recovery-specific fetch path. We can't use
-                // `output_executor` here because the module isn't
-                // constructed yet; use the central executor via
-                // `ClientContext::add_state_machines_dbtx` for this
-                // pre-init path.
-                let state_machine = MintClientStateMachines::Output(MintOutputStateMachine {
+                // Persist the recovery-bootstrapped Output SM under the
+                // executor's DB prefix byte. When the module loads and
+                // `output_executor.start()` runs, it picks this up via
+                // `get_active_states` and drives it.
+                let sm = MintOutputStateMachine {
                     common: OutputSMCommon {
                         operation_id: OperationId::new_random(),
                         range: None,
                         issuance_requests: state.requests.into_values().collect(),
                     },
                     state: OutputSMState::Pending,
-                });
-                let dyn_state = args.context().make_dyn_state(state_machine);
+                };
 
-                args.context()
-                    .add_state_machines_dbtx(&mut dbtx.to_ref_nc(), vec![dyn_state])
-                    .await
-                    .expect("state machine is valid");
+                fedimint_client_module::executor::ModuleExecutor::add_state_machine_unstarted(
+                    &mut dbtx.to_ref_nc(),
+                    sm,
+                )
+                .await;
 
                 dbtx.commit_tx().await;
 
@@ -336,17 +332,8 @@ pub struct MintClientModule {
     receive_executor: fedimint_client_module::executor::ModuleExecutor<ReceiveStateMachine>,
 }
 
-#[derive(Debug, Clone)]
-pub struct MintClientContext {
-    client_ctx: ClientContext<MintClientModule>,
-    tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
-    tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, tbs::PublicKeyShare>>,
-    pub balance_update_sender: tokio::sync::watch::Sender<()>,
-}
-
-/// Lean context handed to per-SM executors. Keeps the `ClientContext`
-/// handle plus the immutable config data SMs need. Does not hold the
-/// module — avoids the module → executor → ctx → module cycle.
+/// Context handed to per-SM executors. Keeps the `ClientContext` handle
+/// plus the immutable config data SMs need.
 #[derive(Debug, Clone)]
 pub struct MintSmContext {
     pub client_ctx: ClientContext<MintClientModule>,
@@ -355,25 +342,10 @@ pub struct MintSmContext {
     pub balance_update_sender: tokio::sync::watch::Sender<()>,
 }
 
-impl Context for MintClientContext {
-    const KIND: Option<ModuleKind> = Some(KIND);
-}
-
 #[apply(async_trait_maybe_send!)]
 impl ClientModule for MintClientModule {
     type Init = MintClientInit;
     type Common = MintModuleTypes;
-    type ModuleStateMachineContext = MintClientContext;
-    type States = MintClientStateMachines;
-
-    fn context(&self) -> Self::ModuleStateMachineContext {
-        MintClientContext {
-            client_ctx: self.client_ctx.clone(),
-            tbs_agg_pks: self.cfg.tbs_agg_pks.clone(),
-            tbs_pks: self.cfg.tbs_pks.clone(),
-            balance_update_sender: self.balance_update_sender.clone(),
-        }
-    }
 
     async fn start(&self) {
         self.input_executor.start().await;
@@ -1048,60 +1020,6 @@ pub enum ReceiveECashError {
     UneconomicalDenomination,
     #[error("Receiving ecash requires additional funds")]
     InsufficientFunds,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum MintClientStateMachines {
-    Input(InputStateMachine),
-    Output(MintOutputStateMachine),
-    Receive(ReceiveStateMachine),
-}
-
-impl IntoDynInstance for MintClientStateMachines {
-    type DynType = DynState;
-
-    fn into_dyn(self, instance_id: ModuleInstanceId) -> Self::DynType {
-        DynState::from_typed(instance_id, self)
-    }
-}
-
-impl State for MintClientStateMachines {
-    type ModuleContext = MintClientContext;
-
-    fn transitions(
-        &self,
-        context: &Self::ModuleContext,
-        global_context: &DynGlobalClientContext,
-    ) -> Vec<StateTransition<Self>> {
-        match self {
-            MintClientStateMachines::Input(redemption_state) => {
-                sm_enum_variant_translation!(
-                    redemption_state.transitions(context, global_context),
-                    MintClientStateMachines::Input
-                )
-            }
-            MintClientStateMachines::Output(issuance_state) => {
-                sm_enum_variant_translation!(
-                    issuance_state.transitions(context, global_context),
-                    MintClientStateMachines::Output
-                )
-            }
-            MintClientStateMachines::Receive(receive_state) => {
-                sm_enum_variant_translation!(
-                    receive_state.transitions(context, global_context),
-                    MintClientStateMachines::Receive
-                )
-            }
-        }
-    }
-
-    fn operation_id(&self) -> OperationId {
-        match self {
-            MintClientStateMachines::Input(redemption_state) => redemption_state.operation_id(),
-            MintClientStateMachines::Output(issuance_state) => issuance_state.operation_id(),
-            MintClientStateMachines::Receive(receive_state) => receive_state.operation_id(),
-        }
-    }
 }
 
 fn round_to_multiple(amount: Amount, min_denomiation: Amount) -> Amount {

@@ -213,6 +213,15 @@ impl<S: StateMachine> ModuleExecutor<S> {
     pub async fn get_active_states(&self) -> Vec<S> {
         self.inner.get_active_states().await
     }
+
+    /// Like [`Self::add_state_machine_dbtx`] but does not spawn the
+    /// driver task — the state will be picked up by the next call to
+    /// [`Self::start`]. Used by pre-init paths (e.g. recovery) that need
+    /// to seed state before the executor exists. `dbtx` must be scoped
+    /// to the module's DB namespace.
+    pub async fn add_state_machine_unstarted(dbtx: &mut DatabaseTransaction<'_>, state: S) {
+        dbtx.insert_new_entry(&ActiveStateKey(state), &()).await;
+    }
 }
 
 impl<S: StateMachine> Inner<S> {

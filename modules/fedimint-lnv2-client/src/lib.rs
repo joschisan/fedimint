@@ -22,13 +22,11 @@ use fedimint_api_client::api::DynModuleApi;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
-use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
 use fedimint_client_module::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
-use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::config::FederationId;
-use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
+use fedimint_core::core::OperationId;
 use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
-use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::SECP256K1;
 use fedimint_core::task::TaskGroup;
@@ -42,7 +40,7 @@ use fedimint_lnv2_common::gateway_api::{
     GatewayConnection, PaymentFee, RealGatewayConnection, RoutingInfo,
 };
 use fedimint_lnv2_common::{
-    Bolt11InvoiceDescription, GatewayApi, KIND, LightningCommonInit, LightningInvoice,
+    Bolt11InvoiceDescription, GatewayApi, LightningCommonInit, LightningInvoice,
     LightningModuleTypes, LightningOutput, LightningOutputV0, MINIMUM_INCOMING_CONTRACT_AMOUNT,
     lnurl, tweak,
 };
@@ -136,10 +134,6 @@ pub struct LightningClientContext {
     pub(crate) client_ctx: ClientContext<LightningClientModule>,
 }
 
-impl Context for LightningClientContext {
-    const KIND: Option<ModuleKind> = Some(KIND);
-}
-
 #[derive(Debug, Clone)]
 pub struct LightningClientModule {
     federation_id: FederationId,
@@ -157,16 +151,6 @@ pub struct LightningClientModule {
 impl ClientModule for LightningClientModule {
     type Init = LightningClientInit;
     type Common = LightningModuleTypes;
-    type ModuleStateMachineContext = LightningClientContext;
-    type States = LightningClientStateMachines;
-
-    fn context(&self) -> Self::ModuleStateMachineContext {
-        LightningClientContext {
-            federation_id: self.federation_id,
-            gateway_conn: self.gateway_conn.clone(),
-            client_ctx: self.client_ctx.clone(),
-        }
-    }
 
     async fn start(&self) {
         self.send_executor.start().await;
@@ -844,50 +828,4 @@ pub enum ListGatewaysError {
 pub enum RoutingInfoError {
     #[error("Failed to request routing info")]
     FailedToRequestRoutingInfo,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum LightningClientStateMachines {
-    Send(SendStateMachine),
-    Receive(ReceiveStateMachine),
-}
-
-impl IntoDynInstance for LightningClientStateMachines {
-    type DynType = DynState;
-
-    fn into_dyn(self, instance_id: ModuleInstanceId) -> Self::DynType {
-        DynState::from_typed(instance_id, self)
-    }
-}
-
-impl State for LightningClientStateMachines {
-    type ModuleContext = LightningClientContext;
-
-    fn transitions(
-        &self,
-        context: &Self::ModuleContext,
-        global_context: &DynGlobalClientContext,
-    ) -> Vec<StateTransition<Self>> {
-        match self {
-            LightningClientStateMachines::Send(state) => {
-                sm_enum_variant_translation!(
-                    state.transitions(context, global_context),
-                    LightningClientStateMachines::Send
-                )
-            }
-            LightningClientStateMachines::Receive(state) => {
-                sm_enum_variant_translation!(
-                    state.transitions(context, global_context),
-                    LightningClientStateMachines::Receive
-                )
-            }
-        }
-    }
-
-    fn operation_id(&self) -> OperationId {
-        match self {
-            LightningClientStateMachines::Send(state) => state.operation_id(),
-            LightningClientStateMachines::Receive(state) => state.operation_id(),
-        }
-    }
 }

@@ -22,7 +22,6 @@ use bitcoin::{Address, ScriptBuf};
 use db::{NextOutputIndexKey, ValidAddressIndexKey, ValidAddressIndexPrefix};
 use events::{ReceivePaymentEvent, SendPaymentEvent};
 use fedimint_api_client::api::{DynModuleApi, FederationResult};
-use fedimint_client::DynGlobalClientContext;
 use fedimint_client::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
@@ -30,13 +29,11 @@ use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
-use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
-use fedimint_client_module::sm_enum_variant_translation;
-use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
+use fedimint_core::core::OperationId;
 use fedimint_core::db::{
     Database, DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped,
 };
-use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::task::{TaskGroup, block_in_place, sleep};
 use fedimint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_send};
@@ -44,8 +41,8 @@ use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_logging::LOG_CLIENT_MODULE_WALLETV2;
 use fedimint_walletv2_common::config::WalletClientConfig;
 use fedimint_walletv2_common::{
-    KIND, StandardScript, WalletCommonInit, WalletInput, WalletInputV0, WalletModuleTypes,
-    WalletOutput, WalletOutputV0, descriptor, is_potential_receive,
+    StandardScript, WalletCommonInit, WalletInput, WalletInputV0, WalletModuleTypes, WalletOutput,
+    WalletOutputV0, descriptor, is_potential_receive,
 };
 use futures::StreamExt;
 use receive_sm::{ReceiveSMCommon, ReceiveSMState, ReceiveStateMachine};
@@ -74,22 +71,10 @@ pub struct WalletClientContext {
     pub client_ctx: ClientContext<WalletClientModule>,
 }
 
-impl Context for WalletClientContext {
-    const KIND: Option<ModuleKind> = Some(KIND);
-}
-
 #[apply(async_trait_maybe_send!)]
 impl ClientModule for WalletClientModule {
     type Init = WalletClientInit;
     type Common = WalletModuleTypes;
-    type ModuleStateMachineContext = WalletClientContext;
-    type States = WalletClientStateMachines;
-
-    fn context(&self) -> Self::ModuleStateMachineContext {
-        WalletClientContext {
-            client_ctx: self.client_ctx.clone(),
-        }
-    }
 
     async fn start(&self) {
         self.send_executor.start().await;
@@ -538,46 +523,4 @@ pub enum SendError {
     InsufficientFunds,
     #[error("Unsupported address type")]
     UnsupportedAddress,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum WalletClientStateMachines {
-    Send(send_sm::SendStateMachine),
-    Receive(receive_sm::ReceiveStateMachine),
-}
-
-impl State for WalletClientStateMachines {
-    type ModuleContext = WalletClientContext;
-
-    fn transitions(
-        &self,
-        context: &Self::ModuleContext,
-        global_context: &DynGlobalClientContext,
-    ) -> Vec<StateTransition<Self>> {
-        match self {
-            WalletClientStateMachines::Send(sm) => sm_enum_variant_translation!(
-                State::transitions(sm, context, global_context),
-                WalletClientStateMachines::Send
-            ),
-            WalletClientStateMachines::Receive(sm) => sm_enum_variant_translation!(
-                State::transitions(sm, context, global_context),
-                WalletClientStateMachines::Receive
-            ),
-        }
-    }
-
-    fn operation_id(&self) -> OperationId {
-        match self {
-            WalletClientStateMachines::Send(sm) => sm.operation_id(),
-            WalletClientStateMachines::Receive(sm) => sm.operation_id(),
-        }
-    }
-}
-
-impl IntoDynInstance for WalletClientStateMachines {
-    type DynType = DynState;
-
-    fn into_dyn(self, instance_id: ModuleInstanceId) -> Self::DynType {
-        DynState::from_typed(instance_id, self)
-    }
 }

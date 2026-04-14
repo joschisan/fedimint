@@ -14,9 +14,7 @@ use fedimint_client_module::module::init::ClientModuleInit;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{ClientModuleRegistry, FinalClientIface};
 use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
-use fedimint_client_module::transaction::{
-    TRANSACTION_SUBMISSION_MODULE_INSTANCE, TxSubmissionSmContext, tx_submission_sm_decoder,
-};
+use fedimint_client_module::transaction::TxSubmissionSmContext;
 use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::{
@@ -560,10 +558,6 @@ impl ClientBuilder {
         let executor = {
             let mut executor_builder = Executor::builder();
 
-            for (module_instance_id, _, module) in modules.iter_modules() {
-                executor_builder.with_module_dyn(module.context(module_instance_id));
-            }
-
             for module_instance_id in module_recoveries.keys() {
                 executor_builder.with_valid_module_id(*module_instance_id);
             }
@@ -675,12 +669,6 @@ impl ClientBuilder {
                 .modules
                 .iter()
                 .map(|(module_instance, module_config)| (*module_instance, module_config.kind())),
-        );
-
-        decoders.register_module(
-            TRANSACTION_SUBMISSION_MODULE_INSTANCE,
-            ModuleKind::from_static_str("tx_submission"),
-            tx_submission_sm_decoder(),
         );
 
         decoders

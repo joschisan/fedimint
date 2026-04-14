@@ -6,21 +6,17 @@ use std::collections::BTreeMap;
 use db::DbKeyPrefix;
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
-use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule};
-use fedimint_client_module::sm::Context;
-use fedimint_core::core::{Decoder, ModuleKind};
+use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_core::db::{Database, DatabaseTransaction, DatabaseVersion};
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::{Amount, apply, async_trait_maybe_send};
 pub use fedimint_empty_common as common;
 use fedimint_empty_common::config::EmptyClientConfig;
 use fedimint_empty_common::{EmptyCommonInit, EmptyModuleTypes};
-use states::EmptyStateMachine;
 use strum::IntoEnumIterator;
 
 pub mod api;
 pub mod db;
-pub mod states;
 
 #[derive(Debug)]
 pub struct EmptyClientModule {
@@ -32,29 +28,10 @@ pub struct EmptyClientModule {
     db: Database,
 }
 
-/// Data needed by the state machine
-#[derive(Debug, Clone)]
-pub struct EmptyClientContext {
-    pub empty_decoder: Decoder,
-}
-
-// TODO: Boiler-plate
-impl Context for EmptyClientContext {
-    const KIND: Option<ModuleKind> = None;
-}
-
 #[apply(async_trait_maybe_send!)]
 impl ClientModule for EmptyClientModule {
     type Init = EmptyClientInit;
     type Common = EmptyModuleTypes;
-    type ModuleStateMachineContext = EmptyClientContext;
-    type States = EmptyStateMachine;
-
-    fn context(&self) -> Self::ModuleStateMachineContext {
-        EmptyClientContext {
-            empty_decoder: self.decoder(),
-        }
-    }
 
     fn input_fee(
         &self,

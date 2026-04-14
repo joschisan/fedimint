@@ -1,21 +1,19 @@
 use std::collections::BTreeMap;
 
 use anyhow::ensure;
-use fedimint_client::DynGlobalClientContext;
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_client_module::module::OutPointRange;
-use fedimint_client_module::sm::{ClientSMDatabaseTransaction, State, StateTransition};
 use fedimint_core::PeerId;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_mintv2_common::{Denomination, verify_note};
-use tbs::{AggregatePublicKey, BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
+use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use crate::api::MintV2ModuleApi;
 use crate::client_db::SpendableNoteKey;
 use crate::events::OutputFinalisedEvent;
-use crate::{MintClientContext, MintSmContext, NoteIssuanceRequest};
+use crate::{MintSmContext, NoteIssuanceRequest};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct MintOutputStateMachine {
@@ -45,139 +43,6 @@ pub enum OutputSMState {
     /// our wallet.
     Success,
 }
-
-impl State for MintOutputStateMachine {
-    type ModuleContext = MintClientContext;
-
-    fn transitions(
-        &self,
-        context: &Self::ModuleContext,
-        global_context: &DynGlobalClientContext,
-    ) -> Vec<StateTransition<Self>> {
-        let context = context.clone();
-
-        match &self.state {
-            OutputSMState::Pending => {
-                vec![StateTransition::new(
-                    Self::await_signature_shares(
-                        global_context.clone(),
-                        self.common.range,
-                        self.common.issuance_requests.clone(),
-                        context.tbs_pks.clone(),
-                    ),
-                    move |dbtx, signature_shares, old_state| {
-                        let balance_update_sender = context.balance_update_sender.clone();
-
-                        dbtx.module_tx()
-                            .on_commit(move || balance_update_sender.send_replace(()));
-
-                        Box::pin(Self::transition_outcome_ready(
-                            dbtx,
-                            signature_shares,
-                            old_state,
-                            context.tbs_agg_pks.clone(),
-                            context.client_ctx.clone(),
-                        ))
-                    },
-                )]
-            }
-            OutputSMState::Aborted | OutputSMState::Failure | OutputSMState::Success => {
-                vec![]
-            }
-        }
-    }
-
-    fn operation_id(&self) -> OperationId {
-        self.common.operation_id
-    }
-}
-
-impl MintOutputStateMachine {
-    async fn await_signature_shares(
-        global_context: DynGlobalClientContext,
-        range: Option<OutPointRange>,
-        issuance_requests: Vec<NoteIssuanceRequest>,
-        tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
-    ) -> Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String> {
-        if let Some(range) = range {
-            global_context.await_tx_accepted(range.txid).await?;
-
-            let shares = global_context
-                .module_api()
-                .fetch_signature_shares(range, issuance_requests, tbs_pks)
-                .await;
-
-            Ok(shares)
-        } else {
-            let shares = global_context
-                .module_api()
-                .fetch_signature_shares_recovery(issuance_requests, tbs_pks)
-                .await;
-
-            Ok(shares)
-        }
-    }
-
-    async fn transition_outcome_ready(
-        dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        signature_shares: Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>,
-        old_state: MintOutputStateMachine,
-        tbs_pks: BTreeMap<Denomination, AggregatePublicKey>,
-        client_ctx: crate::ClientContext<crate::MintClientModule>,
-    ) -> MintOutputStateMachine {
-        let Ok(signature_shares) = signature_shares else {
-            return MintOutputStateMachine {
-                common: old_state.common,
-                state: OutputSMState::Aborted,
-            };
-        };
-
-        for (i, request) in old_state.common.issuance_requests.iter().enumerate() {
-            let agg_blind_signature = aggregate_signature_shares(
-                &signature_shares
-                    .iter()
-                    .map(|(peer, shares)| (peer.to_usize() as u64, shares[i]))
-                    .collect(),
-            );
-
-            let spendable_note = request.finalize(agg_blind_signature);
-
-            let pk = *tbs_pks
-                .get(&request.denomination)
-                .expect("No aggregated pk found for denomination");
-
-            if !verify_note(spendable_note.note(), pk) {
-                return MintOutputStateMachine {
-                    common: old_state.common,
-                    state: OutputSMState::Failure,
-                };
-            }
-
-            dbtx.module_tx()
-                .insert_new_entry(&SpendableNoteKey(spendable_note), &())
-                .await;
-        }
-
-        if let Some(range) = old_state.common.range {
-            client_ctx
-                .log_event(
-                    &mut dbtx.module_tx(),
-                    OutputFinalisedEvent {
-                        operation_id: old_state.common.operation_id,
-                        range,
-                    },
-                )
-                .await;
-        }
-
-        MintOutputStateMachine {
-            common: old_state.common,
-            state: OutputSMState::Success,
-        }
-    }
-}
-
-// ---- New per-module executor impl ------------------------------------------
 
 impl StateMachine for MintOutputStateMachine {
     const DB_PREFIX: u8 = crate::client_db::DbKeyPrefix::OutputStateMachine as u8;

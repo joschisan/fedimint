@@ -6,7 +6,6 @@ mod receive_sm;
 mod send_sm;
 
 use std::collections::BTreeMap;
-use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -22,12 +21,10 @@ use fedimint_api_client::api::DynModuleApi;
 use fedimint_client::ClientHandleArc;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
-use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule};
-use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
+use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_client_module::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
-use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::config::FederationId;
-use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
+use fedimint_core::core::OperationId;
 use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::hex::ToHex;
@@ -139,19 +136,6 @@ pub struct GatewayClientModuleV2 {
     complete_executor: ModuleExecutor<CompleteStateMachine>,
 }
 
-#[derive(Debug, Clone)]
-pub struct GatewayClientContextV2 {
-    pub module: GatewayClientModuleV2,
-    pub decoder: Decoder,
-    pub tpe_agg_pk: AggregatePublicKey,
-    pub tpe_pks: BTreeMap<PeerId, PublicKeyShare>,
-    pub gateway: Arc<dyn IGatewayClientV2>,
-}
-
-impl Context for GatewayClientContextV2 {
-    const KIND: Option<ModuleKind> = Some(fedimint_lnv2_common::KIND);
-}
-
 /// Lean context handed to per-SM executors. Does NOT hold the module itself
 /// — that would create a cycle (module → executor → Inner → ctx → module).
 #[derive(Debug, Clone)]
@@ -167,18 +151,6 @@ pub struct GwV2SmContext {
 impl ClientModule for GatewayClientModuleV2 {
     type Init = GatewayClientInitV2;
     type Common = LightningModuleTypes;
-    type ModuleStateMachineContext = GatewayClientContextV2;
-    type States = GatewayClientStateMachinesV2;
-
-    fn context(&self) -> Self::ModuleStateMachineContext {
-        GatewayClientContextV2 {
-            module: self.clone(),
-            decoder: self.decoder(),
-            tpe_agg_pk: self.cfg.tpe_agg_pk,
-            tpe_pks: self.cfg.tpe_pks.clone(),
-            gateway: self.gateway.clone(),
-        }
-    }
 
     async fn start(&self) {
         self.send_executor.start().await;
@@ -199,76 +171,6 @@ impl ClientModule for GatewayClientModuleV2 {
         _output: &<Self::Common as ModuleCommon>::Output,
     ) -> Option<Amount> {
         Some(self.cfg.output_fee)
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum GatewayClientStateMachinesV2 {
-    Send(SendStateMachine),
-    Receive(ReceiveStateMachine),
-    Complete(CompleteStateMachine),
-}
-
-impl fmt::Display for GatewayClientStateMachinesV2 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            GatewayClientStateMachinesV2::Send(send) => {
-                write!(f, "{send}")
-            }
-            GatewayClientStateMachinesV2::Receive(receive) => {
-                write!(f, "{receive}")
-            }
-            GatewayClientStateMachinesV2::Complete(complete) => {
-                write!(f, "{complete}")
-            }
-        }
-    }
-}
-
-impl IntoDynInstance for GatewayClientStateMachinesV2 {
-    type DynType = DynState;
-
-    fn into_dyn(self, instance_id: ModuleInstanceId) -> Self::DynType {
-        DynState::from_typed(instance_id, self)
-    }
-}
-
-impl State for GatewayClientStateMachinesV2 {
-    type ModuleContext = GatewayClientContextV2;
-
-    fn transitions(
-        &self,
-        context: &Self::ModuleContext,
-        global_context: &DynGlobalClientContext,
-    ) -> Vec<StateTransition<Self>> {
-        match self {
-            GatewayClientStateMachinesV2::Send(state) => {
-                sm_enum_variant_translation!(
-                    state.transitions(context, global_context),
-                    GatewayClientStateMachinesV2::Send
-                )
-            }
-            GatewayClientStateMachinesV2::Receive(state) => {
-                sm_enum_variant_translation!(
-                    state.transitions(context, global_context),
-                    GatewayClientStateMachinesV2::Receive
-                )
-            }
-            GatewayClientStateMachinesV2::Complete(state) => {
-                sm_enum_variant_translation!(
-                    state.transitions(context, global_context),
-                    GatewayClientStateMachinesV2::Complete
-                )
-            }
-        }
-    }
-
-    fn operation_id(&self) -> OperationId {
-        match self {
-            GatewayClientStateMachinesV2::Send(state) => state.operation_id(),
-            GatewayClientStateMachinesV2::Receive(state) => state.operation_id(),
-            GatewayClientStateMachinesV2::Complete(state) => state.operation_id(),
-        }
     }
 }
 
