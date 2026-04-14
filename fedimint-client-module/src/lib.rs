@@ -11,28 +11,18 @@
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::type_complexity)]
 
-use std::fmt::Debug;
 use std::ops::{self};
-use std::sync::Arc;
 
-use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
-use fedimint_core::config::ClientConfig;
+use fedimint_api_client::api::DynModuleApi;
 pub use fedimint_core::core::{IInput, IOutput, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::Database;
-use fedimint_core::module::registry::ModuleDecoderRegistry;
-use fedimint_core::task::{MaybeSend, MaybeSync};
-use fedimint_core::{
-    PeerId, TransactionId, apply, async_trait_maybe_send, dyn_newtype_define, maybe_add_send_sync,
-};
+use fedimint_core::{PeerId, TransactionId, maybe_add_send_sync};
 use fedimint_eventlog::{Event, EventKind, EventPersistence};
-use module::OutPointRange;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use transaction::{ClientInputBundle, ClientOutput};
 
 pub use crate::module::ClientModule;
-use crate::sm::executor::ContextGen;
-use crate::sm::{ClientSMDatabaseTransaction, IState, State};
 use crate::transaction::{ClientInput, ClientOutputBundle};
 
 pub mod db;
@@ -45,8 +35,6 @@ pub mod executor;
 pub mod module;
 /// Secret handling & derivation
 pub mod secret;
-/// Client state machine interfaces and executor implementation
-pub mod sm;
 /// Structs and interfaces to construct Fedimint transactions
 pub mod transaction;
 
@@ -134,204 +122,6 @@ pub enum AddStateMachinesError {
 }
 
 pub type AddStateMachinesResult = Result<(), AddStateMachinesError>;
-
-#[apply(async_trait_maybe_send!)]
-pub trait IGlobalClientContext: Debug + MaybeSend + MaybeSync + 'static {
-    /// Returned a reference client's module API client, so that module-specific
-    /// calls can be made
-    fn module_api(&self) -> DynModuleApi;
-
-    async fn client_config(&self) -> ClientConfig;
-
-    /// Returns a reference to the client's federation API client. The provided
-    /// interface [`fedimint_api_client::api::IGlobalFederationApi`] typically
-    /// does not provide the necessary functionality, for this extension
-    /// traits like [`fedimint_api_client::api::IGlobalFederationApi`] have
-    /// to be used.
-    // TODO: Could be removed in favor of client() except for testing
-    fn api(&self) -> &DynGlobalApi;
-
-    fn decoders(&self) -> &ModuleDecoderRegistry;
-
-    /// This function is mostly meant for internal use, you are probably looking
-    /// for [`DynGlobalClientContext::claim_inputs`].
-    /// Returns transaction id of the funding transaction and an optional
-    /// `OutPoint` that represents change if change was added.
-    async fn claim_inputs_dyn(
-        &self,
-        dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        inputs: InstancelessDynClientInputBundle,
-    ) -> anyhow::Result<OutPointRange>;
-
-    /// This function is mostly meant for internal use, you are probably looking
-    /// for [`DynGlobalClientContext::fund_output`].
-    /// Returns transaction id of the funding transaction and an optional
-    /// `OutPoint` that represents change if change was added.
-    async fn fund_output_dyn(
-        &self,
-        dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        outputs: InstancelessDynClientOutputBundle,
-    ) -> anyhow::Result<OutPointRange>;
-
-    /// Adds a state machine to the executor.
-    async fn add_state_machine_dyn(
-        &self,
-        dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        sm: Box<maybe_add_send_sync!(dyn IState)>,
-    ) -> AddStateMachinesResult;
-
-    async fn log_event_json(
-        &self,
-        dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        kind: EventKind,
-        module: Option<(ModuleKind, ModuleInstanceId)>,
-        payload: serde_json::Value,
-        persist: EventPersistence,
-    );
-
-    async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String>;
-}
-
-#[apply(async_trait_maybe_send!)]
-impl IGlobalClientContext for () {
-    fn module_api(&self) -> DynModuleApi {
-        unimplemented!("fake implementation, only for tests");
-    }
-
-    async fn client_config(&self) -> ClientConfig {
-        unimplemented!("fake implementation, only for tests");
-    }
-
-    fn api(&self) -> &DynGlobalApi {
-        unimplemented!("fake implementation, only for tests");
-    }
-
-    fn decoders(&self) -> &ModuleDecoderRegistry {
-        unimplemented!("fake implementation, only for tests");
-    }
-
-    async fn claim_inputs_dyn(
-        &self,
-        _dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        _input: InstancelessDynClientInputBundle,
-    ) -> anyhow::Result<OutPointRange> {
-        unimplemented!("fake implementation, only for tests");
-    }
-
-    async fn fund_output_dyn(
-        &self,
-        _dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        _outputs: InstancelessDynClientOutputBundle,
-    ) -> anyhow::Result<OutPointRange> {
-        unimplemented!("fake implementation, only for tests");
-    }
-
-    async fn add_state_machine_dyn(
-        &self,
-        _dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        _sm: Box<maybe_add_send_sync!(dyn IState)>,
-    ) -> AddStateMachinesResult {
-        unimplemented!("fake implementation, only for tests");
-    }
-
-    async fn log_event_json(
-        &self,
-        _dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        _kind: EventKind,
-        _module: Option<(ModuleKind, ModuleInstanceId)>,
-        _payload: serde_json::Value,
-        _persist: EventPersistence,
-    ) {
-        unimplemented!("fake implementation, only for tests");
-    }
-
-    async fn await_tx_accepted(&self, _txid: TransactionId) -> Result<(), String> {
-        unimplemented!("fake implementation, only for tests");
-    }
-}
-
-dyn_newtype_define! {
-    /// Global state and functionality provided to all state machines running in the
-    /// client
-    #[derive(Clone)]
-    pub DynGlobalClientContext(Arc<IGlobalClientContext>)
-}
-
-impl DynGlobalClientContext {
-    pub fn new_fake() -> Self {
-        DynGlobalClientContext::from(())
-    }
-
-    pub async fn claim_inputs<I>(
-        &self,
-        dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        inputs: ClientInputBundle<I>,
-    ) -> anyhow::Result<OutPointRange>
-    where
-        I: IInput + MaybeSend + MaybeSync + 'static,
-    {
-        self.claim_inputs_dyn(dbtx, inputs.into_instanceless())
-            .await
-    }
-
-    /// Creates a transaction with the supplied output and funding added by the
-    /// primary module if possible. If the primary module does not have the
-    /// required funds this function fails.
-    pub async fn fund_output<O>(
-        &self,
-        dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        outputs: ClientOutputBundle<O>,
-    ) -> anyhow::Result<OutPointRange>
-    where
-        O: IOutput + MaybeSend + MaybeSync + 'static,
-    {
-        self.fund_output_dyn(dbtx, outputs.into_instanceless())
-            .await
-    }
-
-    /// Allows adding state machines from inside a transition to the executor.
-    /// The added state machine belongs to the same module instance as the state
-    /// machine from inside which it was spawned.
-    pub async fn add_state_machine<S>(
-        &self,
-        dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        sm: S,
-    ) -> AddStateMachinesResult
-    where
-        S: State + MaybeSend + MaybeSync + 'static,
-    {
-        self.add_state_machine_dyn(dbtx, box_up_state(sm)).await
-    }
-
-    async fn log_event<E>(&self, dbtx: &mut ClientSMDatabaseTransaction<'_, '_>, event: E)
-    where
-        E: Event + Send,
-    {
-        self.log_event_json(
-            dbtx,
-            E::KIND,
-            E::MODULE.map(|m| (m, dbtx.module_id())),
-            serde_json::to_value(&event).expect("Payload serialization can't fail"),
-            <E as Event>::PERSISTENCE,
-        )
-        .await;
-    }
-}
-
-fn box_up_state(state: impl IState + 'static) -> Box<maybe_add_send_sync!(dyn IState + 'static)> {
-    Box::new(state)
-}
-
-impl<T> From<Arc<T>> for DynGlobalClientContext
-where
-    T: IGlobalClientContext,
-{
-    fn from(inner: Arc<T>) -> Self {
-        DynGlobalClientContext { inner }
-    }
-}
-
-pub type ModuleGlobalContextGen = ContextGen;
 
 /// Resources particular to a module instance
 pub struct ClientModuleInstance<'m, M: ClientModule> {

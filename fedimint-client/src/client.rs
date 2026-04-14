@@ -18,14 +18,11 @@ use fedimint_client_module::module::{
     IdxRange, OutPointRange,
 };
 use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy as _};
-use fedimint_client_module::sm::DynState;
-use fedimint_client_module::sm::executor::IExecutor;
 use fedimint_client_module::transaction::{
     TransactionBuilder, TxSubmissionStates, TxSubmissionStatesSM,
 };
 use fedimint_client_module::{
-    AddStateMachinesResult, ClientModuleInstance, ModuleGlobalContextGen, ModuleRecoveryCompleted,
-    TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
+    ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
 };
 use fedimint_core::config::{ClientConfig, FederationId, JsonClientConfig, ModuleInitRegistry};
 use fedimint_core::core::{DynInput, DynOutput, ModuleInstanceId, ModuleKind, OperationId};
@@ -50,7 +47,6 @@ use fedimint_eventlog::{
 };
 use fedimint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
 use futures::{Stream, StreamExt as _};
-use global_ctx::ModuleGlobalClientContext;
 use tokio::sync::{broadcast, watch};
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, warn};
@@ -63,13 +59,9 @@ use crate::db::{
     verify_client_db_integrity_dbtx,
 };
 use crate::module_init::{DynClientModuleInit, IClientModuleInit};
-use crate::sm::executor::{
-    ActiveOperationStateKeyPrefix, Executor, InactiveOperationStateKeyPrefix,
-};
 
 pub(crate) mod builder;
 pub(crate) mod event_log;
-pub(crate) mod global_ctx;
 pub(crate) mod handle;
 
 /// Main client type
@@ -95,7 +87,6 @@ pub struct Client {
     federation_config_meta: BTreeMap<String, String>,
     primary_module: Option<ModuleInstanceId>,
     pub(crate) modules: ClientModuleRegistry,
-    executor: Executor,
     tx_submission_executor: ModuleExecutor<TxSubmissionStatesSM>,
     pub(crate) api: DynGlobalApi,
     secp_ctx: Secp256k1<secp256k1::All>,
@@ -219,12 +210,6 @@ impl Client {
         &self.task_group
     }
 
-    /// Useful for our CLI tooling, not meant for external use
-    #[doc(hidden)]
-    pub fn executor(&self) -> &Executor {
-        &self.executor
-    }
-
     pub async fn get_config_from_db(db: &Database) -> Option<ClientConfig> {
         let mut dbtx = db.begin_transaction_nc().await;
         dbtx.get_value(&ClientConfigKey).await
@@ -298,31 +283,8 @@ impl Client {
             .is_some()
     }
 
-    pub fn start_executor(self: &Arc<Self>) {
-        debug!(
-            target: LOG_CLIENT,
-            "Starting fedimint client executor",
-        );
-        self.executor.start_executor(self.context_gen());
-    }
-
     pub fn federation_id(&self) -> FederationId {
         self.federation_id
-    }
-
-    fn context_gen(self: &Arc<Self>) -> ModuleGlobalContextGen {
-        let client_inner = Arc::downgrade(self);
-        Arc::new(move |module_instance, operation| {
-            ModuleGlobalClientContext {
-                client: client_inner
-                    .clone()
-                    .upgrade()
-                    .expect("ModuleGlobalContextGen called after client was dropped"),
-                module_instance_id: module_instance,
-                operation,
-            }
-            .into()
-        })
     }
 
     pub async fn config(&self) -> ClientConfig {
@@ -404,14 +366,6 @@ impl Client {
     /// Get metadata value from the federation config itself
     pub fn get_config_meta(&self, key: &str) -> Option<String> {
         self.federation_config_meta.get(key).cloned()
-    }
-
-    pub async fn add_state_machines(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        states: Vec<DynState>,
-    ) -> AddStateMachinesResult {
-        self.executor.add_state_machines_dbtx(dbtx, states).await
     }
 
     /// Adds funding to a transaction or removes over-funding via change.
@@ -530,10 +484,6 @@ impl Client {
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
-        if Client::operation_exists_dbtx(dbtx, operation_id).await {
-            bail!("There already exists an operation with id {operation_id:?}")
-        }
-
         self.finalize_and_submit_transaction_inner(dbtx, operation_id, tx_builder)
             .await
     }
@@ -638,42 +588,10 @@ impl Client {
         }
     }
 
-    pub async fn operation_exists(&self, operation_id: OperationId) -> bool {
-        let mut dbtx = self.db().begin_transaction_nc().await;
-
-        Client::operation_exists_dbtx(&mut dbtx, operation_id).await
-    }
-
-    pub async fn operation_exists_dbtx(
-        dbtx: &mut DatabaseTransaction<'_>,
-        operation_id: OperationId,
-    ) -> bool {
-        let active_state_exists = dbtx
-            .find_by_prefix(&ActiveOperationStateKeyPrefix { operation_id })
-            .await
-            .next()
-            .await
-            .is_some();
-
-        let inactive_state_exists = dbtx
-            .find_by_prefix(&InactiveOperationStateKeyPrefix { operation_id })
-            .await
-            .next()
-            .await
-            .is_some();
-
-        active_state_exists || inactive_state_exists
-    }
-
-    pub async fn has_active_states(&self, operation_id: OperationId) -> bool {
-        self.db
-            .begin_transaction_nc()
-            .await
-            .find_by_prefix(&ActiveOperationStateKeyPrefix { operation_id })
-            .await
-            .next()
-            .await
-            .is_some()
+    /// Legacy: always returns `false` now. Central operation state tracking
+    /// has been replaced by per-module idempotency keys.
+    pub async fn operation_exists(&self, _operation_id: OperationId) -> bool {
+        false
     }
 
     /// Returns a reference to a typed module client instance by kind
@@ -1290,8 +1208,10 @@ impl ClientContextIface for Client {
         Client::finalize_and_submit_transaction_inner(self, dbtx, operation_id, tx_builder).await
     }
 
-    async fn operation_exists(&self, operation_id: OperationId) -> bool {
-        Client::operation_exists(self, operation_id).await
+    async fn operation_exists(&self, _operation_id: OperationId) -> bool {
+        // Central operation state tracking has been removed; modules now track
+        // idempotency with their own keys.
+        false
     }
 
     async fn config(&self) -> ClientConfig {
@@ -1300,10 +1220,6 @@ impl ClientContextIface for Client {
 
     fn db(&self) -> &Database {
         Client::db(self)
-    }
-
-    fn executor(&self) -> &(maybe_add_send_sync!(dyn IExecutor + 'static)) {
-        Client::executor(self)
     }
 
     async fn invite_code(&self, peer: PeerId) -> Option<InviteCode> {

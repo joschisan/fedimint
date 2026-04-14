@@ -37,7 +37,9 @@ impl ClientHandle {
     }
 
     pub fn start_executor(&self) {
-        self.as_inner().start_executor();
+        // All module state machines now run on per-module `ModuleExecutor`s
+        // started eagerly by `ClientModule::start`. Kept as a no-op so
+        // external callers don't have to care.
     }
 }
 
@@ -57,7 +59,6 @@ impl Drop for ClientHandle {
         let Some(inner) = self.inner.take() else {
             return;
         };
-        inner.executor.stop_executor();
         let task_group = inner.task_group.clone();
         drop(inner);
 

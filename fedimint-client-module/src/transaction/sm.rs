@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use fedimint_api_client::api::DynGlobalApi;
 use fedimint_core::TransactionId;
-use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
+use fedimint_core::core::{ModuleInstanceId, OperationId};
 use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -18,7 +18,6 @@ use tracing::debug;
 
 use crate::executor::{StateMachine, StateTransition as SmStateTransition};
 use crate::module::FinalClientIface;
-use crate::sm::DynState;
 use crate::{TxAcceptedEvent, TxRejectedEvent};
 
 // TODO: how to prevent collisions? Generally reserve some range for custom IDs?

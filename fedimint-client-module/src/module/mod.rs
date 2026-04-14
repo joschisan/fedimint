@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use std::sync::{Arc, Weak};
 use std::{marker, ops};
 
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use bitcoin::secp256k1::PublicKey;
 use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_core::config::ClientConfig;
@@ -30,10 +30,8 @@ use tokio::sync::{broadcast, watch};
 use tracing::warn;
 
 use self::init::ClientModuleInit;
-use crate::sm::executor::IExecutor;
-use crate::sm::{self, DynState};
+use crate::InstancelessDynClientInputBundle;
 use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
-use crate::{AddStateMachinesResult, InstancelessDynClientInputBundle};
 
 /// Return type of [`ClientModule::create_final_inputs_and_outputs`]. The
 /// primary module contributes inputs/outputs to balance a partial
@@ -114,8 +112,6 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
     async fn config(&self) -> ClientConfig;
 
     fn db(&self) -> &Database;
-
-    fn executor(&self) -> &(maybe_add_send_sync!(dyn IExecutor + 'static));
 
     async fn invite_code(&self, peer: PeerId) -> Option<InviteCode>;
 
@@ -315,13 +311,6 @@ where
         inputs.into_instanceless().into_dyn(self.module_instance_id)
     }
 
-    pub fn make_dyn_state<S>(&self, sm: S) -> DynState
-    where
-        S: sm::IState + 'static,
-    {
-        DynState::from_typed(self.module_instance_id, sm)
-    }
-
     pub async fn finalize_and_submit_transaction(
         &self,
         operation_id: OperationId,
@@ -388,74 +377,6 @@ where
         self.client.get().get_internal_payment_markers()
     }
 
-    /// This method starts n state machines with given operation id without a
-    /// corresponding transaction
-    pub async fn manual_operation_start(
-        &self,
-        operation_id: OperationId,
-        sms: Vec<DynState>,
-    ) -> anyhow::Result<()> {
-        let db = self.module_db();
-        let mut dbtx = db.begin_transaction().await;
-        {
-            let dbtx = &mut dbtx.global_dbtx(self.global_dbtx_access_token);
-
-            self.manual_operation_start_inner(&mut dbtx.to_ref_nc(), operation_id, sms)
-                .await?;
-        }
-
-        dbtx.commit_tx_result().await.map_err(|_| {
-            anyhow!(
-                "Operation with id {} already exists",
-                operation_id.fmt_short()
-            )
-        })?;
-
-        Ok(())
-    }
-
-    pub async fn manual_operation_start_dbtx(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        operation_id: OperationId,
-        sms: Vec<DynState>,
-    ) -> anyhow::Result<()> {
-        self.manual_operation_start_inner(
-            &mut dbtx.global_dbtx(self.global_dbtx_access_token),
-            operation_id,
-            sms,
-        )
-        .await
-    }
-
-    /// See [`Self::manual_operation_start`], just inside a database
-    /// transaction.
-    async fn manual_operation_start_inner(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        operation_id: OperationId,
-        sms: Vec<DynState>,
-    ) -> anyhow::Result<()> {
-        dbtx.ensure_global()
-            .expect("Must deal with global dbtx here");
-
-        if self.client.get().operation_exists(operation_id).await {
-            bail!(
-                "Operation with id {} already exists",
-                operation_id.fmt_short()
-            );
-        }
-
-        self.client
-            .get()
-            .executor()
-            .add_state_machines_dbtx(&mut dbtx.to_ref_nc(), sms)
-            .await
-            .expect("State machine is valid");
-
-        Ok(())
-    }
-
     pub async fn claim_inputs<I>(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
@@ -485,18 +406,6 @@ where
                 operation_id,
                 tx_builder,
             )
-            .await
-    }
-
-    pub async fn add_state_machines_dbtx(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        states: Vec<DynState>,
-    ) -> AddStateMachinesResult {
-        self.client
-            .get()
-            .executor()
-            .add_state_machines_dbtx(&mut dbtx.global_dbtx(self.global_dbtx_access_token), states)
             .await
     }
 

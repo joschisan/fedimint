@@ -41,7 +41,6 @@ use crate::db::{
     ClientPreRootSecretHashKey, InitMode, InitState, apply_migrations_client_module_dbtx,
 };
 use crate::module_init::ClientModuleInitRegistry;
-use crate::sm::executor::Executor;
 
 /// The type of root secret hashing
 ///
@@ -314,7 +313,7 @@ impl ClientBuilder {
             )
             .await?;
         if !stopped {
-            client.as_inner().start_executor();
+            client.start_executor();
         }
         Ok(client)
     }
@@ -342,7 +341,7 @@ impl ClientBuilder {
             )
             .await?;
         if !stopped {
-            client.as_inner().start_executor();
+            client.start_executor();
         }
 
         Ok(client)
@@ -555,20 +554,6 @@ impl ClientBuilder {
             .find(|(_id, _kind, module)| module.supports_being_primary())
             .map(|(id, _kind, _module)| id);
 
-        let executor = {
-            let mut executor_builder = Executor::builder();
-
-            for module_instance_id in module_recoveries.keys() {
-                executor_builder.with_valid_module_id(*module_instance_id);
-            }
-
-            executor_builder.build(
-                db.clone(),
-                task_group.clone(),
-                log_ordering_wakeup_tx.clone(),
-            )
-        };
-
         let recovery_receiver_init_val = module_recovery_progress_receivers
             .iter()
             .map(|(module_instance_id, rx)| (*module_instance_id, *rx.borrow()))
@@ -599,7 +584,6 @@ impl ClientBuilder {
             log_ordering_wakeup_tx,
             log_event_added_rx,
             log_event_added_transient_tx: log_event_added_transient_tx.clone(),
-            executor,
             tx_submission_executor,
             api,
             secp_ctx: Secp256k1::new(),

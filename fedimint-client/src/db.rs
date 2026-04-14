@@ -4,9 +4,8 @@ use anyhow::{anyhow, bail};
 use bitcoin::hex::DisplayHex as _;
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::recovery::RecoveryProgress;
-use fedimint_client_module::sm::{ActiveStateMeta, InactiveStateMeta};
 use fedimint_core::config::ClientConfig;
-use fedimint_core::core::{ModuleInstanceId, OperationId};
+use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{
     Database, DatabaseTransaction, DatabaseVersion, DatabaseVersionKey,
     IDatabaseTransactionOpsCore, IDatabaseTransactionOpsCoreTyped, MODULE_GLOBAL_PREFIX,
@@ -21,11 +20,6 @@ use serde::Serialize;
 use strum::IntoEnumIterator as _;
 use strum_macros::EnumIter;
 use tracing::{debug, info, trace, warn};
-
-use crate::sm::executor::{
-    ActiveStateKeyBytes, ActiveStateKeyPrefixBytes, ExecutorDbPrefixes, InactiveStateKeyBytes,
-    InactiveStateKeyPrefixBytes,
-};
 
 #[repr(u8)]
 #[derive(Clone, EnumIter, Debug)]
@@ -44,9 +38,6 @@ pub enum DbKeyPrefix {
     GuardianMetadata = 0x42,
 
     DatabaseVersion = fedimint_core::db::DbKeyPrefix::DatabaseVersion as u8,
-
-    ActiveStates = ExecutorDbPrefixes::ActiveStates as u8,
-    InactiveStates = ExecutorDbPrefixes::InactiveStates as u8,
 
     /// Arbitrary data of the applications integrating Fedimint client and
     /// wanting to store some Federation-specific data in Fedimint client
@@ -355,12 +346,9 @@ pub async fn apply_migrations_client_module_dbtx(
             kind,
             "Migrating client module database"
         );
-        let mut active_states = get_active_states(&mut dbtx.to_ref_nc(), module_instance_id).await;
-        let mut inactive_states =
-            get_inactive_states(&mut dbtx.to_ref_nc(), module_instance_id).await;
 
         while current_version < target_version {
-            let new_states = if let Some(migration) = migrations.get(&current_version) {
+            if let Some(migration) = migrations.get(&current_version) {
                 debug!(
                      target: LOG_CLIENT_DB,
                      module_instance_id,
@@ -374,38 +362,12 @@ pub async fn apply_migrations_client_module_dbtx(
                         .to_ref_with_prefix_module_id(module_instance_id)
                         .0
                         .into_nc(),
-                    active_states.clone(),
-                    inactive_states.clone(),
                 )
-                .await?
+                .await?;
             } else {
                 warn!(
                     target: LOG_CLIENT_DB,
                     ?current_version, "Missing client db migration");
-                None
-            };
-
-            // If the client migration returned new states, a state machine migration has
-            // occurred, and the new states need to be persisted to the database.
-            if let Some((new_active_states, new_inactive_states)) = new_states {
-                remove_old_and_persist_new_active_states(
-                    &mut dbtx.to_ref_nc(),
-                    new_active_states.clone(),
-                    active_states.clone(),
-                    module_instance_id,
-                )
-                .await;
-                remove_old_and_persist_new_inactive_states(
-                    &mut dbtx.to_ref_nc(),
-                    new_inactive_states.clone(),
-                    inactive_states.clone(),
-                    module_instance_id,
-                )
-                .await;
-
-                // the new states become the old states for the next migration
-                active_states = new_active_states;
-                inactive_states = new_inactive_states;
             }
 
             current_version = current_version.increment();
@@ -422,121 +384,6 @@ pub async fn apply_migrations_client_module_dbtx(
         target: LOG_CLIENT_DB,
         ?kind, ?db_version, "Client DB Version");
     Ok(())
-}
-
-/// Reads all active states from the database and returns `Vec<DynState>`.
-/// TODO: It is unfortunate that we can't read states by the module's instance
-/// id so we are forced to return all active states. Once we do a db migration
-/// to add `module_instance_id` to `ActiveStateKey`, this can be improved to
-/// only read the module's relevant states.
-pub async fn get_active_states(
-    dbtx: &mut DatabaseTransaction<'_>,
-    module_instance_id: ModuleInstanceId,
-) -> Vec<(Vec<u8>, OperationId)> {
-    dbtx.find_by_prefix(&ActiveStateKeyPrefixBytes)
-        .await
-        .filter_map(|(state, _)| async move {
-            if module_instance_id == state.module_instance_id {
-                Some((state.state, state.operation_id))
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>()
-        .await
-}
-
-/// Reads all inactive states from the database and returns `Vec<DynState>`.
-/// TODO: It is unfortunate that we can't read states by the module's instance
-/// id so we are forced to return all inactive states. Once we do a db migration
-/// to add `module_instance_id` to `InactiveStateKey`, this can be improved to
-/// only read the module's relevant states.
-pub async fn get_inactive_states(
-    dbtx: &mut DatabaseTransaction<'_>,
-    module_instance_id: ModuleInstanceId,
-) -> Vec<(Vec<u8>, OperationId)> {
-    dbtx.find_by_prefix(&InactiveStateKeyPrefixBytes)
-        .await
-        .filter_map(|(state, _)| async move {
-            if module_instance_id == state.module_instance_id {
-                Some((state.state, state.operation_id))
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>()
-        .await
-}
-
-/// Persists new active states by first removing all current active states, and
-/// re-writing with the new set of active states. `new_active_states` is
-/// expected to contain all active states, not just the newly created states.
-pub async fn remove_old_and_persist_new_active_states(
-    dbtx: &mut DatabaseTransaction<'_>,
-    new_active_states: Vec<(Vec<u8>, OperationId)>,
-    states_to_remove: Vec<(Vec<u8>, OperationId)>,
-    module_instance_id: ModuleInstanceId,
-) {
-    // Remove all existing active states
-    for (bytes, operation_id) in states_to_remove {
-        dbtx.remove_entry(&ActiveStateKeyBytes {
-            operation_id,
-            module_instance_id,
-            state: bytes,
-        })
-        .await
-        .expect("Did not delete anything");
-    }
-
-    // Insert new "migrated" active states
-    for (bytes, operation_id) in new_active_states {
-        dbtx.insert_new_entry(
-            &ActiveStateKeyBytes {
-                operation_id,
-                module_instance_id,
-                state: bytes,
-            },
-            &ActiveStateMeta::default(),
-        )
-        .await;
-    }
-}
-
-/// Persists new inactive states by first removing all current inactive states,
-/// and re-writing with the new set of inactive states. `new_inactive_states` is
-/// expected to contain all inactive states, not just the newly created states.
-pub async fn remove_old_and_persist_new_inactive_states(
-    dbtx: &mut DatabaseTransaction<'_>,
-    new_inactive_states: Vec<(Vec<u8>, OperationId)>,
-    states_to_remove: Vec<(Vec<u8>, OperationId)>,
-    module_instance_id: ModuleInstanceId,
-) {
-    // Remove all existing active states
-    for (bytes, operation_id) in states_to_remove {
-        dbtx.remove_entry(&InactiveStateKeyBytes {
-            operation_id,
-            module_instance_id,
-            state: bytes,
-        })
-        .await
-        .expect("Did not delete anything");
-    }
-
-    // Insert new "migrated" inactive states
-    for (bytes, operation_id) in new_inactive_states {
-        dbtx.insert_new_entry(
-            &InactiveStateKeyBytes {
-                operation_id,
-                module_instance_id,
-                state: bytes,
-            },
-            &InactiveStateMeta {
-                created_at: fedimint_core::time::now(),
-                exited_at: fedimint_core::time::now(),
-            },
-        )
-        .await;
-    }
 }
 
 /// Fetches the encoded client secret from the database and decodes it.

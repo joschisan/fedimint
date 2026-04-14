@@ -83,7 +83,6 @@ pub mod db;
 
 pub mod module_init;
 
-pub mod sm;
 pub use client::Client;
 pub use client::builder::{ClientBuilder, ClientPreview, RootSecret};
 pub use client::handle::{ClientHandle, ClientHandleArc};
