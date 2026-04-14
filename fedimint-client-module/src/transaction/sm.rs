@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use fedimint_api_client::api::DynGlobalApi;
 use fedimint_core::TransactionId;
-use fedimint_core::core::{ModuleInstanceId, OperationId};
+use fedimint_core::core::OperationId;
 use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -19,10 +19,6 @@ use tracing::debug;
 use crate::executor::{StateMachine, StateTransition as SmStateTransition};
 use crate::module::FinalClientIface;
 use crate::{TxAcceptedEvent, TxRejectedEvent};
-
-// TODO: how to prevent collisions? Generally reserve some range for custom IDs?
-/// Reserved module instance id used for client-internal state machines
-pub const TRANSACTION_SUBMISSION_MODULE_INSTANCE: ModuleInstanceId = 0xffff;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// State machine to (re-)submit a transaction until it is either accepted or
@@ -156,7 +152,7 @@ async fn log_tx_event<E: Event + Send>(
         .log_event_json(
             &mut dbtx.to_ref_nc(),
             E::MODULE,
-            TRANSACTION_SUBMISSION_MODULE_INSTANCE,
+            0xffff,
             E::KIND,
             serde_json::to_value(event).expect("Serializable"),
             E::PERSISTENCE,

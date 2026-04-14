@@ -167,7 +167,7 @@ impl ConsensusApi {
             module_instance_id_to_kind.insert(module_instance_id, kind.as_str().to_string());
             module
                 .audit(
-                    &mut dbtx.to_ref_with_prefix_module_id(module_instance_id).0,
+                    &mut dbtx.to_ref_with_prefix_module_id(module_instance_id),
                     &mut audit,
                     module_instance_id,
                 )
@@ -228,7 +228,7 @@ impl HasApiContext<ConsensusApi> for ConsensusApi {
     ) -> (&ConsensusApi, ApiEndpointContext) {
         let mut db = self.db.clone();
         if let Some(id) = id {
-            db = self.db.with_prefix_module_id(id).0;
+            db = self.db.with_prefix_module_id(id);
         }
         (
             self,

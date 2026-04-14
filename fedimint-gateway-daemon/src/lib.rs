@@ -456,7 +456,7 @@ impl AppState {
 
         let operation_id = OperationId::from_encodable(&registered_contract.contract);
 
-        if !(wait || client.operation_exists(operation_id).await) {
+        if !wait {
             return Ok(VerifyResponse {
                 settled: false,
                 preimage: None,

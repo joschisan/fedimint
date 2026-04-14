@@ -98,7 +98,7 @@ where
     ) -> anyhow::Result<()> {
         let typed_cfg: &<<T as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig = cfg.cast()?;
 
-        let (module_db, global_dbtx_access_token) = db.with_prefix_module_id(instance_id);
+        let module_db = db.with_prefix_module_id(instance_id);
         Ok(<Self as ClientModuleInit>::recover(
             self,
             &ClientModuleRecoverArgs {
@@ -109,12 +109,7 @@ where
                 module_root_secret,
                 api: api.clone(),
                 module_api: api.with_module(instance_id),
-                context: ClientContext::new(
-                    final_client,
-                    instance_id,
-                    global_dbtx_access_token,
-                    module_db,
-                ),
+                context: ClientContext::new(final_client, instance_id, module_db),
                 progress_tx,
                 task_group,
             },
@@ -136,7 +131,7 @@ where
         connector_registry: ConnectionPool,
     ) -> anyhow::Result<DynClientModule> {
         let typed_cfg: &<<T as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig = cfg.cast()?;
-        let (module_db, global_dbtx_access_token) = db.with_prefix_module_id(instance_id);
+        let module_db = db.with_prefix_module_id(instance_id);
         Ok(<Self as ClientModuleInit>::init(
             self,
             &ClientModuleInitArgs {
@@ -147,12 +142,7 @@ where
                 module_root_secret,
                 api: api.clone(),
                 module_api: api.with_module(instance_id),
-                context: ClientContext::new(
-                    final_client,
-                    instance_id,
-                    global_dbtx_access_token,
-                    module_db,
-                ),
+                context: ClientContext::new(final_client, instance_id, module_db),
                 task_group,
                 connector_registry,
             },

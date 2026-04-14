@@ -360,7 +360,6 @@ pub async fn apply_migrations_client_module_dbtx(
                 migration(
                     &mut dbtx
                         .to_ref_with_prefix_module_id(module_instance_id)
-                        .0
                         .into_nc(),
                 )
                 .await?;

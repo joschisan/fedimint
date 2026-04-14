@@ -587,12 +587,6 @@ impl Client {
         }
     }
 
-    /// Legacy: always returns `false` now. Central operation state tracking
-    /// has been replaced by per-module idempotency keys.
-    pub async fn operation_exists(&self, _operation_id: OperationId) -> bool {
-        false
-    }
-
     /// Returns a reference to a typed module client instance by kind
     pub fn get_first_module<M: ClientModule>(
         &'_ self,
@@ -607,7 +601,7 @@ impl Client {
             .as_any()
             .downcast_ref::<M>()
             .ok_or_else(|| format_err!("Module is not of type {}", std::any::type_name::<M>()))?;
-        let (db, _) = self.db().with_prefix_module_id(id);
+        let db = self.db().with_prefix_module_id(id);
         Ok(ClientModuleInstance {
             id,
             db,
@@ -1205,12 +1199,6 @@ impl ClientContextIface for Client {
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
         Client::finalize_and_submit_transaction_inner(self, dbtx, operation_id, tx_builder).await
-    }
-
-    async fn operation_exists(&self, _operation_id: OperationId) -> bool {
-        // Central operation state tracking has been removed; modules now track
-        // idempotency with their own keys.
-        false
     }
 
     async fn config(&self) -> ClientConfig {

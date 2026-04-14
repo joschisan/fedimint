@@ -19,7 +19,6 @@ use fedimint_core::db::Database;
 use fedimint_core::{PeerId, TransactionId, maybe_add_send_sync};
 use fedimint_eventlog::{Event, EventKind, EventPersistence};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use transaction::{ClientInputBundle, ClientOutput};
 
 pub use crate::module::ClientModule;
@@ -112,16 +111,6 @@ pub type InstancelessDynClientOutput =
 
 pub type InstancelessDynClientOutputBundle =
     ClientOutputBundle<Box<maybe_add_send_sync!(dyn IOutput + 'static)>>;
-
-#[derive(Debug, Error)]
-pub enum AddStateMachinesError {
-    #[error("State already exists in database")]
-    StateAlreadyExists,
-    #[error("Got {0}")]
-    Other(#[from] anyhow::Error),
-}
-
-pub type AddStateMachinesResult = Result<(), AddStateMachinesError>;
 
 /// Resources particular to a module instance
 pub struct ClientModuleInstance<'m, M: ClientModule> {

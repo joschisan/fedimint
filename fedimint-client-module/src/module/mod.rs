@@ -12,7 +12,7 @@ use fedimint_core::core::{
     Decoder, DynInput, DynOutput, IInput, IntoDynInstance, ModuleInstanceId, ModuleKind,
     OperationId,
 };
-use fedimint_core::db::{Database, DatabaseTransaction, GlobalDBTxAccessToken, NonCommittable};
+use fedimint_core::db::{Database, DatabaseTransaction, NonCommittable};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
@@ -105,8 +105,6 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
 
-    async fn operation_exists(&self, operation_id: OperationId) -> bool;
-
     async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String>;
 
     async fn config(&self) -> ClientConfig;
@@ -174,7 +172,6 @@ impl fmt::Debug for FinalClientIface {
 pub struct ClientContext<M> {
     client: FinalClientIface,
     module_instance_id: ModuleInstanceId,
-    global_dbtx_access_token: GlobalDBTxAccessToken,
     module_db: Database,
     _marker: marker::PhantomData<M>,
 }
@@ -186,7 +183,6 @@ impl<M> Clone for ClientContext<M> {
             module_db: self.module_db.clone(),
             module_instance_id: self.module_instance_id,
             _marker: marker::PhantomData,
-            global_dbtx_access_token: self.global_dbtx_access_token,
         }
     }
 }
@@ -229,13 +225,11 @@ where
     pub fn new(
         client: FinalClientIface,
         module_instance_id: ModuleInstanceId,
-        global_dbtx_access_token: GlobalDBTxAccessToken,
         module_db: Database,
     ) -> Self {
         Self {
             client,
             module_instance_id,
-            global_dbtx_access_token,
             module_db,
             _marker: marker::PhantomData,
         }
@@ -330,11 +324,7 @@ where
     ) -> anyhow::Result<OutPointRange> {
         self.client
             .get()
-            .finalize_and_submit_transaction_dbtx(
-                &mut dbtx.global_dbtx(self.global_dbtx_access_token),
-                operation_id,
-                tx_builder,
-            )
+            .finalize_and_submit_transaction_dbtx(&mut dbtx.global_dbtx(), operation_id, tx_builder)
             .await
     }
 
@@ -347,10 +337,6 @@ where
 
     pub async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String> {
         self.client.get().await_tx_accepted(txid).await
-    }
-
-    pub async fn operation_exists(&self, op_id: OperationId) -> bool {
-        self.client.get().operation_exists(op_id).await
     }
 
     pub async fn get_config(&self) -> ClientConfig {
@@ -402,7 +388,7 @@ where
         self.client
             .get()
             .finalize_and_submit_transaction_inner(
-                &mut dbtx.global_dbtx(self.global_dbtx_access_token),
+                &mut dbtx.global_dbtx(),
                 operation_id,
                 tx_builder,
             )
@@ -447,7 +433,7 @@ where
         self.client
             .get()
             .log_event_json(
-                &mut dbtx.global_dbtx(self.global_dbtx_access_token).to_ref_nc(),
+                &mut dbtx.global_dbtx().to_ref_nc(),
                 <E as Event>::MODULE,
                 self.module_instance_id,
                 <E as Event>::KIND,
@@ -714,7 +700,7 @@ where
             spawn_sms,
         } = <T as ClientModule>::create_final_inputs_and_outputs(
             self,
-            &mut dbtx.to_ref_with_prefix_module_id(module_instance).0,
+            &mut dbtx.to_ref_with_prefix_module_id(module_instance),
             operation_id,
             input_amount,
             output_amount,
@@ -744,7 +730,7 @@ where
     ) -> Amount {
         <T as ClientModule>::get_balance(
             self,
-            &mut dbtx.to_ref_with_prefix_module_id(module_instance).0,
+            &mut dbtx.to_ref_with_prefix_module_id(module_instance),
         )
         .await
     }

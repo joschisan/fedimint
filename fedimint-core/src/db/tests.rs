@@ -2,8 +2,8 @@ use tokio::sync::oneshot;
 
 use super::mem_impl::MemDatabase;
 use super::{
-    Database, GlobalDBTxAccessToken, IDatabaseTransactionOpsCoreTyped, IRawDatabaseExt, TestKey,
-    TestVal, future_returns_shortly,
+    Database, IDatabaseTransactionOpsCoreTyped, IRawDatabaseExt, TestKey, TestVal,
+    future_returns_shortly,
 };
 use crate::runtime::spawn;
 
@@ -100,7 +100,7 @@ async fn test_wait_key_isolated_db() {
     let key = TestKey(1);
     let val = TestVal(2);
     let db = MemDatabase::new().into_database();
-    let db = db.with_prefix_module_id(module_instance_id).0;
+    let db = db.with_prefix_module_id(module_instance_id);
 
     let key_task = waiter(&db, TestKey(1)).await;
 
@@ -122,10 +122,10 @@ async fn test_wait_key_isolated_tx() {
     let val = TestVal(2);
     let db = MemDatabase::new().into_database();
 
-    let key_task = waiter(&db.with_prefix_module_id(module_instance_id).0, TestKey(1)).await;
+    let key_task = waiter(&db.with_prefix_module_id(module_instance_id), TestKey(1)).await;
 
     let mut tx = db.begin_transaction().await;
-    let mut tx_mod = tx.to_ref_with_prefix_module_id(module_instance_id).0;
+    let mut tx_mod = tx.to_ref_with_prefix_module_id(module_instance_id);
     tx_mod.insert_new_entry(&key, &val).await;
     drop(tx_mod);
     tx.commit_tx().await;
@@ -155,11 +155,10 @@ async fn test_prefix_global_dbtx() {
     let db = MemDatabase::new().into_database();
 
     {
-        // Plain module id prefix, can use `global_dbtx` to access global_dbtx
-        let (db, access_token) = db.with_prefix_module_id(module_instance_id);
+        let db = db.with_prefix_module_id(module_instance_id);
 
         let mut tx = db.begin_transaction().await;
-        let mut tx = tx.global_dbtx(access_token);
+        let mut tx = tx.global_dbtx();
         tx.insert_new_entry(&TestKey(1), &TestVal(1)).await;
         tx.commit_tx().await;
     }
@@ -167,23 +166,6 @@ async fn test_prefix_global_dbtx() {
     assert_eq!(
         db.begin_transaction_nc().await.get_value(&TestKey(1)).await,
         Some(TestVal(1))
-    );
-
-    {
-        // Additional non-module inner prefix, does not interfere with `global_dbtx`
-        let (db, access_token) = db.with_prefix_module_id(module_instance_id);
-
-        let db = db.with_prefix(vec![3, 4]);
-
-        let mut tx = db.begin_transaction().await;
-        let mut tx = tx.global_dbtx(access_token);
-        tx.insert_new_entry(&TestKey(2), &TestVal(2)).await;
-        tx.commit_tx().await;
-    }
-
-    assert_eq!(
-        db.begin_transaction_nc().await.get_value(&TestKey(2)).await,
-        Some(TestVal(2))
     );
 }
 
@@ -193,29 +175,5 @@ async fn test_prefix_global_dbtx_panics_on_global_db() {
     let db = MemDatabase::new().into_database();
 
     let mut tx = db.begin_transaction().await;
-    let _tx = tx.global_dbtx(GlobalDBTxAccessToken::from_prefix(&[1]));
-}
-
-#[tokio::test]
-#[should_panic(expected = "Illegal to call global_dbtx on BaseDatabaseTransaction")]
-async fn test_prefix_global_dbtx_panics_on_non_module_prefix() {
-    let db = MemDatabase::new().into_database();
-
-    let prefix = vec![3, 4];
-    let db = db.with_prefix(prefix.clone());
-
-    let mut tx = db.begin_transaction().await;
-    let _tx = tx.global_dbtx(GlobalDBTxAccessToken::from_prefix(&prefix));
-}
-
-#[tokio::test]
-#[should_panic(expected = "Illegal to call global_dbtx on BaseDatabaseTransaction")]
-async fn test_prefix_global_dbtx_panics_on_wrong_access_token() {
-    let db = MemDatabase::new().into_database();
-
-    let prefix = vec![3, 4];
-    let db = db.with_prefix(prefix.clone());
-
-    let mut tx = db.begin_transaction().await;
-    let _tx = tx.global_dbtx(GlobalDBTxAccessToken::from_prefix(&[1]));
+    let _tx = tx.global_dbtx();
 }

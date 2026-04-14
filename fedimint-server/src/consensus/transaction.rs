@@ -18,9 +18,7 @@ pub async fn process_transaction_with_dbtx(
         let meta = modules
             .get_expect(input.module_instance_id())
             .process_input(
-                &mut dbtx
-                    .to_ref_with_prefix_module_id(input.module_instance_id())
-                    .0,
+                &mut dbtx.to_ref_with_prefix_module_id(input.module_instance_id()),
                 input,
                 InPoint { txid, in_idx },
             )
@@ -37,9 +35,7 @@ pub async fn process_transaction_with_dbtx(
         let amount = modules
             .get_expect(output.module_instance_id())
             .process_output(
-                &mut dbtx
-                    .to_ref_with_prefix_module_id(output.module_instance_id())
-                    .0,
+                &mut dbtx.to_ref_with_prefix_module_id(output.module_instance_id()),
                 output,
                 OutPoint { txid, out_idx },
             )

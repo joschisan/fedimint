@@ -651,7 +651,6 @@ impl ConsensusEngine {
                 .audit(
                     &mut dbtx
                         .to_ref_with_prefix_module_id(module_instance_id)
-                        .0
                         .into_nc(),
                     &mut audit,
                     module_instance_id,
@@ -689,7 +688,7 @@ impl ConsensusEngine {
             ConsensusItem::Module(module_item) => {
                 let instance_id = module_item.module_instance_id();
 
-                let module_dbtx = &mut dbtx.to_ref_with_prefix_module_id(instance_id).0;
+                let module_dbtx = &mut dbtx.to_ref_with_prefix_module_id(instance_id);
 
                 self.modules
                     .get_expect(instance_id)
