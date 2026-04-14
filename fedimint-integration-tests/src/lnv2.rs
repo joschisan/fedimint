@@ -67,9 +67,9 @@ fn try_parse_ln_event(entry: &EventLogEntry) -> Option<LnEvent> {
 }
 
 pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::Result<()> {
-    test_direct_ln_payments(env).await?;
     test_payments(env, client_send).await?;
     test_gateway_registration(env).await?;
+    test_direct_ln_payments(env).await?;
 
     Ok(())
 }
