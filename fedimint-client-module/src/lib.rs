@@ -19,7 +19,6 @@ use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_core::config::ClientConfig;
 pub use fedimint_core::core::{IInput, IOutput, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::Database;
-use fedimint_core::module::ApiAuth;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::{BoxStream, NextOrPending};
@@ -462,10 +461,3 @@ impl TransactionUpdates {
     }
 }
 
-/// Admin (guardian) identification and authentication
-pub struct AdminCreds {
-    /// Guardian's own `peer_id`
-    pub peer_id: PeerId,
-    /// Authentication details
-    pub auth: ApiAuth,
-}

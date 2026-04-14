@@ -14,7 +14,7 @@ use fedimint_client_module::{ClientModule, ModuleInstanceId, ModuleKind};
 use fedimint_core::config::{ClientModuleConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::Decoder;
 use fedimint_core::db::{Database, DatabaseVersion};
-use fedimint_core::module::{ApiAuth, CommonModuleInit, IDynCommonModuleInit, ModuleInit};
+use fedimint_core::module::{CommonModuleInit, IDynCommonModuleInit, ModuleInit};
 use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::{NumPeers, apply, async_trait_maybe_send, dyn_newtype_define};
 use fedimint_derive_secret::DerivableSecret;
@@ -44,7 +44,6 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
         module_root_secret: DerivableSecret,
         notifier: Notifier,
         api: DynGlobalApi,
-        admin_auth: Option<ApiAuth>,
         progress_tx: watch::Sender<RecoveryProgress>,
         task_group: TaskGroup,
     ) -> anyhow::Result<()>;
@@ -61,7 +60,6 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
         module_root_secret: DerivableSecret,
         notifier: Notifier,
         api: DynGlobalApi,
-        admin_auth: Option<ApiAuth>,
         task_group: TaskGroup,
         connector_registry: ConnectionPool,
     ) -> anyhow::Result<DynClientModule>;
@@ -101,7 +99,6 @@ where
         // TODO: make dyn type for notifier
         notifier: Notifier,
         api: DynGlobalApi,
-        admin_auth: Option<ApiAuth>,
         progress_tx: watch::Sender<RecoveryProgress>,
         task_group: TaskGroup,
     ) -> anyhow::Result<()> {
@@ -118,7 +115,6 @@ where
                 module_root_secret,
                 notifier: notifier.module_notifier(instance_id, final_client.clone()),
                 api: api.clone(),
-                admin_auth,
                 module_api: api.with_module(instance_id),
                 context: ClientContext::new(
                     final_client,
@@ -145,7 +141,6 @@ where
         // TODO: make dyn type for notifier
         notifier: Notifier,
         api: DynGlobalApi,
-        admin_auth: Option<ApiAuth>,
         task_group: TaskGroup,
         connector_registry: ConnectionPool,
     ) -> anyhow::Result<DynClientModule> {
@@ -161,7 +156,6 @@ where
                 module_root_secret,
                 notifier: notifier.module_notifier(instance_id, final_client.clone()),
                 api: api.clone(),
-                admin_auth,
                 module_api: api.with_module(instance_id),
                 context: ClientContext::new(
                     final_client,

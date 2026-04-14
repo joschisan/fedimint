@@ -5,7 +5,7 @@ use fedimint_api_client::connection::ConnectionPool;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::ModuleKind;
 use fedimint_core::db::{Database, DatabaseVersion};
-use fedimint_core::module::{ApiAuth, CommonModuleInit, ModuleInit};
+use fedimint_core::module::{CommonModuleInit, ModuleInit};
 use fedimint_core::task::TaskGroup;
 use fedimint_core::{NumPeers, apply, async_trait_maybe_send};
 use fedimint_derive_secret::DerivableSecret;
@@ -29,7 +29,6 @@ where
     pub module_root_secret: DerivableSecret,
     pub notifier: ModuleNotifier<<<C as ClientModuleInit>::Module as ClientModule>::States>,
     pub api: DynGlobalApi,
-    pub admin_auth: Option<ApiAuth>,
     pub module_api: DynModuleApi,
     pub context: ClientContext<<C as ClientModuleInit>::Module>,
     pub task_group: TaskGroup,
@@ -70,10 +69,6 @@ where
         &self.api
     }
 
-    pub fn admin_auth(&self) -> Option<&ApiAuth> {
-        self.admin_auth.as_ref()
-    }
-
     pub fn module_api(&self) -> &DynModuleApi {
         &self.module_api
     }
@@ -108,7 +103,6 @@ where
     pub module_root_secret: DerivableSecret,
     pub notifier: ModuleNotifier<<<C as ClientModuleInit>::Module as ClientModule>::States>,
     pub api: DynGlobalApi,
-    pub admin_auth: Option<ApiAuth>,
     pub module_api: DynModuleApi,
     pub context: ClientContext<<C as ClientModuleInit>::Module>,
     pub progress_tx: tokio::sync::watch::Sender<RecoveryProgress>,
@@ -151,10 +145,6 @@ where
 
     pub fn api(&self) -> &DynGlobalApi {
         &self.api
-    }
-
-    pub fn admin_auth(&self) -> Option<&ApiAuth> {
-        self.admin_auth.as_ref()
     }
 
     pub fn module_api(&self) -> &DynModuleApi {

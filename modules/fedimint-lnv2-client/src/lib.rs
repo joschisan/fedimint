@@ -31,7 +31,7 @@ use fedimint_core::config::FederationId;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{ApiAuth, ModuleCommon, ModuleInit};
+use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::SECP256K1;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::util::BoxStream;
@@ -200,7 +200,6 @@ impl ClientModuleInit for LightningClientInit {
             args.module_api().clone(),
             args.module_root_secret(),
             gateway_conn,
-            args.admin_auth().cloned(),
             args.task_group(),
         ))
     }
@@ -239,8 +238,6 @@ pub struct LightningClientModule {
     keypair: Keypair,
     lnurl_keypair: Keypair,
     gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
-    #[allow(unused)] // The field is only used by the cli feature
-    admin_auth: Option<ApiAuth>,
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -285,7 +282,6 @@ impl LightningClientModule {
         module_api: DynModuleApi,
         module_root_secret: &DerivableSecret,
         gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
-        admin_auth: Option<ApiAuth>,
         task_group: &TaskGroup,
     ) -> Self {
         let module = Self {
@@ -301,7 +297,6 @@ impl LightningClientModule {
                 .child_key(ChildId(1))
                 .to_secp_key(SECP256K1),
             gateway_conn,
-            admin_auth,
         };
 
         module.spawn_receive_lnurl_task(task_group);

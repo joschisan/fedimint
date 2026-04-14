@@ -22,7 +22,7 @@ use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default
 use fedimint_client_module::transaction::{
     TRANSACTION_SUBMISSION_MODULE_INSTANCE, TxSubmissionContext, tx_submission_sm_decoder,
 };
-use fedimint_client_module::{AdminCreds, ModuleRecoveryStarted};
+use fedimint_client_module::ModuleRecoveryStarted;
 use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::{
@@ -103,7 +103,6 @@ impl RootSecret {
 /// Used to configure, assemble and build [`Client`]
 pub struct ClientBuilder {
     module_inits: ClientModuleInitRegistry,
-    admin_creds: Option<AdminCreds>,
     meta_service: Arc<crate::meta::MetaService>,
     stopped: bool,
     log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
@@ -125,7 +124,6 @@ impl ClientBuilder {
 
         ClientBuilder {
             module_inits: ModuleInitRegistry::new(),
-            admin_creds: None,
             stopped: false,
             meta_service,
             log_event_added_transient_tx,
@@ -138,7 +136,6 @@ impl ClientBuilder {
     pub(crate) fn from_existing(client: &Client) -> Self {
         ClientBuilder {
             module_inits: client.module_inits.clone(),
-            admin_creds: None,
             stopped: false,
             // non unique
             meta_service: client.meta_service.clone(),
@@ -242,10 +239,6 @@ impl ClientBuilder {
         };
 
         Ok(config)
-    }
-
-    pub fn set_admin_creds(&mut self, creds: AdminCreds) {
-        self.admin_creds = Some(creds);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -456,23 +449,12 @@ impl ClientBuilder {
             .iter()
             .map(|(peer, endpoint)| (*peer, endpoint.url.clone()))
             .collect();
-        let api: DynGlobalApi = match self.admin_creds.as_ref() {
-            Some(admin_creds) => FederationApi::new(
-                connectors.clone(),
-                peer_urls,
-                Some(admin_creds.peer_id),
-                Some(admin_creds.auth.as_str()),
-            )
-            .with_client_ext(db.clone(), log_ordering_wakeup_tx.clone())
-            .with_request_hook(&request_hook)
-            .with_cache()
-            .into(),
-            None => FederationApi::new(connectors.clone(), peer_urls, None, api_secret.as_deref())
+        let api: DynGlobalApi =
+            FederationApi::new(connectors.clone(), peer_urls, None, api_secret.as_deref())
                 .with_client_ext(db.clone(), log_ordering_wakeup_tx.clone())
                 .with_request_hook(&request_hook)
                 .with_cache()
-                .into(),
-        };
+                .into();
 
         let task_group = TaskGroup::new();
 
@@ -520,7 +502,6 @@ impl ClientBuilder {
                     let notifier = notifier.clone();
                     let api = api.clone();
                     let root_secret = root_secret.clone();
-                    let admin_auth = self.admin_creds.as_ref().map(|creds| creds.auth.clone());
                     let final_client = final_client.clone();
                     let (progress_tx, progress_rx) = tokio::sync::watch::channel(progress);
                     let task_group = task_group.clone();
@@ -538,7 +519,6 @@ impl ClientBuilder {
                                         root_secret.derive_module_secret(module_instance_id),
                                         notifier.clone(),
                                         api.clone(),
-                                        admin_auth,
                                         progress_tx,
                                         task_group,
                                     )
@@ -630,7 +610,6 @@ impl ClientBuilder {
                                 root_secret.derive_module_secret(module_instance_id),
                                 notifier.clone(),
                                 api.clone(),
-                                self.admin_creds.as_ref().map(|cred| cred.auth.clone()),
                                 task_group.clone(),
                                 connectors.clone(),
                             )
