@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use fedimint_api_client::connection::ConnectionPool;
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::{Client, ClientBuilder, RootSecret};
@@ -20,7 +19,7 @@ pub struct GatewayClientFactory {
     db: Database,
     mnemonic: Mnemonic,
     registry: ClientModuleInitRegistry,
-    connectors: ConnectionPool,
+    connectors: Endpoint,
 }
 
 impl GatewayClientFactory {
@@ -40,7 +39,7 @@ impl GatewayClientFactory {
         let endpoint = Endpoint::builder(N0).bind().await?;
 
         Ok(Self {
-            connectors: ConnectionPool::new(endpoint),
+            connectors: endpoint,
             db,
             mnemonic,
             registry,
@@ -66,7 +65,7 @@ impl GatewayClientFactory {
                 let endpoint = Endpoint::builder(N0).bind().await?;
 
                 Ok(Some(Self {
-                    connectors: ConnectionPool::new(endpoint),
+                    connectors: endpoint,
                     db,
                     mnemonic,
                     registry,

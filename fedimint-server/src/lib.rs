@@ -29,7 +29,6 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use config::ServerConfig;
 use config::io::read_server_config;
-use fedimint_api_client::connection::ConnectionPool;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped as _};
 use fedimint_core::epoch::ConsensusItem;
@@ -144,10 +143,9 @@ pub async fn run(
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 
     let client_endpoint = Endpoint::builder(N0).bind().await?;
-    let connectors = ConnectionPool::new(client_endpoint);
 
     Box::pin(consensus::run(
-        connectors,
+        client_endpoint,
         auth,
         connections,
         p2p_status_receivers,

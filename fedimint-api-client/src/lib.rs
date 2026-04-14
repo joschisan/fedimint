@@ -22,10 +22,12 @@ pub mod connection;
 /// Client query system
 pub mod query;
 
+pub use iroh::Endpoint;
+
 /// Tries to download the [`ClientConfig`], attempts to retry ten times before
 /// giving up.
 pub async fn download_from_invite_code(
-    endpoint: &connection::ConnectionPool,
+    endpoint: &Endpoint,
     invite: &InviteCode,
 ) -> anyhow::Result<(ClientConfig, DynGlobalApi)> {
     debug!(
@@ -61,7 +63,7 @@ pub async fn download_from_invite_code(
 
 /// Tries to download the [`ClientConfig`] only once.
 pub async fn try_download_client_config(
-    endpoint: &connection::ConnectionPool,
+    endpoint: &Endpoint,
     api_from_invite: &DynGlobalApi,
     federation_id: FederationId,
     api_secret: Option<String>,

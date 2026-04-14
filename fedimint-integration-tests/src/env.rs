@@ -8,7 +8,6 @@ use std::time::Duration;
 use anyhow::{Context, ensure};
 use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
-use fedimint_api_client::connection::ConnectionPool;
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::secret::RootSecretStrategy;
 use fedimint_client::{Client, ClientHandleArc, RootSecret};
@@ -251,7 +250,7 @@ async fn build_client(
     builder.with_module(fedimint_walletv2_client::WalletClientInit);
     builder.with_module(fedimint_lnv2_client::LightningClientInit::default());
 
-    let connectors = ConnectionPool::new(endpoint);
+    let connectors = endpoint;
 
     let mnemonic = Mnemonic::generate(12)?;
     let root_secret =

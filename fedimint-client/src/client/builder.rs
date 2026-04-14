@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{bail, ensure};
 use bitcoin::key::Secp256k1;
 use fedimint_api_client::api::{DynGlobalApi, FederationApi};
-use fedimint_api_client::connection::ConnectionPool;
+use fedimint_api_client::Endpoint;
 use fedimint_api_client::download_from_invite_code;
 use fedimint_client_module::ModuleRecoveryStarted;
 use fedimint_client_module::executor::ModuleExecutor;
@@ -179,7 +179,7 @@ impl ClientBuilder {
     #[allow(clippy::too_many_arguments)]
     async fn init(
         self,
-        connectors: ConnectionPool,
+        connectors: Endpoint,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: ClientConfig,
@@ -230,7 +230,7 @@ impl ClientBuilder {
 
     pub async fn preview(
         self,
-        connectors: ConnectionPool,
+        connectors: Endpoint,
         invite_code: &InviteCode,
     ) -> anyhow::Result<ClientPreview> {
         let (config, _api) = download_from_invite_code(&connectors, invite_code).await?;
@@ -246,7 +246,7 @@ impl ClientBuilder {
     /// Use [`Self::preview`] instead
     pub async fn preview_with_existing_config(
         self,
-        connectors: ConnectionPool,
+        connectors: Endpoint,
         config: ClientConfig,
         api_secret: Option<String>,
     ) -> anyhow::Result<ClientPreview> {
@@ -260,7 +260,7 @@ impl ClientBuilder {
 
     pub async fn open(
         self,
-        connectors: ConnectionPool,
+        connectors: Endpoint,
         db_no_decoders: Database,
         pre_root_secret: RootSecret,
     ) -> anyhow::Result<ClientHandle> {
@@ -321,7 +321,7 @@ impl ClientBuilder {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn build(
         self,
-        connectors: ConnectionPool,
+        connectors: Endpoint,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: ClientConfig,
@@ -350,7 +350,7 @@ impl ClientBuilder {
     /// Build a [`Client`] but do not start the executor
     async fn build_stopped(
         self,
-        connectors: ConnectionPool,
+        connectors: Endpoint,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: &ClientConfig,
@@ -685,7 +685,7 @@ impl ClientBuilder {
 pub struct ClientPreview {
     inner: ClientBuilder,
     config: ClientConfig,
-    connectors: ConnectionPool,
+    connectors: Endpoint,
     api_secret: Option<String>,
 }
 
@@ -719,7 +719,7 @@ impl ClientPreview {
     /// # use fedimint_core::config::ClientConfig;
     /// # use fedimint_derive_secret::DerivableSecret;
     /// # use fedimint_client::{Client, ClientBuilder, RootSecret};
-    /// # use fedimint_api_client::connection::ConnectionPool;
+    /// # use fedimint_api_client::Endpoint;
     /// # use fedimint_core::db::Database;
     /// # use fedimint_core::config::META_FEDERATION_NAME_KEY;
     /// #
@@ -749,7 +749,7 @@ impl ClientPreview {
     /// // let db_path = format!("./path/to/db/{}", config.federation_id());
     /// // let db = RocksDb::open(db_path).expect("error opening DB");
     /// # let db: Database = unimplemented!();
-    /// # let connectors: ConnectionPool = unimplemented!();
+    /// # let connectors: Endpoint = unimplemented!();
     ///
     /// let preview = Client::builder().await
     ///     // Mount the modules the client should support:
