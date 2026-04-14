@@ -545,14 +545,14 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
 {
-    for i in 0..60 {
+    for i in 0..240 {
         match f().await {
             Ok(v) => return Ok(v),
             Err(e) => {
-                if i == 59 {
-                    return Err(e).context(format!("retry '{name}' exhausted after 60 attempts"));
+                if i == 239 {
+                    return Err(e).context(format!("retry '{name}' exhausted after 240 attempts"));
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
     }
