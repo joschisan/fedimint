@@ -444,6 +444,7 @@ impl Database {
             inner: Arc::new(PrefixDatabase {
                 inner: self.inner.clone(),
                 prefix,
+                is_module_isolated: false,
             }),
             module_decoders: self.module_decoders.clone(),
         }
@@ -457,6 +458,7 @@ impl Database {
             inner: Arc::new(PrefixDatabase {
                 inner: self.inner.clone(),
                 prefix,
+                is_module_isolated: true,
             }),
             module_decoders: self.module_decoders.clone(),
         }
@@ -685,6 +687,7 @@ where
 {
     prefix: Vec<u8>,
     inner: Inner,
+    is_module_isolated: bool,
 }
 
 impl<Inner> PrefixDatabase<Inner>
@@ -710,6 +713,7 @@ where
         Box::new(PrefixDatabaseTransaction {
             inner: self.inner.begin_transaction().await,
             prefix: self.prefix.clone(),
+            is_module_isolated: self.is_module_isolated,
         })
     }
     async fn register(&self, key: &[u8]) {
@@ -721,7 +725,11 @@ where
     }
 
     fn is_global(&self) -> bool {
-        false
+        if self.is_module_isolated {
+            false
+        } else {
+            self.inner.is_global()
+        }
     }
 
     fn checkpoint(&self, backup_path: &Path) -> DatabaseResult<()> {
@@ -737,6 +745,7 @@ where
 struct PrefixDatabaseTransaction<Inner> {
     inner: Inner,
     prefix: Vec<u8>,
+    is_module_isolated: bool,
 }
 
 impl<Inner> PrefixDatabaseTransaction<Inner> {
@@ -771,11 +780,19 @@ where
     }
 
     fn is_global(&self) -> bool {
-        false
+        if self.is_module_isolated {
+            false
+        } else {
+            self.inner.is_global()
+        }
     }
 
     fn global_dbtx(&mut self) -> &mut dyn IDatabaseTransaction {
-        &mut self.inner
+        if self.is_module_isolated {
+            &mut self.inner
+        } else {
+            self.inner.global_dbtx()
+        }
     }
 }
 
@@ -1585,6 +1602,7 @@ impl<'tx, Cap> DatabaseTransaction<'tx, Cap> {
             tx: Box::new(PrefixDatabaseTransaction {
                 inner: self.tx,
                 prefix,
+                is_module_isolated: false,
             }),
             decoders: self.decoders,
             commit_tracker: self.commit_tracker,
@@ -1607,6 +1625,7 @@ impl<'tx, Cap> DatabaseTransaction<'tx, Cap> {
             tx: Box::new(PrefixDatabaseTransaction {
                 inner: self.tx,
                 prefix,
+                is_module_isolated: true,
             }),
             decoders: self.decoders,
             commit_tracker: self.commit_tracker,
@@ -1646,6 +1665,7 @@ impl<'tx, Cap> DatabaseTransaction<'tx, Cap> {
             tx: Box::new(PrefixDatabaseTransaction {
                 inner: &mut self.tx,
                 prefix,
+                is_module_isolated: false,
             }),
             decoders: self.decoders.clone(),
             commit_tracker: match self.commit_tracker {
@@ -1672,6 +1692,7 @@ impl<'tx, Cap> DatabaseTransaction<'tx, Cap> {
             tx: Box::new(PrefixDatabaseTransaction {
                 inner: &mut self.tx,
                 prefix,
+                is_module_isolated: true,
             }),
             decoders: self.decoders.clone(),
             commit_tracker: match self.commit_tracker {
