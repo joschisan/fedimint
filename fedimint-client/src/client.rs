@@ -41,7 +41,7 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::transaction::Transaction;
 use fedimint_core::util::{BoxStream, FmtCompact as _, FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{
-    Amount, OutPoint, PeerId, apply, async_trait_maybe_send, maybe_add_send, maybe_add_send_sync,
+    Amount, PeerId, apply, async_trait_maybe_send, maybe_add_send, maybe_add_send_sync,
 };
 use fedimint_eventlog::{
     DBTransactionEventLogExt as _, DynEventLogTrimableTracker, Event, EventKind, EventLogEntry,
@@ -646,20 +646,6 @@ impl Client {
             .is_some()
     }
 
-    /// Waits for an output from the primary module to reach its final
-    /// state.
-    pub async fn await_primary_bitcoin_module_output(
-        &self,
-        operation_id: OperationId,
-        out_point: OutPoint,
-    ) -> anyhow::Result<()> {
-        self.primary_module()
-            .ok_or_else(|| anyhow!("No primary module available"))?
-            .1
-            .await_primary_module_output(operation_id, out_point)
-            .await
-    }
-
     /// Returns a reference to a typed module client instance by kind
     pub fn get_first_module<M: ClientModule>(
         &'_ self,
@@ -719,21 +705,6 @@ impl Client {
     /// BIP39 seed phrase struct).
     pub async fn root_secret_encoding<T: Decodable>(&self) -> anyhow::Result<T> {
         get_decoded_client_secret::<T>(self.db()).await
-    }
-
-    /// Waits for outputs from the primary module to reach its final
-    /// state.
-    pub async fn await_primary_bitcoin_module_outputs(
-        &self,
-        operation_id: OperationId,
-        outputs: Vec<OutPoint>,
-    ) -> anyhow::Result<()> {
-        for out_point in outputs {
-            self.await_primary_bitcoin_module_output(operation_id, out_point)
-                .await?;
-        }
-
-        Ok(())
     }
 
     /// Returns the config of the client in JSON format.
@@ -1299,15 +1270,6 @@ impl ClientContextIface for Client {
 
     async fn transaction_updates(&self, operation_id: OperationId) -> TransactionUpdates {
         Client::transaction_updates(self, operation_id).await
-    }
-
-    async fn await_primary_module_outputs(
-        &self,
-        operation_id: OperationId,
-        // TODO: make `impl Iterator<Item = ...>`
-        outputs: Vec<OutPoint>,
-    ) -> anyhow::Result<()> {
-        Client::await_primary_bitcoin_module_outputs(self, operation_id, outputs).await
     }
 
     async fn has_active_states(&self, operation_id: OperationId) -> bool {

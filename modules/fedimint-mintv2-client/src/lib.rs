@@ -427,14 +427,6 @@ impl ClientModule for MintClientModule {
         Ok((input_bundle, output_bundle))
     }
 
-    async fn await_primary_module_output(
-        &self,
-        operation_id: OperationId,
-        outpoint: OutPoint,
-    ) -> anyhow::Result<()> {
-        self.await_output_sm_success(operation_id, outpoint).await
-    }
-
     async fn get_balance(&self, dbtx: &mut DatabaseTransaction<'_>) -> Amount {
         self.get_count_by_denomination_dbtx(dbtx)
             .await

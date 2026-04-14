@@ -144,7 +144,7 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
         env.ldk_node.bolt11_payment().send(&invoice, None)?;
 
         let state = lnv2.await_final_receive_operation_state(receive_op).await?;
-        assert_eq!(state, FinalReceiveOperationState::Claimed);
+        assert_eq!(state, FinalReceiveOperationState::Claiming);
     }
 
     info!("Testing refund when the payee fails the payment...");
@@ -181,7 +181,7 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
         env.ldk_node.bolt11_payment().fail_for_hash(payment_hash)?;
 
         let state = lnv2.await_final_send_operation_state(send_op).await?;
-        assert_eq!(state, FinalSendOperationState::Refunded);
+        assert_eq!(state, FinalSendOperationState::Refunding);
     }
 
     info!("lnv2: test_payments passed");

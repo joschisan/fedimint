@@ -20,7 +20,7 @@ use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::BoxStream;
 use fedimint_core::{
-    Amount, OutPoint, PeerId, apply, async_trait_maybe_send, dyn_newtype_define, maybe_add_send,
+    Amount, PeerId, apply, async_trait_maybe_send, dyn_newtype_define, maybe_add_send,
     maybe_add_send_sync,
 };
 use fedimint_eventlog::{Event, EventKind, EventPersistence};
@@ -73,13 +73,6 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
     ) -> anyhow::Result<OutPointRange>;
 
     async fn transaction_updates(&self, operation_id: OperationId) -> TransactionUpdates;
-
-    async fn await_primary_module_outputs(
-        &self,
-        operation_id: OperationId,
-        // TODO: make `impl Iterator<Item = ...>`
-        outputs: Vec<OutPoint>,
-    ) -> anyhow::Result<()>;
 
     async fn has_active_states(&self, operation_id: OperationId) -> bool;
 
@@ -337,18 +330,6 @@ where
         self.client.get().transaction_updates(operation_id).await
     }
 
-    pub async fn await_primary_module_outputs(
-        &self,
-        operation_id: OperationId,
-        // TODO: make `impl Iterator<Item = ...>`
-        outputs: Vec<OutPoint>,
-    ) -> anyhow::Result<()> {
-        self.client
-            .get()
-            .await_primary_module_outputs(operation_id, outputs)
-            .await
-    }
-
     pub fn module_db(&self) -> &Database {
         self.module_db
             .ensure_isolated()
@@ -596,7 +577,6 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// If it does it must implement:
     ///
     /// * [`Self::create_final_inputs_and_outputs`]
-    /// * [`Self::await_primary_module_output`]
     /// * [`Self::get_balance`]
     /// * [`Self::subscribe_balance_changes`]
     fn supports_being_primary(&self) -> bool {
@@ -630,18 +610,6 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
         ClientInputBundle<<Self::Common as ModuleCommon>::Input, Self::States>,
         ClientOutputBundle<<Self::Common as ModuleCommon>::Output, Self::States>,
     )> {
-        unimplemented!()
-    }
-
-    /// Waits for the funds from an output created by
-    /// [`Self::create_final_inputs_and_outputs`] to become available. This
-    /// function returning typically implies a change in the output of
-    /// [`Self::get_balance`].
-    async fn await_primary_module_output(
-        &self,
-        _operation_id: OperationId,
-        _out_point: OutPoint,
-    ) -> anyhow::Result<()> {
         unimplemented!()
     }
 
@@ -743,12 +711,6 @@ pub trait IClientModule: Debug {
         output_amount: Amount,
     ) -> anyhow::Result<(ClientInputBundle, ClientOutputBundle)>;
 
-    async fn await_primary_module_output(
-        &self,
-        operation_id: OperationId,
-        out_point: OutPoint,
-    ) -> anyhow::Result<()>;
-
     async fn get_balance(
         &self,
         module_instance: ModuleInstanceId,
@@ -827,14 +789,6 @@ where
         let outputs = outputs.into_dyn(module_instance);
 
         Ok((inputs, outputs))
-    }
-
-    async fn await_primary_module_output(
-        &self,
-        operation_id: OperationId,
-        out_point: OutPoint,
-    ) -> anyhow::Result<()> {
-        <T as ClientModule>::await_primary_module_output(self, operation_id, out_point).await
     }
 
     async fn get_balance(

@@ -82,12 +82,6 @@ const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;
 ///     Funded -- payment is confirmed  --> Success
 ///     Funded -- payment attempt expires --> Refunding
 ///     Funded -- gateway cancels payment attempt --> Refunding
-///     Refunding -- payment is confirmed --> Success
-///     Refunding -- ecash is minted --> Refunded
-///     Refunding -- minting ecash fails --> Failure
-/// ```
-/// The transition from Refunding to Success is only possible if the gateway
-/// misbehaves.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SendOperationState {
     /// We are funding the contract to incentivize the gateway.
@@ -96,11 +90,9 @@ pub enum SendOperationState {
     Funded,
     /// The payment was successful.
     Success([u8; 32]),
-    /// The payment has failed and we are refunding the contract.
+    /// The payment failed and the refund transaction was submitted.
     Refunding,
-    /// The payment has been refunded.
-    Refunded,
-    /// Either a programming error has occurred or the federation is malicious.
+    /// The funding transaction was rejected.
     Failure,
 }
 
@@ -109,38 +101,22 @@ pub enum SendOperationState {
 pub enum FinalSendOperationState {
     /// The payment was successful.
     Success,
-    /// The payment has been refunded.
-    Refunded,
-    /// Either a programming error has occurred or the federation is malicious.
+    /// The payment failed and the refund transaction was submitted.
+    Refunding,
+    /// The funding transaction was rejected.
     Failure,
 }
 
 pub type SendResult = Result<OperationId, SendPaymentError>;
 
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// The state of an operation receiving a payment over lightning.
-///
-/// ```mermaid
-/// graph LR
-/// classDef virtual fill:#fff,stroke-dasharray: 5 5
-///
-///     Pending -- payment is confirmed --> Claiming
-///     Pending -- invoice expires --> Expired
-///     Claiming -- ecash is minted --> Claimed
-///     Claiming -- minting ecash fails --> Failure
-/// ```
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ReceiveOperationState {
     /// We are waiting for the payment.
     Pending,
     /// The payment request has expired.
     Expired,
-    /// The payment has been confirmed and we are issuing the ecash.
+    /// The payment has been confirmed and the claim transaction was submitted.
     Claiming,
-    /// The payment has been successful.
-    Claimed,
-    /// Either a programming error has occurred or the federation is malicious.
-    Failure,
 }
 
 /// The final state of an operation receiving a payment over lightning.
@@ -148,10 +124,8 @@ pub enum ReceiveOperationState {
 pub enum FinalReceiveOperationState {
     /// The payment request has expired.
     Expired,
-    /// The payment has been successful.
-    Claimed,
-    /// Either a programming error has occurred or the federation is malicious.
-    Failure,
+    /// The payment was confirmed and the claim transaction was submitted.
+    Claiming,
 }
 
 pub type ReceiveResult = Result<(Bolt11Invoice, OperationId), ReceiveError>;
@@ -589,8 +563,6 @@ impl LightningClientModule {
         operation_id: OperationId,
     ) -> BoxStream<'static, SendOperationState> {
         let mut stream = self.notifier.subscribe(operation_id).await;
-        let client_ctx = self.client_ctx.clone();
-        let module_api = self.module_api.clone();
 
         Box::pin(stream! {
             loop {
@@ -605,27 +577,8 @@ impl LightningClientModule {
                             yield SendOperationState::Success(preimage);
                             return;
                         },
-                        SendSMState::Refunding(out_points) => {
+                        SendSMState::Refunding(_) => {
                             yield SendOperationState::Refunding;
-
-                            if client_ctx.await_primary_module_outputs(operation_id, out_points.clone()).await.is_ok() {
-                                yield SendOperationState::Refunded;
-                                return;
-                            }
-
-                            // The gateway may have incorrectly claimed the outgoing contract thereby causing
-                            // our refund transaction to be rejected. Therefore, we check one last time if
-                            // the preimage is available before we enter the failure state.
-                            if let Some(preimage) = module_api.await_preimage(
-                                state.common.outpoint,
-                                0
-                            ).await
-                                && state.common.contract.verify_preimage(&preimage) {
-                                    yield SendOperationState::Success(preimage);
-                                    return;
-                                }
-
-                            yield SendOperationState::Failure;
                             return;
                         },
                         SendSMState::Rejected(..) => {
@@ -654,8 +607,8 @@ impl LightningClientModule {
                 SendOperationState::Success(_) => {
                     final_state = Some(FinalSendOperationState::Success);
                 }
-                SendOperationState::Refunded => {
-                    final_state = Some(FinalSendOperationState::Refunded);
+                SendOperationState::Refunding => {
+                    final_state = Some(FinalSendOperationState::Refunding);
                 }
                 SendOperationState::Failure => final_state = Some(FinalSendOperationState::Failure),
                 _ => {}
@@ -865,21 +818,14 @@ impl LightningClientModule {
         operation_id: OperationId,
     ) -> BoxStream<'static, ReceiveOperationState> {
         let mut stream = self.notifier.subscribe(operation_id).await;
-        let client_ctx = self.client_ctx.clone();
 
         Box::pin(stream! {
             loop {
                 if let Some(LightningClientStateMachines::Receive(state)) = stream.next().await {
                     match state.state {
                         ReceiveSMState::Pending => yield ReceiveOperationState::Pending,
-                        ReceiveSMState::Claiming(out_points) => {
+                        ReceiveSMState::Claiming(_) => {
                             yield ReceiveOperationState::Claiming;
-
-                            if client_ctx.await_primary_module_outputs(operation_id, out_points).await.is_ok() {
-                                yield ReceiveOperationState::Claimed;
-                            } else {
-                                yield ReceiveOperationState::Failure;
-                            }
                             return;
                         },
                         ReceiveSMState::Expired => {
@@ -908,13 +854,10 @@ impl LightningClientModule {
                 ReceiveOperationState::Expired => {
                     final_state = Some(FinalReceiveOperationState::Expired);
                 }
-                ReceiveOperationState::Claimed => {
-                    final_state = Some(FinalReceiveOperationState::Claimed);
+                ReceiveOperationState::Claiming => {
+                    final_state = Some(FinalReceiveOperationState::Claiming);
                 }
-                ReceiveOperationState::Failure => {
-                    final_state = Some(FinalReceiveOperationState::Failure);
-                }
-                _ => {}
+                ReceiveOperationState::Pending => {}
             }
         }
 
