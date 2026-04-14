@@ -250,7 +250,7 @@ impl SendStateMachine {
                     .claim_inputs(
                         dbtx,
                         // The input of the refund tx is managed by this state machine
-                        ClientInputBundle::new_no_sm(vec![client_input]),
+                        ClientInputBundle::new(vec![client_input]),
                     )
                     .await
                     .expect("Cannot claim input, additional funding needed");
@@ -317,7 +317,7 @@ impl SendStateMachine {
         };
 
         let change_range = global_context
-            .claim_inputs(dbtx, ClientInputBundle::new_no_sm(vec![client_input]))
+            .claim_inputs(dbtx, ClientInputBundle::new(vec![client_input]))
             .await
             .expect("Cannot claim input, additional funding needed");
 
@@ -486,7 +486,7 @@ async fn transition_gateway_send_payment_sm(
                 .client_ctx
                 .claim_inputs(
                     dbtx,
-                    ClientInputBundle::new_no_sm(vec![client_input]),
+                    ClientInputBundle::new(vec![client_input]),
                     old_state.common.operation_id,
                 )
                 .await
@@ -557,7 +557,7 @@ async fn transition_preimage_sm(
         .client_ctx
         .claim_inputs(
             dbtx,
-            ClientInputBundle::new_no_sm(vec![client_input]),
+            ClientInputBundle::new(vec![client_input]),
             old_state.common.operation_id,
         )
         .await

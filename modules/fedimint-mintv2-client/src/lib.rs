@@ -30,15 +30,14 @@ pub use events::*;
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client::module::ClientModule;
 use fedimint_client::transaction::{
-    ClientInput, ClientInputBundle, ClientInputSM, ClientOutput, ClientOutputBundle,
-    ClientOutputSM, TransactionBuilder,
+    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
 use fedimint_client_module::module::recovery::RecoveryProgress;
-use fedimint_client_module::module::{ClientContext, OutPointRange};
+use fedimint_client_module::module::{ClientContext, IdxRange, OutPointRange};
 use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
 use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
@@ -223,22 +222,24 @@ impl ClientModuleInit for MintClientInit {
             dbtx.insert_entry(&RecoveryStateKey, &state).await;
 
             if state.next_index == state.total_items {
-                let state_machines = args
-                    .context()
-                    .map_dyn(vec![MintClientStateMachines::Output(
-                        MintOutputStateMachine {
-                            common: OutputSMCommon {
-                                operation_id: OperationId::new_random(),
-                                range: None,
-                                issuance_requests: state.requests.into_values().collect(),
-                            },
-                            state: OutputSMState::Pending,
-                        },
-                    )])
-                    .collect();
+                // Recovery spawns a single Output SM with `range: None` to
+                // signal the recovery-specific fetch path. We can't use
+                // `output_executor` here because the module isn't
+                // constructed yet; use the central executor via
+                // `ClientContext::add_state_machines_dbtx` for this
+                // pre-init path.
+                let state_machine = MintClientStateMachines::Output(MintOutputStateMachine {
+                    common: OutputSMCommon {
+                        operation_id: OperationId::new_random(),
+                        range: None,
+                        issuance_requests: state.requests.into_values().collect(),
+                    },
+                    state: OutputSMState::Pending,
+                });
+                let dyn_state = args.context().make_dyn_state(state_machine);
 
                 args.context()
-                    .add_state_machines_dbtx(&mut dbtx.to_ref_nc(), state_machines)
+                    .add_state_machines_dbtx(&mut dbtx.to_ref_nc(), vec![dyn_state])
                     .await
                     .expect("state machine is valid");
 
@@ -275,13 +276,45 @@ impl ClientModuleInit for MintClientInit {
             }
         });
 
+        let cfg: MintClientConfig = args.cfg().clone();
+        let client_ctx = args.context();
+        let balance_update_sender = tokio::sync::watch::channel(()).0;
+
+        let sm_context = MintSmContext {
+            client_ctx: client_ctx.clone(),
+            tbs_agg_pks: cfg.tbs_agg_pks.clone(),
+            tbs_pks: cfg.tbs_pks.clone(),
+            balance_update_sender: balance_update_sender.clone(),
+        };
+
+        let task_group = args.task_group().clone();
+
+        let input_executor = fedimint_client_module::executor::ModuleExecutor::new(
+            client_ctx.module_db().clone(),
+            sm_context.clone(),
+            task_group.clone(),
+        );
+        let output_executor = fedimint_client_module::executor::ModuleExecutor::new(
+            client_ctx.module_db().clone(),
+            sm_context.clone(),
+            task_group.clone(),
+        );
+        let receive_executor = fedimint_client_module::executor::ModuleExecutor::new(
+            client_ctx.module_db().clone(),
+            sm_context,
+            task_group,
+        );
+
         Ok(MintClientModule {
             federation_id: *args.federation_id(),
-            cfg: args.cfg().clone(),
+            cfg,
             root_secret: args.module_root_secret().clone(),
-            client_ctx: args.context(),
-            balance_update_sender: tokio::sync::watch::channel(()).0,
+            client_ctx,
+            balance_update_sender,
             tweak_receiver,
+            input_executor,
+            output_executor,
+            receive_executor,
         })
     }
 
@@ -298,6 +331,9 @@ pub struct MintClientModule {
     client_ctx: ClientContext<Self>,
     balance_update_sender: tokio::sync::watch::Sender<()>,
     tweak_receiver: async_channel::Receiver<[u8; 16]>,
+    input_executor: fedimint_client_module::executor::ModuleExecutor<InputStateMachine>,
+    output_executor: fedimint_client_module::executor::ModuleExecutor<MintOutputStateMachine>,
+    receive_executor: fedimint_client_module::executor::ModuleExecutor<ReceiveStateMachine>,
 }
 
 #[derive(Debug, Clone)]
@@ -305,6 +341,17 @@ pub struct MintClientContext {
     client_ctx: ClientContext<MintClientModule>,
     tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
     tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, tbs::PublicKeyShare>>,
+    pub balance_update_sender: tokio::sync::watch::Sender<()>,
+}
+
+/// Lean context handed to per-SM executors. Keeps the `ClientContext`
+/// handle plus the immutable config data SMs need. Does not hold the
+/// module — avoids the module → executor → ctx → module cycle.
+#[derive(Debug, Clone)]
+pub struct MintSmContext {
+    pub client_ctx: ClientContext<MintClientModule>,
+    pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
+    pub tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, tbs::PublicKeyShare>>,
     pub balance_update_sender: tokio::sync::watch::Sender<()>,
 }
 
@@ -326,6 +373,12 @@ impl ClientModule for MintClientModule {
             tbs_pks: self.cfg.tbs_pks.clone(),
             balance_update_sender: self.balance_update_sender.clone(),
         }
+    }
+
+    async fn start(&self) {
+        self.input_executor.start().await;
+        self.output_executor.start().await;
+        self.receive_executor.start().await;
     }
 
     fn input_fee(
@@ -354,10 +407,8 @@ impl ClientModule for MintClientModule {
         operation_id: OperationId,
         mut input_amount: Amount,
         mut output_amount: Amount,
-    ) -> anyhow::Result<(
-        ClientInputBundle<MintInput, MintClientStateMachines>,
-        ClientOutputBundle<MintOutput, MintClientStateMachines>,
-    )> {
+    ) -> anyhow::Result<fedimint_client_module::module::FinalContribution<MintInput, MintOutput>>
+    {
         let funding_notes = self
             .select_funding_input(dbtx, output_amount.saturating_sub(input_amount))
             .await
@@ -400,7 +451,7 @@ impl ClientModule for MintClientModule {
         // We sort the notes by denomination to minimize the leaked information.
         spendable_notes.sort_by_key(|note| note.denomination);
 
-        let input_bundle = Self::create_input_bundle(operation_id, spendable_notes, false);
+        let inputs = build_inputs(&spendable_notes);
 
         let mut denominations = represent_amount_with_fees(
             input_amount.saturating_sub(output_amount),
@@ -413,12 +464,56 @@ impl ClientModule for MintClientModule {
         // We sort the amounts to minimize the leaked information.
         denominations.sort();
 
-        let output_bundle = self.create_output_bundle(operation_id, denominations).await;
+        let (issuance_requests, outputs) = self.build_issuance(denominations).await;
 
         let sender = self.balance_update_sender.clone();
         dbtx.on_commit(move || sender.send_replace(()));
 
-        Ok((input_bundle, output_bundle))
+        let input_executor = self.input_executor.clone();
+        let output_executor = self.output_executor.clone();
+
+        let spawn_sms: fedimint_client_module::module::SpawnSms =
+            Box::new(move |dbtx, txid, _primary_in_range, primary_out_range| {
+                Box::pin(async move {
+                    if !spendable_notes.is_empty() {
+                        input_executor
+                            .add_state_machine_dbtx(
+                                dbtx,
+                                InputStateMachine {
+                                    common: InputSMCommon {
+                                        operation_id,
+                                        txid,
+                                        spendable_notes,
+                                    },
+                                    state: InputSMState::Pending,
+                                },
+                            )
+                            .await;
+                    }
+
+                    if !issuance_requests.is_empty() {
+                        output_executor
+                            .add_state_machine_dbtx(
+                                dbtx,
+                                MintOutputStateMachine {
+                                    common: OutputSMCommon {
+                                        operation_id,
+                                        range: Some(OutPointRange::new(txid, primary_out_range)),
+                                        issuance_requests,
+                                    },
+                                    state: OutputSMState::Pending,
+                                },
+                            )
+                            .await;
+                    }
+                })
+            });
+
+        Ok(fedimint_client_module::module::FinalContribution {
+            inputs,
+            outputs,
+            spawn_sms,
+        })
     }
 
     async fn get_balance(&self, dbtx: &mut DatabaseTransaction<'_>) -> Amount {
@@ -539,54 +634,24 @@ impl MintClientModule {
 
         (input_notes, output_denominations)
     }
+}
 
-    fn create_input_bundle(
-        operation_id: OperationId,
-        notes: Vec<SpendableNote>,
-        include_receive_sm: bool,
-    ) -> ClientInputBundle<MintInput, MintClientStateMachines> {
-        let inputs = notes
-            .iter()
-            .map(|spendable_note| ClientInput {
-                input: MintInput::new_v0(spendable_note.note()),
-                keys: vec![spendable_note.keypair],
-                amount: spendable_note.amount(),
-            })
-            .collect();
+fn build_inputs(notes: &[SpendableNote]) -> Vec<ClientInput<MintInput>> {
+    notes
+        .iter()
+        .map(|spendable_note| ClientInput {
+            input: MintInput::new_v0(spendable_note.note()),
+            keys: vec![spendable_note.keypair],
+            amount: spendable_note.amount(),
+        })
+        .collect()
+}
 
-        let input_sms = vec![ClientInputSM {
-            state_machines: Arc::new(move |range: OutPointRange| {
-                let mut sms = vec![MintClientStateMachines::Input(InputStateMachine {
-                    common: InputSMCommon {
-                        operation_id,
-                        txid: range.txid(),
-                        spendable_notes: notes.clone(),
-                    },
-                    state: InputSMState::Pending,
-                })];
-
-                if include_receive_sm {
-                    sms.push(MintClientStateMachines::Receive(ReceiveStateMachine {
-                        common: crate::receive::ReceiveSMCommon {
-                            operation_id,
-                            txid: range.txid(),
-                        },
-                        state: crate::receive::ReceiveSMState::Pending,
-                    }));
-                }
-
-                sms
-            }),
-        }];
-
-        ClientInputBundle::new(inputs, input_sms)
-    }
-
-    async fn create_output_bundle(
+impl MintClientModule {
+    async fn build_issuance(
         &self,
-        operation_id: OperationId,
         requested_denominations: Vec<Denomination>,
-    ) -> ClientOutputBundle<MintOutput, MintClientStateMachines> {
+    ) -> (Vec<NoteIssuanceRequest>, Vec<ClientOutput<MintOutput>>) {
         let issuance_requests = futures::stream::iter(requested_denominations)
             .zip(self.tweak_receiver.clone())
             .map(|(d, tweak)| NoteIssuanceRequest::new(d, tweak, &self.root_secret))
@@ -601,20 +666,7 @@ impl MintClientModule {
             })
             .collect();
 
-        let output_sms = vec![ClientOutputSM {
-            state_machines: Arc::new(move |range: OutPointRange| {
-                vec![MintClientStateMachines::Output(MintOutputStateMachine {
-                    common: OutputSMCommon {
-                        operation_id,
-                        range: Some(range),
-                        issuance_requests: issuance_requests.clone(),
-                    },
-                    state: OutputSMState::Pending,
-                })]
-            }),
-        }];
-
-        ClientOutputBundle::new(outputs, output_sms)
+        (issuance_requests, outputs)
     }
 
     /// Count the `ECash` notes in the client's database by denomination.
@@ -674,24 +726,48 @@ impl MintClientModule {
 
         let operation_id = OperationId::new_random();
 
-        let output = self
-            .create_output_bundle(operation_id, represent_amount(amount))
-            .await;
-        let output = self.client_ctx.make_client_outputs(output);
+        let (issuance_requests, outputs) = self.build_issuance(represent_amount(amount)).await;
+        let output_count = outputs.len() as u64;
+        let output_bundle = self
+            .client_ctx
+            .make_client_outputs(ClientOutputBundle::new(outputs));
 
         // Subscribe before submitting so we cannot miss the finalisation event.
         let mut events = self.client_ctx.event_log_transient_receiver();
 
-        let range = self
+        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+
+        let finalize_range = self
             .client_ctx
-            .finalize_and_submit_transaction(
+            .finalize_and_submit_transaction_dbtx(
+                &mut dbtx.to_ref_nc(),
                 operation_id,
-                TransactionBuilder::new().with_outputs(output),
+                TransactionBuilder::new().with_outputs(output_bundle),
             )
             .await
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
-        await_output_finalisation(&mut events, operation_id, range).await;
+        // Caller's outputs come first — output indices 0..output_count.
+        let caller_range =
+            OutPointRange::new(finalize_range.txid(), IdxRange::from(0..output_count));
+
+        self.output_executor
+            .add_state_machine_dbtx(
+                &mut dbtx.to_ref_nc(),
+                MintOutputStateMachine {
+                    common: OutputSMCommon {
+                        operation_id,
+                        range: Some(caller_range),
+                        issuance_requests,
+                    },
+                    state: OutputSMState::Pending,
+                },
+            )
+            .await;
+
+        dbtx.commit_tx().await;
+
+        await_output_finalisation(&mut events, operation_id, caller_range).await;
 
         Box::pin(self.send(amount)).await
     }
@@ -748,14 +824,10 @@ impl MintClientModule {
         Ok(Some(ecash))
     }
 
-    /// Receive the `ECash` by reissuing the notes and return the total amount
-    /// of the ecash reissued. This method is idempotent.
+    /// Receive the `ECash` by reissuing the notes. This method is idempotent
+    /// via the deterministic [`OperationId`] derived from the ecash bytes.
     pub async fn receive(&self, ecash: ECash) -> Result<OperationId, ReceiveECashError> {
         let operation_id = OperationId::from_encodable(&ecash);
-
-        if self.client_ctx.operation_exists(operation_id).await {
-            return Ok(operation_id);
-        }
 
         if ecash.mint() != Some(self.federation_id) {
             return Err(ReceiveECashError::WrongFederation);
@@ -769,18 +841,58 @@ impl MintClientModule {
             return Err(ReceiveECashError::UneconomicalDenomination);
         }
 
-        let input = Self::create_input_bundle(operation_id, ecash.notes(), true);
-        let input = self.client_ctx.make_client_inputs(input);
+        let spendable_notes = ecash.notes();
+        let inputs = build_inputs(&spendable_notes);
+        let input_bundle = self
+            .client_ctx
+            .make_client_inputs(ClientInputBundle::new(inputs));
 
-        self.client_ctx
-            .finalize_and_submit_transaction(
+        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+
+        if dbtx
+            .insert_entry(&crate::client_db::ReceiveOperationKey(operation_id), &())
+            .await
+            .is_some()
+        {
+            return Ok(operation_id);
+        }
+
+        let finalize_range = self
+            .client_ctx
+            .finalize_and_submit_transaction_dbtx(
+                &mut dbtx.to_ref_nc(),
                 operation_id,
-                TransactionBuilder::new().with_inputs(input),
+                TransactionBuilder::new().with_inputs(input_bundle),
             )
             .await
             .map_err(|_| ReceiveECashError::InsufficientFunds)?;
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        let txid = finalize_range.txid();
+
+        // Caller's inputs come first — input indices 0..input_count.
+        self.input_executor
+            .add_state_machine_dbtx(
+                &mut dbtx.to_ref_nc(),
+                InputStateMachine {
+                    common: input::InputSMCommon {
+                        operation_id,
+                        txid,
+                        spendable_notes,
+                    },
+                    state: input::InputSMState::Pending,
+                },
+            )
+            .await;
+
+        self.receive_executor
+            .add_state_machine_dbtx(
+                &mut dbtx.to_ref_nc(),
+                ReceiveStateMachine {
+                    common: crate::receive::ReceiveSMCommon { operation_id, txid },
+                    state: crate::receive::ReceiveSMState::Pending,
+                },
+            )
+            .await;
 
         self.client_ctx
             .log_event(

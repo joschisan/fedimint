@@ -261,7 +261,7 @@ impl ReceiveStateMachine {
             .claim_inputs(
                 dbtx,
                 // The input of the refund tx is managed by this state machine
-                ClientInputBundle::new_no_sm(vec![client_input]),
+                ClientInputBundle::new(vec![client_input]),
             )
             .await
             .expect("Cannot claim input, additional funding needed")
@@ -431,7 +431,7 @@ async fn transition_decryption_shares_sm(
         .client_ctx
         .claim_inputs(
             dbtx,
-            ClientInputBundle::new_no_sm(vec![client_input]),
+            ClientInputBundle::new(vec![client_input]),
             old_state.common.operation_id,
         )
         .await

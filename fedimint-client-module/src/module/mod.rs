@@ -17,7 +17,7 @@ use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use fedimint_core::task::{MaybeSend, MaybeSync};
-use fedimint_core::util::BoxStream;
+use fedimint_core::util::{BoxFuture, BoxStream};
 use fedimint_core::{
     Amount, PeerId, TransactionId, apply, async_trait_maybe_send, dyn_newtype_define,
     maybe_add_send_sync,
@@ -34,6 +34,40 @@ use crate::sm::executor::IExecutor;
 use crate::sm::{self, Context, DynContext, DynState, State};
 use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
 use crate::{AddStateMachinesResult, InstancelessDynClientInputBundle};
+
+/// Return type of [`ClientModule::create_final_inputs_and_outputs`]. The
+/// primary module contributes inputs/outputs to balance a partial
+/// transaction and — once the final txid + index ranges are known —
+/// spawns any state machines it needs to track those contributions.
+///
+/// `spawn_sms` is invoked exactly once by the submission path, *after*
+/// the txid is computed, with the range of input indices and range of
+/// output indices allocated to the primary contribution.
+pub struct FinalContribution<I, O> {
+    pub inputs: Vec<crate::transaction::ClientInput<I>>,
+    pub outputs: Vec<crate::transaction::ClientOutput<O>>,
+    pub spawn_sms: SpawnSms,
+}
+
+pub type SpawnSms = Box<
+    maybe_add_send_sync!(
+        dyn for<'a> FnOnce(
+                &'a mut DatabaseTransaction<'_>,
+                TransactionId,
+                IdxRange,
+                IdxRange,
+            ) -> BoxFuture<'a, ()>
+            + 'static
+    ),
+>;
+
+/// Same as [`FinalContribution`] but with type-erased inputs/outputs, for
+/// the dyn pipeline.
+pub struct DynFinalContribution {
+    pub inputs: Vec<crate::transaction::ClientInput>,
+    pub outputs: Vec<crate::transaction::ClientOutput>,
+    pub spawn_sms: SpawnSms,
+}
 
 pub mod init;
 pub mod recovery;
@@ -266,21 +300,19 @@ where
     }
 
     /// Turn a typed [`ClientOutputBundle`] into a dyn version
-    pub fn make_client_outputs<O, S>(&self, output: ClientOutputBundle<O, S>) -> ClientOutputBundle
+    pub fn make_client_outputs<O>(&self, output: ClientOutputBundle<O>) -> ClientOutputBundle
     where
-        O: IntoDynInstance<DynType = DynOutput> + 'static,
-        S: IntoDynInstance<DynType = DynState> + 'static,
+        O: fedimint_core::core::IOutput + MaybeSend + MaybeSync + 'static,
     {
-        self.make_dyn(output)
+        output.into_instanceless().into_dyn(self.module_instance_id)
     }
 
     /// Turn a typed [`ClientInputBundle`] into a dyn version
-    pub fn make_client_inputs<I, S>(&self, inputs: ClientInputBundle<I, S>) -> ClientInputBundle
+    pub fn make_client_inputs<I>(&self, inputs: ClientInputBundle<I>) -> ClientInputBundle
     where
-        I: IntoDynInstance<DynType = DynInput> + 'static,
-        S: IntoDynInstance<DynType = DynState> + 'static,
+        I: IInput + MaybeSend + MaybeSync + 'static,
     {
-        self.make_dyn(inputs)
+        inputs.into_instanceless().into_dyn(self.module_instance_id)
     }
 
     pub fn make_dyn_state<S>(&self, sm: S) -> DynState
@@ -424,15 +456,14 @@ where
         Ok(())
     }
 
-    pub async fn claim_inputs<I, S>(
+    pub async fn claim_inputs<I>(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
-        inputs: ClientInputBundle<I, S>,
+        inputs: ClientInputBundle<I>,
         operation_id: OperationId,
     ) -> anyhow::Result<OutPointRange>
     where
         I: IInput + MaybeSend + MaybeSync + 'static,
-        S: sm::IState + MaybeSend + MaybeSync + 'static,
     {
         self.claim_inputs_dyn(dbtx, inputs.into_instanceless(), operation_id)
             .await
@@ -615,10 +646,12 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
         _operation_id: OperationId,
         _input_amount: Amount,
         _output_amount: Amount,
-    ) -> anyhow::Result<(
-        ClientInputBundle<<Self::Common as ModuleCommon>::Input, Self::States>,
-        ClientOutputBundle<<Self::Common as ModuleCommon>::Output, Self::States>,
-    )> {
+    ) -> anyhow::Result<
+        FinalContribution<
+            <Self::Common as ModuleCommon>::Input,
+            <Self::Common as ModuleCommon>::Output,
+        >,
+    > {
         unimplemented!()
     }
 
@@ -718,7 +751,7 @@ pub trait IClientModule: Debug {
         operation_id: OperationId,
         input_amount: Amount,
         output_amount: Amount,
-    ) -> anyhow::Result<(ClientInputBundle, ClientOutputBundle)>;
+    ) -> anyhow::Result<DynFinalContribution>;
 
     async fn get_balance(
         &self,
@@ -783,8 +816,12 @@ where
         operation_id: OperationId,
         input_amount: Amount,
         output_amount: Amount,
-    ) -> anyhow::Result<(ClientInputBundle, ClientOutputBundle)> {
-        let (inputs, outputs) = <T as ClientModule>::create_final_inputs_and_outputs(
+    ) -> anyhow::Result<DynFinalContribution> {
+        let FinalContribution {
+            inputs,
+            outputs,
+            spawn_sms,
+        } = <T as ClientModule>::create_final_inputs_and_outputs(
             self,
             &mut dbtx.to_ref_with_prefix_module_id(module_instance).0,
             operation_id,
@@ -793,11 +830,20 @@ where
         )
         .await?;
 
-        let inputs = inputs.into_dyn(module_instance);
+        let inputs = inputs
+            .into_iter()
+            .map(|i| i.into_dyn(module_instance))
+            .collect();
+        let outputs = outputs
+            .into_iter()
+            .map(|o| o.into_dyn(module_instance))
+            .collect();
 
-        let outputs = outputs.into_dyn(module_instance);
-
-        Ok((inputs, outputs))
+        Ok(DynFinalContribution {
+            inputs,
+            outputs,
+            spawn_sms,
+        })
     }
 
     async fn get_balance(

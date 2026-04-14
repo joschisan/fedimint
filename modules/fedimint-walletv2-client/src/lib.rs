@@ -32,7 +32,6 @@ use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArg
 use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
 use fedimint_client_module::sm_enum_variant_translation;
-use fedimint_client_module::transaction::NeverClientStateMachine;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{
     Database, DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped,
@@ -243,10 +242,8 @@ impl WalletClientModule {
         };
 
         let client_output_bundle =
-            self.client_ctx.make_client_outputs(ClientOutputBundle::<
-                WalletOutput,
-                NeverClientStateMachine,
-            >::new_no_sm(vec![client_output]));
+            self.client_ctx
+                .make_client_outputs(ClientOutputBundle::<WalletOutput>::new(vec![client_output]));
 
         let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
 
@@ -362,10 +359,8 @@ impl WalletClientModule {
         };
 
         let client_input_bundle =
-            self.client_ctx.make_client_inputs(ClientInputBundle::<
-                WalletInput,
-                NeverClientStateMachine,
-            >::new_no_sm(vec![client_input]));
+            self.client_ctx
+                .make_client_inputs(ClientInputBundle::<WalletInput>::new(vec![client_input]));
 
         let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
 

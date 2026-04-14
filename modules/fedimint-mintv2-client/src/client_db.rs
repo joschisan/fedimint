@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bitcoin_hashes::hash160;
+use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::{impl_db_lookup, impl_db_record};
 use fedimint_mintv2_common::Denomination;
@@ -15,7 +16,22 @@ use crate::issuance::NoteIssuanceRequest;
 pub enum DbKeyPrefix {
     Note = 0x20,
     RecoveryState = 0x21,
+    InputStateMachine = 0x22,
+    OutputStateMachine = 0x23,
+    ReceiveStateMachine = 0x24,
+    ReceiveOperation = 0x25,
 }
+
+/// Tracks that a `receive(ecash)` has been started for this deterministic
+/// [`OperationId`]. Used to make `receive` idempotent.
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct ReceiveOperationKey(pub OperationId);
+
+impl_db_record!(
+    key = ReceiveOperationKey,
+    value = (),
+    db_prefix = DbKeyPrefix::ReceiveOperation,
+);
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct SpendableNoteKey(pub SpendableNote);

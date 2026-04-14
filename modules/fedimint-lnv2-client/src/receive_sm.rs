@@ -127,7 +127,7 @@ impl ReceiveStateMachine {
         };
 
         let change_range = global_context
-            .claim_inputs(dbtx, ClientInputBundle::new_no_sm(vec![client_input]))
+            .claim_inputs(dbtx, ClientInputBundle::new(vec![client_input]))
             .await
             .expect("Cannot claim input, additional funding needed");
 
@@ -208,7 +208,7 @@ async fn transition_incoming_contract_sm(
         .client_ctx
         .claim_inputs(
             dbtx,
-            ClientInputBundle::new_no_sm(vec![client_input]),
+            ClientInputBundle::new(vec![client_input]),
             old_state.common.operation_id,
         )
         .await

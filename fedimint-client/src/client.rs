@@ -415,23 +415,35 @@ impl Client {
     }
 
     /// Adds funding to a transaction or removes over-funding via change.
+    ///
+    /// Returns the built transaction, the primary module's post-finalize
+    /// spawn callback (if any) and its associated input/output ranges.
     async fn finalize_transaction(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         operation_id: OperationId,
         mut partial_transaction: TransactionBuilder,
-    ) -> anyhow::Result<(Transaction, Vec<DynState>, Range<u64>)> {
+    ) -> anyhow::Result<(
+        Transaction,
+        Option<fedimint_client_module::module::SpawnSms>,
+        Range<u64>, // primary input range
+        Range<u64>, // primary output range (today's change_range)
+    )> {
         let (in_amount, out_amount) = self.transaction_builder_get_balance(&partial_transaction);
 
-        let mut added_inputs_bundles = vec![];
-        let mut added_outputs_bundles = vec![];
+        let primary_input_start = partial_transaction.inputs().count() as u64;
+        let primary_output_start = partial_transaction.outputs().count() as u64;
+
+        let mut spawn_sms: Option<fedimint_client_module::module::SpawnSms> = None;
+        let mut primary_input_end = primary_input_start;
+        let mut primary_output_end = primary_output_start;
 
         if in_amount != out_amount {
             let (module_id, module) = self
                 .primary_module()
                 .ok_or_else(|| anyhow!("No primary module to balance a partial transaction"))?;
 
-            let (added_input_bundle, added_output_bundle) = module
+            let contribution = module
                 .create_final_inputs_and_outputs(
                     module_id,
                     dbtx,
@@ -441,28 +453,16 @@ impl Client {
                 )
                 .await?;
 
-            added_inputs_bundles.push(added_input_bundle);
-            added_outputs_bundles.push(added_output_bundle);
-        }
+            primary_input_end = primary_input_start + contribution.inputs.len() as u64;
+            primary_output_end = primary_output_start + contribution.outputs.len() as u64;
 
-        // This is the range of  outputs that will be added to the transaction
-        // in order to balance it. Notice that it may stay empty in case the transaction
-        // is already balanced.
-        let change_range = Range {
-            start: partial_transaction.outputs().count() as u64,
-            end: (partial_transaction.outputs().count() as u64
-                + added_outputs_bundles
-                    .iter()
-                    .map(|output| output.outputs().len() as u64)
-                    .sum::<u64>()),
-        };
-
-        for added_inputs in added_inputs_bundles {
-            partial_transaction = partial_transaction.with_inputs(added_inputs);
-        }
-
-        for added_outputs in added_outputs_bundles {
-            partial_transaction = partial_transaction.with_outputs(added_outputs);
+            partial_transaction = partial_transaction.with_inputs(
+                fedimint_client_module::transaction::ClientInputBundle::new(contribution.inputs),
+            );
+            partial_transaction = partial_transaction.with_outputs(
+                fedimint_client_module::transaction::ClientOutputBundle::new(contribution.outputs),
+            );
+            spawn_sms = Some(contribution.spawn_sms);
         }
 
         let (input_amount, output_amount) =
@@ -470,9 +470,14 @@ impl Client {
 
         assert!(input_amount >= output_amount, "Transaction is underfunded");
 
-        let (tx, states) = partial_transaction.build(&self.secp_ctx, thread_rng());
+        let tx = partial_transaction.build(&self.secp_ctx, thread_rng());
 
-        Ok((tx, states, change_range))
+        Ok((
+            tx,
+            spawn_sms,
+            primary_input_start..primary_input_end,
+            primary_output_start..primary_output_end,
+        ))
     }
 
     /// Add funding and/or change to the transaction builder as needed, finalize
@@ -539,7 +544,7 @@ impl Client {
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
-        let (transaction, states, change_range) = self
+        let (transaction, spawn_sms, primary_input_range, primary_output_range) = self
             .finalize_transaction(&mut dbtx.to_ref_nc(), operation_id, tx_builder)
             .await?;
 
@@ -577,7 +582,15 @@ impl Client {
             "Finalized and submitting transaction",
         );
 
-        self.executor.add_state_machines_dbtx(dbtx, states).await?;
+        if let Some(spawn_sms) = spawn_sms {
+            spawn_sms(
+                dbtx,
+                txid,
+                IdxRange::from(primary_input_range),
+                IdxRange::from(primary_output_range.clone()),
+            )
+            .await;
+        }
 
         self.tx_submission_executor
             .add_state_machine_dbtx(
@@ -592,7 +605,10 @@ impl Client {
         self.log_event_dbtx(dbtx, None, TxCreatedEvent { txid, operation_id })
             .await;
 
-        Ok(OutPointRange::new(txid, IdxRange::from(change_range)))
+        Ok(OutPointRange::new(
+            txid,
+            IdxRange::from(primary_output_range),
+        ))
     }
 
     pub async fn await_tx_accepted(&self, query_txid: TransactionId) -> Result<(), String> {

@@ -18,8 +18,8 @@ use tracing::debug;
 
 use crate::executor::{StateMachine, StateTransition as SmStateTransition};
 use crate::module::FinalClientIface;
-use crate::sm::{Context, DynContext, State, StateTransition};
-use crate::{DynGlobalClientContext, DynState, TxAcceptedEvent, TxRejectedEvent};
+use crate::sm::{Context, DynContext, DynState, State, StateTransition};
+use crate::{DynGlobalClientContext, TxAcceptedEvent, TxRejectedEvent};
 
 // TODO: how to prevent collisions? Generally reserve some range for custom IDs?
 /// Reserved module instance id used for client-internal state machines

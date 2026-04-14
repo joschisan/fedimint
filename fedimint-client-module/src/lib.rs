@@ -28,11 +28,11 @@ use fedimint_eventlog::{Event, EventKind, EventPersistence};
 use module::OutPointRange;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use transaction::{ClientInputBundle, ClientInputSM, ClientOutput, ClientOutputSM};
+use transaction::{ClientInputBundle, ClientOutput};
 
-pub use crate::module::{ClientModule, StateGenerator};
+pub use crate::module::ClientModule;
 use crate::sm::executor::ContextGen;
-use crate::sm::{ClientSMDatabaseTransaction, DynState, IState, State};
+use crate::sm::{ClientSMDatabaseTransaction, IState, State};
 use crate::transaction::{ClientInput, ClientOutputBundle};
 
 pub mod db;
@@ -116,23 +116,14 @@ impl Event for ModuleRecoveryCompleted {
 
 pub type InstancelessDynClientInput = ClientInput<Box<maybe_add_send_sync!(dyn IInput + 'static)>>;
 
-pub type InstancelessDynClientInputSM =
-    ClientInputSM<Box<maybe_add_send_sync!(dyn IState + 'static)>>;
-
-pub type InstancelessDynClientInputBundle = ClientInputBundle<
-    Box<maybe_add_send_sync!(dyn IInput + 'static)>,
-    Box<maybe_add_send_sync!(dyn IState + 'static)>,
->;
+pub type InstancelessDynClientInputBundle =
+    ClientInputBundle<Box<maybe_add_send_sync!(dyn IInput + 'static)>>;
 
 pub type InstancelessDynClientOutput =
     ClientOutput<Box<maybe_add_send_sync!(dyn IOutput + 'static)>>;
 
-pub type InstancelessDynClientOutputSM =
-    ClientOutputSM<Box<maybe_add_send_sync!(dyn IState + 'static)>>;
-pub type InstancelessDynClientOutputBundle = ClientOutputBundle<
-    Box<maybe_add_send_sync!(dyn IOutput + 'static)>,
-    Box<maybe_add_send_sync!(dyn IState + 'static)>,
->;
+pub type InstancelessDynClientOutputBundle =
+    ClientOutputBundle<Box<maybe_add_send_sync!(dyn IOutput + 'static)>>;
 
 #[derive(Debug, Error)]
 pub enum AddStateMachinesError {
@@ -271,14 +262,13 @@ impl DynGlobalClientContext {
         DynGlobalClientContext::from(())
     }
 
-    pub async fn claim_inputs<I, S>(
+    pub async fn claim_inputs<I>(
         &self,
         dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        inputs: ClientInputBundle<I, S>,
+        inputs: ClientInputBundle<I>,
     ) -> anyhow::Result<OutPointRange>
     where
         I: IInput + MaybeSend + MaybeSync + 'static,
-        S: IState + MaybeSend + MaybeSync + 'static,
     {
         self.claim_inputs_dyn(dbtx, inputs.into_instanceless())
             .await
@@ -287,19 +277,13 @@ impl DynGlobalClientContext {
     /// Creates a transaction with the supplied output and funding added by the
     /// primary module if possible. If the primary module does not have the
     /// required funds this function fails.
-    ///
-    /// The transactions submission state machine as well as the state machines
-    /// for the funding inputs are generated automatically. The caller is
-    /// responsible for the output's state machines, should there be any
-    /// required.
-    pub async fn fund_output<O, S>(
+    pub async fn fund_output<O>(
         &self,
         dbtx: &mut ClientSMDatabaseTransaction<'_, '_>,
-        outputs: ClientOutputBundle<O, S>,
+        outputs: ClientOutputBundle<O>,
     ) -> anyhow::Result<OutPointRange>
     where
         O: IOutput + MaybeSend + MaybeSync + 'static,
-        S: IState + MaybeSend + MaybeSync + 'static,
     {
         self.fund_output_dyn(dbtx, outputs.into_instanceless())
             .await
@@ -334,20 +318,6 @@ impl DynGlobalClientContext {
     }
 }
 
-fn states_to_instanceless_dyn<S: IState + MaybeSend + MaybeSync + 'static>(
-    state_gen: StateGenerator<S>,
-) -> StateGenerator<Box<maybe_add_send_sync!(dyn IState + 'static)>> {
-    Arc::new(move |out_point_range| {
-        let states: Vec<S> = state_gen(out_point_range);
-        states
-            .into_iter()
-            .map(|state| box_up_state(state))
-            .collect()
-    })
-}
-
-/// Not sure why I couldn't just directly call `Box::new` ins
-/// [`states_to_instanceless_dyn`], but this fixed it.
 fn box_up_state(state: impl IState + 'static) -> Box<maybe_add_send_sync!(dyn IState + 'static)> {
     Box::new(state)
 }
@@ -359,20 +329,6 @@ where
     fn from(inner: Arc<T>) -> Self {
         DynGlobalClientContext { inner }
     }
-}
-
-fn states_add_instance(
-    module_instance_id: ModuleInstanceId,
-    state_gen: StateGenerator<Box<maybe_add_send_sync!(dyn IState + 'static)>>,
-) -> StateGenerator<DynState> {
-    Arc::new(move |out_point_range| {
-        let states = state_gen(out_point_range);
-        Iterator::collect(
-            states
-                .into_iter()
-                .map(|state| DynState::from_parts(module_instance_id, state)),
-        )
-    })
 }
 
 pub type ModuleGlobalContextGen = ContextGen;

@@ -271,7 +271,7 @@ impl SendStateMachine {
                 };
 
                 let outpoints = global_context
-                    .claim_inputs(dbtx, ClientInputBundle::new_no_sm(vec![client_input]))
+                    .claim_inputs(dbtx, ClientInputBundle::new(vec![client_input]))
                     .await
                     .expect("Cannot claim input, additional funding needed")
                     .into_iter()
@@ -451,7 +451,7 @@ async fn transition_send_payment_sm(
                 .client_ctx
                 .claim_inputs(
                     dbtx,
-                    ClientInputBundle::new_no_sm(vec![client_input]),
+                    ClientInputBundle::new(vec![client_input]),
                     old_state.common.operation_id,
                 )
                 .await

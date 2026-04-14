@@ -24,9 +24,7 @@ use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule};
 use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
-use fedimint_client_module::transaction::{
-    ClientOutput, ClientOutputBundle, NeverClientStateMachine, TransactionBuilder,
-};
+use fedimint_client_module::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
@@ -414,11 +412,11 @@ impl GatewayClientModuleV2 {
             amount: contract.commitment.amount,
         };
 
-        let client_output_bundle =
-            self.client_ctx.make_client_outputs(ClientOutputBundle::<
-                LightningOutput,
-                NeverClientStateMachine,
-            >::new_no_sm(vec![client_output]));
+        let client_output_bundle = self.client_ctx.make_client_outputs(ClientOutputBundle::<
+            LightningOutput,
+        >::new(vec![
+            client_output,
+        ]));
         let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
 
         let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
@@ -490,11 +488,11 @@ impl GatewayClientModuleV2 {
             amount: contract.commitment.amount,
         };
 
-        let client_output_bundle =
-            self.client_ctx.make_client_outputs(ClientOutputBundle::<
-                LightningOutput,
-                NeverClientStateMachine,
-            >::new_no_sm(vec![client_output]));
+        let client_output_bundle = self.client_ctx.make_client_outputs(ClientOutputBundle::<
+            LightningOutput,
+        >::new(vec![
+            client_output,
+        ]));
         let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
 
         let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
