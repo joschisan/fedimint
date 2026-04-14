@@ -214,6 +214,23 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
             panic!("Expected Receive event");
         };
         assert_eq!(receive.operation_id, receive_op);
+
+        // Verify the freestanding LDK node observes the payment as successful,
+        // i.e. the gateway settled the HTLC back to it via the CompleteSM.
+        let payment_hash = lightning_types::payment::PaymentHash(
+            *invoice.payment_hash().as_ref(),
+        );
+        loop {
+            let event = env.ldk_node.next_event_async().await;
+            env.ldk_node.event_handled()?;
+            if let ldk_node::Event::PaymentSuccessful {
+                payment_hash: hash, ..
+            } = event
+                && hash == payment_hash
+            {
+                break;
+            }
+        }
     }
 
     info!("Testing refund when the payee fails the payment...");
