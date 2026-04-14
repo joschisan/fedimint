@@ -52,8 +52,6 @@ pub mod envs;
 pub mod meta;
 /// Module client interface definitions
 pub mod module;
-/// Operation log subsystem of the client
-pub mod oplog;
 /// Secret handling & derivation
 pub mod secret;
 /// Client state machine interfaces and executor implementation

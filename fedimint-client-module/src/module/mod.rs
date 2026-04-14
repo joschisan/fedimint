@@ -26,16 +26,13 @@ use fedimint_core::{
 use fedimint_eventlog::{Event, EventKind, EventPersistence};
 use fedimint_logging::LOG_CLIENT;
 use futures::Stream;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use tracing::warn;
 
 use self::init::ClientModuleInit;
-use crate::oplog::{IOperationLog, OperationLogEntry, UpdateStreamOrOutcome};
 use crate::sm::executor::{ActiveStateKey, IExecutor, InactiveStateKey};
 use crate::sm::{self, ActiveStateMeta, Context, DynContext, DynState, InactiveStateMeta, State};
 use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
-use crate::{AddStateMachinesResult, InstancelessDynClientInputBundle, TransactionUpdates, oplog};
+use crate::{AddStateMachinesResult, InstancelessDynClientInputBundle, TransactionUpdates};
 
 pub mod init;
 pub mod recovery;
@@ -58,8 +55,6 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
     async fn finalize_and_submit_transaction(
         &self,
         operation_id: OperationId,
-        operation_type: &str,
-        operation_meta_gen: Box<maybe_add_send_sync!(dyn Fn(OutPointRange) -> serde_json::Value)>,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
 
@@ -67,12 +62,9 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         operation_id: OperationId,
-        operation_type: &str,
-        operation_meta_gen: Box<maybe_add_send_sync!(dyn Fn(OutPointRange) -> serde_json::Value)>,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
 
-    // TODO: unify
     async fn finalize_and_submit_transaction_inner(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
@@ -88,8 +80,6 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
         // TODO: make `impl Iterator<Item = ...>`
         outputs: Vec<OutPoint>,
     ) -> anyhow::Result<()>;
-
-    fn operation_log(&self) -> &dyn IOperationLog;
 
     async fn has_active_states(&self, operation_id: OperationId) -> bool;
 
@@ -354,51 +344,28 @@ where
         DynState::from_typed(self.module_instance_id, sm)
     }
 
-    pub async fn finalize_and_submit_transaction<F, Meta>(
+    pub async fn finalize_and_submit_transaction(
         &self,
         operation_id: OperationId,
-        operation_type: &str,
-        operation_meta_gen: F,
         tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<OutPointRange>
-    where
-        F: Fn(OutPointRange) -> Meta + Clone + MaybeSend + MaybeSync + 'static,
-        Meta: serde::Serialize + MaybeSend,
-    {
+    ) -> anyhow::Result<OutPointRange> {
         self.client
             .get()
-            .finalize_and_submit_transaction(
-                operation_id,
-                operation_type,
-                Box::new(move |out_point_range| {
-                    serde_json::to_value(operation_meta_gen(out_point_range)).expect("Can't fail")
-                }),
-                tx_builder,
-            )
+            .finalize_and_submit_transaction(operation_id, tx_builder)
             .await
     }
 
-    pub async fn finalize_and_submit_transaction_dbtx<F, Meta>(
+    pub async fn finalize_and_submit_transaction_dbtx(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         operation_id: OperationId,
-        operation_type: &str,
-        operation_meta_gen: F,
         tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<OutPointRange>
-    where
-        F: Fn(OutPointRange) -> Meta + MaybeSend + MaybeSync + 'static,
-        Meta: serde::Serialize + MaybeSend,
-    {
+    ) -> anyhow::Result<OutPointRange> {
         self.client
             .get()
             .finalize_and_submit_transaction_dbtx(
                 &mut dbtx.global_dbtx(self.global_dbtx_access_token),
                 operation_id,
-                operation_type,
-                Box::new(move |out_point_range| {
-                    serde_json::to_value(operation_meta_gen(out_point_range)).expect("Can't fail")
-                }),
                 tx_builder,
             )
             .await
@@ -418,38 +385,6 @@ where
             .get()
             .await_primary_module_outputs(operation_id, outputs)
             .await
-    }
-
-    // TODO: unify with `Self::get_operation`
-    pub async fn get_operation(
-        &self,
-        operation_id: OperationId,
-    ) -> anyhow::Result<oplog::OperationLogEntry> {
-        let operation = self
-            .client
-            .get()
-            .operation_log()
-            .get_operation(operation_id)
-            .await
-            .ok_or(anyhow::anyhow!("Operation not found"))?;
-
-        if operation.operation_module_kind() != M::kind().as_str() {
-            bail!("Operation is not a lightning operation");
-        }
-
-        Ok(operation)
-    }
-
-    /// Get global db.
-    ///
-    /// Only intended for internal use (private).
-    fn global_db(&self) -> fedimint_core::db::Database {
-        let db = Clone::clone(self.client.get().db());
-
-        db.ensure_global()
-            .expect("global_db must always return a global db");
-
-        db
     }
 
     pub fn module_db(&self) -> &Database {
@@ -517,8 +452,6 @@ where
     pub async fn manual_operation_start(
         &self,
         operation_id: OperationId,
-        op_type: &str,
-        operation_meta: impl serde::Serialize + Debug,
         sms: Vec<DynState>,
     ) -> anyhow::Result<()> {
         let db = self.module_db();
@@ -526,14 +459,8 @@ where
         {
             let dbtx = &mut dbtx.global_dbtx(self.global_dbtx_access_token);
 
-            self.manual_operation_start_inner(
-                &mut dbtx.to_ref_nc(),
-                operation_id,
-                op_type,
-                operation_meta,
-                sms,
-            )
-            .await?;
+            self.manual_operation_start_inner(&mut dbtx.to_ref_nc(), operation_id, sms)
+                .await?;
         }
 
         dbtx.commit_tx_result().await.map_err(|_| {
@@ -550,15 +477,11 @@ where
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         operation_id: OperationId,
-        op_type: &str,
-        operation_meta: impl serde::Serialize + Debug,
         sms: Vec<DynState>,
     ) -> anyhow::Result<()> {
         self.manual_operation_start_inner(
             &mut dbtx.global_dbtx(self.global_dbtx_access_token),
             operation_id,
-            op_type,
-            operation_meta,
             sms,
         )
         .await
@@ -570,37 +493,17 @@ where
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         operation_id: OperationId,
-        op_type: &str,
-        operation_meta: impl serde::Serialize + Debug,
         sms: Vec<DynState>,
     ) -> anyhow::Result<()> {
         dbtx.ensure_global()
             .expect("Must deal with global dbtx here");
 
-        if self
-            .client
-            .get()
-            .operation_log()
-            .get_operation_dbtx(&mut dbtx.to_ref_nc(), operation_id)
-            .await
-            .is_some()
-        {
+        if self.client.get().operation_exists(operation_id).await {
             bail!(
                 "Operation with id {} already exists",
                 operation_id.fmt_short()
             );
         }
-
-        self.client
-            .get()
-            .operation_log()
-            .add_operation_log_entry_dbtx(
-                &mut dbtx.to_ref_nc(),
-                operation_id,
-                op_type,
-                serde_json::to_value(operation_meta).expect("Can't fail"),
-            )
-            .await;
 
         self.client
             .get()
@@ -610,37 +513,6 @@ where
             .expect("State machine is valid");
 
         Ok(())
-    }
-
-    pub fn outcome_or_updates<U, S>(
-        &self,
-        operation: OperationLogEntry,
-        operation_id: OperationId,
-        stream_gen: impl FnOnce() -> S + 'static,
-    ) -> UpdateStreamOrOutcome<U>
-    where
-        U: Clone + Serialize + DeserializeOwned + Debug + MaybeSend + MaybeSync + 'static,
-        S: Stream<Item = U> + MaybeSend + 'static,
-    {
-        use futures::StreamExt;
-        match self.client.get().operation_log().outcome_or_updates(
-            &self.global_db(),
-            operation_id,
-            operation,
-            Box::new(move || {
-                let stream_gen = stream_gen();
-                Box::pin(
-                    stream_gen.map(move |item| serde_json::to_value(item).expect("Can't fail")),
-                )
-            }),
-        ) {
-            UpdateStreamOrOutcome::UpdateStream(stream) => UpdateStreamOrOutcome::UpdateStream(
-                Box::pin(stream.map(|u| serde_json::from_value(u).expect("Can't fail"))),
-            ),
-            UpdateStreamOrOutcome::Outcome(o) => {
-                UpdateStreamOrOutcome::Outcome(serde_json::from_value(o).expect("Can't fail"))
-            }
-        }
     }
 
     pub async fn claim_inputs<I, S>(
@@ -686,25 +558,6 @@ where
             .executor()
             .add_state_machines_dbtx(&mut dbtx.global_dbtx(self.global_dbtx_access_token), states)
             .await
-    }
-
-    pub async fn add_operation_log_entry_dbtx(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        operation_id: OperationId,
-        operation_type: &str,
-        operation_meta: impl serde::Serialize,
-    ) {
-        self.client
-            .get()
-            .operation_log()
-            .add_operation_log_entry_dbtx(
-                &mut dbtx.global_dbtx(self.global_dbtx_access_token),
-                operation_id,
-                operation_type,
-                serde_json::to_value(operation_meta).expect("Can't fail"),
-            )
-            .await;
     }
 
     pub async fn log_event<E, Cap>(&self, dbtx: &mut DatabaseTransaction<'_, Cap>, event: E)

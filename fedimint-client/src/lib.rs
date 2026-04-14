@@ -84,8 +84,6 @@ pub mod db;
 /// Management of meta fields
 pub mod meta;
 
-pub mod oplog;
-
 pub mod module_init;
 
 pub mod sm;

@@ -599,7 +599,7 @@ async fn module_mint_send(
         .get_first_module::<MintClientModule>()
         .map_err(|e| CliError::internal(e))?;
     let ecash = mint_module
-        .send(payload.amount, serde_json::Value::Null)
+        .send(payload.amount)
         .await
         .map_err(|e| CliError::internal(e))?;
 
@@ -635,7 +635,7 @@ async fn module_mint_receive(
     let amount = ecash.amount();
 
     let operation_id = mint
-        .receive(ecash, serde_json::Value::Null)
+        .receive(ecash)
         .await
         .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
 

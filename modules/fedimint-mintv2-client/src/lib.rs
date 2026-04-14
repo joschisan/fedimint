@@ -48,7 +48,7 @@ use fedimint_core::config::FederationId;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
+use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::rand::{Rng, thread_rng};
 use fedimint_core::secp256k1::{Keypair, PublicKey};
 use fedimint_core::util::{BoxStream, NextOrPending};
@@ -62,7 +62,6 @@ use futures::{StreamExt, pin_mut};
 use itertools::Itertools;
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tbs::AggregatePublicKey;
 use thiserror::Error;
 
@@ -104,24 +103,6 @@ impl SpendableNote {
             signature: self.signature,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum MintOperationMeta {
-    Send {
-        ecash: String,
-        custom_meta: Value,
-    },
-    Reissue {
-        change_outpoint_range: OutPointRange,
-        amount: Amount,
-        custom_meta: Value,
-    },
-    Receive {
-        change_outpoint_range: OutPointRange,
-        ecash: String,
-        custom_meta: Value,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -716,14 +697,14 @@ impl MintClientModule {
     /// before the reissue is complete in which case the reissued notes are
     /// returned to the regular balance. To cancel a successful ecash send
     /// simply receive it yourself.
-    pub async fn send(&self, amount: Amount, custom_meta: Value) -> Result<ECash, SendECashError> {
+    pub async fn send(&self, amount: Amount) -> Result<ECash, SendECashError> {
         let amount = round_to_multiple(amount, client_denominations().next().unwrap().amount());
 
         if let Some(ecash) = self
             .client_ctx
             .module_db()
             .autocommit(
-                |dbtx, _| Box::pin(self.send_ecash_dbtx(dbtx, amount, custom_meta.clone())),
+                |dbtx, _| Box::pin(self.send_ecash_dbtx(dbtx, amount)),
                 Some(100),
             )
             .await
@@ -744,18 +725,11 @@ impl MintClientModule {
             .create_output_bundle(operation_id, represent_amount(amount))
             .await;
         let output = self.client_ctx.make_client_outputs(output);
-        let cm = custom_meta.clone();
 
         let range = self
             .client_ctx
             .finalize_and_submit_transaction(
                 operation_id,
-                MintCommonInit::KIND.as_str(),
-                move |change_outpoint_range| MintOperationMeta::Reissue {
-                    change_outpoint_range,
-                    amount,
-                    custom_meta: cm.clone(),
-                },
                 TransactionBuilder::new().with_outputs(output),
             )
             .await
@@ -767,14 +741,13 @@ impl MintClientModule {
                 .map_err(|_| SendECashError::Failure)?;
         }
 
-        Box::pin(self.send(amount, custom_meta)).await
+        Box::pin(self.send(amount)).await
     }
 
     async fn send_ecash_dbtx(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         mut remaining_amount: Amount,
-        custom_meta: Value,
     ) -> Result<Option<ECash>, Infallible> {
         let mut stream = dbtx
             .find_by_prefix_sorted_descending(&SpendableNotePrefix)
@@ -807,18 +780,6 @@ impl MintClientModule {
         let operation_id = OperationId::new_random();
 
         self.client_ctx
-            .add_operation_log_entry_dbtx(
-                dbtx,
-                operation_id,
-                MintCommonInit::KIND.as_str(),
-                MintOperationMeta::Send {
-                    ecash: base32::encode_prefixed(FEDIMINT_PREFIX, &ecash),
-                    custom_meta,
-                },
-            )
-            .await;
-
-        self.client_ctx
             .log_event(
                 dbtx,
                 SendPaymentEvent {
@@ -837,11 +798,7 @@ impl MintClientModule {
 
     /// Receive the `ECash` by reissuing the notes and return the total amount
     /// of the ecash reissued. This method is idempotent.
-    pub async fn receive(
-        &self,
-        ecash: ECash,
-        custom_meta: Value,
-    ) -> Result<OperationId, ReceiveECashError> {
+    pub async fn receive(&self, ecash: ECash) -> Result<OperationId, ReceiveECashError> {
         let operation_id = OperationId::from_encodable(&ecash);
 
         if self.client_ctx.operation_exists(operation_id).await {
@@ -862,17 +819,10 @@ impl MintClientModule {
 
         let input = Self::create_input_bundle(operation_id, ecash.notes(), true);
         let input = self.client_ctx.make_client_inputs(input);
-        let ec = base32::encode_prefixed(FEDIMINT_PREFIX, &ecash);
 
         self.client_ctx
             .finalize_and_submit_transaction(
                 operation_id,
-                MintCommonInit::KIND.as_str(),
-                move |change_outpoint_range| MintOperationMeta::Receive {
-                    change_outpoint_range,
-                    ecash: ec.clone(),
-                    custom_meta: custom_meta.clone(),
-                },
                 TransactionBuilder::new().with_inputs(input),
             )
             .await

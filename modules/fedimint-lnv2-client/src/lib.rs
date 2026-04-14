@@ -22,7 +22,6 @@ use db::{DbKeyPrefix, GatewayKey, IncomingContractStreamIndexKey};
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule, OutPointRange};
-use fedimint_client_module::oplog::UpdateStreamOrOutcome;
 use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
 use fedimint_client_module::transaction::{
     ClientOutput, ClientOutputBundle, ClientOutputSM, TransactionBuilder,
@@ -32,9 +31,10 @@ use fedimint_core::config::FederationId;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{ApiAuth, CommonModuleInit, ModuleCommon, ModuleInit};
+use fedimint_core::module::{ApiAuth, ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::SECP256K1;
 use fedimint_core::task::TaskGroup;
+use fedimint_core::util::BoxStream;
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send};
@@ -53,7 +53,6 @@ use futures::StreamExt;
 use lightning_invoice::{Bolt11Invoice, Currency};
 use secp256k1::{Keypair, PublicKey, Scalar, SecretKey, ecdh};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use strum::IntoEnumIterator as _;
 use thiserror::Error;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
@@ -70,60 +69,6 @@ const EXPIRATION_DELTA_LIMIT: u64 = 1440;
 
 /// A two hour buffer in case either the client or gateway go offline
 const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum LightningOperationMeta {
-    Send(SendOperationMeta),
-    Receive(ReceiveOperationMeta),
-    LnurlReceive(LnurlReceiveOperationMeta),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SendOperationMeta {
-    pub change_outpoint_range: OutPointRange,
-    pub gateway: SafeUrl,
-    pub contract: OutgoingContract,
-    pub invoice: LightningInvoice,
-    pub custom_meta: Value,
-}
-
-impl SendOperationMeta {
-    /// Calculate the absolute fee paid to the gateway on success.
-    pub fn gateway_fee(&self) -> Amount {
-        match &self.invoice {
-            LightningInvoice::Bolt11(invoice) => self.contract.amount.saturating_sub(
-                Amount::from_msats(invoice.amount_milli_satoshis().expect("Invoice has amount")),
-            ),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReceiveOperationMeta {
-    pub gateway: SafeUrl,
-    pub contract: IncomingContract,
-    pub invoice: LightningInvoice,
-    pub custom_meta: Value,
-}
-
-impl ReceiveOperationMeta {
-    /// Calculate the absolute fee paid to the gateway on success.
-    pub fn gateway_fee(&self) -> Amount {
-        match &self.invoice {
-            LightningInvoice::Bolt11(invoice) => {
-                Amount::from_msats(invoice.amount_milli_satoshis().expect("Invoice has amount"))
-                    .saturating_sub(self.contract.commitment.amount)
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LnurlReceiveOperationMeta {
-    pub contract: IncomingContract,
-    pub custom_meta: Value,
-}
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// The state of an operation sending a payment over lightning.
@@ -211,27 +156,16 @@ pub enum FinalReceiveOperationState {
 
 pub type ReceiveResult = Result<(Bolt11Invoice, OperationId), ReceiveError>;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct LightningClientInit {
     pub gateway_conn: Option<Arc<dyn GatewayConnection + Send + Sync>>,
-    pub custom_meta_fn: Arc<dyn Fn() -> Value + Send + Sync>,
 }
 
 impl std::fmt::Debug for LightningClientInit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LightningClientInit")
             .field("gateway_conn", &self.gateway_conn)
-            .field("custom_meta_fn", &"<function>")
             .finish()
-    }
-}
-
-impl Default for LightningClientInit {
-    fn default() -> Self {
-        LightningClientInit {
-            gateway_conn: None,
-            custom_meta_fn: Arc::new(|| Value::Null),
-        }
     }
 }
 
@@ -266,7 +200,6 @@ impl ClientModuleInit for LightningClientInit {
             args.module_api().clone(),
             args.module_root_secret(),
             gateway_conn,
-            self.custom_meta_fn.clone(),
             args.admin_auth().cloned(),
             args.task_group(),
         ))
@@ -352,7 +285,6 @@ impl LightningClientModule {
         module_api: DynModuleApi,
         module_root_secret: &DerivableSecret,
         gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
-        custom_meta_fn: Arc<dyn Fn() -> Value + Send + Sync>,
         admin_auth: Option<ApiAuth>,
         task_group: &TaskGroup,
     ) -> Self {
@@ -372,7 +304,7 @@ impl LightningClientModule {
             admin_auth,
         };
 
-        module.spawn_receive_lnurl_task(custom_meta_fn, task_group);
+        module.spawn_receive_lnurl_task(task_group);
 
         module.spawn_gateway_map_update_task(task_group);
 
@@ -507,7 +439,6 @@ impl LightningClientModule {
         &self,
         invoice: Bolt11Invoice,
         gateway: Option<SafeUrl>,
-        custom_meta: Value,
     ) -> Result<OperationId, SendPaymentError> {
         let amount = invoice
             .amount_milli_satoshis()
@@ -604,20 +535,7 @@ impl LightningClientModule {
         let transaction = TransactionBuilder::new().with_outputs(client_output);
 
         self.client_ctx
-            .finalize_and_submit_transaction(
-                operation_id,
-                LightningCommonInit::KIND.as_str(),
-                move |change_outpoint_range| {
-                    LightningOperationMeta::Send(SendOperationMeta {
-                        change_outpoint_range,
-                        gateway: gateway_api.clone(),
-                        contract: contract.clone(),
-                        invoice: LightningInvoice::Bolt11(invoice.clone()),
-                        custom_meta: custom_meta.clone(),
-                    })
-                },
-                transaction,
-            )
+            .finalize_and_submit_transaction(operation_id, transaction)
             .await
             .map_err(|e| SendPaymentError::FailedToFundPayment(e.to_string()))?;
 
@@ -656,9 +574,7 @@ impl LightningClientModule {
 
             let mut stream = self
                 .subscribe_send_operation_state_updates(operation_id)
-                .await
-                .expect("operation_id exists")
-                .into_stream();
+                .await;
 
             // This will not block since we checked for active states and there were none,
             // so by definition a final state has to have been assumed already.
@@ -676,58 +592,55 @@ impl LightningClientModule {
     pub async fn subscribe_send_operation_state_updates(
         &self,
         operation_id: OperationId,
-    ) -> anyhow::Result<UpdateStreamOrOutcome<SendOperationState>> {
-        let operation = self.client_ctx.get_operation(operation_id).await?;
+    ) -> BoxStream<'static, SendOperationState> {
         let mut stream = self.notifier.subscribe(operation_id).await;
         let client_ctx = self.client_ctx.clone();
         let module_api = self.module_api.clone();
 
-        Ok(self.client_ctx.outcome_or_updates(operation, operation_id, move || {
-            stream! {
-                loop {
-                    if let Some(LightningClientStateMachines::Send(state)) = stream.next().await {
-                        match state.state {
-                            SendSMState::Funding => yield SendOperationState::Funding,
-                            SendSMState::Funded => yield SendOperationState::Funded,
-                            SendSMState::Success(preimage) => {
-                                // the preimage has been verified by the state machine previously
-                                assert!(state.common.contract.verify_preimage(&preimage));
+        Box::pin(stream! {
+            loop {
+                if let Some(LightningClientStateMachines::Send(state)) = stream.next().await {
+                    match state.state {
+                        SendSMState::Funding => yield SendOperationState::Funding,
+                        SendSMState::Funded => yield SendOperationState::Funded,
+                        SendSMState::Success(preimage) => {
+                            // the preimage has been verified by the state machine previously
+                            assert!(state.common.contract.verify_preimage(&preimage));
 
-                                yield SendOperationState::Success(preimage);
+                            yield SendOperationState::Success(preimage);
+                            return;
+                        },
+                        SendSMState::Refunding(out_points) => {
+                            yield SendOperationState::Refunding;
+
+                            if client_ctx.await_primary_module_outputs(operation_id, out_points.clone()).await.is_ok() {
+                                yield SendOperationState::Refunded;
                                 return;
-                            },
-                            SendSMState::Refunding(out_points) => {
-                                yield SendOperationState::Refunding;
+                            }
 
-                                if client_ctx.await_primary_module_outputs(operation_id, out_points.clone()).await.is_ok() {
-                                    yield SendOperationState::Refunded;
+                            // The gateway may have incorrectly claimed the outgoing contract thereby causing
+                            // our refund transaction to be rejected. Therefore, we check one last time if
+                            // the preimage is available before we enter the failure state.
+                            if let Some(preimage) = module_api.await_preimage(
+                                state.common.outpoint,
+                                0
+                            ).await
+                                && state.common.contract.verify_preimage(&preimage) {
+                                    yield SendOperationState::Success(preimage);
                                     return;
                                 }
 
-                                // The gateway may have incorrectly claimed the outgoing contract thereby causing
-                                // our refund transaction to be rejected. Therefore, we check one last time if
-                                // the preimage is available before we enter the failure state.
-                                if let Some(preimage) = module_api.await_preimage(
-                                    state.common.outpoint,
-                                    0
-                                ).await
-                                    && state.common.contract.verify_preimage(&preimage) {
-                                        yield SendOperationState::Success(preimage);
-                                        return;
-                                    }
-
-                                yield SendOperationState::Failure;
-                                return;
-                            },
-                            SendSMState::Rejected(..) => {
-                                yield SendOperationState::Failure;
-                                return;
-                            },
-                        }
+                            yield SendOperationState::Failure;
+                            return;
+                        },
+                        SendSMState::Rejected(..) => {
+                            yield SendOperationState::Failure;
+                            return;
+                        },
                     }
                 }
             }
-        }))
+        })
     }
 
     /// Await the final state of the send operation.
@@ -737,8 +650,7 @@ impl LightningClientModule {
     ) -> anyhow::Result<FinalSendOperationState> {
         let mut stream = self
             .subscribe_send_operation_state_updates(operation_id)
-            .await?
-            .into_stream();
+            .await;
 
         let mut final_state = None;
 
@@ -775,9 +687,8 @@ impl LightningClientModule {
         expiry_secs: u32,
         description: Bolt11InvoiceDescription,
         gateway: Option<SafeUrl>,
-        custom_meta: Value,
     ) -> Result<(Bolt11Invoice, OperationId), ReceiveError> {
-        let (gateway, contract, invoice) = self
+        let (_gateway, contract, invoice) = self
             .create_contract_and_fetch_invoice(
                 self.keypair.public_key(),
                 amount,
@@ -788,16 +699,7 @@ impl LightningClientModule {
             .await?;
 
         let operation_id = self
-            .receive_incoming_contract(
-                self.keypair.secret_key(),
-                contract.clone(),
-                LightningOperationMeta::Receive(ReceiveOperationMeta {
-                    gateway,
-                    contract,
-                    invoice: LightningInvoice::Bolt11(invoice.clone()),
-                    custom_meta,
-                }),
-            )
+            .receive_incoming_contract(self.keypair.secret_key(), contract)
             .await
             .expect("The contract has been generated with our public key");
 
@@ -902,7 +804,6 @@ impl LightningClientModule {
         &self,
         sk: SecretKey,
         contract: IncomingContract,
-        operation_meta: LightningOperationMeta,
     ) -> Option<OperationId> {
         let operation_id = OperationId::from_encodable(&contract.clone());
 
@@ -923,8 +824,6 @@ impl LightningClientModule {
         self.client_ctx
             .manual_operation_start(
                 operation_id,
-                LightningCommonInit::KIND.as_str(),
-                operation_meta,
                 vec![self.client_ctx.make_dyn_state(receive_sm)],
             )
             .await
@@ -969,36 +868,33 @@ impl LightningClientModule {
     pub async fn subscribe_receive_operation_state_updates(
         &self,
         operation_id: OperationId,
-    ) -> anyhow::Result<UpdateStreamOrOutcome<ReceiveOperationState>> {
-        let operation = self.client_ctx.get_operation(operation_id).await?;
+    ) -> BoxStream<'static, ReceiveOperationState> {
         let mut stream = self.notifier.subscribe(operation_id).await;
         let client_ctx = self.client_ctx.clone();
 
-        Ok(self.client_ctx.outcome_or_updates(operation, operation_id, move || {
-            stream! {
-                loop {
-                    if let Some(LightningClientStateMachines::Receive(state)) = stream.next().await {
-                        match state.state {
-                            ReceiveSMState::Pending => yield ReceiveOperationState::Pending,
-                            ReceiveSMState::Claiming(out_points) => {
-                                yield ReceiveOperationState::Claiming;
+        Box::pin(stream! {
+            loop {
+                if let Some(LightningClientStateMachines::Receive(state)) = stream.next().await {
+                    match state.state {
+                        ReceiveSMState::Pending => yield ReceiveOperationState::Pending,
+                        ReceiveSMState::Claiming(out_points) => {
+                            yield ReceiveOperationState::Claiming;
 
-                                if client_ctx.await_primary_module_outputs(operation_id, out_points).await.is_ok() {
-                                    yield ReceiveOperationState::Claimed;
-                                } else {
-                                    yield ReceiveOperationState::Failure;
-                                }
-                                return;
-                            },
-                            ReceiveSMState::Expired => {
-                                yield ReceiveOperationState::Expired;
-                                return;
+                            if client_ctx.await_primary_module_outputs(operation_id, out_points).await.is_ok() {
+                                yield ReceiveOperationState::Claimed;
+                            } else {
+                                yield ReceiveOperationState::Failure;
                             }
+                            return;
+                        },
+                        ReceiveSMState::Expired => {
+                            yield ReceiveOperationState::Expired;
+                            return;
                         }
                     }
                 }
             }
-        }))
+        })
     }
 
     /// Await the final state of the receive operation.
@@ -1008,8 +904,7 @@ impl LightningClientModule {
     ) -> anyhow::Result<FinalReceiveOperationState> {
         let mut stream = self
             .subscribe_receive_operation_state_updates(operation_id)
-            .await?
-            .into_stream();
+            .await;
 
         let mut final_state = None;
 
@@ -1069,21 +964,17 @@ impl LightningClientModule {
         )))
     }
 
-    fn spawn_receive_lnurl_task(
-        &self,
-        custom_meta_fn: Arc<dyn Fn() -> Value + Send + Sync>,
-        task_group: &TaskGroup,
-    ) {
+    fn spawn_receive_lnurl_task(&self, task_group: &TaskGroup) {
         let module = self.clone();
 
         task_group.spawn_cancellable("receive_lnurl_task", async move {
             loop {
-                module.receive_lnurl(custom_meta_fn()).await;
+                module.receive_lnurl().await;
             }
         });
     }
 
-    async fn receive_lnurl(&self, custom_meta: Value) {
+    async fn receive_lnurl(&self) {
         let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
 
         let stream_index = dbtx
@@ -1098,14 +989,7 @@ impl LightningClientModule {
 
         for contract in &contracts {
             if let Some(operation_id) = self
-                .receive_incoming_contract(
-                    self.lnurl_keypair.secret_key(),
-                    contract.clone(),
-                    LightningOperationMeta::LnurlReceive(LnurlReceiveOperationMeta {
-                        contract: contract.clone(),
-                        custom_meta: custom_meta.clone(),
-                    }),
-                )
+                .receive_incoming_contract(self.lnurl_keypair.secret_key(), contract.clone())
                 .await
             {
                 self.await_final_receive_operation_state(operation_id)

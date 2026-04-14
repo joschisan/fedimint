@@ -4,7 +4,6 @@ use fedimint_lnv2_client::{
     FinalReceiveOperationState, FinalSendOperationState, LightningClientModule,
 };
 use fedimint_lnv2_common::Bolt11InvoiceDescription;
-use serde_json::Value;
 use tracing::info;
 
 use crate::cli;
@@ -125,7 +124,7 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
             3600,
         )?;
 
-        let send_op = lnv2.send(invoice, Some(gw.clone()), Value::Null).await?;
+        let send_op = lnv2.send(invoice, Some(gw.clone())).await?;
         let state = lnv2.await_final_send_operation_state(send_op).await?;
         assert_eq!(state, FinalSendOperationState::Success);
     }
@@ -139,7 +138,6 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
                 300,
                 Bolt11InvoiceDescription::Direct(String::new()),
                 Some(gw.clone()),
-                Value::Null,
             )
             .await?;
 
@@ -163,7 +161,7 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
             payment_hash,
         )?;
 
-        let send_op = lnv2.send(invoice, Some(gw.clone()), Value::Null).await?;
+        let send_op = lnv2.send(invoice, Some(gw.clone())).await?;
 
         // Wait until the HTLC is actually held by LDK, then fail it. Failing
         // before the HTLC arrives is a no-op in LDK's ChannelManager, so the

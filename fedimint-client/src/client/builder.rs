@@ -51,7 +51,6 @@ use crate::db::{
 };
 use crate::meta::MetaService;
 use crate::module_init::ClientModuleInitRegistry;
-use crate::oplog::OperationLog;
 use crate::sm::executor::Executor;
 use crate::sm::notifier::Notifier;
 
@@ -712,7 +711,6 @@ impl ClientBuilder {
             secp_ctx: Secp256k1::new(),
             root_secret,
             task_group,
-            operation_log: OperationLog::new(db.clone()),
             client_recovery_progress_receiver,
             meta_service: self.meta_service,
             iroh_enable_dht: self.iroh_enable_dht,

@@ -1,6 +1,5 @@
 use fedimint_core::Amount;
 use fedimint_mintv2_client::{FinalReceiveOperationState, MintClientModule};
-use serde_json::Value;
 use tracing::info;
 
 use crate::env::TestEnv;
@@ -16,13 +15,13 @@ pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
 
     let ecash = client_send
         .get_first_module::<MintClientModule>()?
-        .send(Amount::from_sats(1_000), Value::Null)
+        .send(Amount::from_sats(1_000))
         .await?;
 
     // First receive succeeds (sender receives own ecash back)
     let operation_id = client_send
         .get_first_module::<MintClientModule>()?
-        .receive(ecash.clone(), Value::Null)
+        .receive(ecash.clone())
         .await?;
 
     let state = client_send
@@ -35,7 +34,7 @@ pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
     // Second receive with same ecash is rejected
     let operation_id = client_receive
         .get_first_module::<MintClientModule>()?
-        .receive(ecash, Value::Null)
+        .receive(ecash)
         .await?;
 
     let state = client_receive

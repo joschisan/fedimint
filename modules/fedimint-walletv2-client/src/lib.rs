@@ -38,7 +38,7 @@ use fedimint_core::db::{
     Database, DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
+use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::task::{TaskGroup, block_in_place, sleep};
 use fedimint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
@@ -59,27 +59,6 @@ use tracing::warn;
 
 /// Number of output info entries to scan per batch.
 const SLICE_SIZE: u64 = 1000;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum WalletOperationMeta {
-    Send(SendMeta),
-    Receive(ReceiveMeta),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SendMeta {
-    pub change_outpoint_range: OutPointRange,
-    pub address: Address<NetworkUnchecked>,
-    pub value: bitcoin::Amount,
-    pub fee: bitcoin::Amount,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReceiveMeta {
-    pub change_outpoint_range: OutPointRange,
-    pub value: bitcoin::Amount,
-    pub fee: bitcoin::Amount,
-}
 
 /// The final state of an operation sending bitcoin onchain.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,20 +257,9 @@ impl WalletClientModule {
             vec![client_output_sm],
         ));
 
-        let address_clone = address.clone();
-
         self.client_ctx
             .finalize_and_submit_transaction(
                 operation_id,
-                WalletCommonInit::KIND.as_str(),
-                move |change_outpoint_range| {
-                    WalletOperationMeta::Send(SendMeta {
-                        change_outpoint_range,
-                        address: address_clone.clone(),
-                        value,
-                        fee,
-                    })
-                },
                 TransactionBuilder::new().with_outputs(client_output_bundle),
             )
             .await
@@ -426,14 +394,6 @@ impl WalletClientModule {
             .client_ctx
             .finalize_and_submit_transaction(
                 operation_id,
-                WalletCommonInit::KIND.as_str(),
-                move |change_outpoint_range| {
-                    WalletOperationMeta::Receive(ReceiveMeta {
-                        change_outpoint_range,
-                        value,
-                        fee,
-                    })
-                },
                 TransactionBuilder::new().with_inputs(client_input_bundle),
             )
             .await

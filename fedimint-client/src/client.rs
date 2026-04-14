@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::fmt::{self, Formatter};
 use std::future::{Future, pending};
 use std::ops::Range;
@@ -19,7 +19,6 @@ use fedimint_client_module::module::{
     ClientContextIface, ClientModule, ClientModuleRegistry, DynClientModule, FinalClientIface,
     IClientModule, IdxRange, OutPointRange, PrimaryModulePriority,
 };
-use fedimint_client_module::oplog::IOperationLog;
 use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy as _};
 use fedimint_client_module::sm::executor::{ActiveStateKey, IExecutor, InactiveStateKey};
 use fedimint_client_module::sm::{ActiveStateMeta, DynState, InactiveStateMeta};
@@ -42,7 +41,7 @@ use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::runtime::sleep;
-use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
+use fedimint_core::task::TaskGroup;
 use fedimint_core::transaction::Transaction;
 use fedimint_core::util::{BoxStream, FmtCompact as _, FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{
@@ -64,14 +63,12 @@ use tracing::{debug, info, warn};
 use crate::ClientBuilder;
 use crate::client::event_log::DefaultApplicationEventLogKey;
 use crate::db::{
-    ApiSecretKey, ChronologicalOperationLogKey, ClientConfigKey, ClientMetadataKey,
-    ClientModuleRecovery, ClientModuleRecoveryState, EncodedClientSecretKey, Metadata,
-    OperationLogKey, apply_migrations_core_client_dbtx, get_decoded_client_secret,
-    verify_client_db_integrity_dbtx,
+    ApiSecretKey, ClientConfigKey, ClientMetadataKey, ClientModuleRecovery,
+    ClientModuleRecoveryState, EncodedClientSecretKey, Metadata,
+    apply_migrations_core_client_dbtx, get_decoded_client_secret, verify_client_db_integrity_dbtx,
 };
 use crate::meta::MetaService;
 use crate::module_init::{ClientModuleInitRegistry, DynClientModuleInit, IClientModuleInit};
-use crate::oplog::OperationLog;
 use crate::sm::executor::{
     ActiveModuleOperationStateKeyPrefix, ActiveOperationStateKeyPrefix, Executor,
     InactiveModuleOperationStateKeyPrefix, InactiveOperationStateKeyPrefix,
@@ -110,7 +107,6 @@ pub struct Client {
     executor: Executor,
     pub(crate) api: DynGlobalApi,
     root_secret: DerivableSecret,
-    operation_log: OperationLog,
     secp_ctx: Secp256k1<secp256k1::All>,
     meta_service: Arc<MetaService>,
 
@@ -129,17 +125,6 @@ pub struct Client {
     request_hook: ApiRequestHook,
     iroh_enable_dht: bool,
     iroh_enable_next: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ListOperationsParams {
-    limit: Option<usize>,
-    last_seen: Option<ChronologicalOperationLogKey>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetOperationIdRequest {
-    operation_id: OperationId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -445,28 +430,6 @@ impl Client {
         self.executor.add_state_machines_dbtx(dbtx, states).await
     }
 
-    // TODO: implement as part of [`OperationLog`]
-    pub async fn get_active_operations(&self) -> HashSet<OperationId> {
-        let active_states = self.executor.get_active_states().await;
-        let mut active_operations = HashSet::with_capacity(active_states.len());
-        let mut dbtx = self.db().begin_transaction_nc().await;
-        for (state, _) in active_states {
-            let operation_id = state.operation_id();
-            if dbtx
-                .get_value(&OperationLogKey { operation_id })
-                .await
-                .is_some()
-            {
-                active_operations.insert(operation_id);
-            }
-        }
-        active_operations
-    }
-
-    pub fn operation_log(&self) -> &OperationLog {
-        &self.operation_log
-    }
-
     /// Get the meta manager to read meta fields.
     pub fn meta_service(&self) -> &Arc<MetaService> {
         &self.meta_service
@@ -554,35 +517,19 @@ impl Client {
     /// The function will panic if the database transaction collides with
     /// other and fails with others too often, this should not happen except for
     /// excessively concurrent scenarios.
-    pub async fn finalize_and_submit_transaction<F, M>(
+    pub async fn finalize_and_submit_transaction(
         &self,
         operation_id: OperationId,
-        operation_type: &str,
-        operation_meta_gen: F,
         tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<OutPointRange>
-    where
-        F: Fn(OutPointRange) -> M + Clone + MaybeSend + MaybeSync,
-        M: serde::Serialize + MaybeSend,
-    {
-        let operation_type = operation_type.to_owned();
-
+    ) -> anyhow::Result<OutPointRange> {
         let autocommit_res = self
             .db
             .autocommit(
                 |dbtx, _| {
-                    let operation_type = operation_type.clone();
                     let tx_builder = tx_builder.clone();
-                    let operation_meta_gen = operation_meta_gen.clone();
                     Box::pin(async move {
-                        self.finalize_and_submit_transaction_dbtx(
-                            dbtx,
-                            operation_id,
-                            &operation_type,
-                            operation_meta_gen,
-                            tx_builder,
-                        )
-                        .await
+                        self.finalize_and_submit_transaction_dbtx(dbtx, operation_id, tx_builder)
+                            .await
                     })
                 },
                 Some(100), // TODO: handle what happens after 100 retries
@@ -603,36 +550,18 @@ impl Client {
 
     /// See [`Self::finalize_and_submit_transaction`], just inside a database
     /// transaction.
-    pub async fn finalize_and_submit_transaction_dbtx<F, M>(
+    pub async fn finalize_and_submit_transaction_dbtx(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         operation_id: OperationId,
-        operation_type: &str,
-        operation_meta_gen: F,
         tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<OutPointRange>
-    where
-        F: FnOnce(OutPointRange) -> M + MaybeSend,
-        M: serde::Serialize + MaybeSend,
-    {
+    ) -> anyhow::Result<OutPointRange> {
         if Client::operation_exists_dbtx(dbtx, operation_id).await {
             bail!("There already exists an operation with id {operation_id:?}")
         }
 
-        let out_point_range = self
-            .finalize_and_submit_transaction_inner(dbtx, operation_id, tx_builder)
-            .await?;
-
-        self.operation_log()
-            .add_operation_log_entry_dbtx(
-                dbtx,
-                operation_id,
-                operation_type,
-                operation_meta_gen(out_point_range),
-            )
-            .await;
-
-        Ok(out_point_range)
+        self.finalize_and_submit_transaction_inner(dbtx, operation_id, tx_builder)
+            .await
     }
 
     async fn finalize_and_submit_transaction_inner(
@@ -1217,23 +1146,6 @@ impl Client {
                     let invite_code = self.invite_code(req.peer).await;
                     yield serde_json::to_value(invite_code)?;
                 }
-                "get_operation" => {
-                    let req: GetOperationIdRequest = serde_json::from_value(params)?;
-                    let operation = self.operation_log().get_operation(req.operation_id).await;
-                    yield serde_json::to_value(operation)?;
-                }
-                "list_operations" => {
-                    let req: ListOperationsParams = serde_json::from_value(params)?;
-                    let limit = if req.limit.is_none() && req.last_seen.is_none() {
-                        usize::MAX
-                    } else {
-                        req.limit.unwrap_or(usize::MAX)
-                    };
-                    let operations = self.operation_log()
-                        .paginate_operations_rev(limit, req.last_seen)
-                        .await;
-                    yield serde_json::to_value(operations)?;
-                }
                 "has_pending_recoveries" => {
                     let has_pending = self.has_pending_recoveries();
                     yield serde_json::to_value(has_pending)?;
@@ -1503,38 +1415,18 @@ impl ClientContextIface for Client {
     async fn finalize_and_submit_transaction(
         &self,
         operation_id: OperationId,
-        operation_type: &str,
-        operation_meta_gen: Box<maybe_add_send_sync!(dyn Fn(OutPointRange) -> serde_json::Value)>,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
-        Client::finalize_and_submit_transaction(
-            self,
-            operation_id,
-            operation_type,
-            // |out_point_range| operation_meta_gen(out_point_range),
-            &operation_meta_gen,
-            tx_builder,
-        )
-        .await
+        Client::finalize_and_submit_transaction(self, operation_id, tx_builder).await
     }
 
     async fn finalize_and_submit_transaction_dbtx(
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         operation_id: OperationId,
-        operation_type: &str,
-        operation_meta_gen: Box<maybe_add_send_sync!(dyn Fn(OutPointRange) -> serde_json::Value)>,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
-        Client::finalize_and_submit_transaction_dbtx(
-            self,
-            dbtx,
-            operation_id,
-            operation_type,
-            &operation_meta_gen,
-            tx_builder,
-        )
-        .await
+        Client::finalize_and_submit_transaction_dbtx(self, dbtx, operation_id, tx_builder).await
     }
 
     async fn finalize_and_submit_transaction_inner(
@@ -1557,10 +1449,6 @@ impl ClientContextIface for Client {
         outputs: Vec<OutPoint>,
     ) -> anyhow::Result<()> {
         Client::await_primary_bitcoin_module_outputs(self, operation_id, outputs).await
-    }
-
-    fn operation_log(&self) -> &dyn IOperationLog {
-        Client::operation_log(self)
     }
 
     async fn has_active_states(&self, operation_id: OperationId) -> bool {

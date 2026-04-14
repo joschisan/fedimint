@@ -28,7 +28,7 @@ use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind
 use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::hex::ToHex;
-use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
+use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::time::now;
 use fedimint_core::util::Spanned;
@@ -55,9 +55,6 @@ use crate::send_sm::SendSMCommon;
 
 /// LNv2 CLTV Delta in blocks
 pub const EXPIRATION_DELTA_MINIMUM_V2: u64 = 144;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GatewayOperationMetaV2;
 
 #[derive(Debug, Clone)]
 pub struct GatewayClientInitV2 {
@@ -321,8 +318,6 @@ impl GatewayClientModuleV2 {
             .manual_operation_start_dbtx(
                 &mut dbtx.to_ref_nc(),
                 operation_id,
-                LightningCommonInit::KIND.as_str(),
-                GatewayOperationMetaV2,
                 vec![self.client_ctx.make_dyn_state(send_sm)],
             )
             .await
@@ -439,12 +434,7 @@ impl GatewayClientModuleV2 {
         let transaction = TransactionBuilder::new().with_outputs(client_output);
 
         self.client_ctx
-            .finalize_and_submit_transaction(
-                operation_id,
-                LightningCommonInit::KIND.as_str(),
-                |_| GatewayOperationMetaV2,
-                transaction,
-            )
+            .finalize_and_submit_transaction(operation_id, transaction)
             .await?;
 
         let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
@@ -507,12 +497,7 @@ impl GatewayClientModuleV2 {
         let transaction = TransactionBuilder::new().with_outputs(client_output);
 
         self.client_ctx
-            .finalize_and_submit_transaction(
-                operation_id,
-                LightningCommonInit::KIND.as_str(),
-                |_| GatewayOperationMetaV2,
-                transaction,
-            )
+            .finalize_and_submit_transaction(operation_id, transaction)
             .await?;
 
         let mut dbtx = self.client_ctx.module_db().begin_transaction().await;

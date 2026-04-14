@@ -5,7 +5,6 @@ use anyhow::{anyhow, bail};
 use bitcoin::hex::DisplayHex as _;
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::recovery::RecoveryProgress;
-use fedimint_client_module::oplog::{JsonStringed, OperationLogEntry, OperationOutcome};
 use fedimint_client_module::sm::{ActiveStateMeta, InactiveStateMeta};
 use fedimint_core::config::{ClientConfig, ClientConfigV0, FederationId, GlobalClientConfig};
 use fedimint_core::core::{ModuleInstanceId, OperationId};
@@ -81,7 +80,6 @@ pub enum DbKeyPrefix {
     ClientSecret = 0x29, // Unused
     ClientPreRootSecretHash = 0x2a,
     OperationLog = 0x2c,
-    ChronologicalOperationLog = 0x2d,
     CommonApiVersionCache = 0x2e, // Unused
     ClientConfig = 0x2f,
     PendingClientConfig = 0x3b, // Unused
@@ -177,68 +175,12 @@ impl_db_lookup!(
 );
 
 #[derive(Debug, Encodable, Decodable, Serialize)]
-pub struct OperationLogKey {
-    pub operation_id: OperationId,
-}
-
-impl_db_record!(
-    key = OperationLogKey,
-    value = OperationLogEntry,
-    db_prefix = DbKeyPrefix::OperationLog
-);
-
-#[derive(Debug, Encodable)]
-pub struct OperationLogKeyPrefix;
-
-impl_db_lookup!(key = OperationLogKey, query_prefix = OperationLogKeyPrefix);
-
-#[derive(Debug, Encodable, Decodable, Serialize)]
-pub struct OperationLogKeyV0 {
-    pub operation_id: OperationId,
-}
-
-#[derive(Debug, Encodable)]
-pub struct OperationLogKeyPrefixV0;
-
-impl_db_record!(
-    key = OperationLogKeyV0,
-    value = OperationLogEntryV0,
-    db_prefix = DbKeyPrefix::OperationLog
-);
-
-impl_db_lookup!(
-    key = OperationLogKeyV0,
-    query_prefix = OperationLogKeyPrefixV0
-);
-
-#[derive(Debug, Encodable, Decodable, Serialize)]
 pub struct ClientPreRootSecretHashKey;
 
 impl_db_record!(
     key = ClientPreRootSecretHashKey,
     value = [u8; 8],
     db_prefix = DbKeyPrefix::ClientPreRootSecretHash
-);
-
-/// Key used to lookup operation log entries in chronological order
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct ChronologicalOperationLogKey {
-    pub creation_time: std::time::SystemTime,
-    pub operation_id: OperationId,
-}
-
-#[derive(Debug, Encodable)]
-pub struct ChronologicalOperationLogKeyPrefix;
-
-impl_db_record!(
-    key = ChronologicalOperationLogKey,
-    value = (),
-    db_prefix = DbKeyPrefix::ChronologicalOperationLog
-);
-
-impl_db_lookup!(
-    key = ChronologicalOperationLogKey,
-    query_prefix = ChronologicalOperationLogKeyPrefix
 );
 
 #[derive(Debug, Encodable, Decodable, Serialize)]
@@ -484,71 +426,9 @@ pub fn get_core_client_database_migrations()
         }),
     );
 
-    // Migration to add outcome_time to OperationLogEntry
-    migrations.insert(
-        DatabaseVersion(1),
-        Box::new(|mut ctx| {
-            Box::pin(async move {
-                let mut dbtx = ctx.dbtx();
-
-                // Read all OperationLogEntries using V0 format
-                let operation_logs = dbtx
-                    .find_by_prefix(&OperationLogKeyPrefixV0)
-                    .await
-                    .collect::<Vec<_>>()
-                    .await;
-
-                // Build a map from operation_id -> max_time of inactive state
-                let mut op_id_max_time = BTreeMap::new();
-
-                // Process inactive states
-                {
-                    let mut inactive_states_stream =
-                        dbtx.find_by_prefix(&InactiveStateKeyPrefixBytes).await;
-
-                    while let Some((state, meta)) = inactive_states_stream.next().await {
-                        let entry = op_id_max_time
-                            .entry(state.operation_id)
-                            .or_insert(meta.exited_at);
-                        *entry = (*entry).max(meta.exited_at);
-                    }
-                }
-                // Migrate each V0 operation log entry to the new format
-                for (op_key_v0, log_entry_v0) in operation_logs {
-                    let new_entry = OperationLogEntry::new(
-                        log_entry_v0.operation_module_kind,
-                        log_entry_v0.meta,
-                        log_entry_v0.outcome.map(|outcome| {
-                            OperationOutcome {
-                                outcome,
-                                // If we found state times, use the max, otherwise use
-                                // current time
-                                time: op_id_max_time
-                                    .get(&op_key_v0.operation_id)
-                                    .copied()
-                                    .unwrap_or_else(fedimint_core::time::now),
-                            }
-                        }),
-                    );
-
-                    dbtx.remove_entry(&op_key_v0).await;
-                    dbtx.insert_entry(
-                        &OperationLogKey {
-                            operation_id: op_key_v0.operation_id,
-                        },
-                        &new_entry,
-                    )
-                    .await;
-                }
-
-                Ok(())
-            })
-        }),
-    );
-
     // Fix #6948
     migrations.insert(
-        DatabaseVersion(2),
+        DatabaseVersion(1),
         Box::new(|mut ctx: fedimint_core::db::DbMigrationFnContext<'_, _>| {
             Box::pin(async move {
                 let mut dbtx = ctx.dbtx();
@@ -645,7 +525,7 @@ pub fn get_core_client_database_migrations()
 
     // Fix #7367
     migrations.insert(
-        DatabaseVersion(3),
+        DatabaseVersion(2),
         Box::new(|mut ctx: fedimint_core::db::DbMigrationFnContext<'_, _>| {
             Box::pin(async move {
                 let mut dbtx = ctx.dbtx();
@@ -979,10 +859,3 @@ pub async fn get_decoded_client_secret<T: Decodable>(db: &Database) -> anyhow::R
     }
 }
 
-/// V0 version of operation log entry for migration purposes
-#[derive(Debug, Serialize, Deserialize, Encodable, Decodable)]
-pub struct OperationLogEntryV0 {
-    pub(crate) operation_module_kind: String,
-    pub(crate) meta: JsonStringed,
-    pub(crate) outcome: Option<JsonStringed>,
-}
