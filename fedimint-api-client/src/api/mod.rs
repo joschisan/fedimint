@@ -5,15 +5,19 @@ use std::fmt::Debug;
 use std::future::pending;
 use std::pin::Pin;
 use std::result;
+use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context as _, anyhow, bail};
 pub use error::{FederationError, OutputOutcomeError};
+use fedimint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
 use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, OutputOutcome};
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };
-use fedimint_core::module::{ApiMethod, ApiRequestErased, SerdeModuleEncoding};
+use fedimint_core::module::{
+    ApiError, ApiMethod, ApiRequestErased, FEDIMINT_API_ALPN, IrohApiRequest, SerdeModuleEncoding,
+};
 use fedimint_core::runtime::sleep;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::transaction::{SerdeTransaction, Transaction, TransactionSubmissionOutcome};
@@ -25,16 +29,86 @@ use fedimint_core::{
 use fedimint_logging::LOG_CLIENT_NET_API;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{Future, StreamExt};
-use iroh::Endpoint;
 use iroh::endpoint::Connection;
+use iroh::{Endpoint, PublicKey};
 use jsonrpsee_core::DeserializeOwned;
 use serde_json::Value;
+use thiserror::Error;
 use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, instrument, trace, warn};
 
-pub use crate::connection::{IGuardianConnection, ServerError, ServerResult, node_id_from_url};
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
+
+// ── Error types ─────────────────────────────────────────────────────────────
+
+/// An API request error when calling a single federation peer
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ServerError {
+    #[error("Response deserialization error: {0}")]
+    ResponseDeserialization(anyhow::Error),
+
+    #[error("Invalid peer id: {peer_id}")]
+    InvalidPeerId { peer_id: PeerId },
+
+    #[error("Invalid peer url: {url}")]
+    InvalidPeerUrl { url: SafeUrl, source: anyhow::Error },
+
+    #[error("Connection failed: {0}")]
+    Connection(anyhow::Error),
+
+    #[error("Transport error: {0}")]
+    Transport(anyhow::Error),
+
+    #[error("Invalid rpc id")]
+    InvalidRpcId(anyhow::Error),
+
+    #[error("Invalid request")]
+    InvalidRequest(anyhow::Error),
+
+    #[error("Invalid response: {0}")]
+    InvalidResponse(anyhow::Error),
+
+    #[error("Unspecified server error: {0}")]
+    ServerError(anyhow::Error),
+
+    #[error("Unspecified condition error: {0}")]
+    ConditionFailed(anyhow::Error),
+
+    #[error("Unspecified internal client error: {0}")]
+    InternalClientError(anyhow::Error),
+}
+
+impl ServerError {
+    pub fn is_unusual(&self) -> bool {
+        match self {
+            ServerError::ResponseDeserialization(_)
+            | ServerError::InvalidPeerId { .. }
+            | ServerError::InvalidPeerUrl { .. }
+            | ServerError::InvalidResponse(_)
+            | ServerError::InvalidRpcId(_)
+            | ServerError::InvalidRequest(_)
+            | ServerError::InternalClientError(_)
+            | ServerError::ServerError(_) => true,
+            ServerError::Connection(_)
+            | ServerError::Transport(_)
+            | ServerError::ConditionFailed(_) => false,
+        }
+    }
+
+    pub fn report_if_unusual(&self, peer_id: PeerId, context: &str) {
+        let unusual = self.is_unusual();
+
+        trace!(target: LOG_CLIENT_NET_API, error = %self, %context, "ServerError");
+
+        if unusual {
+            warn!(target: LOG_CLIENT_NET_API, error = %self, %context, %peer_id, "Unusual ServerError");
+        }
+    }
+}
+
+pub type ServerResult<T> = Result<T, ServerError>;
 
 #[derive(Debug, Clone)]
 enum PeerState {
@@ -73,11 +147,6 @@ pub trait IRawFederationApi: Debug + MaybeSend + MaybeSync {
     ///
     /// The stream emits a new value whenever the connection status changes.
     fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>>;
-    /// Wait for some connections being initialized
-    ///
-    /// This is useful to avoid initializing networking by
-    /// tasks that are not high priority.
-    async fn wait_for_initialized_connections(&self);
 }
 
 /// An extension trait allowing to making federation-wide API call on top
@@ -318,36 +387,6 @@ pub trait FederationApiExt: IRawFederationApi {
         .await
     }
 
-}
-
-#[apply(async_trait_maybe_send!)]
-impl<T: ?Sized> FederationApiExt for T where T: IRawFederationApi {}
-
-dyn_newtype_define! {
-    #[derive(Clone)]
-    pub DynModuleApi(Arc<IRawFederationApi>)
-}
-
-dyn_newtype_define! {
-    #[derive(Clone)]
-    pub DynGlobalApi(Arc<IGlobalFederationApi>)
-}
-
-impl AsRef<dyn IGlobalFederationApi + 'static> for DynGlobalApi {
-    fn as_ref(&self) -> &(dyn IGlobalFederationApi + 'static) {
-        self.inner.as_ref()
-    }
-}
-
-impl DynGlobalApi {
-    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, SafeUrl>) -> Self {
-        FederationApi::new(endpoint, peers).into()
-    }
-}
-
-/// The API for the global (non-module) endpoints
-#[apply(async_trait_maybe_send!)]
-pub trait IGlobalFederationApi: IRawFederationApi {
     async fn submit_transaction(
         &self,
         tx: Transaction,
@@ -376,7 +415,23 @@ pub trait IGlobalFederationApi: IRawFederationApi {
 }
 
 #[apply(async_trait_maybe_send!)]
-impl<T: ?Sized> IGlobalFederationApi for T where T: IRawFederationApi + MaybeSend + MaybeSync {}
+impl<T: ?Sized> FederationApiExt for T where T: IRawFederationApi {}
+
+dyn_newtype_define! {
+    #[derive(Clone)]
+    pub DynModuleApi(Arc<IRawFederationApi>)
+}
+
+dyn_newtype_define! {
+    #[derive(Clone)]
+    pub DynGlobalApi(Arc<IRawFederationApi>)
+}
+
+impl DynGlobalApi {
+    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, SafeUrl>) -> Self {
+        FederationApi::new(endpoint, peers).into()
+    }
+}
 
 pub fn deserialize_outcome<R>(
     outcome: &SerdeOutputOutcome,
@@ -497,9 +552,57 @@ async fn connect_iroh(endpoint: &Endpoint, url: &SafeUrl) -> anyhow::Result<Conn
     let node_id = node_id_from_url(url)?;
 
     endpoint
-        .connect(node_id, fedimint_core::module::FEDIMINT_API_ALPN)
+        .connect(node_id, FEDIMINT_API_ALPN)
         .await
         .map_err(anyhow::Error::from)
+}
+
+/// Parse a node ID from an iroh:// URL.
+fn node_id_from_url(url: &SafeUrl) -> anyhow::Result<PublicKey> {
+    if url.scheme() != "iroh" {
+        bail!("Unsupported scheme: {}, expected iroh://", url.scheme());
+    }
+    let host = url.host_str().context("Missing host string in Iroh URL")?;
+    PublicKey::from_str(host).context("Failed to parse node id")
+}
+
+// ── Transport trait + iroh impl ─────────────────────────────────────────────
+
+const IROH_MAX_RESPONSE_BYTES: usize = ALEPH_BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
+
+#[async_trait::async_trait]
+pub trait IGuardianConnection: Debug + Send + Sync + 'static {
+    async fn request(&self, method: ApiMethod, request: ApiRequestErased) -> ServerResult<Value>;
+}
+
+#[async_trait::async_trait]
+impl IGuardianConnection for Connection {
+    async fn request(&self, method: ApiMethod, request: ApiRequestErased) -> ServerResult<Value> {
+        let json = serde_json::to_vec(&IrohApiRequest { method, request })
+            .expect("Serialization to vec can't fail");
+
+        let (mut sink, mut stream) = self
+            .open_bi()
+            .await
+            .map_err(|e| ServerError::Transport(e.into()))?;
+
+        sink.write_all(&json)
+            .await
+            .map_err(|e| ServerError::Transport(e.into()))?;
+
+        sink.finish()
+            .map_err(|e| ServerError::Transport(e.into()))?;
+
+        let response = stream
+            .read_to_end(IROH_MAX_RESPONSE_BYTES)
+            .await
+            .map_err(|e| ServerError::Transport(e.into()))?;
+
+        let response = serde_json::from_slice::<Result<Value, ApiError>>(&response)
+            .map_err(|e| ServerError::InvalidResponse(e.into()))?;
+
+        response.map_err(|e| ServerError::InvalidResponse(anyhow::anyhow!("Api Error: {:?}", e)))
+    }
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -554,9 +657,6 @@ impl IRawFederationApi for FederationApi {
                 current.clone()
             })
             .boxed()
-    }
-    async fn wait_for_initialized_connections(&self) {
-        // Iroh endpoint is ready at construction time, nothing to wait for
     }
 }
 

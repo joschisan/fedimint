@@ -10,7 +10,7 @@ use serde::Serialize;
 use thiserror::Error;
 use tracing::{trace, warn};
 
-use crate::connection::ServerError;
+use super::ServerError;
 
 /// An API request error when calling an entire federation
 ///

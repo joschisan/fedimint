@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use fedimint_api_client::api::DynGlobalApi;
+use fedimint_api_client::api::{DynGlobalApi, FederationApiExt as _};
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::DatabaseTransaction;

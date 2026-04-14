@@ -27,7 +27,7 @@ use anyhow::Context as _;
 use bitcoin_hashes::sha256;
 use client_db::{RecoveryState, RecoveryStateKey, SpendableNoteAmountPrefix, SpendableNotePrefix};
 pub use events::*;
-use fedimint_api_client::api::DynModuleApi;
+use fedimint_api_client::api::{DynModuleApi, FederationApiExt as _};
 use fedimint_client::module::ClientModule;
 use fedimint_client::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,

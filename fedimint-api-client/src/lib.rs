@@ -6,8 +6,7 @@
 #![allow(clippy::return_self_not_must_use)]
 
 use anyhow::{Context as _, bail};
-use api::{DynGlobalApi, FederationApiExt as _};
-use connection::ServerError;
+use api::{DynGlobalApi, FederationApiExt as _, ServerError};
 use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::endpoint_constants::CLIENT_CONFIG_ENDPOINT;
 use fedimint_core::invite_code::InviteCode;
@@ -18,7 +17,6 @@ use query::FilterMap;
 use tracing::debug;
 
 pub mod api;
-pub mod connection;
 /// Client query system
 pub mod query;
 

@@ -8,7 +8,7 @@ use anyhow::{Context as _, anyhow, bail, format_err};
 use bitcoin::key::Secp256k1;
 use bitcoin::key::rand::thread_rng;
 use bitcoin::secp256k1::{self, PublicKey};
-use fedimint_api_client::api::{DynGlobalApi, IGlobalFederationApi};
+use fedimint_api_client::api::{DynGlobalApi, IRawFederationApi};
 use fedimint_api_client::Endpoint;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::recovery::RecoveryProgress;
@@ -111,8 +111,8 @@ impl Client {
         Ok(ClientBuilder::new())
     }
 
-    pub fn api(&self) -> &(dyn IGlobalFederationApi + 'static) {
-        self.api.as_ref()
+    pub fn api(&self) -> &(dyn IRawFederationApi + 'static) {
+        &*self.api
     }
 
     pub fn api_clone(&self) -> DynGlobalApi {

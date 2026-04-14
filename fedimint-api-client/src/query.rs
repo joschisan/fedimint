@@ -5,7 +5,7 @@ use std::mem;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::{NumPeers, PeerId, maybe_add_send_sync};
 
-use crate::connection::{ServerError, ServerResult};
+use crate::api::{ServerError, ServerResult};
 
 /// Fedimint query strategy
 ///
