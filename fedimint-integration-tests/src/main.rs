@@ -23,14 +23,16 @@ fn main() -> anyhow::Result<()> {
     info!("Invite code: {}", env.invite_code);
     info!("Gateway: {}", env.gw_addr);
 
-    info!("Running lnv2 tests...");
-    runtime.block_on(lnv2::run_tests(&env))?;
-
-    info!("Running mintv2 tests...");
-    runtime.block_on(mintv2::run_tests(&env))?;
+    let client_send = runtime.block_on(env.new_client())?;
 
     info!("Running walletv2 tests...");
-    runtime.block_on(walletv2::run_tests(&env))?;
+    runtime.block_on(walletv2::run_tests(&env, &client_send))?;
+
+    info!("Running lnv2 tests...");
+    runtime.block_on(lnv2::run_tests(&env, &client_send))?;
+
+    info!("Running mintv2 tests...");
+    runtime.block_on(mintv2::run_tests(&env, &client_send))?;
 
     info!("All integration tests passed!");
 

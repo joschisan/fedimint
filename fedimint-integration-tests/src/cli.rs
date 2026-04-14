@@ -3,7 +3,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use fedimint_gateway_cli_core::{
     FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkInvoiceCreateResponse,
-    LdkOnchainReceiveResponse, WalletReceiveResponse,
+    LdkOnchainReceiveResponse,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -58,17 +58,6 @@ pub fn gatewayd_federation_balance(
         .arg("balance")
         .arg(fed_id)
         .run_cli::<FederationBalanceResponse>()
-}
-
-pub fn gatewayd_wallet_receive(gw_addr: &str, fed_id: &str) -> Result<WalletReceiveResponse> {
-    Command::new("target-nix/debug/gatewayd-cli")
-        .arg("-a")
-        .arg(gw_addr)
-        .arg("module")
-        .arg(fed_id)
-        .arg("walletv2")
-        .arg("receive")
-        .run_cli::<WalletReceiveResponse>()
 }
 
 pub fn gatewayd_ldk_onchain_receive(gw_addr: &str) -> Result<LdkOnchainReceiveResponse> {

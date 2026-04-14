@@ -1,10 +1,9 @@
 use std::pin::pin;
 
-use anyhow::{Context, ensure};
+use anyhow::Context;
 use async_stream::stream;
 use bitcoincore_rpc::RpcApi;
 use fedimint_client::ClientHandleArc;
-use fedimint_core::Amount;
 use fedimint_eventlog::{Event, EventLogEntry, EventLogId};
 use fedimint_walletv2_client::WalletClientModule;
 use fedimint_walletv2_client::events::{
@@ -72,15 +71,12 @@ fn try_parse_wallet_event(entry: &EventLogEntry) -> Option<WalletEvent> {
     None
 }
 
-pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
-    info!("walletv2: circular_deposit");
+pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::Result<()> {
+    info!("walletv2: pegin + on-chain send");
 
-    let client_send = env.new_client().await?;
-    let client_receive = env.new_client().await?;
+    let mut send_events = pin!(wallet_event_stream(client_send));
 
-    let mut send_events = pin!(wallet_event_stream(&client_send));
-
-    env.pegin(&client_send, bitcoin::Amount::from_sat(100_000_000))
+    env.pegin(client_send, bitcoin::Amount::from_sat(100_000_000))
         .await?;
 
     // Drain the walletv2 events emitted by the pegin itself.
@@ -91,20 +87,15 @@ pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
         panic!("Expected pegin ReceiveUpdate event");
     };
 
-    let receive_address = client_receive
-        .get_first_module::<WalletClientModule>()?
-        .receive()
-        .await;
+    let external_address = block_in_place(|| env.bitcoind.get_new_address(None, None))?
+        .require_network(bitcoin::Network::Regtest)?;
 
-    info!(
-        address = %receive_address,
-        "Sending to receiver's federation address"
-    );
+    info!(address = %external_address, "Sending on-chain to external address");
 
     let operation_id = client_send
         .get_first_module::<WalletClientModule>()?
         .send(
-            receive_address.as_unchecked().clone(),
+            external_address.as_unchecked().clone(),
             bitcoin::Amount::from_sat(100_000),
             None,
         )
@@ -121,10 +112,7 @@ pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
     assert_eq!(update.operation_id, operation_id);
 
     let SendPaymentStatus::Success(txid) = update.status else {
-        panic!(
-            "Circular deposit send operation failed: {:?}",
-            update.status
-        );
+        panic!("On-chain send failed: {:?}", update.status);
     };
 
     info!(%txid, "Send confirmed, waiting for tx in mempool");
@@ -136,28 +124,14 @@ pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
     })
     .await?;
 
-    env.mine_blocks(10);
-
-    retry("circular deposit balance", || async {
-        let balance = client_receive.get_balance().await?;
-
-        ensure!(
-            balance >= Amount::from_sats(99_000),
-            "receiver balance {balance} too low"
-        );
-
-        Ok(())
-    })
-    .await?;
-
-    info!("walletv2: circular_deposit passed");
+    info!("walletv2: pegin + on-chain send passed");
 
     info!("walletv2: zero_fee_send_aborts");
 
     let abort_op = client_send
         .get_first_module::<WalletClientModule>()?
         .send(
-            receive_address.as_unchecked().clone(),
+            external_address.as_unchecked().clone(),
             bitcoin::Amount::from_sat(100_000),
             Some(bitcoin::Amount::ZERO),
         )

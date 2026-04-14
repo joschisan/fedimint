@@ -213,32 +213,6 @@ impl TestEnv {
         })?)
     }
 
-    pub async fn pegin_gateway(&self, amount: bitcoin::Amount) -> anyhow::Result<()> {
-        let fed_id = self.invite_code.federation_id().to_string();
-
-        let addr = cli::gatewayd_wallet_receive(&self.gw_addr, &fed_id)?
-            .address
-            .assume_checked();
-
-        self.send_to_address(&addr, amount)?;
-        self.mine_blocks(10);
-
-        retry("gateway pegin balance", || {
-            let fed_id = fed_id.clone();
-            async move {
-                let balance =
-                    cli::gatewayd_federation_balance(&self.gw_addr, &fed_id)?.balance_msat;
-
-                ensure!(balance.msats > 0, "gateway balance is zero");
-                Ok(())
-            }
-        })
-        .await?;
-
-        info!("Pegged in gateway");
-        Ok(())
-    }
-
     pub async fn pegin(
         &self,
         client: &ClientHandleArc,

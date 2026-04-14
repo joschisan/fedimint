@@ -63,16 +63,12 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<MintEvent> {
     None
 }
 
-pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
+pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::Result<()> {
     info!("mintv2: send_and_receive (10 iterations) + double_spend_is_rejected");
 
-    let client_send = env.new_client().await?;
     let client_receive = env.new_client().await?;
 
-    env.pegin(&client_send, bitcoin::Amount::from_sat(100_000_000))
-        .await?;
-
-    let mut send_events = pin!(mint_event_stream(&client_send));
+    let mut send_events = pin!(mint_event_stream(client_send));
     let mut receive_events = pin!(mint_event_stream(&client_receive));
 
     for i in 0..10 {

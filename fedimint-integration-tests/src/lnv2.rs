@@ -1,5 +1,6 @@
 use std::pin::pin;
 
+use anyhow::ensure;
 use async_stream::stream;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::Amount;
@@ -14,7 +15,7 @@ use futures::StreamExt;
 use tracing::info;
 
 use crate::cli;
-use crate::env::{NUM_GUARDIANS, TestEnv};
+use crate::env::{NUM_GUARDIANS, TestEnv, retry};
 
 #[derive(Debug)]
 enum LnEvent {
@@ -65,9 +66,9 @@ fn try_parse_ln_event(entry: &EventLogEntry) -> Option<LnEvent> {
     None
 }
 
-pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
+pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::Result<()> {
     test_direct_ln_payments(env).await?;
-    test_payments(env).await?;
+    test_payments(env, client_send).await?;
     test_gateway_registration(env).await?;
 
     Ok(())
@@ -152,26 +153,16 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
+async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Result<()> {
     info!("lnv2: test_payments");
-
-    let client = env.new_client().await?;
-
-    env.pegin(&client, bitcoin::Amount::from_sat(100_000_000))
-        .await?;
 
     let lnv2 = client.get_first_module::<LightningClientModule>()?;
 
     let gw: SafeUrl = env.gw_public.parse()?;
 
-    info!("Pegging in gateway...");
+    let mut events = pin!(ln_event_stream(client));
 
-    env.pegin_gateway(bitcoin::Amount::from_sat(100_000_000))
-        .await?;
-
-    let mut events = pin!(ln_event_stream(&client));
-
-    info!("Testing payment from client to LDK node...");
+    info!("Testing payment from client to LDK node (funds gateway federation liquidity)...");
 
     {
         let invoice = env.ldk_node.bolt11_payment().receive(
@@ -196,12 +187,26 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
         assert!(matches!(update.status, SendPaymentStatus::Success(_)));
     }
 
-    info!("Testing payment from LDK node to client...");
+    info!("Polling gateway federation balance...");
+
+    let fed_id = env.invite_code.federation_id().to_string();
+    retry("gateway federation balance", || {
+        let fed_id = fed_id.clone();
+        async move {
+            let balance =
+                cli::gatewayd_federation_balance(&env.gw_addr, &fed_id)?.balance_msat;
+            ensure!(balance.msats > 0, "gateway federation balance is zero");
+            Ok(())
+        }
+    })
+    .await?;
+
+    info!("Testing payment from LDK node to client (half of first send)...");
 
     {
         let (invoice, receive_op) = lnv2
             .receive(
-                Amount::from_msats(1_000_000),
+                Amount::from_msats(500_000),
                 300,
                 Bolt11InvoiceDescription::Direct(String::new()),
                 Some(gw.clone()),
