@@ -364,27 +364,6 @@ where
         self.client.get().operation_exists(op_id).await
     }
 
-    pub async fn get_own_active_states(&self) -> Vec<(M::States, ActiveStateMeta)> {
-        self.client
-            .get()
-            .executor()
-            .get_active_states()
-            .await
-            .into_iter()
-            .filter(|s| s.0.module_instance_id() == self.module_instance_id)
-            .map(|s| {
-                (
-                    Clone::clone(
-                        s.0.as_any()
-                            .downcast_ref::<M::States>()
-                            .expect("incorrect output type passed to module plugin"),
-                    ),
-                    s.1,
-                )
-            })
-            .collect()
-    }
-
     pub async fn get_config(&self) -> ClientConfig {
         self.client.get().config().await
     }

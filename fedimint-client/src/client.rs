@@ -39,7 +39,6 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
-use fedimint_core::runtime::sleep;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::transaction::Transaction;
 use fedimint_core::util::{BoxStream, FmtCompact as _, FmtCompactAnyhow as _, SafeUrl};
@@ -917,16 +916,6 @@ impl Client {
             .await
             .context("Recovery task completed and update receiver disconnected, but the desired modules are still unavailable or failed to recover")?;
 
-        Ok(())
-    }
-
-    pub async fn wait_for_all_active_state_machines(&self) -> anyhow::Result<()> {
-        loop {
-            if self.executor.get_active_states().await.is_empty() {
-                break;
-            }
-            sleep(Duration::from_millis(100)).await;
-        }
         Ok(())
     }
 
