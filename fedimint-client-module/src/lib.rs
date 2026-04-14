@@ -456,4 +456,3 @@ impl TransactionUpdates {
         Ok(())
     }
 }
-

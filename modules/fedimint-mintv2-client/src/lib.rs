@@ -38,9 +38,7 @@ use fedimint_client_module::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
 use fedimint_client_module::module::recovery::RecoveryProgress;
-use fedimint_client_module::module::{
-    ClientContext, OutPointRange,
-};
+use fedimint_client_module::module::{ClientContext, OutPointRange};
 use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
 use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};

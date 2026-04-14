@@ -8,16 +8,14 @@ use fedimint_api_client::api::global_api::with_cache::GlobalFederationApiWithCac
 use fedimint_api_client::api::{DynGlobalApi, FederationApi};
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_api_client::download_from_invite_code;
+use fedimint_client_module::ModuleRecoveryStarted;
 use fedimint_client_module::module::init::ClientModuleInit;
 use fedimint_client_module::module::recovery::RecoveryProgress;
-use fedimint_client_module::module::{
-    ClientModuleRegistry, FinalClientIface,
-};
+use fedimint_client_module::module::{ClientModuleRegistry, FinalClientIface};
 use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use fedimint_client_module::transaction::{
     TRANSACTION_SUBMISSION_MODULE_INSTANCE, TxSubmissionContext, tx_submission_sm_decoder,
 };
-use fedimint_client_module::ModuleRecoveryStarted;
 use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::{

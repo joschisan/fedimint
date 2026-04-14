@@ -554,4 +554,3 @@ pub async fn get_decoded_client_secret<T: Decodable>(db: &Database) -> anyhow::R
         None => bail!("Encoded client secret not present in DB"),
     }
 }
-
