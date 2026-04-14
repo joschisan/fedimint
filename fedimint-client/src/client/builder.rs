@@ -98,8 +98,6 @@ pub struct ClientBuilder {
     module_inits: ClientModuleInitRegistry,
     stopped: bool,
     log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
-    iroh_enable_dht: bool,
-    iroh_enable_next: bool,
 }
 
 impl ClientBuilder {
@@ -116,18 +114,6 @@ impl ClientBuilder {
             module_inits: ModuleInitRegistry::new(),
             stopped: false,
             log_event_added_transient_tx,
-            iroh_enable_dht: true,
-            iroh_enable_next: true,
-        }
-    }
-
-    pub(crate) fn from_existing(client: &Client) -> Self {
-        ClientBuilder {
-            module_inits: client.module_inits.clone(),
-            stopped: false,
-            log_event_added_transient_tx: client.log_event_added_transient_tx.clone(),
-            iroh_enable_dht: client.iroh_enable_dht,
-            iroh_enable_next: client.iroh_enable_next,
         }
     }
 
@@ -143,20 +129,6 @@ impl ClientBuilder {
 
     pub fn stopped(&mut self) {
         self.stopped = true;
-    }
-
-    /// Override if the DHT should be enabled when using Iroh to connect to
-    /// the federation
-    pub fn with_iroh_enable_dht(mut self, iroh_enable_dht: bool) -> Self {
-        self.iroh_enable_dht = iroh_enable_dht;
-        self
-    }
-
-    /// Override if the parallel unstable/next Iroh stack should be enabled when
-    /// using Iroh to connect to the federation
-    pub fn with_iroh_enable_next(mut self, iroh_enable_next: bool) -> Self {
-        self.iroh_enable_next = iroh_enable_next;
-        self
     }
 
     /// Migrate client module databases
@@ -631,18 +603,14 @@ impl ClientBuilder {
             federation_config_meta: config.global.meta,
             primary_module,
             modules,
-            module_inits: self.module_inits.clone(),
             log_ordering_wakeup_tx,
             log_event_added_rx,
             log_event_added_transient_tx: log_event_added_transient_tx.clone(),
             executor,
             api,
             secp_ctx: Secp256k1::new(),
-            root_secret,
             task_group,
             client_recovery_progress_receiver,
-            iroh_enable_dht: self.iroh_enable_dht,
-            iroh_enable_next: self.iroh_enable_next,
         });
 
         client_inner

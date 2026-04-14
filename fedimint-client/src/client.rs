@@ -43,7 +43,6 @@ use fedimint_core::util::{BoxStream, FmtCompact as _, FmtCompactAnyhow as _, Saf
 use fedimint_core::{
     Amount, OutPoint, PeerId, apply, async_trait_maybe_send, maybe_add_send, maybe_add_send_sync,
 };
-use fedimint_derive_secret::DerivableSecret;
 use fedimint_eventlog::{
     DBTransactionEventLogExt as _, DynEventLogTrimableTracker, Event, EventKind, EventLogEntry,
     EventLogId, EventLogTrimableId, EventLogTrimableTracker, EventPersistence, PersistedLogEntry,
@@ -62,7 +61,7 @@ use crate::db::{
     EncodedClientSecretKey, apply_migrations_core_client_dbtx, get_decoded_client_secret,
     verify_client_db_integrity_dbtx,
 };
-use crate::module_init::{ClientModuleInitRegistry, DynClientModuleInit, IClientModuleInit};
+use crate::module_init::{DynClientModuleInit, IClientModuleInit};
 use crate::sm::executor::{
     ActiveModuleOperationStateKeyPrefix, ActiveOperationStateKeyPrefix, Executor,
     InactiveModuleOperationStateKeyPrefix, InactiveOperationStateKeyPrefix,
@@ -97,10 +96,8 @@ pub struct Client {
     federation_config_meta: BTreeMap<String, String>,
     primary_module: Option<ModuleInstanceId>,
     pub(crate) modules: ClientModuleRegistry,
-    module_inits: ClientModuleInitRegistry,
     executor: Executor,
     pub(crate) api: DynGlobalApi,
-    root_secret: DerivableSecret,
     secp_ctx: Secp256k1<secp256k1::All>,
 
     task_group: TaskGroup,
@@ -115,8 +112,6 @@ pub struct Client {
     /// Receiver for events fired every time (ordered) log event is added.
     log_event_added_rx: watch::Receiver<()>,
     log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
-    iroh_enable_dht: bool,
-    iroh_enable_next: bool,
 }
 
 impl Client {
@@ -1236,10 +1231,6 @@ impl Client {
     /// Get a receiver that signals when new events are added to the event log
     pub fn log_event_added_rx(&self) -> watch::Receiver<()> {
         self.log_event_added_rx.clone()
-    }
-
-    pub fn iroh_enable_dht(&self) -> bool {
-        self.iroh_enable_dht
     }
 
     pub(crate) async fn run_core_migrations(
