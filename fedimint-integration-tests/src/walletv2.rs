@@ -152,5 +152,29 @@ pub async fn run_tests(env: &TestEnv) -> anyhow::Result<()> {
 
     info!("walletv2: circular_deposit passed");
 
+    info!("walletv2: zero_fee_send_aborts");
+
+    let abort_op = client_send
+        .get_first_module::<WalletClientModule>()?
+        .send(
+            receive_address.as_unchecked().clone(),
+            bitcoin::Amount::from_sat(100_000),
+            Some(bitcoin::Amount::ZERO),
+        )
+        .await?;
+
+    let Some(WalletEvent::Send(send)) = send_events.next().await else {
+        panic!("Expected Send event");
+    };
+    assert_eq!(send.operation_id, abort_op);
+
+    let Some(WalletEvent::SendUpdate(update)) = send_events.next().await else {
+        panic!("Expected SendUpdate event");
+    };
+    assert_eq!(update.operation_id, abort_op);
+    assert_eq!(update.status, SendPaymentStatus::Aborted);
+
+    info!("walletv2: zero_fee_send_aborts passed");
+
     Ok(())
 }
