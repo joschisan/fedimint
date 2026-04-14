@@ -704,8 +704,9 @@ impl Client {
             .iter_modules_id_kind()
             .map(|(id, kind)| (id, kind.to_string()))
             .collect();
+        let task_group = self.task_group.clone();
         self.task_group
-            .spawn("module recoveries", |_task_handle| async {
+            .spawn("module recoveries", |_task_handle| async move {
                 Self::run_module_recoveries_task(
                     db,
                     log_ordering_wakeup_tx,
@@ -713,6 +714,7 @@ impl Client {
                     module_recoveries,
                     module_recovery_progress_receivers,
                     module_kinds,
+                    task_group,
                 )
                 .await;
             });
@@ -731,30 +733,43 @@ impl Client {
             watch::Receiver<RecoveryProgress>,
         >,
         module_kinds: BTreeMap<ModuleInstanceId, String>,
+        task_group: TaskGroup,
     ) {
-        debug!(target: LOG_CLIENT_RECOVERY, num_modules=%module_recovery_progress_receivers.len(), "Staring module recoveries");
-        let mut completed_stream = Vec::new();
-        let progress_stream = futures::stream::FuturesUnordered::new();
+        debug!(target: LOG_CLIENT_RECOVERY, num_modules=%module_recovery_progress_receivers.len(), "Starting module recoveries");
+
+        // Recoveries run as independent tasks and report completion via this
+        // channel. Running them inside the select below would let them hold a
+        // write transaction while yielding, deadlocking the progress handler
+        // that needs its own write transaction.
+        let (completion_tx, completion_rx) =
+            tokio::sync::mpsc::unbounded_channel::<ModuleInstanceId>();
 
         for (module_instance_id, f) in module_recoveries {
-            completed_stream.push(futures::stream::once(Box::pin(async move {
-                match f.await {
-                    Ok(()) => (module_instance_id, None),
-                    Err(err) => {
-                        warn!(
-                            target: LOG_CLIENT,
-                            err = %err.fmt_compact_anyhow(), module_instance_id, "Module recovery failed"
-                        );
-                        // a module recovery that failed reports and error and
-                        // just never finishes, so we don't need a separate state
-                        // for it
-                        futures::future::pending::<()>().await;
-                        unreachable!()
+            let tx = completion_tx.clone();
+            task_group.spawn(
+                format!("module {module_instance_id} recovery"),
+                move |_| async move {
+                    match f.await {
+                        Ok(()) => {
+                            let _ = tx.send(module_instance_id);
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: LOG_CLIENT,
+                                err = %err.fmt_compact_anyhow(),
+                                module_instance_id,
+                                "Module recovery failed"
+                            );
+                            // Don't send completion - recovery is considered
+                            // permanently stuck.
+                        }
                     }
-                }
-            })));
+                },
+            );
         }
+        drop(completion_tx);
 
+        let progress_stream = futures::stream::FuturesUnordered::new();
         for (module_instance_id, rx) in module_recovery_progress_receivers {
             progress_stream.push(
                 tokio_stream::wrappers::WatchStream::new(rx)
@@ -763,9 +778,12 @@ impl Client {
             );
         }
 
+        let completion_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(completion_rx)
+            .map(|module_instance_id| (module_instance_id, None));
+
         let mut futures = futures::stream::select(
             futures::stream::select_all(progress_stream),
-            futures::stream::select_all(completed_stream),
+            completion_stream,
         );
 
         while let Some((module_instance_id, progress)) = futures.next().await {
