@@ -634,13 +634,16 @@ impl ClientBuilder {
 
         let client_arc = ClientHandle::new(client_inner);
 
-        for (_, _, module) in client_arc.modules.iter_modules() {
-            module.start().await;
-        }
-
         final_client.set(client_iface.clone());
 
         client_arc.tx_submission_executor.start().await;
+
+        // Module `start` is called *after* `final_client.set` so that any
+        // per-module executors spawned here can safely resolve the weak
+        // client reference from their transition contexts.
+        for (_, _, module) in client_arc.modules.iter_modules() {
+            module.start().await;
+        }
 
         if !module_recoveries.is_empty() {
             client_arc.spawn_module_recoveries_task(
