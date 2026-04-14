@@ -92,6 +92,30 @@ impl<S: StateMachine> StateTransition<S> {
             }),
         }
     }
+
+    /// Lift a transition on a sub-state into one on a parent enum that
+    /// carries it as a variant. `wrap` re-embeds the sub-state in the
+    /// parent; `unwrap` projects back out (panics on variant mismatch).
+    pub fn map<T, F, G>(self, wrap: F, unwrap: G) -> StateTransition<T>
+    where
+        T: StateMachine,
+        F: Fn(S) -> T + MaybeSend + MaybeSync + Clone + 'static,
+        G: Fn(T) -> S + MaybeSend + MaybeSync + Clone + 'static,
+    {
+        let inner = self.transition;
+        StateTransition {
+            trigger: self.trigger,
+            transition: Arc::new(move |dbtx, val, parent| {
+                let inner = inner.clone();
+                let wrap = wrap.clone();
+                let sub = unwrap(parent);
+                Box::pin(async move {
+                    let new_sub = inner(dbtx, val, sub).await;
+                    wrap(new_sub)
+                })
+            }),
+        }
+    }
 }
 
 // ---- DB records ------------------------------------------------------------

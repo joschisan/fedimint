@@ -11,6 +11,7 @@ use bitcoin::key::rand::thread_rng;
 use bitcoin::secp256k1::{self, PublicKey};
 use fedimint_api_client::api::{DynGlobalApi, IGlobalFederationApi};
 use fedimint_api_client::connection::ConnectionPool;
+use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
     ClientContextIface, ClientModule, ClientModuleRegistry, DynClientModule, IClientModule,
@@ -19,7 +20,6 @@ use fedimint_client_module::module::{
 use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy as _};
 use fedimint_client_module::sm::DynState;
 use fedimint_client_module::sm::executor::IExecutor;
-use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::transaction::{
     TRANSACTION_SUBMISSION_MODULE_INSTANCE, TransactionBuilder, TxSubmissionStates,
     TxSubmissionStatesSM,
