@@ -528,26 +528,6 @@ where
     }
 }
 
-/// Priority module priority (lower number is higher priority)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PrimaryModulePriority(u64);
-
-impl PrimaryModulePriority {
-    pub const HIGH: Self = Self(100);
-    pub const LOW: Self = Self(10000);
-
-    pub fn custom(prio: u64) -> Self {
-        Self(prio)
-    }
-}
-/// Whether this module supports being primary
-pub enum PrimaryModuleSupport {
-    /// Module supports being primary at given priority
-    Yes { priority: PrimaryModulePriority },
-    /// Module does not support being primary
-    None,
-}
-
 /// Fedimint module client
 #[apply(async_trait_maybe_send!)]
 pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
@@ -619,8 +599,8 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// * [`Self::await_primary_module_output`]
     /// * [`Self::get_balance`]
     /// * [`Self::subscribe_balance_changes`]
-    fn supports_being_primary(&self) -> PrimaryModuleSupport {
-        PrimaryModuleSupport::None
+    fn supports_being_primary(&self) -> bool {
+        false
     }
 
     /// Creates all inputs and outputs necessary to balance the transaction.
@@ -752,7 +732,7 @@ pub trait IClientModule: Debug {
 
     fn output_fee(&self, amount: Amount, output: &DynOutput) -> Option<Amount>;
 
-    fn supports_being_primary(&self) -> PrimaryModuleSupport;
+    fn supports_being_primary(&self) -> bool;
 
     async fn create_final_inputs_and_outputs(
         &self,
@@ -821,7 +801,7 @@ where
         )
     }
 
-    fn supports_being_primary(&self) -> PrimaryModuleSupport {
+    fn supports_being_primary(&self) -> bool {
         <T as ClientModule>::supports_being_primary(self)
     }
 

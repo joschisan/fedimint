@@ -39,7 +39,7 @@ use fedimint_client_module::module::init::{
 };
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
-    ClientContext, OutPointRange, PrimaryModulePriority, PrimaryModuleSupport,
+    ClientContext, OutPointRange,
 };
 use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
 use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
@@ -350,10 +350,8 @@ impl ClientModule for MintClientModule {
         Some(self.cfg.output_fee)
     }
 
-    fn supports_being_primary(&self) -> PrimaryModuleSupport {
-        PrimaryModuleSupport::Yes {
-            priority: PrimaryModulePriority::HIGH,
-        }
+    fn supports_being_primary(&self) -> bool {
+        true
     }
 
     async fn create_final_inputs_and_outputs(

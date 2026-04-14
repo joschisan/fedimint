@@ -11,7 +11,7 @@ use fedimint_api_client::download_from_invite_code;
 use fedimint_client_module::module::init::ClientModuleInit;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
-    ClientModuleRegistry, FinalClientIface, PrimaryModulePriority, PrimaryModuleSupport,
+    ClientModuleRegistry, FinalClientIface,
 };
 use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use fedimint_client_module::transaction::{
@@ -587,17 +587,10 @@ impl ClientBuilder {
             dbtx.commit_tx().await;
         }
 
-        let mut primary_modules: BTreeMap<PrimaryModulePriority, Vec<ModuleInstanceId>> =
-            BTreeMap::new();
-
-        for (module_id, _kind, module) in modules.iter_modules() {
-            match module.supports_being_primary() {
-                PrimaryModuleSupport::Yes { priority } => {
-                    primary_modules.entry(priority).or_default().push(module_id);
-                }
-                PrimaryModuleSupport::None => {}
-            }
-        }
+        let primary_module = modules
+            .iter_modules()
+            .find(|(_id, _kind, module)| module.supports_being_primary())
+            .map(|(id, _kind, _module)| id);
 
         let executor = {
             let mut executor_builder = Executor::builder();
@@ -636,7 +629,7 @@ impl ClientBuilder {
             connectors,
             federation_id: fed_id,
             federation_config_meta: config.global.meta,
-            primary_modules,
+            primary_module,
             modules,
             module_inits: self.module_inits.clone(),
             log_ordering_wakeup_tx,

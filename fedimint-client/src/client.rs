@@ -14,7 +14,7 @@ use fedimint_api_client::connection::ConnectionPool;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
     ClientContextIface, ClientModule, ClientModuleRegistry, DynClientModule, FinalClientIface,
-    IClientModule, IdxRange, OutPointRange, PrimaryModulePriority,
+    IClientModule, IdxRange, OutPointRange,
 };
 use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy as _};
 use fedimint_client_module::sm::executor::{ActiveStateKey, IExecutor, InactiveStateKey};
@@ -95,7 +95,7 @@ pub struct Client {
     db: Database,
     federation_id: FederationId,
     federation_config_meta: BTreeMap<String, String>,
-    primary_modules: BTreeMap<PrimaryModulePriority, Vec<ModuleInstanceId>>,
+    primary_module: Option<ModuleInstanceId>,
     pub(crate) modules: ClientModuleRegistry,
     module_inits: ClientModuleInitRegistry,
     executor: Executor,
@@ -1255,13 +1255,10 @@ impl Client {
         Ok(())
     }
 
-    /// Returns the highest-priority primary module, if any
+    /// Returns the primary module, if any
     pub fn primary_module(&self) -> Option<(ModuleInstanceId, &DynClientModule)> {
-        self.primary_modules
-            .iter()
-            .flat_map(|(_prio, ids)| ids.iter().copied())
+        self.primary_module
             .map(|id| (id, self.modules.get_expect(id)))
-            .next()
     }
 
     /// Returns the primary module, panicking if none is available
