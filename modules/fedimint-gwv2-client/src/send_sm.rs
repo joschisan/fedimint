@@ -13,7 +13,7 @@ use fedimint_lnv2_common::{LightningInput, LightningInputV0, LightningInvoice, O
 use serde::{Deserialize, Serialize};
 
 use super::FinalReceiveState;
-use super::events::{OutgoingPaymentFailed, OutgoingPaymentSucceeded};
+use super::events::{SendPaymentStatus, SendPaymentUpdateEvent};
 use crate::{GatewayClientContextV2, GatewayClientModuleV2};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -253,9 +253,9 @@ impl SendStateMachine {
                     .client_ctx
                     .log_event(
                         &mut dbtx.module_tx(),
-                        OutgoingPaymentSucceeded {
-                            payment_image: old_state.common.contract.payment_image.clone(),
-                            target_federation: payment_response.target_federation,
+                        SendPaymentUpdateEvent {
+                            operation_id: old_state.common.operation_id,
+                            status: SendPaymentStatus::Success(payment_response.preimage),
                         },
                     )
                     .await;
@@ -281,14 +281,19 @@ impl SendStateMachine {
                 }))
             }
             Err(e) => {
+                let signature = client_ctx
+                    .module
+                    .keypair
+                    .sign_schnorr(old_state.common.contract.forfeit_message());
+
                 client_ctx
                     .module
                     .client_ctx
                     .log_event(
                         &mut dbtx.module_tx(),
-                        OutgoingPaymentFailed {
-                            payment_image: old_state.common.contract.payment_image.clone(),
-                            error: e.clone(),
+                        SendPaymentUpdateEvent {
+                            operation_id: old_state.common.operation_id,
+                            status: SendPaymentStatus::Cancelled(signature),
                         },
                     )
                     .await;

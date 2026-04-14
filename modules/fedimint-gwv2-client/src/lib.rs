@@ -13,8 +13,12 @@ use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::Message;
-use events::{IncomingPaymentStarted, OutgoingPaymentStarted};
+use events::{
+    CompleteLightningPaymentEvent, ReceivePaymentStatus, ReceivePaymentUpdateEvent,
+    SendPaymentStatus, SendPaymentUpdateEvent,
+};
 use fedimint_api_client::api::DynModuleApi;
+use fedimint_eventlog::EventLogId;
 use fedimint_client::ClientHandleArc;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule, OutPointRange};
@@ -30,7 +34,6 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::hex::ToHex;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::Keypair;
-use fedimint_core::time::now;
 use fedimint_core::util::Spanned;
 use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send, secp256k1};
 use fedimint_lnv2_common::config::LightningClientConfig;
@@ -39,14 +42,13 @@ use fedimint_lnv2_common::gateway_api::SendPaymentPayload;
 use fedimint_lnv2_common::{
     LightningCommonInit, LightningInvoice, LightningModuleTypes, LightningOutput, LightningOutputV0,
 };
-use futures::StreamExt;
 use lightning_invoice::Bolt11Invoice;
 use receive_sm::{ReceiveSMState, ReceiveStateMachine};
 use secp256k1::schnorr::Signature;
 use send_sm::{SendSMState, SendStateMachine};
 use serde::{Deserialize, Serialize};
 use tpe::{AggregatePublicKey, PublicKeyShare};
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::api::GatewayFederationApi;
 use crate::complete_sm::{CompleteSMCommon, CompleteSMState, CompleteStateMachine};
@@ -232,8 +234,6 @@ impl GatewayClientModuleV2 {
         &self,
         payload: SendPaymentPayload,
     ) -> anyhow::Result<Result<[u8; 32], Signature>> {
-        let operation_start = now();
-
         // The operation id is equal to the contract id which also doubles as the
         // message signed by the gateway via the forfeit signature to forfeit
         // the gateways claim to a contract in case of cancellation. We only create a
@@ -322,46 +322,22 @@ impl GatewayClientModuleV2 {
             )
             .await
             .ok();
-
-        self.client_ctx
-            .log_event(
-                &mut dbtx,
-                OutgoingPaymentStarted {
-                    operation_start,
-                    outgoing_contract: payload.contract.clone(),
-                    min_contract_amount,
-                    invoice_amount: Amount::from_msats(amount),
-                    max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM_V2),
-                },
-            )
-            .await;
         dbtx.commit_tx().await;
 
         Ok(self.subscribe_send(operation_id).await)
     }
 
     pub async fn subscribe_send(&self, operation_id: OperationId) -> Result<[u8; 32], Signature> {
-        let mut stream = self.notifier.subscribe(operation_id).await;
+        let status = await_event::<SendPaymentUpdateEvent, _>(&self.client_ctx, |ev| {
+            (ev.operation_id == operation_id).then(|| ev.status.clone())
+        })
+        .await;
 
-        loop {
-            if let Some(GatewayClientStateMachinesV2::Send(state)) = stream.next().await {
-                match state.state {
-                    SendSMState::Sending => {}
-                    SendSMState::Claiming(claiming) => {
-                        return Ok(claiming.preimage);
-                    }
-                    SendSMState::Cancelled(cancelled) => {
-                        warn!("Outgoing lightning payment is cancelled {:?}", cancelled);
-
-                        let signature = self
-                            .keypair
-                            .sign_schnorr(state.common.contract.forfeit_message());
-
-                        assert!(state.common.contract.verify_forfeit_signature(&signature));
-
-                        return Err(signature);
-                    }
-                }
+        match status {
+            SendPaymentStatus::Success(preimage) => Ok(preimage),
+            SendPaymentStatus::Cancelled(signature) => {
+                warn!("Outgoing lightning payment is cancelled");
+                Err(signature)
             }
         }
     }
@@ -372,10 +348,8 @@ impl GatewayClientModuleV2 {
         incoming_chan_id: u64,
         htlc_id: u64,
         contract: IncomingContract,
-        amount_msat: u64,
+        _amount_msat: u64,
     ) -> anyhow::Result<()> {
-        let operation_start = now();
-
         let operation_id = OperationId::from_encodable(&contract);
 
         if self.client_ctx.operation_exists(operation_id).await {
@@ -388,7 +362,6 @@ impl GatewayClientModuleV2 {
             output: LightningOutput::V0(LightningOutputV0::Incoming(contract.clone())),
             amount: contract.commitment.amount,
         };
-        let commitment = contract.commitment.clone();
         let client_output_sm = ClientOutputSM::<GatewayClientStateMachinesV2> {
             state_machines: Arc::new(move |range: OutPointRange| {
                 assert_eq!(range.count(), 1);
@@ -426,29 +399,14 @@ impl GatewayClientModuleV2 {
             .finalize_and_submit_transaction(operation_id, transaction)
             .await?;
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
-        self.client_ctx
-            .log_event(
-                &mut dbtx,
-                IncomingPaymentStarted {
-                    operation_start,
-                    incoming_contract_commitment: commitment,
-                    invoice_amount: Amount::from_msats(amount_msat),
-                },
-            )
-            .await;
-        dbtx.commit_tx().await;
-
         Ok(())
     }
 
     pub async fn relay_direct_swap(
         &self,
         contract: IncomingContract,
-        amount_msat: u64,
+        _amount_msat: u64,
     ) -> anyhow::Result<FinalReceiveState> {
-        let operation_start = now();
-
         let operation_id = OperationId::from_encodable(&contract);
 
         if self.client_ctx.operation_exists(operation_id).await {
@@ -461,7 +419,6 @@ impl GatewayClientModuleV2 {
             output: LightningOutput::V0(LightningOutputV0::Incoming(contract.clone())),
             amount: contract.commitment.amount,
         };
-        let commitment = contract.commitment.clone();
         let client_output_sm = ClientOutputSM::<GatewayClientStateMachinesV2> {
             state_machines: Arc::new(move |range| {
                 assert_eq!(range.count(), 1);
@@ -489,66 +446,60 @@ impl GatewayClientModuleV2 {
             .finalize_and_submit_transaction(operation_id, transaction)
             .await?;
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
-        self.client_ctx
-            .log_event(
-                &mut dbtx,
-                IncomingPaymentStarted {
-                    operation_start,
-                    incoming_contract_commitment: commitment,
-                    invoice_amount: Amount::from_msats(amount_msat),
-                },
-            )
-            .await;
-        dbtx.commit_tx().await;
-
         Ok(self.await_receive(operation_id).await)
     }
 
     pub async fn await_receive(&self, operation_id: OperationId) -> FinalReceiveState {
-        let mut stream = self.notifier.subscribe(operation_id).await;
+        let status = await_event::<ReceivePaymentUpdateEvent, _>(&self.client_ctx, |ev| {
+            (ev.operation_id == operation_id).then(|| ev.status.clone())
+        })
+        .await;
 
-        loop {
-            if let Some(GatewayClientStateMachinesV2::Receive(state)) = stream.next().await {
-                match state.state {
-                    ReceiveSMState::Funding => {}
-                    ReceiveSMState::Rejected(..) => return FinalReceiveState::Rejected,
-                    ReceiveSMState::Success(preimage) => {
-                        return FinalReceiveState::Success(preimage);
-                    }
-                    ReceiveSMState::Refunding(_) => return FinalReceiveState::Refunded,
-                    ReceiveSMState::Failure => return FinalReceiveState::Failure,
-                }
-            }
+        match status {
+            ReceivePaymentStatus::Success(preimage) => FinalReceiveState::Success(preimage),
+            ReceivePaymentStatus::Rejected => FinalReceiveState::Rejected,
+            ReceivePaymentStatus::Refunded => FinalReceiveState::Refunded,
+            ReceivePaymentStatus::Failure => FinalReceiveState::Failure,
         }
     }
 
     /// For the given `OperationId`, this function will wait until the Complete
-    /// state machine has finished or failed.
+    /// state machine has finished.
     pub async fn await_completion(&self, operation_id: OperationId) {
-        let mut stream = self.notifier.subscribe(operation_id).await;
+        await_event::<CompleteLightningPaymentEvent, _>(&self.client_ctx, |ev| {
+            (ev.operation_id == operation_id).then_some(())
+        })
+        .await;
+    }
+}
 
-        loop {
-            match stream.next().await {
-                Some(GatewayClientStateMachinesV2::Complete(state)) => {
-                    if state.state == CompleteSMState::Completed {
-                        info!(%state, "LNv2 completion state machine finished");
-                        return;
-                    }
+/// Tail the persistent event log waiting for an event of type `E` for which
+/// `predicate` returns `Some(value)`. Returns the matched value.
+async fn await_event<E, T>(
+    client_ctx: &ClientContext<GatewayClientModuleV2>,
+    predicate: impl Fn(&E) -> Option<T>,
+) -> T
+where
+    E: fedimint_eventlog::Event,
+{
+    let mut log_rx = client_ctx.log_event_added_rx();
+    let mut next_id = EventLogId::LOG_START;
 
-                    info!(%state, "Waiting for LNv2 completion state machine");
-                }
-                Some(GatewayClientStateMachinesV2::Receive(state)) => {
-                    info!(%state, "Waiting for LNv2 completion state machine");
-                    continue;
-                }
-                Some(state) => {
-                    warn!(%state, "Operation is not an LNv2 completion state machine");
-                    return;
-                }
-                None => return,
+    loop {
+        for entry in client_ctx.get_event_log(Some(next_id), 100).await {
+            next_id = entry.id().saturating_add(1);
+            let raw = entry.as_raw();
+            if raw.module_kind() != E::MODULE.as_ref() || raw.kind != E::KIND {
+                continue;
+            }
+            let Some(ev) = raw.to_event::<E>() else {
+                continue;
+            };
+            if let Some(out) = predicate(&ev) {
+                return out;
             }
         }
+        let _ = log_rx.changed().await;
     }
 }
 

@@ -1325,6 +1325,18 @@ impl ClientContextIface for Client {
         self.get_event_log_transient_receiver()
     }
 
+    fn log_event_added_rx(&self) -> watch::Receiver<()> {
+        Client::log_event_added_rx(self)
+    }
+
+    async fn get_event_log(
+        &self,
+        pos: Option<EventLogId>,
+        limit: u64,
+    ) -> Vec<PersistedLogEntry> {
+        Client::get_event_log(self, pos, limit).await
+    }
+
     async fn read_operation_active_states<'dbtx>(
         &self,
         operation_id: OperationId,

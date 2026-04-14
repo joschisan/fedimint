@@ -23,8 +23,10 @@ use fedimint_core::{
     Amount, PeerId, apply, async_trait_maybe_send, dyn_newtype_define, maybe_add_send,
     maybe_add_send_sync,
 };
-use fedimint_eventlog::{Event, EventKind, EventLogEntry, EventPersistence};
-use tokio::sync::broadcast;
+use fedimint_eventlog::{
+    Event, EventKind, EventLogEntry, EventLogId, EventPersistence, PersistedLogEntry,
+};
+use tokio::sync::{broadcast, watch};
 use fedimint_logging::LOG_CLIENT;
 use futures::Stream;
 use tracing::warn;
@@ -90,6 +92,14 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
     fn get_internal_payment_markers(&self) -> anyhow::Result<(PublicKey, u64)>;
 
     fn event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry>;
+
+    fn log_event_added_rx(&self) -> watch::Receiver<()>;
+
+    async fn get_event_log(
+        &self,
+        pos: Option<EventLogId>,
+        limit: u64,
+    ) -> Vec<PersistedLogEntry>;
 
     #[allow(clippy::too_many_arguments)]
     async fn log_event_json(
@@ -490,6 +500,21 @@ where
     /// produces the event to avoid missing it.
     pub fn event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry> {
         self.client.get().event_log_transient_receiver()
+    }
+
+    /// Watch channel that signals when any new event is added to the
+    /// persistent event log.
+    pub fn log_event_added_rx(&self) -> watch::Receiver<()> {
+        self.client.get().log_event_added_rx()
+    }
+
+    /// Read a batch of persisted event log entries starting at `pos`.
+    pub async fn get_event_log(
+        &self,
+        pos: Option<EventLogId>,
+        limit: u64,
+    ) -> Vec<PersistedLogEntry> {
+        self.client.get().get_event_log(pos, limit).await
     }
 
     pub async fn log_event<E, Cap>(&self, dbtx: &mut DatabaseTransaction<'_, Cap>, event: E)

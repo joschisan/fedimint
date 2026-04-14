@@ -19,7 +19,7 @@ use fedimint_logging::LOG_CLIENT_MODULE_GW;
 use tpe::{AggregatePublicKey, DecryptionKeyShare, PublicKeyShare, aggregate_dk_shares};
 use tracing::warn;
 
-use super::events::{IncomingPaymentFailed, IncomingPaymentSucceeded};
+use super::events::{ReceivePaymentStatus, ReceivePaymentUpdateEvent};
 use crate::GatewayClientContextV2;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -191,14 +191,9 @@ impl ReceiveStateMachine {
                     .client_ctx
                     .log_event(
                         &mut dbtx.module_tx(),
-                        IncomingPaymentFailed {
-                            payment_image: old_state
-                                .common
-                                .contract
-                                .commitment
-                                .payment_image
-                                .clone(),
-                            error: error.clone(),
+                        ReceivePaymentUpdateEvent {
+                            operation_id: old_state.common.operation_id,
+                            status: ReceivePaymentStatus::Rejected,
                         },
                     )
                     .await;
@@ -221,9 +216,9 @@ impl ReceiveStateMachine {
                 .client_ctx
                 .log_event(
                     &mut dbtx.module_tx(),
-                    IncomingPaymentFailed {
-                        payment_image: old_state.common.contract.commitment.payment_image.clone(),
-                        error: "Client config's public keys are inconsistent".to_string(),
+                    ReceivePaymentUpdateEvent {
+                        operation_id: old_state.common.operation_id,
+                        status: ReceivePaymentStatus::Failure,
                     },
                 )
                 .await;
@@ -241,8 +236,9 @@ impl ReceiveStateMachine {
                 .client_ctx
                 .log_event(
                     &mut dbtx.module_tx(),
-                    IncomingPaymentSucceeded {
-                        payment_image: old_state.common.contract.commitment.payment_image.clone(),
+                    ReceivePaymentUpdateEvent {
+                        operation_id: old_state.common.operation_id,
+                        status: ReceivePaymentStatus::Success(preimage),
                     },
                 )
                 .await;
@@ -275,9 +271,9 @@ impl ReceiveStateMachine {
             .client_ctx
             .log_event(
                 &mut dbtx.module_tx(),
-                IncomingPaymentFailed {
-                    payment_image: old_state.common.contract.commitment.payment_image.clone(),
-                    error: "Failed to decrypt preimage".to_string(),
+                ReceivePaymentUpdateEvent {
+                    operation_id: old_state.common.operation_id,
+                    status: ReceivePaymentStatus::Refunded,
                 },
             )
             .await;

@@ -4,10 +4,8 @@ use fedimint_client::DynGlobalClientContext;
 use fedimint_client_module::sm::{ClientSMDatabaseTransaction, State, StateTransition};
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_lnv2_common::contracts::PaymentImage;
-
 use super::FinalReceiveState;
-use super::events::CompleteLightningPaymentSucceeded;
+use super::events::CompleteLightningPaymentEvent;
 use crate::{GatewayClientContextV2, InterceptPaymentResponse, PaymentAction, Preimage};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -162,8 +160,8 @@ impl CompleteStateMachine {
             .client_ctx
             .log_event(
                 &mut dbtx.module_tx(),
-                CompleteLightningPaymentSucceeded {
-                    payment_image: PaymentImage::Hash(old_state.common.payment_hash),
+                CompleteLightningPaymentEvent {
+                    operation_id: old_state.common.operation_id,
                 },
             )
             .await;
