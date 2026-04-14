@@ -16,7 +16,7 @@ use fedimint_client_module::module::{ClientModuleRegistry, FinalClientIface};
 use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use fedimint_client_module::transaction::TxSubmissionSmContext;
 use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
-use fedimint_core::core::{ModuleInstanceId, ModuleKind};
+use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{
     Database, IDatabaseTransactionOpsCoreTyped as _, verify_module_db_integrity_dbtx,
 };
@@ -647,7 +647,7 @@ impl ClientBuilder {
     }
 
     fn decoders(&self, config: &ClientConfig) -> ModuleDecoderRegistry {
-        let mut decoders = client_decoders(
+        let decoders = client_decoders(
             &self.module_inits,
             config
                 .modules

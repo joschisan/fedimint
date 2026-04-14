@@ -3,7 +3,6 @@ use std::fmt::{self, Formatter};
 use std::future::{Future, pending};
 use std::ops::Range;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, bail, format_err};
 use bitcoin::key::Secp256k1;

@@ -32,10 +32,6 @@ impl ClientHandle {
         }
     }
 
-    pub(crate) fn as_inner(&self) -> &Arc<Client> {
-        self.inner.as_ref().expect("Inner always set")
-    }
-
     pub fn start_executor(&self) {
         // All module state machines now run on per-module `ModuleExecutor`s
         // started eagerly by `ClientModule::start`. Kept as a no-op so
