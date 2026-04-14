@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::SystemTime;
 
 use anyhow::{anyhow, bail};
 use bitcoin::hex::DisplayHex as _;
@@ -18,52 +17,10 @@ use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::{impl_db_lookup, impl_db_record};
 use fedimint_logging::LOG_CLIENT_DB;
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use strum::IntoEnumIterator as _;
 use strum_macros::EnumIter;
 use tracing::{debug, info, trace, warn};
-
-/// Client metadata
-///
-/// A client can have a blob of extra data encoded in it. We provide methods to
-/// use json encoding, but clients are free to use their own encoding.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Encodable, Decodable, Clone)]
-pub struct Metadata(Vec<u8>);
-
-impl Metadata {
-    /// Create empty metadata
-    pub fn empty() -> Self {
-        Self(vec![])
-    }
-
-    pub fn from_raw(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-
-    pub fn into_raw(self) -> Vec<u8> {
-        self.0
-    }
-
-    /// Is metadata empty
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Create metadata as json from typed `val`
-    pub fn from_json_serialized<T: Serialize>(val: T) -> Self {
-        Self(serde_json::to_vec(&val).expect("serializing to vec can't fail"))
-    }
-
-    /// Attempt to deserialize metadata as typed json
-    pub fn to_json_deserialized<T: serde::de::DeserializeOwned>(&self) -> anyhow::Result<T> {
-        Ok(serde_json::from_slice(&self.0)?)
-    }
-
-    /// Attempt to deserialize metadata as untyped json (`serde_json::Value`)
-    pub fn to_json_value(&self) -> anyhow::Result<serde_json::Value> {
-        Ok(serde_json::from_slice(&self.0)?)
-    }
-}
 
 use crate::sm::executor::{
     ActiveStateKeyBytes, ActiveStateKeyPrefixBytes, ExecutorDbPrefixes, InactiveStateKeyBytes,
@@ -78,9 +35,6 @@ pub enum DbKeyPrefix {
     OperationLog = 0x2c,
     ClientConfig = 0x2f,
     ClientInitState = 0x31,
-    ClientMetadata = 0x32,
-    ClientMetaField = 0x34,
-    ClientMetaServiceInfo = 0x35,
     ApiSecret = 0x36,
     ApiUrlAnnouncement = 0x38,
     EventLog = fedimint_eventlog::DB_KEY_PREFIX_EVENT_LOG,
@@ -197,21 +151,6 @@ impl_db_record!(
 
 impl_db_lookup!(key = ApiSecretKey, query_prefix = ApiSecretKeyPrefix);
 
-/// Client metadata that will be stored/restored on backup&recovery
-#[derive(Debug, Encodable, Decodable, Serialize)]
-pub struct ClientMetadataKey;
-
-#[derive(Debug, Encodable)]
-pub struct ClientMetadataPrefix;
-
-impl_db_record!(
-    key = ClientMetadataKey,
-    value = Metadata,
-    db_prefix = DbKeyPrefix::ClientMetadata
-);
-
-impl_db_lookup!(key = ClientMetadataKey, query_prefix = ClientMetadataPrefix);
-
 /// Does the client modules need to run recovery before being usable?
 #[derive(Debug, Encodable, Decodable, Serialize)]
 pub struct ClientInitStateKey;
@@ -305,40 +244,6 @@ impl_db_record!(
     value = ClientModuleRecoveryState,
     db_prefix = DbKeyPrefix::ClientModuleRecovery,
 );
-
-#[derive(Encodable, Decodable, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub(crate) struct MetaFieldPrefix;
-
-#[derive(Encodable, Decodable, Debug)]
-pub struct MetaServiceInfoKey;
-
-#[derive(Encodable, Decodable, Debug)]
-pub struct MetaServiceInfo {
-    pub last_updated: SystemTime,
-    pub revision: u64,
-}
-
-#[derive(
-    Encodable, Decodable, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize, Deserialize,
-)]
-pub(crate) struct MetaFieldKey(pub fedimint_client_module::meta::MetaFieldKey);
-
-#[derive(Encodable, Decodable, Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct MetaFieldValue(pub fedimint_client_module::meta::MetaFieldValue);
-
-impl_db_record!(
-    key = MetaFieldKey,
-    value = MetaFieldValue,
-    db_prefix = DbKeyPrefix::ClientMetaField
-);
-
-impl_db_record!(
-    key = MetaServiceInfoKey,
-    value = MetaServiceInfo,
-    db_prefix = DbKeyPrefix::ClientMetaServiceInfo
-);
-
-impl_db_lookup!(key = MetaFieldKey, query_prefix = MetaFieldPrefix);
 
 pub fn get_core_client_database_migrations()
 -> BTreeMap<DatabaseVersion, fedimint_core::db::ClientCoreDbMigrationFn> {

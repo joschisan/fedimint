@@ -4,7 +4,6 @@ use std::future::{Future, pending};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, anyhow, bail, format_err};
 use async_stream::try_stream;
@@ -61,11 +60,10 @@ use tracing::{debug, info, warn};
 use crate::ClientBuilder;
 use crate::client::event_log::DefaultApplicationEventLogKey;
 use crate::db::{
-    ApiSecretKey, ClientConfigKey, ClientMetadataKey, ClientModuleRecovery,
-    ClientModuleRecoveryState, EncodedClientSecretKey, Metadata,
-    apply_migrations_core_client_dbtx, get_decoded_client_secret, verify_client_db_integrity_dbtx,
+    ApiSecretKey, ClientConfigKey, ClientModuleRecovery, ClientModuleRecoveryState,
+    EncodedClientSecretKey, apply_migrations_core_client_dbtx, get_decoded_client_secret,
+    verify_client_db_integrity_dbtx,
 };
-use crate::meta::MetaService;
 use crate::module_init::{ClientModuleInitRegistry, DynClientModuleInit, IClientModuleInit};
 use crate::sm::executor::{
     ActiveModuleOperationStateKeyPrefix, ActiveOperationStateKeyPrefix, Executor,
@@ -106,7 +104,6 @@ pub struct Client {
     pub(crate) api: DynGlobalApi,
     root_secret: DerivableSecret,
     secp_ctx: Secp256k1<secp256k1::All>,
-    meta_service: Arc<MetaService>,
 
     task_group: TaskGroup,
 
@@ -425,21 +422,6 @@ impl Client {
         states: Vec<DynState>,
     ) -> AddStateMachinesResult {
         self.executor.add_state_machines_dbtx(dbtx, states).await
-    }
-
-    /// Get the meta manager to read meta fields.
-    pub fn meta_service(&self) -> &Arc<MetaService> {
-        &self.meta_service
-    }
-
-    /// Get the meta manager to read meta fields.
-    pub async fn get_meta_expiration_timestamp(&self) -> Option<SystemTime> {
-        let meta_service = self.meta_service();
-        let ts = meta_service
-            .get_field::<u64>(self.db(), "federation_expiry_timestamp")
-            .await
-            .and_then(|v| v.value)?;
-        Some(UNIX_EPOCH + Duration::from_secs(ts))
     }
 
     /// Adds funding to a transaction or removes over-funding via change.
@@ -826,38 +808,6 @@ impl Client {
         })
     }
 
-    /// Get the client [`Metadata`]
-    pub async fn get_metadata(&self) -> Metadata {
-        self.db
-            .begin_transaction_nc()
-            .await
-            .get_value(&ClientMetadataKey)
-            .await
-            .unwrap_or_else(|| {
-                warn!(
-                    target: LOG_CLIENT,
-                    "Missing existing metadata. This key should have been set on Client init"
-                );
-                Metadata::empty()
-            })
-    }
-
-    /// Set the client [`Metadata`]
-    pub async fn set_metadata(&self, metadata: &Metadata) {
-        self.db
-            .autocommit::<_, _, anyhow::Error>(
-                |dbtx, _| {
-                    Box::pin(async {
-                        Self::set_metadata_dbtx(dbtx, metadata).await;
-                        Ok(())
-                    })
-                },
-                None,
-            )
-            .await
-            .expect("Failed to autocommit metadata");
-    }
-
     pub fn has_pending_recoveries(&self) -> bool {
         !self
             .client_recovery_progress_receiver
@@ -917,11 +867,6 @@ impl Client {
             .context("Recovery task completed and update receiver disconnected, but the desired modules are still unavailable or failed to recover")?;
 
         Ok(())
-    }
-
-    /// Set the client [`Metadata`]
-    pub async fn set_metadata_dbtx(dbtx: &mut DatabaseTransaction<'_>, metadata: &Metadata) {
-        dbtx.insert_new_entry(&ClientMetadataKey, metadata).await;
     }
 
     fn spawn_module_recoveries_task(

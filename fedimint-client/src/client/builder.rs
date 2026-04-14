@@ -8,7 +8,6 @@ use fedimint_api_client::api::global_api::with_cache::GlobalFederationApiWithCac
 use fedimint_api_client::api::{DynGlobalApi, FederationApi};
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_api_client::download_from_invite_code;
-use fedimint_client_module::meta::LegacyMetaSource;
 use fedimint_client_module::module::init::ClientModuleInit;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
@@ -41,11 +40,9 @@ use tracing::{debug, trace, warn};
 use super::handle::ClientHandle;
 use super::{Client, client_decoders};
 use crate::db::{
-    self, ApiSecretKey, ClientInitStateKey, ClientMetadataKey, ClientModuleRecovery,
-    ClientModuleRecoveryState, ClientPreRootSecretHashKey, InitMode, InitState, Metadata,
-    apply_migrations_client_module_dbtx,
+    self, ApiSecretKey, ClientInitStateKey, ClientModuleRecovery, ClientModuleRecoveryState,
+    ClientPreRootSecretHashKey, InitMode, InitState, apply_migrations_client_module_dbtx,
 };
-use crate::meta::MetaService;
 use crate::module_init::ClientModuleInitRegistry;
 use crate::sm::executor::Executor;
 use crate::sm::notifier::Notifier;
@@ -99,7 +96,6 @@ impl RootSecret {
 /// Used to configure, assemble and build [`Client`]
 pub struct ClientBuilder {
     module_inits: ClientModuleInitRegistry,
-    meta_service: Arc<crate::meta::MetaService>,
     stopped: bool,
     log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
     iroh_enable_dht: bool,
@@ -113,14 +109,12 @@ impl ClientBuilder {
             version = %fedimint_build_code_version_env!(),
             "Initializing fedimint client",
         );
-        let meta_service = MetaService::new(LegacyMetaSource::default());
         let (log_event_added_transient_tx, _log_event_added_transient_rx) =
             broadcast::channel(1024);
 
         ClientBuilder {
             module_inits: ModuleInitRegistry::new(),
             stopped: false,
-            meta_service,
             log_event_added_transient_tx,
             iroh_enable_dht: true,
             iroh_enable_next: true,
@@ -131,8 +125,6 @@ impl ClientBuilder {
         ClientBuilder {
             module_inits: client.module_inits.clone(),
             stopped: false,
-            // non unique
-            meta_service: client.meta_service.clone(),
             log_event_added_transient_tx: client.log_event_added_transient_tx.clone(),
             iroh_enable_dht: client.iroh_enable_dht,
             iroh_enable_next: client.iroh_enable_next,
@@ -151,10 +143,6 @@ impl ClientBuilder {
 
     pub fn stopped(&mut self) {
         self.stopped = true;
-    }
-
-    pub fn with_meta_service(&mut self, meta_service: Arc<MetaService>) {
-        self.meta_service = meta_service;
     }
 
     /// Override if the DHT should be enabled when using Iroh to connect to
@@ -258,9 +246,6 @@ impl ClientBuilder {
 
             let init_state = InitState::Pending(init_mode);
             dbtx.insert_entry(&ClientInitStateKey, &init_state).await;
-
-            dbtx.insert_new_entry(&ClientMetadataKey, &Metadata::empty())
-                .await;
 
             dbtx.commit_tx_result().await?;
         }
@@ -663,21 +648,9 @@ impl ClientBuilder {
             root_secret,
             task_group,
             client_recovery_progress_receiver,
-            meta_service: self.meta_service,
             iroh_enable_dht: self.iroh_enable_dht,
             iroh_enable_next: self.iroh_enable_next,
         });
-        client_inner
-            .task_group
-            .spawn_cancellable("MetaService::update_continuously", {
-                let client_inner = client_inner.clone();
-                async move {
-                    client_inner
-                        .meta_service
-                        .update_continuously(&client_inner)
-                        .await;
-                }
-            });
 
         client_inner
             .task_group

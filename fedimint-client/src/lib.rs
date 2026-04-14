@@ -81,9 +81,6 @@ mod client;
 /// Database keys used by the client
 pub mod db;
 
-/// Management of meta fields
-pub mod meta;
-
 pub mod module_init;
 
 pub mod sm;

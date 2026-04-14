@@ -45,7 +45,6 @@ pub mod db;
 
 /// Environment variables
 pub mod envs;
-pub mod meta;
 /// Module client interface definitions
 pub mod module;
 /// Secret handling & derivation
