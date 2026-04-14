@@ -137,6 +137,8 @@ impl SendStateMachine {
 }
 
 impl StateMachine for SendStateMachine {
+    const DB_PREFIX: u8 = crate::db::DbKeyPrefix::SendStateMachine as u8;
+
     type Context = WalletClientContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {

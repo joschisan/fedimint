@@ -582,15 +582,12 @@ impl ClientBuilder {
         let (client_recovery_progress_sender, client_recovery_progress_receiver) =
             watch::channel(recovery_receiver_init_val);
 
-        let (tx_submission_db, tx_submission_access_token) =
-            db.with_prefix_module_id(TRANSACTION_SUBMISSION_MODULE_INSTANCE);
         let tx_submission_executor = ModuleExecutor::new(
-            tx_submission_db,
+            db.clone(),
             TxSubmissionSmContext {
                 api: api.clone(),
                 decoders: decoders.clone(),
                 client: final_client.clone(),
-                access_token: tx_submission_access_token,
             },
             task_group.clone(),
         );

@@ -27,9 +27,7 @@ use fedimint_client::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
 use fedimint_client_module::db::ClientModuleMigrationFn;
-use fedimint_client_module::executor::{
-    ModuleExecutor, StateMachine, StateTransition as SmStateTransition,
-};
+use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
@@ -68,7 +66,8 @@ pub struct WalletClientModule {
     client_ctx: ClientContext<Self>,
     db: Database,
     module_api: DynModuleApi,
-    executor: ModuleExecutor<WalletClientStateMachines>,
+    send_executor: ModuleExecutor<SendStateMachine>,
+    receive_executor: ModuleExecutor<ReceiveStateMachine>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,7 +93,8 @@ impl ClientModule for WalletClientModule {
     }
 
     async fn start(&self) {
-        self.executor.start().await;
+        self.send_executor.start().await;
+        self.receive_executor.start().await;
     }
 
     fn input_fee(
@@ -135,13 +135,16 @@ impl ClientModuleInit for WalletClientInit {
 
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
         let client_ctx = args.context();
-        let executor = ModuleExecutor::new(
+        let sm_context = WalletClientContext {
+            client_ctx: client_ctx.clone(),
+        };
+        let send_executor = ModuleExecutor::new(
             args.db().clone(),
-            WalletClientContext {
-                client_ctx: client_ctx.clone(),
-            },
+            sm_context.clone(),
             args.task_group().clone(),
         );
+        let receive_executor =
+            ModuleExecutor::new(args.db().clone(), sm_context, args.task_group().clone());
 
         let module = WalletClientModule {
             root_secret: args.module_root_secret().clone(),
@@ -149,7 +152,8 @@ impl ClientModuleInit for WalletClientInit {
             client_ctx,
             db: args.db().clone(),
             module_api: args.module_api().clone(),
-            executor,
+            send_executor,
+            receive_executor,
         };
 
         module.spawn_output_scanner(args.task_group());
@@ -256,10 +260,10 @@ impl WalletClientModule {
             .await
             .map_err(|_| SendError::InsufficientFunds)?;
 
-        self.executor
+        self.send_executor
             .add_state_machine_dbtx(
                 &mut dbtx.to_ref_nc(),
-                WalletClientStateMachines::Send(SendStateMachine {
+                SendStateMachine {
                     common: SendSMCommon {
                         operation_id,
                         outpoint: OutPoint {
@@ -270,7 +274,7 @@ impl WalletClientModule {
                         fee,
                     },
                     state: SendSMState::Funding,
-                }),
+                },
             )
             .await;
 
@@ -375,10 +379,10 @@ impl WalletClientModule {
             .await
             .expect("Input amount is sufficient to finalize transaction");
 
-        self.executor
+        self.receive_executor
             .add_state_machine_dbtx(
                 &mut dbtx.to_ref_nc(),
-                WalletClientStateMachines::Receive(ReceiveStateMachine {
+                ReceiveStateMachine {
                     common: ReceiveSMCommon {
                         operation_id,
                         txid: range.txid(),
@@ -386,7 +390,7 @@ impl WalletClientModule {
                         fee,
                     },
                     state: ReceiveSMState::Funding,
-                }),
+                },
             )
             .await;
 
@@ -580,36 +584,5 @@ impl IntoDynInstance for WalletClientStateMachines {
 
     fn into_dyn(self, instance_id: ModuleInstanceId) -> Self::DynType {
         DynState::from_typed(instance_id, self)
-    }
-}
-
-impl StateMachine for WalletClientStateMachines {
-    type Context = WalletClientContext;
-
-    fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        match self {
-            WalletClientStateMachines::Send(sm) => StateMachine::transitions(sm, ctx)
-                .into_iter()
-                .map(|t| {
-                    t.map(WalletClientStateMachines::Send, |p| match p {
-                        WalletClientStateMachines::Send(s) => s,
-                        WalletClientStateMachines::Receive(_) => {
-                            panic!("unexpected Receive variant in Send transition")
-                        }
-                    })
-                })
-                .collect(),
-            WalletClientStateMachines::Receive(sm) => StateMachine::transitions(sm, ctx)
-                .into_iter()
-                .map(|t| {
-                    t.map(WalletClientStateMachines::Receive, |p| match p {
-                        WalletClientStateMachines::Receive(s) => s,
-                        WalletClientStateMachines::Send(_) => {
-                            panic!("unexpected Send variant in Receive transition")
-                        }
-                    })
-                })
-                .collect(),
-        }
     }
 }

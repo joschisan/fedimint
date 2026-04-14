@@ -43,6 +43,11 @@ use futures::stream::StreamExt;
 pub trait StateMachine:
     Debug + Clone + Eq + Hash + Encodable + Decodable + MaybeSend + MaybeSync + 'static
 {
+    /// DB prefix byte under which this SM's active states live in the
+    /// owning [`ModuleExecutor`]'s database. Must be unique among state
+    /// machine types sharing a module DB.
+    const DB_PREFIX: u8;
+
     /// Per-module context handed to every transition.
     type Context: Clone + MaybeSend + MaybeSync + 'static;
 
@@ -92,30 +97,6 @@ impl<S: StateMachine> StateTransition<S> {
             }),
         }
     }
-
-    /// Lift a transition on a sub-state into one on a parent enum that
-    /// carries it as a variant. `wrap` re-embeds the sub-state in the
-    /// parent; `unwrap` projects back out (panics on variant mismatch).
-    pub fn map<T, F, G>(self, wrap: F, unwrap: G) -> StateTransition<T>
-    where
-        T: StateMachine,
-        F: Fn(S) -> T + MaybeSend + MaybeSync + Clone + 'static,
-        G: Fn(T) -> S + MaybeSend + MaybeSync + Clone + 'static,
-    {
-        let inner = self.transition;
-        StateTransition {
-            trigger: self.trigger,
-            transition: Arc::new(move |dbtx, val, parent| {
-                let inner = inner.clone();
-                let wrap = wrap.clone();
-                let sub = unwrap(parent);
-                Box::pin(async move {
-                    let new_sub = inner(dbtx, val, sub).await;
-                    wrap(new_sub)
-                })
-            }),
-        }
-    }
 }
 
 // ---- DB records ------------------------------------------------------------
@@ -134,7 +115,7 @@ impl<S: Encodable + Decodable> Decodable for ActiveStateKey<S> {
 }
 
 impl<S: StateMachine> DatabaseRecord for ActiveStateKey<S> {
-    const DB_PREFIX: u8 = 0;
+    const DB_PREFIX: u8 = S::DB_PREFIX;
     type Key = Self;
     type Value = ();
 }

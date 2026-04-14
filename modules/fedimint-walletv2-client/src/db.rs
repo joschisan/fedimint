@@ -8,6 +8,8 @@ use strum_macros::EnumIter;
 pub enum DbKeyPrefix {
     NextOutputIndex = 0x31,
     ValidAddressIndex = 0x32,
+    SendStateMachine = 0x33,
+    ReceiveStateMachine = 0x34,
 }
 
 impl std::fmt::Display for DbKeyPrefix {

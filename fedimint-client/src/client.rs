@@ -21,8 +21,7 @@ use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy
 use fedimint_client_module::sm::DynState;
 use fedimint_client_module::sm::executor::IExecutor;
 use fedimint_client_module::transaction::{
-    TRANSACTION_SUBMISSION_MODULE_INSTANCE, TransactionBuilder, TxSubmissionStates,
-    TxSubmissionStatesSM,
+    TransactionBuilder, TxSubmissionStates, TxSubmissionStatesSM,
 };
 use fedimint_client_module::{
     AddStateMachinesResult, ClientModuleInstance, ModuleGlobalContextGen, ModuleRecoveryCompleted,
@@ -580,23 +579,15 @@ impl Client {
 
         self.executor.add_state_machines_dbtx(dbtx, states).await?;
 
-        // Tx submission state machine lives in its own typed ModuleExecutor.
-        // Its DB namespace is the module-id prefix of TRANSACTION_SUBMISSION
-        // _MODULE_INSTANCE; re-prefix this dbtx accordingly so the write
-        // lands in the right place atomically.
-        {
-            let (mut tx_sub_dbtx, _) =
-                dbtx.to_ref_with_prefix_module_id(TRANSACTION_SUBMISSION_MODULE_INSTANCE);
-            self.tx_submission_executor
-                .add_state_machine_dbtx(
-                    &mut tx_sub_dbtx,
-                    TxSubmissionStatesSM {
-                        operation_id,
-                        state: TxSubmissionStates::Created(transaction),
-                    },
-                )
-                .await;
-        }
+        self.tx_submission_executor
+            .add_state_machine_dbtx(
+                dbtx,
+                TxSubmissionStatesSM {
+                    operation_id,
+                    state: TxSubmissionStates::Created(transaction),
+                },
+            )
+            .await;
 
         self.log_event_dbtx(dbtx, None, TxCreatedEvent { txid, operation_id })
             .await;
