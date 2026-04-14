@@ -15,7 +15,6 @@ mod send_sm;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use async_stream::stream;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
 use db::{DbKeyPrefix, GatewayKey, IncomingContractStreamIndexKey};
@@ -35,7 +34,7 @@ use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::SECP256K1;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::time::duration_since_epoch;
-use fedimint_core::util::{BoxStream, SafeUrl};
+use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_lnv2_common::config::LightningClientConfig;
@@ -48,10 +47,8 @@ use fedimint_lnv2_common::{
     LightningModuleTypes, LightningOutput, LightningOutputV0, MINIMUM_INCOMING_CONTRACT_AMOUNT,
     lnurl, tweak,
 };
-use futures::StreamExt;
 use lightning_invoice::{Bolt11Invoice, Currency};
 use secp256k1::{Keypair, PublicKey, Scalar, SecretKey, ecdh};
-use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator as _;
 use thiserror::Error;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
@@ -68,32 +65,6 @@ const EXPIRATION_DELTA_LIMIT: u64 = 1440;
 
 /// A two hour buffer in case either the client or gateway go offline
 const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;
-
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// The state of an operation sending a payment over lightning.
-///
-/// ```mermaid
-/// graph LR
-/// classDef virtual fill:#fff,stroke-dasharray: 5 5
-///
-///     Funding -- funding transaction is rejected --> Rejected
-///     Funding -- funding transaction is accepted --> Funded
-///     Funded -- payment is confirmed  --> Success
-///     Funded -- payment attempt expires --> Refunding
-///     Funded -- gateway cancels payment attempt --> Refunding
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum SendOperationState {
-    /// We are funding the contract to incentivize the gateway.
-    Funding,
-    /// We are waiting for the gateway to complete the payment.
-    Funded,
-    /// The payment was successful.
-    Success([u8; 32]),
-    /// The payment failed and the refund transaction was submitted.
-    Refunding,
-    /// The funding transaction was rejected.
-    Failure,
-}
 
 pub type SendResult = Result<OperationId, SendPaymentError>;
 
@@ -175,6 +146,7 @@ impl Context for LightningClientContext {
 pub struct LightningClientModule {
     federation_id: FederationId,
     cfg: LightningClientConfig,
+    #[allow(dead_code)]
     notifier: ModuleNotifier<LightningClientStateMachines>,
     client_ctx: ClientContext<Self>,
     module_api: DynModuleApi,
@@ -393,7 +365,11 @@ impl LightningClientModule {
             });
         }
 
-        let operation_id = self.get_next_operation_id(&invoice).await?;
+        let operation_id = OperationId::from_encodable(&invoice.payment_hash());
+
+        if self.client_ctx.operation_exists(operation_id).await {
+            return Err(SendPaymentError::InvoiceAlreadyAttempted(operation_id));
+        }
 
         let (ephemeral_tweak, ephemeral_pk) = tweak::generate(self.keypair.public_key());
 
@@ -493,71 +469,6 @@ impl LightningClientModule {
         dbtx.commit_tx().await;
 
         Ok(operation_id)
-    }
-
-    async fn get_next_operation_id(
-        &self,
-        invoice: &Bolt11Invoice,
-    ) -> Result<OperationId, SendPaymentError> {
-        for payment_attempt in 0..u64::MAX {
-            let operation_id = OperationId::from_encodable(&(invoice.clone(), payment_attempt));
-
-            if !self.client_ctx.operation_exists(operation_id).await {
-                return Ok(operation_id);
-            }
-
-            if self.client_ctx.has_active_states(operation_id).await {
-                return Err(SendPaymentError::PaymentInProgress(operation_id));
-            }
-
-            let mut stream = self
-                .subscribe_send_operation_state_updates(operation_id)
-                .await;
-
-            // This will not block since we checked for active states and there were none,
-            // so by definition a final state has to have been assumed already.
-            while let Some(state) = stream.next().await {
-                if let SendOperationState::Success(_) = state {
-                    return Err(SendPaymentError::InvoiceAlreadyPaid(operation_id));
-                }
-            }
-        }
-
-        panic!("We could not find an unused operation id for sending a lightning payment");
-    }
-
-    /// Subscribe to all state updates of the send operation.
-    pub async fn subscribe_send_operation_state_updates(
-        &self,
-        operation_id: OperationId,
-    ) -> BoxStream<'static, SendOperationState> {
-        let mut stream = self.notifier.subscribe(operation_id).await;
-
-        Box::pin(stream! {
-            loop {
-                if let Some(LightningClientStateMachines::Send(state)) = stream.next().await {
-                    match state.state {
-                        SendSMState::Funding => yield SendOperationState::Funding,
-                        SendSMState::Funded => yield SendOperationState::Funded,
-                        SendSMState::Success(preimage) => {
-                            // the preimage has been verified by the state machine previously
-                            assert!(state.common.contract.verify_preimage(&preimage));
-
-                            yield SendOperationState::Success(preimage);
-                            return;
-                        },
-                        SendSMState::Refunding(_) => {
-                            yield SendOperationState::Refunding;
-                            return;
-                        },
-                        SendSMState::Rejected(..) => {
-                            yield SendOperationState::Failure;
-                            return;
-                        },
-                    }
-                }
-            }
-        })
     }
 
     /// Request an invoice. For testing you can optionally specify a gateway to
@@ -843,10 +754,8 @@ pub enum SendPaymentError {
     InvoiceMissingAmount,
     #[error("Invoice has expired")]
     InvoiceExpired,
-    #[error("A payment for this invoice is already in progress")]
-    PaymentInProgress(OperationId),
-    #[error("This invoice has already been paid")]
-    InvoiceAlreadyPaid(OperationId),
+    #[error("A payment for this invoice has already been attempted")]
+    InvoiceAlreadyAttempted(OperationId),
     #[error(transparent)]
     SelectGateway(SelectGatewayError),
     #[error("Failed to connect to gateway")]
