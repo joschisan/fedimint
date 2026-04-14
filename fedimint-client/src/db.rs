@@ -6,7 +6,7 @@ use bitcoin::hex::DisplayHex as _;
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::sm::{ActiveStateMeta, InactiveStateMeta};
-use fedimint_core::config::{ClientConfig, ClientConfigV0, FederationId, GlobalClientConfig};
+use fedimint_core::config::ClientConfig;
 use fedimint_core::core::{ModuleInstanceId, OperationId};
 use fedimint_core::db::{
     Database, DatabaseTransaction, DatabaseVersion, DatabaseVersionKey,
@@ -16,9 +16,6 @@ use fedimint_core::db::{
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::{impl_db_lookup, impl_db_record};
-use fedimint_eventlog::{
-    DB_KEY_PREFIX_EVENT_LOG, DB_KEY_PREFIX_UNORDERED_EVENT_LOG, EventLogId, UnordedEventLogId,
-};
 use fedimint_logging::LOG_CLIENT_DB;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -77,24 +74,18 @@ use crate::sm::executor::{
 #[derive(Clone, EnumIter, Debug)]
 pub enum DbKeyPrefix {
     EncodedClientSecret = 0x28,
-    ClientSecret = 0x29, // Unused
     ClientPreRootSecretHash = 0x2a,
     OperationLog = 0x2c,
-    CommonApiVersionCache = 0x2e, // Unused
     ClientConfig = 0x2f,
-    PendingClientConfig = 0x3b, // Unused
-    ClientInviteCode = 0x30,    // Unused; clean out remnant data before re-using!
     ClientInitState = 0x31,
     ClientMetadata = 0x32,
     ClientMetaField = 0x34,
     ClientMetaServiceInfo = 0x35,
     ApiSecret = 0x36,
-    PeerLastApiVersionsSummaryCache = 0x37, // Unused
     ApiUrlAnnouncement = 0x38,
     EventLog = fedimint_eventlog::DB_KEY_PREFIX_EVENT_LOG,
     UnorderedEventLog = fedimint_eventlog::DB_KEY_PREFIX_UNORDERED_EVENT_LOG,
     EventLogTrimable = fedimint_eventlog::DB_KEY_PREFIX_EVENT_LOG_TRIMABLE,
-    ChainId = 0x3c, // Unused
     ClientModuleRecovery = 0x40,
     GuardianMetadata = 0x42,
 
@@ -190,25 +181,6 @@ impl_db_record!(
     key = ClientConfigKey,
     value = ClientConfig,
     db_prefix = DbKeyPrefix::ClientConfig
-);
-
-#[derive(Debug, Encodable, Decodable, Serialize)]
-pub struct ClientConfigKeyV0 {
-    pub id: FederationId,
-}
-
-#[derive(Debug, Encodable)]
-pub struct ClientConfigKeyPrefixV0;
-
-impl_db_record!(
-    key = ClientConfigKeyV0,
-    value = ClientConfigV0,
-    db_prefix = DbKeyPrefix::ClientConfig
-);
-
-impl_db_lookup!(
-    key = ClientConfigKeyV0,
-    query_prefix = ClientConfigKeyPrefixV0
 );
 
 #[derive(Debug, Encodable, Decodable, Serialize)]
@@ -334,24 +306,6 @@ impl_db_record!(
     db_prefix = DbKeyPrefix::ClientModuleRecovery,
 );
 
-/// Old (incorrect) version of the [`ClientModuleRecoveryState`]
-/// that used the wrong prefix.
-///
-/// See <https://github.com/fedimint/fedimint/issues/7367>.
-///
-/// Used only for the migration.
-#[derive(Debug, Encodable, Decodable, Serialize)]
-pub struct ClientModuleRecoveryIncorrectDoNotUse {
-    pub module_instance_id: ModuleInstanceId,
-}
-
-impl_db_record!(
-    key = ClientModuleRecoveryIncorrectDoNotUse,
-    value = ClientModuleRecoveryState,
-    // This was wrong and we keep it wrong for a migration.
-    db_prefix = DbKeyPrefix::ClientInitState,
-);
-
 #[derive(Encodable, Decodable, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub(crate) struct MetaFieldPrefix;
 
@@ -388,170 +342,7 @@ impl_db_lookup!(key = MetaFieldKey, query_prefix = MetaFieldPrefix);
 
 pub fn get_core_client_database_migrations()
 -> BTreeMap<DatabaseVersion, fedimint_core::db::ClientCoreDbMigrationFn> {
-    let mut migrations: BTreeMap<DatabaseVersion, fedimint_core::db::ClientCoreDbMigrationFn> =
-        BTreeMap::new();
-    migrations.insert(
-        DatabaseVersion(0),
-        Box::new(|mut ctx| {
-            Box::pin(async move {
-                let mut dbtx = ctx.dbtx();
-
-                let config_v0 = dbtx
-                    .find_by_prefix(&ClientConfigKeyPrefixV0)
-                    .await
-                    .collect::<Vec<_>>()
-                    .await;
-
-                assert!(config_v0.len() <= 1);
-                let Some((id, config_v0)) = config_v0.into_iter().next() else {
-                    return Ok(());
-                };
-
-                let global = GlobalClientConfig {
-                    api_endpoints: config_v0.global.api_endpoints,
-                    broadcast_public_keys: None,
-                    consensus_version: config_v0.global.consensus_version,
-                    meta: config_v0.global.meta,
-                };
-
-                let config = ClientConfig {
-                    global,
-                    modules: config_v0.modules,
-                };
-
-                dbtx.remove_entry(&id).await;
-                dbtx.insert_new_entry(&ClientConfigKey, &config).await;
-                Ok(())
-            })
-        }),
-    );
-
-    // Fix #6948
-    migrations.insert(
-        DatabaseVersion(1),
-        Box::new(|mut ctx: fedimint_core::db::DbMigrationFnContext<'_, _>| {
-            Box::pin(async move {
-                let mut dbtx = ctx.dbtx();
-
-                // Migrate unordered keys that got written to ordered table
-                {
-                    let mut ordered_log_entries = dbtx
-                        .raw_find_by_prefix(&[DB_KEY_PREFIX_EVENT_LOG])
-                        .await
-                        .expect("DB operation failed");
-                    let mut keys_to_migrate = vec![];
-                    while let Some((k, _v)) = ordered_log_entries.next().await {
-                        trace!(target: LOG_CLIENT_DB,
-                            k=%k.as_hex(),
-                            "Checking ordered log key"
-                        );
-                        if EventLogId::consensus_decode_whole(&k[1..], &Default::default()).is_err()
-                        {
-                            assert!(
-                                UnordedEventLogId::consensus_decode_whole(
-                                    &k[1..],
-                                    &Default::default()
-                                )
-                                .is_ok()
-                            );
-                            keys_to_migrate.push(k);
-                        }
-                    }
-                    drop(ordered_log_entries);
-                    for mut key_to_migrate in keys_to_migrate {
-                        warn!(target: LOG_CLIENT_DB,
-                            k=%key_to_migrate.as_hex(),
-                            "Migrating unordered event log entry written to an ordered log"
-                        );
-                        let v = dbtx
-                            .raw_remove_entry(&key_to_migrate)
-                            .await
-                            .expect("DB operation failed")
-                            .expect("Was there a moment ago");
-                        assert_eq!(key_to_migrate[0], 0x39);
-                        key_to_migrate[0] = DB_KEY_PREFIX_UNORDERED_EVENT_LOG;
-                        assert_eq!(key_to_migrate[0], 0x3a);
-                        dbtx.raw_insert_bytes(&key_to_migrate, &v)
-                            .await
-                            .expect("DB operation failed");
-                    }
-                }
-
-                // Migrate ordered keys that got written to unordered table
-                {
-                    let mut unordered_log_entries = dbtx
-                        .raw_find_by_prefix(&[DB_KEY_PREFIX_UNORDERED_EVENT_LOG])
-                        .await
-                        .expect("DB operation failed");
-                    let mut keys_to_migrate = vec![];
-                    while let Some((k, _v)) = unordered_log_entries.next().await {
-                        trace!(target: LOG_CLIENT_DB,
-                            k=%k.as_hex(),
-                            "Checking unordered log key"
-                        );
-                        if UnordedEventLogId::consensus_decode_whole(&k[1..], &Default::default())
-                            .is_err()
-                        {
-                            assert!(
-                                EventLogId::consensus_decode_whole(&k[1..], &Default::default())
-                                    .is_ok()
-                            );
-                            keys_to_migrate.push(k);
-                        }
-                    }
-                    drop(unordered_log_entries);
-                    for mut key_to_migrate in keys_to_migrate {
-                        warn!(target: LOG_CLIENT_DB,
-                            k=%key_to_migrate.as_hex(),
-                            "Migrating ordered event log entry written to an unordered log"
-                        );
-                        let v = dbtx
-                            .raw_remove_entry(&key_to_migrate)
-                            .await
-                            .expect("DB operation failed")
-                            .expect("Was there a moment ago");
-                        assert_eq!(key_to_migrate[0], 0x3a);
-                        key_to_migrate[0] = DB_KEY_PREFIX_EVENT_LOG;
-                        assert_eq!(key_to_migrate[0], 0x39);
-                        dbtx.raw_insert_bytes(&key_to_migrate, &v)
-                            .await
-                            .expect("DB operation failed");
-                    }
-                }
-                Ok(())
-            })
-        }),
-    );
-
-    // Fix #7367
-    migrations.insert(
-        DatabaseVersion(2),
-        Box::new(|mut ctx: fedimint_core::db::DbMigrationFnContext<'_, _>| {
-            Box::pin(async move {
-                let mut dbtx = ctx.dbtx();
-
-                for module_id in 0..u16::MAX {
-                    let old_key = ClientModuleRecoveryIncorrectDoNotUse {
-                        module_instance_id: module_id,
-                    };
-                    let new_key = ClientModuleRecovery {
-                        module_instance_id: module_id,
-                    };
-                    let Some(value) = dbtx.get_value(&old_key).await else {
-                        debug!(target: LOG_CLIENT_DB, %module_id, "No more ClientModuleRecovery keys found for migartion");
-                        break;
-                    };
-
-                    debug!(target: LOG_CLIENT_DB, %module_id, "Migrating old ClientModuleRecovery key");
-                    dbtx.remove_entry(&old_key).await.expect("Is there.");
-                    assert!(dbtx.insert_entry(&new_key, &value).await.is_none());
-                }
-
-                Ok(())
-            })
-        }),
-    );
-    migrations
+    BTreeMap::new()
 }
 
 /// Apply core client database migrations
