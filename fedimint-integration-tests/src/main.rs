@@ -34,6 +34,13 @@ fn main() -> anyhow::Result<()> {
 
     info!("All integration tests passed!");
 
-    runtime.block_on(env.shutdown());
+    runtime.block_on(client_send.task_group().clone().shutdown_join_all(None))?;
+
+    if let Err(e) = env.ldk_node.stop() {
+        tracing::warn!("LDK node stop failed: {e:?}");
+    }
+
+    runtime.block_on(env.endpoint.close());
+
     Ok(())
 }

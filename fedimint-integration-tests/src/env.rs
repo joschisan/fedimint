@@ -51,8 +51,8 @@ pub struct TestEnv {
     pub invite_code: InviteCode,
     pub gw_addr: String,
     pub gw_public: String,
-    endpoint: Endpoint,
-    client_counter: AtomicU64,
+    pub endpoint: Endpoint,
+    pub client_counter: AtomicU64,
 }
 
 impl TestEnv {
@@ -154,12 +154,6 @@ impl TestEnv {
             },
             client_send,
         ))
-    }
-
-    /// Gracefully close the shared iroh Endpoint. iroh logs loud errors if
-    /// endpoints are dropped without being closed first.
-    pub async fn shutdown(&self) {
-        self.endpoint.close().await;
     }
 
     fn connect_bitcoind(

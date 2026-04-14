@@ -149,5 +149,11 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
 
     info!("mintv2: double_spend_is_rejected passed");
 
+    client_receive
+        .task_group()
+        .clone()
+        .shutdown_join_all(None)
+        .await?;
+
     Ok(())
 }

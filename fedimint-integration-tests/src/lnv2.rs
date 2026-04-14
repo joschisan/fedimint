@@ -148,6 +148,8 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
         .await?;
     assert!(listed.is_empty());
 
+    client.task_group().clone().shutdown_join_all(None).await?;
+
     info!("lnv2: test_gateway_registration passed");
 
     Ok(())
