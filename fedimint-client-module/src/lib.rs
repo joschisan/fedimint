@@ -39,6 +39,8 @@ pub mod db;
 
 /// Environment variables
 pub mod envs;
+/// Per-module typed state machine executor
+pub mod executor;
 /// Module client interface definitions
 pub mod module;
 /// Secret handling & derivation
