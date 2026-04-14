@@ -1321,6 +1321,10 @@ impl ClientContextIface for Client {
         .await;
     }
 
+    fn event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry> {
+        self.get_event_log_transient_receiver()
+    }
+
     async fn read_operation_active_states<'dbtx>(
         &self,
         operation_id: OperationId,

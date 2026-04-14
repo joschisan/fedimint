@@ -23,7 +23,7 @@ use std::convert::Infallible;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use anyhow::{Context as _, anyhow};
+use anyhow::Context as _;
 use bitcoin_hashes::sha256;
 use client_db::{RecoveryState, RecoveryStateKey, SpendableNoteAmountPrefix, SpendableNotePrefix};
 pub use events::*;
@@ -49,15 +49,14 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::rand::{Rng, thread_rng};
 use fedimint_core::secp256k1::{Keypair, PublicKey};
-use fedimint_core::util::{BoxStream, NextOrPending};
-use fedimint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send};
+use fedimint_core::util::BoxStream;
+use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::DerivableSecret;
 use fedimint_mintv2_common::config::{MintClientConfig, client_denominations};
 use fedimint_mintv2_common::{
     Denomination, KIND, MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, RecoveryItem,
 };
-use futures::{StreamExt, pin_mut};
-use itertools::Itertools;
+use futures::StreamExt;
 use rand::seq::IteratorRandom;
 use tbs::AggregatePublicKey;
 use thiserror::Error;
@@ -297,6 +296,7 @@ pub struct MintClientModule {
     federation_id: FederationId,
     cfg: MintClientConfig,
     root_secret: DerivableSecret,
+    #[allow(dead_code)]
     notifier: ModuleNotifier<MintClientStateMachines>,
     client_ctx: ClientContext<Self>,
     balance_update_sender: tokio::sync::watch::Sender<()>,
@@ -620,36 +620,6 @@ impl MintClientModule {
         ClientOutputBundle::new(outputs, output_sms)
     }
 
-    async fn await_output_sm_success(
-        &self,
-        operation_id: OperationId,
-        outpoint: OutPoint,
-    ) -> anyhow::Result<()> {
-        let stream = self
-            .notifier
-            .subscribe(operation_id)
-            .await
-            .filter_map(|state| async {
-                let MintClientStateMachines::Output(state) = state else {
-                    return None;
-                };
-
-                if !state.common.range?.into_iter().contains(&outpoint) {
-                    return None;
-                }
-
-                match state.state {
-                    OutputSMState::Pending => None,
-                    OutputSMState::Success => Some(Ok(())),
-                    OutputSMState::Aborted => Some(Err(anyhow!("Transaction was rejected"))),
-                    OutputSMState::Failure => Some(Err(anyhow!("Failed to finalize notes",))),
-                }
-            });
-
-        pin_mut!(stream);
-
-        stream.next_or_pending().await
-    }
 
     /// Count the `ECash` notes in the client's database by denomination.
     pub async fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
@@ -713,6 +683,9 @@ impl MintClientModule {
             .await;
         let output = self.client_ctx.make_client_outputs(output);
 
+        // Subscribe before submitting so we cannot miss the finalisation event.
+        let mut events = self.client_ctx.event_log_transient_receiver();
+
         let range = self
             .client_ctx
             .finalize_and_submit_transaction(
@@ -722,11 +695,7 @@ impl MintClientModule {
             .await
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
-        for outpoint in range {
-            self.await_output_sm_success(operation_id, outpoint)
-                .await
-                .map_err(|_| SendECashError::Failure)?;
-        }
+        await_output_finalisation(&mut events, operation_id, range).await;
 
         Box::pin(self.send(amount)).await
     }
@@ -920,6 +889,35 @@ async fn download_slice_with_hash(
             peer_selector.remove(peer);
         } else {
             peer_selector.report(peer, TIMEOUT);
+        }
+    }
+}
+
+async fn await_output_finalisation(
+    rx: &mut tokio::sync::broadcast::Receiver<fedimint_eventlog::EventLogEntry>,
+    operation_id: OperationId,
+    range: OutPointRange,
+) {
+    use fedimint_eventlog::Event as _;
+    use tokio::sync::broadcast::error::RecvError;
+
+    loop {
+        match rx.recv().await {
+            Ok(entry) => {
+                if entry.module_kind() != Some(&fedimint_mintv2_common::KIND)
+                    || entry.kind != events::OutputFinalisedEvent::KIND
+                {
+                    continue;
+                }
+                let Some(ev) = entry.to_event::<events::OutputFinalisedEvent>() else {
+                    continue;
+                };
+                if ev.operation_id == operation_id && ev.range == range {
+                    return;
+                }
+            }
+            Err(RecvError::Lagged(_)) => continue,
+            Err(RecvError::Closed) => return,
         }
     }
 }

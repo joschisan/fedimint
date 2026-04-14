@@ -13,6 +13,7 @@ use tbs::{AggregatePublicKey, BlindedSignatureShare, PublicKeyShare, aggregate_s
 
 use crate::api::MintV2ModuleApi;
 use crate::client_db::SpendableNoteKey;
+use crate::events::OutputFinalisedEvent;
 use crate::{MintClientContext, NoteIssuanceRequest};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -74,6 +75,7 @@ impl State for MintOutputStateMachine {
                             signature_shares,
                             old_state,
                             context.tbs_agg_pks.clone(),
+                            context.client_ctx.clone(),
                         ))
                     },
                 )]
@@ -120,6 +122,7 @@ impl MintOutputStateMachine {
         signature_shares: Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>,
         old_state: MintOutputStateMachine,
         tbs_pks: BTreeMap<Denomination, AggregatePublicKey>,
+        client_ctx: crate::ClientContext<crate::MintClientModule>,
     ) -> MintOutputStateMachine {
         let Ok(signature_shares) = signature_shares else {
             return MintOutputStateMachine {
@@ -151,6 +154,18 @@ impl MintOutputStateMachine {
 
             dbtx.module_tx()
                 .insert_new_entry(&SpendableNoteKey(spendable_note), &())
+                .await;
+        }
+
+        if let Some(range) = old_state.common.range {
+            client_ctx
+                .log_event(
+                    &mut dbtx.module_tx(),
+                    OutputFinalisedEvent {
+                        operation_id: old_state.common.operation_id,
+                        range,
+                    },
+                )
                 .await;
         }
 

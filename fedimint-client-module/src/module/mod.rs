@@ -23,7 +23,8 @@ use fedimint_core::{
     Amount, PeerId, apply, async_trait_maybe_send, dyn_newtype_define, maybe_add_send,
     maybe_add_send_sync,
 };
-use fedimint_eventlog::{Event, EventKind, EventPersistence};
+use fedimint_eventlog::{Event, EventKind, EventLogEntry, EventPersistence};
+use tokio::sync::broadcast;
 use fedimint_logging::LOG_CLIENT;
 use futures::Stream;
 use tracing::warn;
@@ -87,6 +88,8 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
     async fn invite_code(&self, peer: PeerId) -> Option<InviteCode>;
 
     fn get_internal_payment_markers(&self) -> anyhow::Result<(PublicKey, u64)>;
+
+    fn event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry>;
 
     #[allow(clippy::too_many_arguments)]
     async fn log_event_json(
@@ -480,6 +483,13 @@ where
             .executor()
             .add_state_machines_dbtx(&mut dbtx.global_dbtx(self.global_dbtx_access_token), states)
             .await
+    }
+
+    /// Subscribe to the broadcast of all transient (unpersisted) events
+    /// emitted by the client. Subscribe before triggering the action that
+    /// produces the event to avoid missing it.
+    pub fn event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry> {
+        self.client.get().event_log_transient_receiver()
     }
 
     pub async fn log_event<E, Cap>(&self, dbtx: &mut DatabaseTransaction<'_, Cap>, event: E)
