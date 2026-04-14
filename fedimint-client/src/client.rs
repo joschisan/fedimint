@@ -6,7 +6,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, bail, format_err};
-use async_stream::try_stream;
 use bitcoin::key::Secp256k1;
 use bitcoin::key::rand::thread_rng;
 use bitcoin::secp256k1::{self, PublicKey};
@@ -25,8 +24,8 @@ use fedimint_client_module::transaction::{
     TxSubmissionStatesSM,
 };
 use fedimint_client_module::{
-    AddStateMachinesResult, ClientModuleInstance, GetInviteCodeRequest, ModuleGlobalContextGen,
-    ModuleRecoveryCompleted, TransactionUpdates, TxCreatedEvent,
+    AddStateMachinesResult, ClientModuleInstance, ModuleGlobalContextGen, ModuleRecoveryCompleted,
+    TransactionUpdates, TxCreatedEvent,
 };
 use fedimint_core::config::{ClientConfig, FederationId, JsonClientConfig, ModuleInitRegistry};
 use fedimint_core::core::{DynInput, DynOutput, ModuleInstanceId, ModuleKind, OperationId};
@@ -52,7 +51,6 @@ use fedimint_eventlog::{
 use fedimint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
 use futures::{Stream, StreamExt as _};
 use global_ctx::ModuleGlobalClientContext;
-use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, watch};
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, warn};
@@ -120,9 +118,6 @@ pub struct Client {
     iroh_enable_dht: bool,
     iroh_enable_next: bool,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetBalanceChangesRequest {}
 
 impl Client {
     /// Initialize a client builder that can be configured to create a new
@@ -1045,62 +1040,6 @@ impl Client {
             .global
             .broadcast_public_keys
             .expect("Guardian public keys must be present in config")
-    }
-
-    pub fn handle_global_rpc(
-        &self,
-        method: String,
-        params: serde_json::Value,
-    ) -> BoxStream<'_, anyhow::Result<serde_json::Value>> {
-        Box::pin(try_stream! {
-            match method.as_str() {
-                "get_balance" => {
-                    let balance = self.get_balance().await.unwrap_or_default();
-                    yield serde_json::to_value(balance)?;
-                }
-                "subscribe_balance_changes" => {
-                    let _req: GetBalanceChangesRequest = serde_json::from_value(params)?;
-                    let mut stream = self.subscribe_balance_changes().await;
-                    while let Some(balance) = stream.next().await {
-                        yield serde_json::to_value(balance)?;
-                    }
-                }
-                "get_config" => {
-                    let config = self.config().await;
-                    yield serde_json::to_value(config)?;
-                }
-                "get_federation_id" => {
-                    let federation_id = self.federation_id();
-                    yield serde_json::to_value(federation_id)?;
-                }
-                "get_invite_code" => {
-                    let req: GetInviteCodeRequest = serde_json::from_value(params)?;
-                    let invite_code = self.invite_code(req.peer).await;
-                    yield serde_json::to_value(invite_code)?;
-                }
-                "has_pending_recoveries" => {
-                    let has_pending = self.has_pending_recoveries();
-                    yield serde_json::to_value(has_pending)?;
-                }
-                "wait_for_all_recoveries" => {
-                    self.wait_for_all_recoveries().await?;
-                    yield serde_json::Value::Null;
-                }
-                "subscribe_to_recovery_progress" => {
-                    let mut stream = self.subscribe_to_recovery_progress();
-                    while let Some((module_id, progress)) = stream.next().await {
-                        yield serde_json::json!({
-                            "module_id": module_id,
-                            "progress": progress
-                        });
-                    }
-                }
-                _ => {
-                    Err(anyhow::format_err!("Unknown method: {}", method))?;
-                    unreachable!()
-                },
-            }
-        })
     }
 
     pub async fn log_event<E>(&self, module_id: Option<ModuleInstanceId>, event: E)

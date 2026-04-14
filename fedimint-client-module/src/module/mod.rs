@@ -583,16 +583,6 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// access to global client is allowed.
     async fn start(&self) {}
 
-    async fn handle_rpc(
-        &self,
-        _method: String,
-        _request: serde_json::Value,
-    ) -> BoxStream<'_, anyhow::Result<serde_json::Value>> {
-        Box::pin(futures::stream::once(std::future::ready(Err(
-            anyhow::format_err!("This module does not implement rpc"),
-        ))))
-    }
-
     /// Returns the fee the processing of this input requires.
     ///
     /// If the semantics of a given input aren't known this function returns
@@ -758,12 +748,6 @@ pub trait IClientModule: Debug {
 
     async fn start(&self);
 
-    async fn handle_rpc(
-        &self,
-        method: String,
-        request: serde_json::Value,
-    ) -> BoxStream<'_, anyhow::Result<serde_json::Value>>;
-
     fn input_fee(&self, amount: Amount, input: &DynInput) -> Option<Amount>;
 
     fn output_fee(&self, amount: Amount, output: &DynOutput) -> Option<Amount>;
@@ -813,14 +797,6 @@ where
 
     async fn start(&self) {
         <T as ClientModule>::start(self).await;
-    }
-
-    async fn handle_rpc(
-        &self,
-        method: String,
-        request: serde_json::Value,
-    ) -> BoxStream<'_, anyhow::Result<serde_json::Value>> {
-        <T as ClientModule>::handle_rpc(self, method, request).await
     }
 
     fn input_fee(&self, amount: Amount, input: &DynInput) -> Option<Amount> {
