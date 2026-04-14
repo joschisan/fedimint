@@ -34,7 +34,6 @@ use tokio::select;
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{Instrument, debug, error, info, trace, warn};
 
-use crate::sm::notifier::Notifier;
 use crate::{AddStateMachinesError, AddStateMachinesResult, DynGlobalClientContext};
 
 /// After how many attempts a DB transaction is aborted with an error
@@ -79,7 +78,6 @@ struct ExecutorInner {
     state: std::sync::RwLock<ExecutorState>,
     module_contexts: BTreeMap<ModuleInstanceId, DynContext>,
     valid_module_ids: BTreeSet<ModuleInstanceId>,
-    notifier: Notifier,
     /// Any time executor should notice state machine update (e.g. because it
     /// was created), it's must be sent through this channel for it to notice.
     sm_update_tx: mpsc::UnboundedSender<DynState>,
@@ -290,10 +288,8 @@ impl Executor {
                 )
                 .await;
 
-            let notify_sender = self.inner.notifier.sender();
             let sm_updates_tx = self.inner.sm_update_tx.clone();
             dbtx.on_commit(move || {
-                notify_sender.notify(state.clone());
                 let _ = sm_updates_tx.send(state);
             });
         }
@@ -404,12 +400,6 @@ impl Executor {
     /// If called in parallel with [`start_executor`](Self::start_executor).
     pub fn stop_executor(&self) -> Option<()> {
         self.inner.stop_executor()
-    }
-
-    /// Returns a reference to the [`Notifier`] that can be used to subscribe to
-    /// state transitions
-    pub fn notifier(&self) -> &Notifier {
-        &self.inner.notifier
     }
 }
 
@@ -647,7 +637,6 @@ impl ExecutorInner {
                     futures.push({
                         let sm_update_tx = self.sm_update_tx.clone();
                         let db = self.db.clone();
-                        let notifier = self.notifier.clone();
                         let module_contexts = self.module_contexts.clone();
                         let global_context_gen = global_context_gen.clone();
                         Box::pin(
@@ -720,9 +709,7 @@ impl ExecutorInner {
                                                     );
                                                     let v = ActiveStateMeta::default().into_inactive();
                                                     dbtx.insert_entry(&InactiveStateKeyDb(k), &v).await;
-                                                    Ok(ActiveOrInactiveState::Inactive {
-                                                        dyn_state: new_state,
-                                                    })
+                                                    Ok(ActiveOrInactiveState::Inactive)
                                                 } else {
                                                     let k = ActiveStateKey::from_state(
                                                         new_state.clone(),
@@ -748,16 +735,12 @@ impl ExecutorInner {
                                     "State transition complete",
                                 );
 
-                                match &outcome {
-                                    ActiveOrInactiveState::Active { dyn_state, meta: _ } => {
-                                        sm_update_tx
-                                            .send(dyn_state.clone())
-                                            .expect("can't fail: we are the receiving end");
-                                        notifier.notify(dyn_state.clone());
-                                    }
-                                    ActiveOrInactiveState::Inactive { dyn_state } => {
-                                        notifier.notify(dyn_state.clone());
-                                    }
+                                if let ActiveOrInactiveState::Active { dyn_state, meta: _ } =
+                                    &outcome
+                                {
+                                    sm_update_tx
+                                        .send(dyn_state.clone())
+                                        .expect("can't fail: we are the receiving end");
                                 }
                                 ExecutorLoopEvent::Completed { state, outcome }
                             }
@@ -919,7 +902,6 @@ impl ExecutorBuilder {
     pub fn build(
         self,
         db: Database,
-        notifier: Notifier,
         client_task_group: TaskGroup,
         log_ordering_wakeup_tx: watch::Sender<()>,
     ) -> Executor {
@@ -931,7 +913,6 @@ impl ExecutorBuilder {
             state: std::sync::RwLock::new(ExecutorState::Unstarted { sm_update_rx }),
             module_contexts: self.module_contexts,
             valid_module_ids: self.valid_module_ids,
-            notifier,
             sm_update_tx,
             client_task_group,
         });
@@ -956,24 +937,6 @@ impl Encodable for ActiveOperationStateKeyPrefix {
 }
 
 impl ::fedimint_core::db::DatabaseLookup for ActiveOperationStateKeyPrefix {
-    type Record = ActiveStateKeyDb;
-}
-
-#[derive(Debug)]
-pub(crate) struct ActiveModuleOperationStateKeyPrefix {
-    pub operation_id: OperationId,
-    pub module_instance: ModuleInstanceId,
-}
-
-impl Encodable for ActiveModuleOperationStateKeyPrefix {
-    fn consensus_encode<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        self.operation_id.consensus_encode(writer)?;
-        self.module_instance.consensus_encode(writer)?;
-        Ok(())
-    }
-}
-
-impl ::fedimint_core::db::DatabaseLookup for ActiveModuleOperationStateKeyPrefix {
     type Record = ActiveStateKeyDb;
 }
 
@@ -1072,24 +1035,6 @@ impl ::fedimint_core::db::DatabaseLookup for InactiveOperationStateKeyPrefix {
     type Record = InactiveStateKeyDb;
 }
 
-#[derive(Debug)]
-pub(crate) struct InactiveModuleOperationStateKeyPrefix {
-    pub operation_id: OperationId,
-    pub module_instance: ModuleInstanceId,
-}
-
-impl Encodable for InactiveModuleOperationStateKeyPrefix {
-    fn consensus_encode<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        self.operation_id.consensus_encode(writer)?;
-        self.module_instance.consensus_encode(writer)?;
-        Ok(())
-    }
-}
-
-impl ::fedimint_core::db::DatabaseLookup for InactiveModuleOperationStateKeyPrefix {
-    type Record = InactiveStateKeyDb;
-}
-
 #[derive(Debug, Clone)]
 pub struct InactiveStateKeyPrefix;
 
@@ -1170,9 +1115,7 @@ enum ActiveOrInactiveState {
         #[allow(dead_code)] // currently not printed anywhere, but useful in the db
         meta: ActiveStateMeta,
     },
-    Inactive {
-        dyn_state: DynState,
-    },
+    Inactive,
 }
 
 impl ActiveOrInactiveState {

@@ -18,11 +18,10 @@ use events::{
     SendPaymentStatus, SendPaymentUpdateEvent,
 };
 use fedimint_api_client::api::DynModuleApi;
-use fedimint_eventlog::EventLogId;
 use fedimint_client::ClientHandleArc;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule, OutPointRange};
-use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
+use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
 use fedimint_client_module::transaction::{
     ClientOutput, ClientOutputBundle, ClientOutputSM, TransactionBuilder,
 };
@@ -36,6 +35,7 @@ use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::util::Spanned;
 use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send, secp256k1};
+use fedimint_eventlog::EventLogId;
 use fedimint_lnv2_common::config::LightningClientConfig;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::SendPaymentPayload;
@@ -83,7 +83,6 @@ impl ClientModuleInit for GatewayClientInitV2 {
         Ok(GatewayClientModuleV2 {
             federation_id: *args.federation_id(),
             cfg: args.cfg().clone(),
-            notifier: args.notifier().clone(),
             client_ctx: args.context(),
             module_api: args.module_api().clone(),
             keypair: args
@@ -99,7 +98,6 @@ impl ClientModuleInit for GatewayClientInitV2 {
 pub struct GatewayClientModuleV2 {
     pub federation_id: FederationId,
     pub cfg: LightningClientConfig,
-    pub notifier: ModuleNotifier<GatewayClientStateMachinesV2>,
     pub client_ctx: ClientContext<Self>,
     pub module_api: DynModuleApi,
     pub keypair: Keypair,

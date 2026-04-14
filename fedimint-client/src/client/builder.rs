@@ -43,7 +43,6 @@ use crate::db::{
 };
 use crate::module_init::ClientModuleInitRegistry;
 use crate::sm::executor::Executor;
-use crate::sm::notifier::Notifier;
 
 /// The type of root secret hashing
 ///
@@ -392,8 +391,6 @@ impl ClientBuilder {
 
         let init_state = Self::load_init_state(&db).await;
 
-        let notifier = Notifier::new();
-
         let mut module_recoveries: BTreeMap<
             ModuleInstanceId,
             Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
@@ -427,7 +424,6 @@ impl ClientBuilder {
                     let num_peers = NumPeers::from(config.global.api_endpoints.len());
                     let db = db.clone();
                     let kind = kind.clone();
-                    let notifier = notifier.clone();
                     let api = api.clone();
                     let root_secret = root_secret.clone();
                     let final_client = final_client.clone();
@@ -445,7 +441,6 @@ impl ClientBuilder {
                                         db.clone(),
                                         module_instance_id,
                                         root_secret.derive_module_secret(module_instance_id),
-                                        notifier.clone(),
                                         api.clone(),
                                         progress_tx,
                                         task_group,
@@ -536,7 +531,6 @@ impl ClientBuilder {
                                 // of the same kind we have to use
                                 // the instance id instead.
                                 root_secret.derive_module_secret(module_instance_id),
-                                notifier.clone(),
                                 api.clone(),
                                 task_group.clone(),
                                 connectors.clone(),
@@ -577,7 +571,6 @@ impl ClientBuilder {
 
             executor_builder.build(
                 db.clone(),
-                notifier,
                 task_group.clone(),
                 log_ordering_wakeup_tx.clone(),
             )
@@ -591,7 +584,6 @@ impl ClientBuilder {
             watch::channel(recovery_receiver_init_val);
 
         let client_inner = Arc::new(Client {
-            final_client: final_client.clone(),
             config: tokio::sync::RwLock::new(config.clone()),
             api_secret,
             decoders,

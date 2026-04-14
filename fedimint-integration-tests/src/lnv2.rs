@@ -217,9 +217,7 @@ async fn test_payments(env: &TestEnv) -> anyhow::Result<()> {
 
         // Verify the freestanding LDK node observes the payment as successful,
         // i.e. the gateway settled the HTLC back to it via the CompleteSM.
-        let payment_hash = lightning_types::payment::PaymentHash(
-            *invoice.payment_hash().as_ref(),
-        );
+        let payment_hash = lightning_types::payment::PaymentHash(*invoice.payment_hash().as_ref());
         loop {
             let event = env.ldk_node.next_event_async().await;
             env.ldk_node.event_handled()?;

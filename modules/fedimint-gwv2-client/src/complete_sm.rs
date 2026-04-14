@@ -4,6 +4,7 @@ use fedimint_client::DynGlobalClientContext;
 use fedimint_client_module::sm::{ClientSMDatabaseTransaction, State, StateTransition};
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
+
 use super::FinalReceiveState;
 use super::events::CompleteLightningPaymentEvent;
 use crate::{GatewayClientContextV2, InterceptPaymentResponse, PaymentAction, Preimage};

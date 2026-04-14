@@ -21,7 +21,7 @@ use db::{DbKeyPrefix, GatewayKey, IncomingContractStreamIndexKey};
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule, OutPointRange};
-use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
+use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
 use fedimint_client_module::transaction::{
     ClientOutput, ClientOutputBundle, ClientOutputSM, TransactionBuilder,
 };
@@ -109,7 +109,6 @@ impl ClientModuleInit for LightningClientInit {
         Ok(LightningClientModule::new(
             *args.federation_id(),
             args.cfg().clone(),
-            args.notifier().clone(),
             args.context(),
             args.module_api().clone(),
             args.module_root_secret(),
@@ -146,8 +145,6 @@ impl Context for LightningClientContext {
 pub struct LightningClientModule {
     federation_id: FederationId,
     cfg: LightningClientConfig,
-    #[allow(dead_code)]
-    notifier: ModuleNotifier<LightningClientStateMachines>,
     client_ctx: ClientContext<Self>,
     module_api: DynModuleApi,
     keypair: Keypair,
@@ -192,7 +189,6 @@ impl LightningClientModule {
     fn new(
         federation_id: FederationId,
         cfg: LightningClientConfig,
-        notifier: ModuleNotifier<LightningClientStateMachines>,
         client_ctx: ClientContext<Self>,
         module_api: DynModuleApi,
         module_root_secret: &DerivableSecret,
@@ -202,7 +198,6 @@ impl LightningClientModule {
         let module = Self {
             federation_id,
             cfg,
-            notifier,
             client_ctx,
             module_api,
             keypair: module_root_secret

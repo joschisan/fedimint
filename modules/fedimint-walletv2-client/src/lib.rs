@@ -31,7 +31,7 @@ use fedimint_client::transaction::{
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule, OutPointRange};
-use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
+use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
 use fedimint_client_module::sm_enum_variant_translation;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{
@@ -63,8 +63,6 @@ const SLICE_SIZE: u64 = 1000;
 pub struct WalletClientModule {
     root_secret: DerivableSecret,
     cfg: WalletClientConfig,
-    #[allow(dead_code)]
-    notifier: ModuleNotifier<WalletClientStateMachines>,
     client_ctx: ClientContext<Self>,
     db: Database,
     module_api: DynModuleApi,
@@ -132,7 +130,6 @@ impl ClientModuleInit for WalletClientInit {
         let module = WalletClientModule {
             root_secret: args.module_root_secret().clone(),
             cfg: args.cfg().clone(),
-            notifier: args.notifier().clone(),
             client_ctx: args.context(),
             db: args.db().clone(),
             module_api: args.module_api().clone(),
@@ -326,7 +323,7 @@ impl WalletClientModule {
         value: bitcoin::Amount,
         address_index: u64,
         fee: bitcoin::Amount,
-    ) -> (OperationId, TransactionId) {
+    ) -> TransactionId {
         let operation_id = OperationId::new_random();
 
         let client_input = ClientInput::<WalletInput> {
@@ -383,7 +380,7 @@ impl WalletClientModule {
 
         dbtx.commit_tx().await;
 
-        (operation_id, range.txid())
+        range.txid()
     }
 
     fn spawn_output_scanner(&self, task_group: &TaskGroup) {
@@ -480,13 +477,11 @@ impl WalletClientModule {
                         .ok_or(anyhow!("No consensus feerate is available"))?;
 
                     if output.value > receive_fee {
-                        let (operation_id, txid) = self
+                        let txid = self
                             .receive_output(output.index, output.value, address_index, receive_fee)
                             .await;
 
                         self.client_ctx
-                            .transaction_updates(operation_id)
-                            .await
                             .await_tx_accepted(txid)
                             .await
                             .map_err(|e| anyhow!("Claim transaction was rejected: {e}"))?;

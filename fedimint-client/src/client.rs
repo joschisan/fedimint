@@ -13,19 +13,19 @@ use fedimint_api_client::api::{DynGlobalApi, IGlobalFederationApi};
 use fedimint_api_client::connection::ConnectionPool;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
-    ClientContextIface, ClientModule, ClientModuleRegistry, DynClientModule, FinalClientIface,
-    IClientModule, IdxRange, OutPointRange,
+    ClientContextIface, ClientModule, ClientModuleRegistry, DynClientModule, IClientModule,
+    IdxRange, OutPointRange,
 };
 use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy as _};
-use fedimint_client_module::sm::executor::{ActiveStateKey, IExecutor, InactiveStateKey};
-use fedimint_client_module::sm::{ActiveStateMeta, DynState, InactiveStateMeta};
+use fedimint_client_module::sm::DynState;
+use fedimint_client_module::sm::executor::IExecutor;
 use fedimint_client_module::transaction::{
     TRANSACTION_SUBMISSION_MODULE_INSTANCE, TransactionBuilder, TxSubmissionStates,
     TxSubmissionStatesSM,
 };
 use fedimint_client_module::{
     AddStateMachinesResult, ClientModuleInstance, ModuleGlobalContextGen, ModuleRecoveryCompleted,
-    TransactionUpdates, TxCreatedEvent,
+    TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
 };
 use fedimint_core::config::{ClientConfig, FederationId, JsonClientConfig, ModuleInitRegistry};
 use fedimint_core::core::{DynInput, DynOutput, ModuleInstanceId, ModuleKind, OperationId};
@@ -41,7 +41,8 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::transaction::Transaction;
 use fedimint_core::util::{BoxStream, FmtCompact as _, FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{
-    Amount, PeerId, apply, async_trait_maybe_send, maybe_add_send, maybe_add_send_sync,
+    Amount, PeerId, TransactionId, apply, async_trait_maybe_send, maybe_add_send,
+    maybe_add_send_sync,
 };
 use fedimint_eventlog::{
     DBTransactionEventLogExt as _, DynEventLogTrimableTracker, Event, EventKind, EventLogEntry,
@@ -63,8 +64,7 @@ use crate::db::{
 };
 use crate::module_init::{DynClientModuleInit, IClientModuleInit};
 use crate::sm::executor::{
-    ActiveModuleOperationStateKeyPrefix, ActiveOperationStateKeyPrefix, Executor,
-    InactiveModuleOperationStateKeyPrefix, InactiveOperationStateKeyPrefix,
+    ActiveOperationStateKeyPrefix, Executor, InactiveOperationStateKeyPrefix,
 };
 
 pub(crate) mod builder;
@@ -86,7 +86,6 @@ pub(crate) mod handle;
 /// [`crate::ClientHandle`] is responsible for external lifecycle management
 /// and resource freeing of the [`Client`].
 pub struct Client {
-    final_client: FinalClientIface,
     config: tokio::sync::RwLock<ClientConfig>,
     api_secret: Option<String>,
     decoders: ModuleDecoderRegistry,
@@ -594,18 +593,31 @@ impl Client {
         Ok(OutPointRange::new(txid, IdxRange::from(change_range)))
     }
 
-    async fn transaction_update_stream(
-        &self,
-        operation_id: OperationId,
-    ) -> BoxStream<'static, TxSubmissionStatesSM> {
-        self.executor
-            .notifier()
-            .module_notifier::<TxSubmissionStatesSM>(
-                TRANSACTION_SUBMISSION_MODULE_INSTANCE,
-                self.final_client.clone(),
-            )
-            .subscribe(operation_id)
-            .await
+    pub async fn await_tx_accepted(&self, query_txid: TransactionId) -> Result<(), String> {
+        let mut log_rx = self.log_event_added_rx();
+        let mut next_id = EventLogId::LOG_START;
+        loop {
+            for entry in self.get_event_log(Some(next_id), 100).await {
+                next_id = entry.id().saturating_add(1);
+                let raw = entry.as_raw();
+                if raw.module_kind().is_some() {
+                    continue;
+                }
+                if raw.kind == TxAcceptedEvent::KIND
+                    && let Some(ev) = raw.to_event::<TxAcceptedEvent>()
+                    && ev.txid == query_txid
+                {
+                    return Ok(());
+                }
+                if raw.kind == TxRejectedEvent::KIND
+                    && let Some(ev) = raw.to_event::<TxRejectedEvent>()
+                    && ev.txid == query_txid
+                {
+                    return Err(ev.error);
+                }
+            }
+            let _ = log_rx.changed().await;
+        }
     }
 
     pub async fn operation_exists(&self, operation_id: OperationId) -> bool {
@@ -683,14 +695,6 @@ impl Client {
 
     pub fn endpoints(&self) -> &ConnectionPool {
         &self.connectors
-    }
-
-    /// Returns a stream of transaction updates for the given operation id that
-    /// can later be used to watch for a specific transaction being accepted.
-    pub async fn transaction_updates(&self, operation_id: OperationId) -> TransactionUpdates {
-        TransactionUpdates {
-            update_stream: self.transaction_update_stream(operation_id).await,
-        }
     }
 
     /// Returns the instance id of the first module of the given kind.
@@ -1268,14 +1272,6 @@ impl ClientContextIface for Client {
         Client::finalize_and_submit_transaction_inner(self, dbtx, operation_id, tx_builder).await
     }
 
-    async fn transaction_updates(&self, operation_id: OperationId) -> TransactionUpdates {
-        Client::transaction_updates(self, operation_id).await
-    }
-
-    async fn has_active_states(&self, operation_id: OperationId) -> bool {
-        Client::has_active_states(self, operation_id).await
-    }
-
     async fn operation_exists(&self, operation_id: OperationId) -> bool {
         Client::operation_exists(self, operation_id).await
     }
@@ -1329,45 +1325,12 @@ impl ClientContextIface for Client {
         Client::log_event_added_rx(self)
     }
 
-    async fn get_event_log(
-        &self,
-        pos: Option<EventLogId>,
-        limit: u64,
-    ) -> Vec<PersistedLogEntry> {
+    async fn get_event_log(&self, pos: Option<EventLogId>, limit: u64) -> Vec<PersistedLogEntry> {
         Client::get_event_log(self, pos, limit).await
     }
 
-    async fn read_operation_active_states<'dbtx>(
-        &self,
-        operation_id: OperationId,
-        module_id: ModuleInstanceId,
-        dbtx: &'dbtx mut DatabaseTransaction<'_>,
-    ) -> Pin<Box<maybe_add_send!(dyn Stream<Item = (ActiveStateKey, ActiveStateMeta)> + 'dbtx)>>
-    {
-        Box::pin(
-            dbtx.find_by_prefix(&ActiveModuleOperationStateKeyPrefix {
-                operation_id,
-                module_instance: module_id,
-            })
-            .await
-            .map(move |(k, v)| (k.0, v)),
-        )
-    }
-    async fn read_operation_inactive_states<'dbtx>(
-        &self,
-        operation_id: OperationId,
-        module_id: ModuleInstanceId,
-        dbtx: &'dbtx mut DatabaseTransaction<'_>,
-    ) -> Pin<Box<maybe_add_send!(dyn Stream<Item = (InactiveStateKey, InactiveStateMeta)> + 'dbtx)>>
-    {
-        Box::pin(
-            dbtx.find_by_prefix(&InactiveModuleOperationStateKeyPrefix {
-                operation_id,
-                module_instance: module_id,
-            })
-            .await
-            .map(move |(k, v)| (k.0, v)),
-        )
+    async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String> {
+        Client::await_tx_accepted(self, txid).await
     }
 }
 

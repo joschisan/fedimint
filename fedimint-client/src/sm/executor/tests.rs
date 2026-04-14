@@ -17,7 +17,6 @@ use tracing::{info, trace};
 
 use super::Executor;
 use crate::DynGlobalClientContext;
-use crate::sm::notifier::Notifier;
 
 #[derive(Debug, Clone, Eq, PartialEq, Decodable, Encodable, Hash)]
 enum MockStateMachine {
@@ -138,12 +137,7 @@ fn get_executor() -> (Executor, Sender<u64>, Database) {
         },
     );
     let (log_ordering_wakeup_tx, _log_ordering_wakeup_rx) = watch::channel(());
-    let executor = executor_builder.build(
-        db.clone(),
-        Notifier::new(),
-        TaskGroup::new(),
-        log_ordering_wakeup_tx,
-    );
+    let executor = executor_builder.build(db.clone(), TaskGroup::new(), log_ordering_wakeup_tx);
     executor.start_executor(Arc::new(|_, _| DynGlobalClientContext::new_fake()));
 
     info!(

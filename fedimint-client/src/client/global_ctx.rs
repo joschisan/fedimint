@@ -3,7 +3,7 @@ use std::sync::Arc;
 use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_client_module::module::OutPointRange;
 use fedimint_client_module::sm::{ClientSMDatabaseTransaction, DynState, IState};
-use fedimint_client_module::transaction::{TransactionBuilder, TxSubmissionStatesSM};
+use fedimint_client_module::transaction::TransactionBuilder;
 use fedimint_client_module::{
     AddStateMachinesResult, IGlobalClientContext, InstancelessDynClientInputBundle,
     InstancelessDynClientOutputBundle,
@@ -11,8 +11,7 @@ use fedimint_client_module::{
 use fedimint_core::config::ClientConfig;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
-use fedimint_core::util::BoxStream;
-use fedimint_core::{apply, async_trait_maybe_send, maybe_add_send_sync};
+use fedimint_core::{TransactionId, apply, async_trait_maybe_send, maybe_add_send_sync};
 use fedimint_eventlog::{EventKind, EventPersistence};
 
 use super::Client;
@@ -92,8 +91,8 @@ impl IGlobalClientContext for ModuleGlobalClientContext {
             .await
     }
 
-    async fn transaction_update_stream(&self) -> BoxStream<TxSubmissionStatesSM> {
-        self.client.transaction_update_stream(self.operation).await
+    async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String> {
+        self.client.await_tx_accepted(txid).await
     }
 
     async fn log_event_json(

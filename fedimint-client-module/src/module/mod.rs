@@ -1,7 +1,6 @@
 use core::fmt;
 use std::any::Any;
 use std::fmt::Debug;
-use std::pin::Pin;
 use std::sync::{Arc, Weak};
 use std::{marker, ops};
 
@@ -20,22 +19,21 @@ use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::BoxStream;
 use fedimint_core::{
-    Amount, PeerId, apply, async_trait_maybe_send, dyn_newtype_define, maybe_add_send,
+    Amount, PeerId, TransactionId, apply, async_trait_maybe_send, dyn_newtype_define,
     maybe_add_send_sync,
 };
 use fedimint_eventlog::{
     Event, EventKind, EventLogEntry, EventLogId, EventPersistence, PersistedLogEntry,
 };
-use tokio::sync::{broadcast, watch};
 use fedimint_logging::LOG_CLIENT;
-use futures::Stream;
+use tokio::sync::{broadcast, watch};
 use tracing::warn;
 
 use self::init::ClientModuleInit;
-use crate::sm::executor::{ActiveStateKey, IExecutor, InactiveStateKey};
-use crate::sm::{self, ActiveStateMeta, Context, DynContext, DynState, InactiveStateMeta, State};
+use crate::sm::executor::IExecutor;
+use crate::sm::{self, Context, DynContext, DynState, State};
 use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
-use crate::{AddStateMachinesResult, InstancelessDynClientInputBundle, TransactionUpdates};
+use crate::{AddStateMachinesResult, InstancelessDynClientInputBundle};
 
 pub mod init;
 pub mod recovery;
@@ -75,11 +73,9 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
 
-    async fn transaction_updates(&self, operation_id: OperationId) -> TransactionUpdates;
-
-    async fn has_active_states(&self, operation_id: OperationId) -> bool;
-
     async fn operation_exists(&self, operation_id: OperationId) -> bool;
+
+    async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String>;
 
     async fn config(&self) -> ClientConfig;
 
@@ -95,11 +91,7 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
 
     fn log_event_added_rx(&self) -> watch::Receiver<()>;
 
-    async fn get_event_log(
-        &self,
-        pos: Option<EventLogId>,
-        limit: u64,
-    ) -> Vec<PersistedLogEntry>;
+    async fn get_event_log(&self, pos: Option<EventLogId>, limit: u64) -> Vec<PersistedLogEntry>;
 
     #[allow(clippy::too_many_arguments)]
     async fn log_event_json(
@@ -111,20 +103,6 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
         payload: serde_json::Value,
         persist: EventPersistence,
     );
-
-    async fn read_operation_active_states<'dbtx>(
-        &self,
-        operation_id: OperationId,
-        module_id: ModuleInstanceId,
-        dbtx: &'dbtx mut DatabaseTransaction<'_>,
-    ) -> Pin<Box<maybe_add_send!(dyn Stream<Item = (ActiveStateKey, ActiveStateMeta)> + 'dbtx)>>;
-
-    async fn read_operation_inactive_states<'dbtx>(
-        &self,
-        operation_id: OperationId,
-        module_id: ModuleInstanceId,
-        dbtx: &'dbtx mut DatabaseTransaction<'_>,
-    ) -> Pin<Box<maybe_add_send!(dyn Stream<Item = (InactiveStateKey, InactiveStateMeta)> + 'dbtx)>>;
 }
 
 /// A final, fully initialized client
@@ -339,10 +317,6 @@ where
             .await
     }
 
-    pub async fn transaction_updates(&self, operation_id: OperationId) -> TransactionUpdates {
-        self.client.get().transaction_updates(operation_id).await
-    }
-
     pub fn module_db(&self) -> &Database {
         self.module_db
             .ensure_isolated()
@@ -350,8 +324,8 @@ where
         &self.module_db
     }
 
-    pub async fn has_active_states(&self, op_id: OperationId) -> bool {
-        self.client.get().has_active_states(op_id).await
+    pub async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String> {
+        self.client.get().await_tx_accepted(txid).await
     }
 
     pub async fn operation_exists(&self, op_id: OperationId) -> bool {

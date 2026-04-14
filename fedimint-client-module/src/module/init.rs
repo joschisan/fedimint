@@ -16,7 +16,6 @@ use super::ClientContext;
 use super::recovery::RecoveryProgress;
 use crate::db::ClientModuleMigrationFn;
 use crate::module::ClientModule;
-use crate::sm::ModuleNotifier;
 
 pub struct ClientModuleInitArgs<C>
 where
@@ -27,7 +26,6 @@ where
     pub cfg: <<C as ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     pub db: Database,
     pub module_root_secret: DerivableSecret,
-    pub notifier: ModuleNotifier<<<C as ClientModuleInit>::Module as ClientModule>::States>,
     pub api: DynGlobalApi,
     pub module_api: DynModuleApi,
     pub context: ClientContext<<C as ClientModuleInit>::Module>,
@@ -57,12 +55,6 @@ where
 
     pub fn module_root_secret(&self) -> &DerivableSecret {
         &self.module_root_secret
-    }
-
-    pub fn notifier(
-        &self,
-    ) -> &ModuleNotifier<<<C as ClientModuleInit>::Module as ClientModule>::States> {
-        &self.notifier
     }
 
     pub fn api(&self) -> &DynGlobalApi {
@@ -101,7 +93,6 @@ where
     pub cfg: <<C as ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     pub db: Database,
     pub module_root_secret: DerivableSecret,
-    pub notifier: ModuleNotifier<<<C as ClientModuleInit>::Module as ClientModule>::States>,
     pub api: DynGlobalApi,
     pub module_api: DynModuleApi,
     pub context: ClientContext<<C as ClientModuleInit>::Module>,
@@ -135,12 +126,6 @@ where
 
     pub fn module_root_secret(&self) -> &DerivableSecret {
         &self.module_root_secret
-    }
-
-    pub fn notifier(
-        &self,
-    ) -> &ModuleNotifier<<<C as ClientModuleInit>::Module as ClientModule>::States> {
-        &self.notifier
     }
 
     pub fn api(&self) -> &DynGlobalApi {

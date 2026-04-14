@@ -20,8 +20,6 @@ use fedimint_core::{NumPeers, apply, async_trait_maybe_send, dyn_newtype_define}
 use fedimint_derive_secret::DerivableSecret;
 use tokio::sync::watch;
 
-use crate::sm::notifier::Notifier;
-
 pub type ClientModuleInitRegistry = ModuleInitRegistry<DynClientModuleInit>;
 
 #[apply(async_trait_maybe_send!)]
@@ -42,7 +40,6 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
         db: Database,
         instance_id: ModuleInstanceId,
         module_root_secret: DerivableSecret,
-        notifier: Notifier,
         api: DynGlobalApi,
         progress_tx: watch::Sender<RecoveryProgress>,
         task_group: TaskGroup,
@@ -58,7 +55,6 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
         db: Database,
         instance_id: ModuleInstanceId,
         module_root_secret: DerivableSecret,
-        notifier: Notifier,
         api: DynGlobalApi,
         task_group: TaskGroup,
         connector_registry: ConnectionPool,
@@ -96,8 +92,6 @@ where
         db: Database,
         instance_id: ModuleInstanceId,
         module_root_secret: DerivableSecret,
-        // TODO: make dyn type for notifier
-        notifier: Notifier,
         api: DynGlobalApi,
         progress_tx: watch::Sender<RecoveryProgress>,
         task_group: TaskGroup,
@@ -113,7 +107,6 @@ where
                 cfg: typed_cfg.clone(),
                 db: module_db.clone(),
                 module_root_secret,
-                notifier: notifier.module_notifier(instance_id, final_client.clone()),
                 api: api.clone(),
                 module_api: api.with_module(instance_id),
                 context: ClientContext::new(
@@ -138,8 +131,6 @@ where
         db: Database,
         instance_id: ModuleInstanceId,
         module_root_secret: DerivableSecret,
-        // TODO: make dyn type for notifier
-        notifier: Notifier,
         api: DynGlobalApi,
         task_group: TaskGroup,
         connector_registry: ConnectionPool,
@@ -154,7 +145,6 @@ where
                 cfg: typed_cfg.clone(),
                 db: module_db.clone(),
                 module_root_secret,
-                notifier: notifier.module_notifier(instance_id, final_client.clone()),
                 api: api.clone(),
                 module_api: api.with_module(instance_id),
                 context: ClientContext::new(

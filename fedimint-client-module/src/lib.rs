@@ -21,25 +21,19 @@ pub use fedimint_core::core::{IInput, IOutput, ModuleInstanceId, ModuleKind, Ope
 use fedimint_core::db::Database;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::{MaybeSend, MaybeSync};
-use fedimint_core::util::{BoxStream, NextOrPending};
 use fedimint_core::{
     PeerId, TransactionId, apply, async_trait_maybe_send, dyn_newtype_define, maybe_add_send_sync,
 };
 use fedimint_eventlog::{Event, EventKind, EventPersistence};
-use fedimint_logging::LOG_CLIENT;
-use futures::StreamExt;
 use module::OutPointRange;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::debug;
-use transaction::{
-    ClientInputBundle, ClientInputSM, ClientOutput, ClientOutputSM, TxSubmissionStatesSM,
-};
+use transaction::{ClientInputBundle, ClientInputSM, ClientOutput, ClientOutputSM};
 
 pub use crate::module::{ClientModule, StateGenerator};
 use crate::sm::executor::ContextGen;
 use crate::sm::{ClientSMDatabaseTransaction, DynState, IState, State};
-use crate::transaction::{ClientInput, ClientOutputBundle, TxSubmissionStates};
+use crate::transaction::{ClientInput, ClientOutputBundle};
 
 pub mod db;
 
@@ -68,8 +62,8 @@ impl Event for TxCreatedEvent {
 
 #[derive(Serialize, Deserialize)]
 pub struct TxAcceptedEvent {
-    txid: TransactionId,
-    operation_id: OperationId,
+    pub txid: TransactionId,
+    pub operation_id: OperationId,
 }
 
 impl Event for TxAcceptedEvent {
@@ -80,9 +74,9 @@ impl Event for TxAcceptedEvent {
 
 #[derive(Serialize, Deserialize)]
 pub struct TxRejectedEvent {
-    txid: TransactionId,
-    error: String,
-    operation_id: OperationId,
+    pub txid: TransactionId,
+    pub error: String,
+    pub operation_id: OperationId,
 }
 impl Event for TxRejectedEvent {
     const MODULE: Option<ModuleKind> = None;
@@ -202,7 +196,7 @@ pub trait IGlobalClientContext: Debug + MaybeSend + MaybeSync + 'static {
         persist: EventPersistence,
     );
 
-    async fn transaction_update_stream(&self) -> BoxStream<TxSubmissionStatesSM>;
+    async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String>;
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -258,7 +252,7 @@ impl IGlobalClientContext for () {
         unimplemented!("fake implementation, only for tests");
     }
 
-    async fn transaction_update_stream(&self) -> BoxStream<TxSubmissionStatesSM> {
+    async fn await_tx_accepted(&self, _txid: TransactionId) -> Result<(), String> {
         unimplemented!("fake implementation, only for tests");
     }
 }
@@ -273,22 +267,6 @@ dyn_newtype_define! {
 impl DynGlobalClientContext {
     pub fn new_fake() -> Self {
         DynGlobalClientContext::from(())
-    }
-
-    pub async fn await_tx_accepted(&self, query_txid: TransactionId) -> Result<(), String> {
-        self.transaction_update_stream()
-            .await
-            .filter_map(|tx_update| {
-                std::future::ready(match tx_update.state {
-                    TxSubmissionStates::Accepted(txid) if txid == query_txid => Some(Ok(())),
-                    TxSubmissionStates::Rejected(txid, submit_error) if txid == query_txid => {
-                        Some(Err(submit_error))
-                    }
-                    _ => None,
-                })
-            })
-            .next_or_pending()
-            .await
     }
 
     pub async fn claim_inputs<I, S>(
@@ -429,30 +407,4 @@ where
 #[derive(Deserialize)]
 pub struct GetInviteCodeRequest {
     pub peer: PeerId,
-}
-
-pub struct TransactionUpdates {
-    pub update_stream: BoxStream<'static, TxSubmissionStatesSM>,
-}
-
-impl TransactionUpdates {
-    /// Waits for the transaction to be accepted or rejected as part of the
-    /// operation to which the `TransactionUpdates` object is subscribed.
-    pub async fn await_tx_accepted(self, await_txid: TransactionId) -> Result<(), String> {
-        debug!(target: LOG_CLIENT, %await_txid, "Await tx accepted");
-        self.update_stream
-            .filter_map(|tx_update| {
-                std::future::ready(match tx_update.state {
-                    TxSubmissionStates::Accepted(txid) if txid == await_txid => Some(Ok(())),
-                    TxSubmissionStates::Rejected(txid, submit_error) if txid == await_txid => {
-                        Some(Err(submit_error))
-                    }
-                    _ => None,
-                })
-            })
-            .next_or_pending()
-            .await?;
-        debug!(target: LOG_CLIENT, %await_txid, "Tx accepted");
-        Ok(())
-    }
 }

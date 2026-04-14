@@ -39,7 +39,7 @@ use fedimint_client_module::module::init::{
 };
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{ClientContext, OutPointRange};
-use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
+use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
 use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
@@ -279,7 +279,6 @@ impl ClientModuleInit for MintClientInit {
             federation_id: *args.federation_id(),
             cfg: args.cfg().clone(),
             root_secret: args.module_root_secret().clone(),
-            notifier: args.notifier().clone(),
             client_ctx: args.context(),
             balance_update_sender: tokio::sync::watch::channel(()).0,
             tweak_receiver,
@@ -296,8 +295,6 @@ pub struct MintClientModule {
     federation_id: FederationId,
     cfg: MintClientConfig,
     root_secret: DerivableSecret,
-    #[allow(dead_code)]
-    notifier: ModuleNotifier<MintClientStateMachines>,
     client_ctx: ClientContext<Self>,
     balance_update_sender: tokio::sync::watch::Sender<()>,
     tweak_receiver: async_channel::Receiver<[u8; 16]>,
@@ -619,7 +616,6 @@ impl MintClientModule {
 
         ClientOutputBundle::new(outputs, output_sms)
     }
-
 
     /// Count the `ECash` notes in the client's database by denomination.
     pub async fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
