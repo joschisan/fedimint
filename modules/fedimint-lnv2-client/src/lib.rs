@@ -17,13 +17,14 @@ use std::sync::Arc;
 
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
-use db::{DbKeyPrefix, GatewayKey, IncomingContractStreamIndexKey};
+use db::{DbKeyPrefix, GatewayKey, IncomingContractStreamIndexKey, SendOperationKey};
 use fedimint_api_client::api::DynModuleApi;
+use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
-use fedimint_client_module::module::{ClientContext, ClientModule, OutPointRange};
+use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
 use fedimint_client_module::transaction::{
-    ClientOutput, ClientOutputBundle, ClientOutputSM, TransactionBuilder,
+    ClientOutput, ClientOutputBundle, NeverClientStateMachine, TransactionBuilder,
 };
 use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::config::FederationId;
@@ -150,6 +151,8 @@ pub struct LightningClientModule {
     keypair: Keypair,
     lnurl_keypair: Keypair,
     gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
+    send_executor: ModuleExecutor<SendStateMachine>,
+    receive_executor: ModuleExecutor<ReceiveStateMachine>,
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -165,6 +168,11 @@ impl ClientModule for LightningClientModule {
             gateway_conn: self.gateway_conn.clone(),
             client_ctx: self.client_ctx.clone(),
         }
+    }
+
+    async fn start(&self) {
+        self.send_executor.start().await;
+        self.receive_executor.start().await;
     }
 
     fn input_fee(
@@ -195,6 +203,22 @@ impl LightningClientModule {
         gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
         task_group: &TaskGroup,
     ) -> Self {
+        let sm_context = LightningClientContext {
+            federation_id,
+            gateway_conn: gateway_conn.clone(),
+            client_ctx: client_ctx.clone(),
+        };
+        let send_executor = ModuleExecutor::new(
+            client_ctx.module_db().clone(),
+            sm_context.clone(),
+            task_group.clone(),
+        );
+        let receive_executor = ModuleExecutor::new(
+            client_ctx.module_db().clone(),
+            sm_context,
+            task_group.clone(),
+        );
+
         let module = Self {
             federation_id,
             cfg,
@@ -207,6 +231,8 @@ impl LightningClientModule {
                 .child_key(ChildId(1))
                 .to_secp_key(SECP256K1),
             gateway_conn,
+            send_executor,
+            receive_executor,
         };
 
         module.spawn_receive_lnurl_task(task_group);
@@ -362,10 +388,6 @@ impl LightningClientModule {
 
         let operation_id = OperationId::from_encodable(&invoice.payment_hash());
 
-        if self.client_ctx.operation_exists(operation_id).await {
-            return Err(SendPaymentError::InvoiceAlreadyAttempted(operation_id));
-        }
-
         let (ephemeral_tweak, ephemeral_pk) = tweak::generate(self.keypair.public_key());
 
         let refund_keypair = SecretKey::from_slice(&ephemeral_tweak)
@@ -411,44 +433,51 @@ impl LightningClientModule {
             ephemeral_pk,
         };
 
-        let contract_clone = contract.clone();
-        let gateway_api_clone = gateway_api.clone();
-        let invoice_clone = invoice.clone();
-
         let client_output = ClientOutput::<LightningOutput> {
             output: LightningOutput::V0(LightningOutputV0::Outgoing(contract.clone())),
             amount: contract.amount,
         };
 
-        let client_output_sm = ClientOutputSM::<LightningClientStateMachines> {
-            state_machines: Arc::new(move |range: OutPointRange| {
-                vec![LightningClientStateMachines::Send(SendStateMachine {
-                    common: SendSMCommon {
-                        operation_id,
-                        outpoint: range.into_iter().next().unwrap(),
-                        contract: contract_clone.clone(),
-                        gateway_api: Some(gateway_api_clone.clone()),
-                        invoice: Some(LightningInvoice::Bolt11(invoice_clone.clone())),
-                        refund_keypair,
-                    },
-                    state: SendSMState::Funding,
-                })]
-            }),
-        };
+        let client_output_bundle =
+            self.client_ctx.make_client_outputs(ClientOutputBundle::<
+                LightningOutput,
+                NeverClientStateMachine,
+            >::new_no_sm(vec![client_output]));
 
-        let client_output = self.client_ctx.make_client_outputs(ClientOutputBundle::new(
-            vec![client_output],
-            vec![client_output_sm],
-        ));
+        let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
 
-        let transaction = TransactionBuilder::new().with_outputs(client_output);
+        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
 
-        self.client_ctx
-            .finalize_and_submit_transaction(operation_id, transaction)
+        if dbtx
+            .insert_entry(&SendOperationKey(operation_id), &())
+            .await
+            .is_some()
+        {
+            return Err(SendPaymentError::InvoiceAlreadyAttempted(operation_id));
+        }
+
+        let range = self
+            .client_ctx
+            .finalize_and_submit_transaction_dbtx(&mut dbtx.to_ref_nc(), operation_id, transaction)
             .await
             .map_err(|e| SendPaymentError::FailedToFundPayment(e.to_string()))?;
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        self.send_executor
+            .add_state_machine_dbtx(
+                &mut dbtx.to_ref_nc(),
+                SendStateMachine {
+                    common: SendSMCommon {
+                        operation_id,
+                        outpoint: range.into_iter().next().unwrap(),
+                        contract,
+                        gateway_api: Some(gateway_api),
+                        invoice: Some(LightningInvoice::Bolt11(invoice.clone())),
+                        refund_keypair,
+                    },
+                    state: SendSMState::Funding,
+                },
+            )
+            .await;
 
         self.client_ctx
             .log_event(
@@ -494,10 +523,14 @@ impl LightningClientModule {
             )
             .await?;
 
+        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+
         let operation_id = self
-            .receive_incoming_contract(self.keypair.secret_key(), contract)
+            .receive_incoming_contract(&mut dbtx.to_ref_nc(), self.keypair.secret_key(), contract)
             .await
             .expect("The contract has been generated with our public key");
+
+        dbtx.commit_tx().await;
 
         Ok((invoice, operation_id))
     }
@@ -595,9 +628,12 @@ impl LightningClientModule {
     }
 
     // Receive an incoming contract locked to a public key derived from our
-    // static module public key.
+    // static module public key. Takes the caller's dbtx so the spawn is atomic
+    // with any surrounding state changes (e.g. advancing the lnurl stream
+    // index in [`Self::receive_lnurl`]).
     async fn receive_incoming_contract(
         &self,
+        dbtx: &mut DatabaseTransaction<'_>,
         sk: SecretKey,
         contract: IncomingContract,
     ) -> Option<OperationId> {
@@ -605,25 +641,20 @@ impl LightningClientModule {
 
         let (claim_keypair, agg_decryption_key) = self.recover_contract_keys(sk, &contract)?;
 
-        let receive_sm = LightningClientStateMachines::Receive(ReceiveStateMachine {
-            common: ReceiveSMCommon {
-                operation_id,
-                contract: contract.clone(),
-                claim_keypair,
-                agg_decryption_key,
-            },
-            state: ReceiveSMState::Pending,
-        });
-
-        // this may only fail if the operation id is already in use, in which case we
-        // ignore the error such that the method is idempotent
-        self.client_ctx
-            .manual_operation_start(
-                operation_id,
-                vec![self.client_ctx.make_dyn_state(receive_sm)],
+        self.receive_executor
+            .add_state_machine_dbtx(
+                dbtx,
+                ReceiveStateMachine {
+                    common: ReceiveSMCommon {
+                        operation_id,
+                        contract,
+                        claim_keypair,
+                        agg_decryption_key,
+                    },
+                    state: ReceiveSMState::Pending,
+                },
             )
-            .await
-            .ok();
+            .await;
 
         Some(operation_id)
     }
@@ -722,8 +753,12 @@ impl LightningClientModule {
             .await;
 
         for contract in &contracts {
-            self.receive_incoming_contract(self.lnurl_keypair.secret_key(), contract.clone())
-                .await;
+            self.receive_incoming_contract(
+                &mut dbtx.to_ref_nc(),
+                self.lnurl_keypair.secret_key(),
+                contract.clone(),
+            )
+            .await;
         }
 
         dbtx.insert_entry(&IncomingContractStreamIndexKey, &next_index)

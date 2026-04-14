@@ -1,8 +1,10 @@
 use fedimint_client_module::DynGlobalClientContext;
+use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_client_module::sm::{ClientSMDatabaseTransaction, State, StateTransition};
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::OutPoint;
 use fedimint_core::core::OperationId;
+use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::secp256k1::Keypair;
 use fedimint_lnv2_common::contracts::IncomingContract;
@@ -143,4 +145,84 @@ impl ReceiveStateMachine {
 
         old_state.update(ReceiveSMState::Claiming(change_range.into_iter().collect()))
     }
+}
+
+// ---- New per-module executor impl ------------------------------------------
+
+impl StateMachine for ReceiveStateMachine {
+    const DB_PREFIX: u8 = crate::db::DbKeyPrefix::ReceiveStateMachine as u8;
+
+    type Context = LightningClientContext;
+
+    fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
+        match &self.state {
+            ReceiveSMState::Pending => {
+                let ctx_clone = ctx.clone();
+                let contract = self.common.contract.clone();
+                vec![SmStateTransition::new(
+                    await_incoming_contract_sm(contract, ctx_clone.clone()),
+                    move |dbtx, outpoint, old_state| {
+                        let ctx = ctx_clone.clone();
+                        Box::pin(transition_incoming_contract_sm(
+                            ctx, dbtx, old_state, outpoint,
+                        ))
+                    },
+                )]
+            }
+            ReceiveSMState::Claiming(..) | ReceiveSMState::Expired => vec![],
+        }
+    }
+}
+
+#[instrument(target = LOG_CLIENT_MODULE_LNV2, skip(ctx))]
+async fn await_incoming_contract_sm(
+    contract: IncomingContract,
+    ctx: LightningClientContext,
+) -> Option<OutPoint> {
+    ctx.client_ctx
+        .module_api()
+        .await_incoming_contract(&contract.contract_id(), contract.commitment.expiration)
+        .await
+}
+
+async fn transition_incoming_contract_sm(
+    ctx: LightningClientContext,
+    dbtx: &mut DatabaseTransaction<'_>,
+    old_state: ReceiveStateMachine,
+    outpoint: Option<OutPoint>,
+) -> ReceiveStateMachine {
+    let Some(outpoint) = outpoint else {
+        return old_state.update(ReceiveSMState::Expired);
+    };
+
+    let client_input = ClientInput::<LightningInput> {
+        input: LightningInput::V0(LightningInputV0::Incoming(
+            outpoint,
+            old_state.common.agg_decryption_key,
+        )),
+        amount: old_state.common.contract.commitment.amount,
+        keys: vec![old_state.common.claim_keypair],
+    };
+
+    let change_range = ctx
+        .client_ctx
+        .claim_inputs(
+            dbtx,
+            ClientInputBundle::new_no_sm(vec![client_input]),
+            old_state.common.operation_id,
+        )
+        .await
+        .expect("Cannot claim input, additional funding needed");
+
+    ctx.client_ctx
+        .log_event(
+            dbtx,
+            ReceivePaymentEvent {
+                operation_id: old_state.common.operation_id,
+                amount: old_state.common.contract.commitment.amount,
+            },
+        )
+        .await;
+
+    old_state.update(ReceiveSMState::Claiming(change_range.into_iter().collect()))
 }
