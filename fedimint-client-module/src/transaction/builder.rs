@@ -37,9 +37,6 @@ pub struct ClientInputBundle<I = DynInput> {
 
 impl<I> ClientInputBundle<I> {
     pub fn new(inputs: Vec<ClientInput<I>>) -> Self {
-        if inputs.is_empty() {
-            warn!(target: LOG_CLIENT, "Empty input bundle will be illegal in the future");
-        }
         Self { inputs }
     }
 
