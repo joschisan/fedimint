@@ -193,8 +193,7 @@ async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Resul
     retry("gateway federation balance", || {
         let fed_id = fed_id.clone();
         async move {
-            let balance =
-                cli::gatewayd_federation_balance(&env.gw_addr, &fed_id)?.balance_msat;
+            let balance = cli::gatewayd_federation_balance(&env.gw_addr, &fed_id)?.balance_msat;
             ensure!(balance.msats > 0, "gateway federation balance is zero");
             Ok(())
         }

@@ -56,7 +56,7 @@ pub struct TestEnv {
 }
 
 impl TestEnv {
-    pub fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<Self> {
+    pub fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<(Self, ClientHandleArc)> {
         let data_dir = tempfile::TempDir::new()?;
         let base = data_dir.path();
         info!("Test data directory: {}", base.display());
@@ -96,6 +96,20 @@ impl TestEnv {
         let invite_code: InviteCode = invite_code_str.trim().parse()?;
         info!("Federation ready");
 
+        // Bind the iroh endpoint now so we can start building the first client
+        // concurrently with the rest of setup — address grinding is the
+        // slowest part of client construction and benefits from overlapping
+        // with gateway/LDK bring-up.
+        let endpoint = runtime.block_on(async { Endpoint::builder(N0).bind().await })?;
+
+        let client_counter = AtomicU64::new(0);
+        let client_send = runtime.block_on(build_client(
+            endpoint.clone(),
+            invite_code.clone(),
+            data_dir.path().to_path_buf(),
+            client_counter.fetch_add(1, Ordering::Relaxed),
+        ))?;
+
         runtime.block_on(start_gatewayd(
             base,
             "gw",
@@ -127,18 +141,19 @@ impl TestEnv {
         runtime.block_on(open_channel(&bitcoind, &gw_addr, &ldk_node))?;
         info!("Channel opened");
 
-        let endpoint = runtime.block_on(async { Endpoint::builder(N0).bind().await })?;
-
-        Ok(Self {
-            ldk_node,
-            data_dir,
-            bitcoind,
-            invite_code,
-            gw_addr,
-            gw_public,
-            endpoint,
-            client_counter: AtomicU64::new(0),
-        })
+        Ok((
+            Self {
+                ldk_node,
+                data_dir,
+                bitcoind,
+                invite_code,
+                gw_addr,
+                gw_public,
+                endpoint,
+                client_counter,
+            },
+            client_send,
+        ))
     }
 
     /// Gracefully close the shared iroh Endpoint. iroh logs loud errors if
@@ -167,35 +182,13 @@ impl TestEnv {
 
     pub async fn new_client(&self) -> anyhow::Result<ClientHandleArc> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
-        let db_path = self.data_dir.path().join(format!("client-{n}"));
-        tokio::fs::create_dir_all(&db_path).await?;
-
-        let db = fedimint_rocksdb::RocksDb::build(&db_path)
-            .open()
-            .await?
-            .into();
-
-        let mut builder = Client::builder().await?;
-        builder.with_module(fedimint_mintv2_client::MintClientInit);
-        builder.with_module(fedimint_walletv2_client::WalletClientInit);
-        builder.with_module(fedimint_lnv2_client::LightningClientInit::default());
-
-        let connectors = ConnectionPool::new(self.endpoint.clone());
-
-        let mnemonic = Mnemonic::generate(12)?;
-        let root_secret = RootSecret::StandardDoubleDerive(
-            Bip39RootSecretStrategy::<12>::to_root_secret(&mnemonic),
-        );
-
-        let client = builder
-            .preview(connectors, &self.invite_code)
-            .await?
-            .join(db, root_secret)
-            .await
-            .map(Arc::new)?;
-
-        info!("Created client-{n}");
-        Ok(client)
+        build_client(
+            self.endpoint.clone(),
+            self.invite_code.clone(),
+            self.data_dir.path().to_path_buf(),
+            n,
+        )
+        .await
     }
 
     pub fn mine_blocks(&self, n: u64) {
@@ -220,6 +213,7 @@ impl TestEnv {
     ) -> anyhow::Result<()> {
         let walletv2 = client.get_first_module::<WalletClientModule>()?;
         let addr = walletv2.receive().await;
+        info!(%addr, "Pegin address ready");
 
         let txid = self.send_to_address(&addr, amount)?;
 
@@ -242,6 +236,42 @@ impl TestEnv {
         info!("Pegged in to {addr}");
         Ok(())
     }
+}
+
+async fn build_client(
+    endpoint: Endpoint,
+    invite_code: InviteCode,
+    data_dir: std::path::PathBuf,
+    n: u64,
+) -> anyhow::Result<ClientHandleArc> {
+    let db_path = data_dir.join(format!("client-{n}"));
+    tokio::fs::create_dir_all(&db_path).await?;
+
+    let db = fedimint_rocksdb::RocksDb::build(&db_path)
+        .open()
+        .await?
+        .into();
+
+    let mut builder = Client::builder().await?;
+    builder.with_module(fedimint_mintv2_client::MintClientInit);
+    builder.with_module(fedimint_walletv2_client::WalletClientInit);
+    builder.with_module(fedimint_lnv2_client::LightningClientInit::default());
+
+    let connectors = ConnectionPool::new(endpoint);
+
+    let mnemonic = Mnemonic::generate(12)?;
+    let root_secret =
+        RootSecret::StandardDoubleDerive(Bip39RootSecretStrategy::<12>::to_root_secret(&mnemonic));
+
+    let client = builder
+        .preview(connectors, &invite_code)
+        .await?
+        .join(db, root_secret)
+        .await
+        .map(Arc::new)?;
+
+    info!("Created client-{n}");
+    Ok(client)
 }
 
 async fn start_fedimintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {

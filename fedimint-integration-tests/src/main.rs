@@ -17,13 +17,11 @@ fn main() -> anyhow::Result<()> {
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);
 
     info!("Setting up test environment...");
-    let env = env::TestEnv::setup(runtime.clone())?;
+    let (env, client_send) = env::TestEnv::setup(runtime.clone())?;
 
     info!("Test environment ready!");
     info!("Invite code: {}", env.invite_code);
     info!("Gateway: {}", env.gw_addr);
-
-    let client_send = runtime.block_on(env.new_client())?;
 
     info!("Running walletv2 tests...");
     runtime.block_on(walletv2::run_tests(&env, &client_send))?;
