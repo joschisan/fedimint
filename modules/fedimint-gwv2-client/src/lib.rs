@@ -1,5 +1,6 @@
 mod api;
 mod complete_sm;
+mod db;
 pub mod events;
 mod receive_sm;
 mod send_sm;
@@ -19,22 +20,23 @@ use events::{
 };
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client::ClientHandleArc;
+use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
-use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule, OutPointRange};
+use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule};
 use fedimint_client_module::sm::{Context, DynState, State, StateTransition};
 use fedimint_client_module::transaction::{
-    ClientOutput, ClientOutputBundle, ClientOutputSM, TransactionBuilder,
+    ClientOutput, ClientOutputBundle, NeverClientStateMachine, TransactionBuilder,
 };
 use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::hex::ToHex;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::util::Spanned;
-use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send, secp256k1};
+use fedimint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send, secp256k1};
 use fedimint_eventlog::EventLogId;
 use fedimint_lnv2_common::config::LightningClientConfig;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
@@ -80,16 +82,48 @@ impl ClientModuleInit for GatewayClientInitV2 {
     type Module = GatewayClientModuleV2;
 
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
+        let federation_id = *args.federation_id();
+        let cfg = args.cfg().clone();
+        let client_ctx = args.context();
+        let module_api = args.module_api().clone();
+        let keypair = args
+            .module_root_secret()
+            .clone()
+            .to_secp_key(fedimint_core::secp256k1::SECP256K1);
+        let gateway = self.gateway.clone();
+        let task_group = args.task_group().clone();
+
+        let sm_context = GwV2SmContext {
+            client_ctx: client_ctx.clone(),
+            keypair,
+            tpe_agg_pk: cfg.tpe_agg_pk,
+            tpe_pks: cfg.tpe_pks.clone(),
+            gateway: gateway.clone(),
+        };
+
+        let send_executor = ModuleExecutor::new(
+            client_ctx.module_db().clone(),
+            sm_context.clone(),
+            task_group.clone(),
+        );
+        let receive_executor = ModuleExecutor::new(
+            client_ctx.module_db().clone(),
+            sm_context.clone(),
+            task_group.clone(),
+        );
+        let complete_executor =
+            ModuleExecutor::new(client_ctx.module_db().clone(), sm_context, task_group);
+
         Ok(GatewayClientModuleV2 {
-            federation_id: *args.federation_id(),
-            cfg: args.cfg().clone(),
-            client_ctx: args.context(),
-            module_api: args.module_api().clone(),
-            keypair: args
-                .module_root_secret()
-                .clone()
-                .to_secp_key(fedimint_core::secp256k1::SECP256K1),
-            gateway: self.gateway.clone(),
+            federation_id,
+            cfg,
+            client_ctx,
+            module_api,
+            keypair,
+            gateway,
+            send_executor,
+            receive_executor,
+            complete_executor,
         })
     }
 }
@@ -102,6 +136,9 @@ pub struct GatewayClientModuleV2 {
     pub module_api: DynModuleApi,
     pub keypair: Keypair,
     pub gateway: Arc<dyn IGatewayClientV2>,
+    send_executor: ModuleExecutor<SendStateMachine>,
+    receive_executor: ModuleExecutor<ReceiveStateMachine>,
+    complete_executor: ModuleExecutor<CompleteStateMachine>,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +154,18 @@ impl Context for GatewayClientContextV2 {
     const KIND: Option<ModuleKind> = Some(fedimint_lnv2_common::KIND);
 }
 
+/// Lean context handed to per-SM executors. Does NOT hold the module itself
+/// — that would create a cycle (module → executor → Inner → ctx → module).
+#[derive(Debug, Clone)]
+pub struct GwV2SmContext {
+    pub client_ctx: ClientContext<GatewayClientModuleV2>,
+    pub keypair: Keypair,
+    pub tpe_agg_pk: AggregatePublicKey,
+    pub tpe_pks: BTreeMap<PeerId, PublicKeyShare>,
+    pub gateway: Arc<dyn IGatewayClientV2>,
+}
+
+#[apply(async_trait_maybe_send!)]
 impl ClientModule for GatewayClientModuleV2 {
     type Init = GatewayClientInitV2;
     type Common = LightningModuleTypes;
@@ -131,6 +180,12 @@ impl ClientModule for GatewayClientModuleV2 {
             tpe_pks: self.cfg.tpe_pks.clone(),
             gateway: self.gateway.clone(),
         }
+    }
+
+    async fn start(&self) {
+        self.send_executor.start().await;
+        self.receive_executor.start().await;
+        self.complete_executor.start().await;
     }
     fn input_fee(
         &self,
@@ -239,10 +294,6 @@ impl GatewayClientModuleV2 {
         // prevent replay attacks with a previously cancelled outgoing contract
         let operation_id = OperationId::from_encodable(&payload.contract.clone());
 
-        if self.client_ctx.operation_exists(operation_id).await {
-            return Ok(self.subscribe_send(operation_id).await);
-        }
-
         // Since the following four checks may only fail due to client side
         // programming error we do not have to enable cancellation and can check
         // them before we start the state machine.
@@ -298,28 +349,34 @@ impl GatewayClientModuleV2 {
             .min_contract_amount(&payload.federation_id, amount)
             .await?;
 
-        let send_sm = GatewayClientStateMachinesV2::Send(SendStateMachine {
-            common: SendSMCommon {
-                operation_id,
-                outpoint: payload.outpoint,
-                contract: payload.contract.clone(),
-                max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM_V2),
-                min_contract_amount,
-                invoice: payload.invoice,
-                claim_keypair: self.keypair,
-            },
-            state: SendSMState::Sending,
-        });
-
         let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
-        self.client_ctx
-            .manual_operation_start_dbtx(
-                &mut dbtx.to_ref_nc(),
-                operation_id,
-                vec![self.client_ctx.make_dyn_state(send_sm)],
-            )
+
+        if dbtx
+            .insert_entry(&db::OperationKey(operation_id), &())
             .await
-            .ok();
+            .is_some()
+        {
+            return Ok(self.subscribe_send(operation_id).await);
+        }
+
+        self.send_executor
+            .add_state_machine_dbtx(
+                &mut dbtx.to_ref_nc(),
+                SendStateMachine {
+                    common: SendSMCommon {
+                        operation_id,
+                        outpoint: payload.outpoint,
+                        contract: payload.contract.clone(),
+                        max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM_V2),
+                        min_contract_amount,
+                        invoice: payload.invoice,
+                        claim_keypair: self.keypair,
+                    },
+                    state: SendSMState::Sending,
+                },
+            )
+            .await;
+
         dbtx.commit_tx().await;
 
         Ok(self.subscribe_send(operation_id).await)
@@ -350,52 +407,71 @@ impl GatewayClientModuleV2 {
     ) -> anyhow::Result<()> {
         let operation_id = OperationId::from_encodable(&contract);
 
-        if self.client_ctx.operation_exists(operation_id).await {
-            return Ok(());
-        }
-
         let refund_keypair = self.keypair;
 
         let client_output = ClientOutput::<LightningOutput> {
             output: LightningOutput::V0(LightningOutputV0::Incoming(contract.clone())),
             amount: contract.commitment.amount,
         };
-        let client_output_sm = ClientOutputSM::<GatewayClientStateMachinesV2> {
-            state_machines: Arc::new(move |range: OutPointRange| {
-                assert_eq!(range.count(), 1);
 
-                vec![
-                    GatewayClientStateMachinesV2::Receive(ReceiveStateMachine {
-                        common: ReceiveSMCommon {
-                            operation_id,
-                            contract: contract.clone(),
-                            outpoint: range.into_iter().next().unwrap(),
-                            refund_keypair,
-                        },
-                        state: ReceiveSMState::Funding,
-                    }),
-                    GatewayClientStateMachinesV2::Complete(CompleteStateMachine {
-                        common: CompleteSMCommon {
-                            operation_id,
-                            payment_hash,
-                            incoming_chan_id,
-                            htlc_id,
-                        },
-                        state: CompleteSMState::Pending,
-                    }),
-                ]
-            }),
+        let client_output_bundle =
+            self.client_ctx.make_client_outputs(ClientOutputBundle::<
+                LightningOutput,
+                NeverClientStateMachine,
+            >::new_no_sm(vec![client_output]));
+        let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
+
+        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+
+        if dbtx
+            .insert_entry(&db::OperationKey(operation_id), &())
+            .await
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        let range = self
+            .client_ctx
+            .finalize_and_submit_transaction_dbtx(&mut dbtx.to_ref_nc(), operation_id, transaction)
+            .await?;
+
+        let outpoint = OutPoint {
+            txid: range.txid(),
+            out_idx: 0,
         };
 
-        let client_output = self.client_ctx.make_client_outputs(ClientOutputBundle::new(
-            vec![client_output],
-            vec![client_output_sm],
-        ));
-        let transaction = TransactionBuilder::new().with_outputs(client_output);
+        self.receive_executor
+            .add_state_machine_dbtx(
+                &mut dbtx.to_ref_nc(),
+                ReceiveStateMachine {
+                    common: ReceiveSMCommon {
+                        operation_id,
+                        contract,
+                        outpoint,
+                        refund_keypair,
+                    },
+                    state: ReceiveSMState::Funding,
+                },
+            )
+            .await;
 
-        self.client_ctx
-            .finalize_and_submit_transaction(operation_id, transaction)
-            .await?;
+        self.complete_executor
+            .add_state_machine_dbtx(
+                &mut dbtx.to_ref_nc(),
+                CompleteStateMachine {
+                    common: CompleteSMCommon {
+                        operation_id,
+                        payment_hash,
+                        incoming_chan_id,
+                        htlc_id,
+                    },
+                    state: CompleteSMState::Pending,
+                },
+            )
+            .await;
+
+        dbtx.commit_tx().await;
 
         Ok(())
     }
@@ -407,42 +483,56 @@ impl GatewayClientModuleV2 {
     ) -> anyhow::Result<FinalReceiveState> {
         let operation_id = OperationId::from_encodable(&contract);
 
-        if self.client_ctx.operation_exists(operation_id).await {
-            return Ok(self.await_receive(operation_id).await);
-        }
-
         let refund_keypair = self.keypair;
 
         let client_output = ClientOutput::<LightningOutput> {
             output: LightningOutput::V0(LightningOutputV0::Incoming(contract.clone())),
             amount: contract.commitment.amount,
         };
-        let client_output_sm = ClientOutputSM::<GatewayClientStateMachinesV2> {
-            state_machines: Arc::new(move |range| {
-                assert_eq!(range.count(), 1);
 
-                vec![GatewayClientStateMachinesV2::Receive(ReceiveStateMachine {
+        let client_output_bundle =
+            self.client_ctx.make_client_outputs(ClientOutputBundle::<
+                LightningOutput,
+                NeverClientStateMachine,
+            >::new_no_sm(vec![client_output]));
+        let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
+
+        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+
+        if dbtx
+            .insert_entry(&db::OperationKey(operation_id), &())
+            .await
+            .is_some()
+        {
+            return Ok(self.await_receive(operation_id).await);
+        }
+
+        let range = self
+            .client_ctx
+            .finalize_and_submit_transaction_dbtx(&mut dbtx.to_ref_nc(), operation_id, transaction)
+            .await?;
+
+        let outpoint = OutPoint {
+            txid: range.txid(),
+            out_idx: 0,
+        };
+
+        self.receive_executor
+            .add_state_machine_dbtx(
+                &mut dbtx.to_ref_nc(),
+                ReceiveStateMachine {
                     common: ReceiveSMCommon {
                         operation_id,
-                        contract: contract.clone(),
-                        outpoint: range.into_iter().next().unwrap(),
+                        contract,
+                        outpoint,
                         refund_keypair,
                     },
                     state: ReceiveSMState::Funding,
-                })]
-            }),
-        };
+                },
+            )
+            .await;
 
-        let client_output = self.client_ctx.make_client_outputs(ClientOutputBundle::new(
-            vec![client_output],
-            vec![client_output_sm],
-        ));
-
-        let transaction = TransactionBuilder::new().with_outputs(client_output);
-
-        self.client_ctx
-            .finalize_and_submit_transaction(operation_id, transaction)
-            .await?;
+        dbtx.commit_tx().await;
 
         Ok(self.await_receive(operation_id).await)
     }
@@ -468,6 +558,23 @@ impl GatewayClientModuleV2 {
             (ev.operation_id == operation_id).then_some(())
         })
         .await;
+    }
+}
+
+pub(crate) async fn await_receive_from_log(
+    client_ctx: &ClientContext<GatewayClientModuleV2>,
+    operation_id: OperationId,
+) -> FinalReceiveState {
+    let status = await_event::<ReceivePaymentUpdateEvent, _>(client_ctx, |ev| {
+        (ev.operation_id == operation_id).then(|| ev.status.clone())
+    })
+    .await;
+
+    match status {
+        ReceivePaymentStatus::Success(preimage) => FinalReceiveState::Success(preimage),
+        ReceivePaymentStatus::Rejected => FinalReceiveState::Rejected,
+        ReceivePaymentStatus::Refunded => FinalReceiveState::Refunded,
+        ReceivePaymentStatus::Failure => FinalReceiveState::Failure,
     }
 }
 

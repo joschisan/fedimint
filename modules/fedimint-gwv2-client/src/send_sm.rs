@@ -1,10 +1,12 @@
 use std::fmt;
 
 use fedimint_client_module::DynGlobalClientContext;
+use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_client_module::sm::{ClientSMDatabaseTransaction, State, StateTransition};
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
+use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::{Amount, OutPoint};
@@ -14,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use super::FinalReceiveState;
 use super::events::{SendPaymentStatus, SendPaymentUpdateEvent};
-use crate::{GatewayClientContextV2, GatewayClientModuleV2};
+use crate::{GatewayClientContextV2, GatewayClientModuleV2, GwV2SmContext};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
@@ -59,7 +61,7 @@ pub enum SendSMState {
     Cancelled(Cancelled),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentResponse {
     preimage: [u8; 32],
     target_federation: Option<FederationId>,
@@ -299,6 +301,185 @@ impl SendStateMachine {
                     .await;
                 old_state.update(SendSMState::Cancelled(e))
             }
+        }
+    }
+}
+
+// ---- New per-module executor impl ------------------------------------------
+
+impl StateMachine for SendStateMachine {
+    const DB_PREFIX: u8 = crate::db::DbKeyPrefix::SendStateMachine as u8;
+
+    type Context = GwV2SmContext;
+
+    fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
+        match &self.state {
+            SendSMState::Sending => {
+                let ctx_clone = ctx.clone();
+                let max_delay = self.common.max_delay;
+                let min_contract_amount = self.common.min_contract_amount;
+                let invoice = self.common.invoice.clone();
+                let contract = self.common.contract.clone();
+                vec![SmStateTransition::new(
+                    send_payment_sm(
+                        ctx_clone.clone(),
+                        max_delay,
+                        min_contract_amount,
+                        invoice,
+                        contract,
+                    ),
+                    move |dbtx, result, old_state| {
+                        let ctx = ctx_clone.clone();
+                        Box::pin(transition_send_payment_sm(ctx, dbtx, old_state, result))
+                    },
+                )]
+            }
+            SendSMState::Claiming(..) | SendSMState::Cancelled(..) => vec![],
+        }
+    }
+}
+
+async fn send_payment_sm(
+    ctx: GwV2SmContext,
+    max_delay: u64,
+    min_contract_amount: Amount,
+    invoice: LightningInvoice,
+    contract: OutgoingContract,
+) -> Result<PaymentResponse, Cancelled> {
+    let LightningInvoice::Bolt11(invoice) = invoice;
+
+    if invoice.is_expired() {
+        return Err(Cancelled::InvoiceExpired);
+    }
+
+    if max_delay == 0 {
+        return Err(Cancelled::TimeoutTooClose);
+    }
+
+    let Some(max_fee) = contract.amount.checked_sub(min_contract_amount) else {
+        return Err(Cancelled::Underfunded);
+    };
+
+    if let Some(client) = ctx.gateway.is_lnv1_invoice(&invoice).await {
+        let final_state = ctx.gateway.relay_lnv1_swap(client.value(), &invoice).await;
+        return match final_state {
+            Ok(final_receive_state) => match final_receive_state {
+                FinalReceiveState::Rejected => Err(Cancelled::Rejected),
+                FinalReceiveState::Success(preimage) => Ok(PaymentResponse {
+                    preimage,
+                    target_federation: Some(client.value().federation_id()),
+                }),
+                FinalReceiveState::Refunded => Err(Cancelled::Refunded),
+                FinalReceiveState::Failure => Err(Cancelled::Failure),
+            },
+            Err(e) => Err(Cancelled::FinalizationError(e.to_string())),
+        };
+    }
+
+    match ctx
+        .gateway
+        .is_direct_swap(&invoice)
+        .await
+        .map_err(|e| Cancelled::RegistrationError(e.to_string()))?
+    {
+        Some((contract, client)) => {
+            match client
+                .get_first_module::<GatewayClientModuleV2>()
+                .expect("Must have client module")
+                .relay_direct_swap(
+                    contract,
+                    invoice
+                        .amount_milli_satoshis()
+                        .expect("amountless invoices are not supported"),
+                )
+                .await
+            {
+                Ok(final_receive_state) => match final_receive_state {
+                    FinalReceiveState::Rejected => Err(Cancelled::Rejected),
+                    FinalReceiveState::Success(preimage) => Ok(PaymentResponse {
+                        preimage,
+                        target_federation: Some(client.federation_id()),
+                    }),
+                    FinalReceiveState::Refunded => Err(Cancelled::Refunded),
+                    FinalReceiveState::Failure => Err(Cancelled::Failure),
+                },
+                Err(e) => Err(Cancelled::FinalizationError(e.to_string())),
+            }
+        }
+        None => {
+            let preimage = ctx
+                .gateway
+                .pay(invoice, max_delay, max_fee)
+                .await
+                .map_err(|e| Cancelled::LightningRpcError(e.to_string()))?;
+            Ok(PaymentResponse {
+                preimage,
+                target_federation: None,
+            })
+        }
+    }
+}
+
+async fn transition_send_payment_sm(
+    ctx: GwV2SmContext,
+    dbtx: &mut DatabaseTransaction<'_>,
+    old_state: SendStateMachine,
+    result: Result<PaymentResponse, Cancelled>,
+) -> SendStateMachine {
+    match result {
+        Ok(payment_response) => {
+            ctx.client_ctx
+                .log_event(
+                    dbtx,
+                    SendPaymentUpdateEvent {
+                        operation_id: old_state.common.operation_id,
+                        status: SendPaymentStatus::Success(payment_response.preimage),
+                    },
+                )
+                .await;
+
+            let client_input = ClientInput::<LightningInput> {
+                input: LightningInput::V0(LightningInputV0::Outgoing(
+                    old_state.common.outpoint,
+                    OutgoingWitness::Claim(payment_response.preimage),
+                )),
+                amount: old_state.common.contract.amount,
+                keys: vec![old_state.common.claim_keypair],
+            };
+
+            let outpoints = ctx
+                .client_ctx
+                .claim_inputs(
+                    dbtx,
+                    ClientInputBundle::new_no_sm(vec![client_input]),
+                    old_state.common.operation_id,
+                )
+                .await
+                .expect("Cannot claim input, additional funding needed")
+                .into_iter()
+                .collect();
+
+            old_state.update(SendSMState::Claiming(Claiming {
+                preimage: payment_response.preimage,
+                outpoints,
+            }))
+        }
+        Err(e) => {
+            let signature = ctx
+                .keypair
+                .sign_schnorr(old_state.common.contract.forfeit_message());
+
+            ctx.client_ctx
+                .log_event(
+                    dbtx,
+                    SendPaymentUpdateEvent {
+                        operation_id: old_state.common.operation_id,
+                        status: SendPaymentStatus::Cancelled(signature),
+                    },
+                )
+                .await;
+
+            old_state.update(SendSMState::Cancelled(e))
         }
     }
 }
