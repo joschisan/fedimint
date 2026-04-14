@@ -393,6 +393,8 @@ Examples:
     /// Show the chain ID (bitcoin block hash at height 1) cached in the client
     /// database
     ChainId,
+    /// Trigger a panic to verify backtrace handling
+    Panic,
     /// Visualize client internals for debugging
     Visualize {
         #[clap(subcommand)]

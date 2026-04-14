@@ -1335,6 +1335,9 @@ impl FedimintCli {
                     "handle_events exits only if client shuts down, which we don't do here"
                 )
             }
+            Command::Dev(DevCmd::Panic) => {
+                panic!("This panic is intentional for testing backtrace handling");
+            }
             Command::Dev(DevCmd::ChainId) => {
                 let client = self.client_open(&cli).await?;
                 let chain_id = client
