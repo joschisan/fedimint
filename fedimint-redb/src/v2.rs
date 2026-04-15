@@ -234,6 +234,22 @@ impl<'tx> ReadTxRef<'tx> {
 
         view
     }
+
+    /// Undo one [`Self::isolate`] step by popping the last prefix segment.
+    /// Panics if the prefix is already empty.
+    pub fn deisolate(&self) -> ReadTxRef<'tx> {
+        let mut view = ReadTxRef {
+            tx: self.tx,
+            db: self.db,
+            prefix: self.prefix.clone(),
+        };
+
+        view.prefix
+            .pop()
+            .expect("deisolate called on a tx with no isolation prefix");
+
+        view
+    }
 }
 
 pub struct WriteTransaction {
@@ -321,6 +337,24 @@ impl<'tx> WriteTxRef<'tx> {
         };
 
         view.prefix.push(segment.into());
+
+        view
+    }
+
+    /// Undo one [`Self::isolate`] step by popping the last prefix segment.
+    /// Panics if the prefix is already empty.
+    pub fn deisolate(&self) -> WriteTxRef<'tx> {
+        let mut view = WriteTxRef {
+            tx: self.tx,
+            db: self.db,
+            prefix: self.prefix.clone(),
+            touched: self.touched,
+            on_commit: self.on_commit,
+        };
+
+        view.prefix
+            .pop()
+            .expect("deisolate called on a tx with no isolation prefix");
 
         view
     }

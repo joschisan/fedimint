@@ -24,8 +24,6 @@ use transaction::{ClientInputBundle, ClientOutput};
 pub use crate::module::ClientModule;
 use crate::transaction::{ClientInput, ClientOutputBundle};
 
-pub mod db;
-
 /// Environment variables
 pub mod envs;
 /// Per-module typed state machine executor

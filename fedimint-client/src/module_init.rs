@@ -11,7 +11,7 @@ use fedimint_client_module::module::{ClientContext, DynClientModule, FinalClient
 use fedimint_client_module::{ClientModule, ModuleInstanceId, ModuleKind};
 use fedimint_core::config::{ClientModuleConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::Decoder;
-use fedimint_core::db::Database;
+use fedimint_redb::v2::Database;
 use fedimint_core::module::{CommonModuleInit, IDynCommonModuleInit, ModuleInit};
 use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::{NumPeers, apply, async_trait_maybe_send, dyn_newtype_define};
@@ -91,7 +91,7 @@ where
     ) -> anyhow::Result<()> {
         let typed_cfg: &<<T as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig = cfg.cast()?;
 
-        let module_db = db.with_prefix_module_id(instance_id);
+        let module_db = db.isolate(format!("module-{instance_id}"));
         Ok(<Self as ClientModuleInit>::recover(
             self,
             &ClientModuleRecoverArgs {
@@ -124,7 +124,7 @@ where
         connector_registry: Endpoint,
     ) -> anyhow::Result<DynClientModule> {
         let typed_cfg: &<<T as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig = cfg.cast()?;
-        let module_db = db.with_prefix_module_id(instance_id);
+        let module_db = db.isolate(format!("module-{instance_id}"));
         Ok(<Self as ClientModuleInit>::init(
             self,
             &ClientModuleInitArgs {

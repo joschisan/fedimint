@@ -12,7 +12,6 @@ use fedimint_core::core::{
     Decoder, DynInput, DynOutput, IInput, IntoDynInstance, ModuleInstanceId, ModuleKind,
     OperationId,
 };
-use fedimint_core::db::{Database, NonCommittable, WriteDatabaseTransaction};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
@@ -26,6 +25,7 @@ use fedimint_eventlog::{
     Event, EventKind, EventLogEntry, EventLogId, EventPersistence, PersistedLogEntry,
 };
 use fedimint_logging::LOG_CLIENT;
+use fedimint_redb::v2::{Database, WriteTxRef};
 use tokio::sync::{broadcast, watch};
 use tracing::warn;
 
@@ -50,7 +50,7 @@ pub struct FinalContribution<I, O> {
 pub type SpawnSms = Box<
     maybe_add_send_sync!(
         dyn for<'a> FnOnce(
-                &'a mut WriteDatabaseTransaction<'_>,
+                &'a WriteTxRef<'_>,
                 TransactionId,
                 IdxRange,
                 IdxRange,
@@ -93,14 +93,14 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
 
     async fn finalize_and_submit_transaction_dbtx(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
 
     async fn finalize_and_submit_transaction_inner(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
@@ -124,7 +124,7 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
     #[allow(clippy::too_many_arguments)]
     async fn log_event_json(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+        dbtx: &WriteTxRef<'_>,
         module_kind: Option<ModuleKind>,
         module_id: ModuleInstanceId,
         kind: EventKind,
@@ -318,20 +318,17 @@ where
 
     pub async fn finalize_and_submit_transaction_dbtx(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
         self.client
             .get()
-            .finalize_and_submit_transaction_dbtx(&mut dbtx.global_dbtx(), operation_id, tx_builder)
+            .finalize_and_submit_transaction_dbtx(&dbtx.deisolate(), operation_id, tx_builder)
             .await
     }
 
     pub fn module_db(&self) -> &Database {
-        self.module_db
-            .ensure_isolated()
-            .expect("module_db must always return isolated db");
         &self.module_db
     }
 
@@ -365,7 +362,7 @@ where
 
     pub async fn claim_inputs<I>(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         inputs: ClientInputBundle<I>,
         operation_id: OperationId,
     ) -> anyhow::Result<OutPointRange>
@@ -378,7 +375,7 @@ where
 
     async fn claim_inputs_dyn(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         inputs: InstancelessDynClientInputBundle,
         operation_id: OperationId,
     ) -> anyhow::Result<OutPointRange> {
@@ -387,11 +384,7 @@ where
 
         self.client
             .get()
-            .finalize_and_submit_transaction_inner(
-                &mut dbtx.global_dbtx(),
-                operation_id,
-                tx_builder,
-            )
+            .finalize_and_submit_transaction_inner(&dbtx.deisolate(), operation_id, tx_builder)
             .await
     }
 
@@ -417,10 +410,9 @@ where
         self.client.get().get_event_log(pos, limit).await
     }
 
-    pub async fn log_event<E, Cap>(&self, dbtx: &mut WriteDatabaseTransaction<'_, Cap>, event: E)
+    pub async fn log_event<E>(&self, dbtx: &WriteTxRef<'_>, event: E)
     where
         E: Event + Send,
-        Cap: Send,
     {
         if <E as Event>::MODULE != Some(<M as ClientModule>::kind()) {
             warn!(
@@ -433,7 +425,7 @@ where
         self.client
             .get()
             .log_event_json(
-                &mut dbtx.global_dbtx().to_ref_nc(),
+                &dbtx.deisolate(),
                 <E as Event>::MODULE,
                 self.module_instance_id,
                 <E as Event>::KIND,
@@ -525,7 +517,7 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     ///   of calling `create_change_output` and have to be injected later.
     async fn create_final_inputs_and_outputs(
         &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
+        _dbtx: &WriteTxRef<'_>,
         _operation_id: OperationId,
         _input_amount: Amount,
         _output_amount: Amount,
@@ -542,7 +534,7 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// transactions.
     async fn get_balance(
         &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+        _dbtx: &WriteTxRef<'_>,
     ) -> Amount {
         unimplemented!()
     }
@@ -610,7 +602,7 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// this should be done on per-module basis, to avoid mistakes.
     async fn leave(
         &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+        _dbtx: &WriteTxRef<'_>,
     ) -> anyhow::Result<()> {
         bail!("Unable to determine if safe to leave the federation: Not implemented")
     }
@@ -634,7 +626,7 @@ pub trait IClientModule: Debug {
     async fn create_final_inputs_and_outputs(
         &self,
         module_instance: ModuleInstanceId,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         input_amount: Amount,
         output_amount: Amount,
@@ -643,7 +635,7 @@ pub trait IClientModule: Debug {
     async fn get_balance(
         &self,
         module_instance: ModuleInstanceId,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+        dbtx: &WriteTxRef<'_>,
     ) -> Amount;
 
     async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()>;
@@ -695,7 +687,7 @@ where
     async fn create_final_inputs_and_outputs(
         &self,
         module_instance: ModuleInstanceId,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         input_amount: Amount,
         output_amount: Amount,
@@ -706,7 +698,7 @@ where
             spawn_sms,
         } = <T as ClientModule>::create_final_inputs_and_outputs(
             self,
-            &mut dbtx.to_ref_with_prefix_module_id(module_instance),
+            &dbtx.isolate(format!("module-{module_instance}")),
             operation_id,
             input_amount,
             output_amount,
@@ -732,11 +724,11 @@ where
     async fn get_balance(
         &self,
         module_instance: ModuleInstanceId,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
+        dbtx: &WriteTxRef<'_>,
     ) -> Amount {
         <T as ClientModule>::get_balance(
             self,
-            &mut dbtx.to_ref_with_prefix_module_id(module_instance),
+            &dbtx.isolate(format!("module-{module_instance}")),
         )
         .await
     }

@@ -3,15 +3,14 @@
 
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
-use fedimint_core::db::{Database, NonCommittable, WriteDatabaseTransaction};
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::{Amount, apply, async_trait_maybe_send};
 pub use fedimint_empty_common as common;
 use fedimint_empty_common::config::EmptyClientConfig;
 use fedimint_empty_common::{EmptyCommonInit, EmptyModuleTypes};
+use fedimint_redb::v2::{Database, WriteTxRef};
 
 pub mod api;
-pub mod db;
 
 #[derive(Debug)]
 pub struct EmptyClientModule {
@@ -44,10 +43,7 @@ impl ClientModule for EmptyClientModule {
         unreachable!()
     }
 
-    async fn get_balance(
-        &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-    ) -> Amount {
+    async fn get_balance(&self, _dbtx: &WriteTxRef<'_>) -> Amount {
         Amount::ZERO
     }
 }

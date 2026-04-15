@@ -23,6 +23,7 @@ fedimint-api-client = { workspace = true }
 fedimint-client-module = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-empty-common = { workspace = true }
+fedimint-redb = { workspace = true }
 serde = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
