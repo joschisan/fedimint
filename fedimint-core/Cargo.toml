@@ -52,6 +52,7 @@ macro_rules_attribute = { workspace = true }
 miniscript = { workspace = true, features = ["serde"] }
 n0-future = { workspace = true }
 rand = { workspace = true }
+redb = { workspace = true }
 scopeguard = { workspace = true }
 secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
 serde = { workspace = true }

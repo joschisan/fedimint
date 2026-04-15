@@ -2,12 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
 
 use fedimint_core::core::ModuleInstanceId;
-use futures::StreamExt;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-
-use crate::db::{DatabaseKey, DatabaseLookup, DatabaseRecord, IWriteDatabaseTransactionOpsTyped};
-use crate::task::{MaybeSend, MaybeSync};
 
 #[derive(Default)]
 pub struct Audit {
@@ -23,32 +19,20 @@ impl Audit {
         })
     }
 
-    pub async fn add_items<KP, F>(
+    /// Add pre-computed `(name, milli_sat)` items for a module. Modules are
+    /// expected to iterate their own tables using the v2 database API and pass
+    /// the resulting (row-name, signed-milli-sat) pairs here.
+    pub fn add_items(
         &mut self,
-        dbtx: &mut impl IWriteDatabaseTransactionOpsTyped<'_>,
         module_instance_id: ModuleInstanceId,
-        key_prefix: &KP,
-        to_milli_sat: F,
-    ) where
-        KP: DatabaseLookup + 'static + MaybeSend + MaybeSync,
-        KP::Record: DatabaseKey,
-        F: Fn(KP::Record, <<KP as DatabaseLookup>::Record as DatabaseRecord>::Value) -> i64,
-    {
-        let mut new_items = dbtx
-            .find_by_prefix(key_prefix)
-            .await
-            .map(|(key, value)| {
-                let name = format!("{key:?}");
-                let milli_sat = to_milli_sat(key, value);
-                AuditItem {
-                    name,
-                    milli_sat,
-                    module_instance_id: Some(module_instance_id),
-                }
-            })
-            .collect::<Vec<AuditItem>>()
-            .await;
-        self.items.append(&mut new_items);
+        items: impl IntoIterator<Item = (String, i64)>,
+    ) {
+        self.items
+            .extend(items.into_iter().map(|(name, milli_sat)| AuditItem {
+                name,
+                milli_sat,
+                module_instance_id: Some(module_instance_id),
+            }));
     }
 }
 

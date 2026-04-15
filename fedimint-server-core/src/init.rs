@@ -14,7 +14,8 @@ use fedimint_core::config::{
     ServerModuleConsensusConfig,
 };
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::db::{Database, DatabaseVersion};
+use fedimint_core::db::DatabaseVersion;
+use fedimint_core::db::v2::Database as V2Database;
 use fedimint_core::module::{
     CommonModuleInit, CoreConsensusVersion, IDynCommonModuleInit, ModuleConsensusVersion,
     ModuleInit,
@@ -59,7 +60,7 @@ pub trait IServerModuleInit: IDynCommonModuleInit {
         &self,
         peer_num: NumPeers,
         cfg: ServerModuleConfig,
-        db: Database,
+        db: V2Database,
         task_group: &TaskGroup,
         our_peer_id: PeerId,
         module_api: DynModuleApi,
@@ -100,7 +101,7 @@ where
     S: ServerModuleInit,
 {
     cfg: ServerModuleConfig,
-    db: Database,
+    db: V2Database,
     task_group: TaskGroup,
     our_peer_id: PeerId,
     num_peers: NumPeers,
@@ -119,7 +120,7 @@ where
         &self.cfg
     }
 
-    pub fn db(&self) -> &Database {
+    pub fn db(&self) -> &V2Database {
         &self.db
     }
 
@@ -224,7 +225,7 @@ where
         &self,
         num_peers: NumPeers,
         cfg: ServerModuleConfig,
-        db: Database,
+        db: V2Database,
         task_group: &TaskGroup,
         our_peer_id: PeerId,
         module_api: DynModuleApi,

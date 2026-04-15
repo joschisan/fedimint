@@ -117,6 +117,7 @@ use crate::{async_trait_maybe_send, maybe_add_send, maybe_add_send_sync};
 
 pub mod mem_impl;
 pub mod notifications;
+pub mod v2;
 
 pub use test_utils::*;
 

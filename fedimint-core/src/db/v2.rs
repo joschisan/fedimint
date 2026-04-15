@@ -21,9 +21,10 @@ use std::ops::RangeBounds;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use redb::{ReadableDatabase, ReadableTable, TableDefinition};
+
+use crate::encoding::{Decodable, Encodable};
+use crate::module::registry::ModuleDecoderRegistry;
 use tokio::sync::Notify;
 
 // ─── Table definition ────────────────────────────────────────────────────

@@ -14,10 +14,8 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{
-    Database, DatabaseVersion, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
-    NonCommittable, WriteDatabaseTransaction,
-};
+use fedimint_core::db::DatabaseVersion;
+use fedimint_core::db::v2::{Database, WriteTxRef};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
@@ -25,8 +23,7 @@ use fedimint_core::module::{
     ModuleInit, TransactionItemAmounts, api_endpoint,
 };
 use fedimint_core::{
-    Amount, InPoint, OutPoint, PeerId, apply, async_trait_maybe_send, push_db_key_items,
-    push_db_pair_items,
+    Amount, InPoint, OutPoint, PeerId, apply, async_trait_maybe_send,
 };
 use fedimint_mintv2_common::config::{
     MintClientConfig, MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
@@ -44,15 +41,12 @@ use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
-use futures::StreamExt;
-use strum::IntoEnumIterator;
 use tbs::{AggregatePublicKey, BlindedSignatureShare, PublicKeyShare, derive_pk_share};
 use threshold_crypto::group::Curve;
 
 use crate::db::{
-    BlindedSignatureShareKey, BlindedSignatureSharePrefix, BlindedSignatureShareRecoveryKey,
-    BlindedSignatureShareRecoveryPrefix, DbKeyPrefix, IssuanceCounterKey, IssuanceCounterPrefix,
-    NonceKey, NonceKeyPrefix, RecoveryItemKey, RecoveryItemPrefix,
+    BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER, NOTE_NONCE,
+    RECOVERY_ITEM,
 };
 
 #[derive(Debug, Clone)]
@@ -60,66 +54,6 @@ pub struct MintInit;
 
 impl ModuleInit for MintInit {
     type Common = MintCommonInit;
-
-    async fn dump_database(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        let mut mint: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> = BTreeMap::new();
-        let filtered_prefixes = DbKeyPrefix::iter().filter(|f| {
-            prefix_names.is_empty() || prefix_names.contains(&f.to_string().to_lowercase())
-        });
-        for table in filtered_prefixes {
-            match table {
-                DbKeyPrefix::NoteNonce => {
-                    push_db_key_items!(dbtx, NonceKeyPrefix, NonceKey, mint, "Used Coins");
-                }
-                DbKeyPrefix::BlindedSignatureShare => {
-                    push_db_pair_items!(
-                        dbtx,
-                        BlindedSignatureSharePrefix,
-                        BlindedSignatureShareKey,
-                        BlindedSignatureShare,
-                        mint,
-                        "Blinded Signature Shares"
-                    );
-                }
-                DbKeyPrefix::BlindedSignatureShareRecovery => {
-                    push_db_pair_items!(
-                        dbtx,
-                        BlindedSignatureShareRecoveryPrefix,
-                        BlindedSignatureShareRecoveryKey,
-                        BlindedSignatureShare,
-                        mint,
-                        "Blinded Signature Shares (Recovery)"
-                    );
-                }
-                DbKeyPrefix::MintAuditItem => {
-                    push_db_pair_items!(
-                        dbtx,
-                        IssuanceCounterPrefix,
-                        IssuanceCounterKey,
-                        u64,
-                        mint,
-                        "Issuance Counter"
-                    );
-                }
-                DbKeyPrefix::RecoveryItem => {
-                    push_db_pair_items!(
-                        dbtx,
-                        RecoveryItemPrefix,
-                        RecoveryItemKey,
-                        RecoveryItem,
-                        mint,
-                        "Recovery Items"
-                    );
-                }
-            }
-        }
-
-        Box::new(mint.into_iter())
-    }
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -220,14 +154,13 @@ pub struct Mint {
 impl Mint {
     pub async fn note_distribution_ui(&self) -> BTreeMap<Denomination, u64> {
         self.db
-            .begin_write_transaction()
+            .begin_read()
             .await
-            .find_by_prefix(&IssuanceCounterPrefix)
-            .await
-            .filter(|entry| std::future::ready(entry.1 > 0))
-            .map(|(key, count)| (key.0, count))
+            .open_table(&ISSUANCE_COUNTER)
+            .iter()
+            .into_iter()
+            .filter(|(_, count)| *count > 0)
             .collect()
-            .await
     }
 }
 
@@ -238,24 +171,24 @@ impl ServerModule for Mint {
 
     async fn consensus_proposal(
         &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
+        _dbtx: &WriteTxRef<'_>,
     ) -> Vec<MintConsensusItem> {
         Vec::new()
     }
 
-    async fn process_consensus_item<'a, 'b>(
-        &'a self,
-        _dbtx: &mut WriteDatabaseTransaction<'b>,
+    async fn process_consensus_item(
+        &self,
+        _dbtx: &WriteTxRef<'_>,
         _consensus_item: MintConsensusItem,
         _peer_id: PeerId,
     ) -> anyhow::Result<()> {
         bail!("Mint does not process consensus items");
     }
 
-    async fn process_input<'a, 'b, 'c>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'c>,
-        input: &'b MintInput,
+    async fn process_input(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        input: &MintInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, MintInputError> {
         let input = input.ensure_v0_ref()?;
@@ -271,33 +204,27 @@ impl ServerModule for Mint {
             return Err(MintInputError::InvalidSignature);
         }
 
-        if dbtx
-            .insert_entry(&NonceKey(input.note.nonce), &())
-            .await
-            .is_some()
-        {
+        if dbtx.insert(&NOTE_NONCE, &input.note.nonce, &()).is_some() {
             return Err(MintInputError::SpentCoin);
         }
 
         let new_count = dbtx
-            .remove_entry(&IssuanceCounterKey(input.note.denomination))
-            .await
+            .remove(&ISSUANCE_COUNTER, &input.note.denomination)
             .unwrap_or(0)
             .checked_sub(1)
             .expect("Failed to decrement issuance counter");
 
-        dbtx.insert_new_entry(&IssuanceCounterKey(input.note.denomination), &new_count)
-            .await;
+        dbtx.insert(&ISSUANCE_COUNTER, &input.note.denomination, &new_count);
 
-        let next_index = get_recovery_count(dbtx).await;
+        let next_index = get_recovery_count(dbtx);
 
-        dbtx.insert_new_entry(
-            &RecoveryItemKey(next_index),
+        dbtx.insert(
+            &RECOVERY_ITEM,
+            &next_index,
             &RecoveryItem::Input {
                 nonce_hash: input.note.nonce.consensus_hash(),
             },
-        )
-        .await;
+        );
 
         let amount = input.note.amount();
 
@@ -310,10 +237,10 @@ impl ServerModule for Mint {
         })
     }
 
-    async fn process_output<'a, 'b>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'b>,
-        output: &'a MintOutput,
+    async fn process_output(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        output: &MintOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, MintOutputError> {
         let output = output.ensure_v0_ref()?;
@@ -326,35 +253,29 @@ impl ServerModule for Mint {
             .map(|key| tbs::sign_message(output.nonce, *key))
             .ok_or(MintOutputError::InvalidDenomination)?;
 
-        // Store by outpoint for efficient range-based retrieval
-        dbtx.insert_entry(&BlindedSignatureShareKey(outpoint), &signature)
-            .await;
+        dbtx.insert(&BLINDED_SIGNATURE_SHARE, &outpoint, &signature);
 
-        // Store by blinded message for recovery
-        dbtx.insert_entry(&BlindedSignatureShareRecoveryKey(output.nonce), &signature)
-            .await;
+        dbtx.insert(&BLINDED_SIGNATURE_SHARE_RECOVERY, &output.nonce, &signature);
 
         let new_count = dbtx
-            .remove_entry(&IssuanceCounterKey(output.denomination))
-            .await
+            .remove(&ISSUANCE_COUNTER, &output.denomination)
             .unwrap_or(0)
             .checked_add(1)
             .expect("Failed to increment issuance counter");
 
-        dbtx.insert_new_entry(&IssuanceCounterKey(output.denomination), &new_count)
-            .await;
+        dbtx.insert(&ISSUANCE_COUNTER, &output.denomination, &new_count);
 
-        let next_index = get_recovery_count(dbtx).await;
+        let next_index = get_recovery_count(dbtx);
 
-        dbtx.insert_new_entry(
-            &RecoveryItemKey(next_index),
+        dbtx.insert(
+            &RECOVERY_ITEM,
+            &next_index,
             &RecoveryItem::Output {
                 denomination: output.denomination,
                 nonce_hash: output.nonce.consensus_hash(),
                 tweak: output.tweak,
             },
-        )
-        .await;
+        );
 
         let amount = output.amount();
 
@@ -366,15 +287,22 @@ impl ServerModule for Mint {
 
     async fn audit(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         audit: &mut Audit,
         module_instance_id: ModuleInstanceId,
     ) {
-        audit
-            .add_items(dbtx, module_instance_id, &IssuanceCounterPrefix, |k, v| {
-                -((k.0.amount().msats * v) as i64)
-            })
-            .await;
+        let items = dbtx
+            .open_table(&ISSUANCE_COUNTER)
+            .iter()
+            .into_iter()
+            .map(|(denomination, count)| {
+                (
+                    format!("IssuanceCounter({denomination:?})"),
+                    -((denomination.amount().msats * count) as i64),
+                )
+            });
+
+        audit.add_items(module_instance_id, items);
     }
 
     fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
@@ -385,11 +313,11 @@ impl ServerModule for Mint {
                 async |_module: &Mint, context, range: fedimint_core::OutPointRange| -> Vec<BlindedSignatureShare> {
                     let db = context.db();
 
-                    let mut dbtx = db
-                        .wait_key_check(&BlindedSignatureShareKey(range.start_out_point()), std::convert::identity)
+                    let tx = db
+                        .wait_key_check(&BLINDED_SIGNATURE_SHARE, &range.start_out_point(), std::convert::identity)
                         .await.1;
 
-                    Ok(get_signature_shares(&mut dbtx, range).await)
+                    Ok(get_signature_shares(&tx, range))
                 }
             },
             api_endpoint! {
@@ -397,8 +325,8 @@ impl ServerModule for Mint {
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, messages: Vec<tbs::BlindedMessage>| -> Vec<BlindedSignatureShare> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    get_signature_shares_recovery(&mut dbtx, messages).await
+                    let tx = db.begin_read().await;
+                    get_signature_shares_recovery(&tx, messages)
                 }
             },
             api_endpoint! {
@@ -406,8 +334,8 @@ impl ServerModule for Mint {
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, range: (u64, u64)| -> Vec<RecoveryItem> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(get_recovery_slice(&mut dbtx, range).await)
+                    let tx = db.begin_read().await;
+                    Ok(get_recovery_slice(&tx, range))
                 }
             },
             api_endpoint! {
@@ -415,8 +343,8 @@ impl ServerModule for Mint {
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, range: (u64, u64)| -> bitcoin::hashes::sha256::Hash {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(get_recovery_slice(&mut dbtx, range).await.consensus_hash())
+                    let tx = db.begin_read().await;
+                    Ok(get_recovery_slice(&tx, range).consensus_hash())
                 }
             },
             api_endpoint! {
@@ -424,38 +352,34 @@ impl ServerModule for Mint {
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, _params: ()| -> u64 {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(get_recovery_count(&mut dbtx).await)
+                    let tx = db.begin_read().await;
+                    Ok(get_recovery_count_read(&tx))
                 }
             },
         ]
     }
 }
 
-async fn get_signature_shares(
-    dbtx: &mut fedimint_core::db::ReadDatabaseTransaction<'_>,
+fn get_signature_shares(
+    tx: &fedimint_core::db::v2::ReadTransaction,
     range: fedimint_core::OutPointRange,
 ) -> Vec<BlindedSignatureShare> {
-    let start_key = BlindedSignatureShareKey(range.start_out_point());
-    let end_key = BlindedSignatureShareKey(range.end_out_point());
-
-    dbtx.find_by_range(start_key..end_key)
-        .await
-        .map(|entry| entry.1)
+    tx.open_table(&BLINDED_SIGNATURE_SHARE)
+        .range(range.start_out_point()..range.end_out_point())
+        .into_iter()
+        .map(|(_, v)| v)
         .collect()
-        .await
 }
 
-async fn get_signature_shares_recovery(
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+fn get_signature_shares_recovery(
+    tx: &fedimint_core::db::v2::ReadTransaction,
     messages: Vec<tbs::BlindedMessage>,
 ) -> Result<Vec<BlindedSignatureShare>, ApiError> {
     let mut shares = Vec::new();
 
     for message in messages {
-        let share = dbtx
-            .get_value(&BlindedSignatureShareRecoveryKey(message))
-            .await
+        let share = tx
+            .get(&BLINDED_SIGNATURE_SHARE_RECOVERY, &message)
             .ok_or(ApiError::bad_request(
                 "No blinded signature share found".to_string(),
             ))?;
@@ -466,21 +390,29 @@ async fn get_signature_shares_recovery(
     Ok(shares)
 }
 
-async fn get_recovery_count(dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>) -> u64 {
-    dbtx.find_by_prefix_sorted_descending(&RecoveryItemPrefix)
-        .await
-        .next()
-        .await
-        .map_or(0, |entry| entry.0.0 + 1)
+fn get_recovery_count(dbtx: &WriteTxRef<'_>) -> u64 {
+    dbtx.open_table(&RECOVERY_ITEM)
+        .iter()
+        .into_iter()
+        .next_back()
+        .map_or(0, |(idx, _)| idx + 1)
 }
 
-async fn get_recovery_slice(
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+fn get_recovery_count_read(tx: &fedimint_core::db::v2::ReadTransaction) -> u64 {
+    tx.open_table(&RECOVERY_ITEM)
+        .iter()
+        .into_iter()
+        .next_back()
+        .map_or(0, |(idx, _)| idx + 1)
+}
+
+fn get_recovery_slice(
+    tx: &fedimint_core::db::v2::ReadTransaction,
     range: (u64, u64),
 ) -> Vec<RecoveryItem> {
-    dbtx.find_by_range(RecoveryItemKey(range.0)..RecoveryItemKey(range.1))
-        .await
-        .map(|entry| entry.1)
+    tx.open_table(&RECOVERY_ITEM)
+        .range(range.0..range.1)
+        .into_iter()
+        .map(|(_, v)| v)
         .collect()
-        .await
 }

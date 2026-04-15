@@ -2227,6 +2227,7 @@ dependencies = [
  "miniscript",
  "n0-future 0.1.3",
  "rand 0.8.5",
+ "redb",
  "scopeguard",
  "secp256k1",
  "serde",

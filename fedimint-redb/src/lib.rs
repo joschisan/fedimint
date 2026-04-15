@@ -3,8 +3,6 @@
 //! This implementation uses redb's native transaction types directly without
 //! buffering writes in memory.
 
-pub mod v2;
-
 use std::fmt::Debug;
 use std::ops::Range;
 use std::path::Path;

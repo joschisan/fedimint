@@ -20,7 +20,6 @@ use fedimint_core::core::{
     Decoder, DynInput, DynInputError, DynModuleConsensusItem, DynOutput, DynOutputError,
     ModuleInstanceId, ModuleKind,
 };
-use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{
@@ -28,6 +27,7 @@ use fedimint_core::module::{
     ModuleInit, TransactionItemAmounts,
 };
 use fedimint_core::{InPoint, OutPoint, PeerId, apply, async_trait_maybe_send, dyn_newtype_define};
+use fedimint_core::db::v2::WriteTxRef;
 pub use init::*;
 
 #[apply(async_trait_maybe_send!)]
@@ -68,9 +68,9 @@ pub trait ServerModule: Debug + Sized {
     /// If you think you actually do require latency critical consensus items or
     /// have trouble designing your module in order to avoid them please contact
     /// the Fedimint developers.
-    async fn consensus_proposal<'a>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+    async fn consensus_proposal(
+        &self,
+        dbtx: &WriteTxRef<'_>,
     ) -> Vec<<Self::Common as ModuleCommon>::ConsensusItem>;
 
     /// This function is called once for every consensus item. The function
@@ -80,9 +80,9 @@ pub trait ServerModule: Debug + Sized {
     /// the history of the federation.* This enables consensus_proposal to
     /// return all available consensus item without wasting disk
     /// space with redundant consensus items.
-    async fn process_consensus_item<'a, 'b>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'b>,
+    async fn process_consensus_item(
+        &self,
+        dbtx: &WriteTxRef<'_>,
         consensus_item: <Self::Common as ModuleCommon>::ConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()>;
@@ -91,10 +91,10 @@ pub trait ServerModule: Debug + Sized {
     /// be part of the database transaction. On failure (e.g. double spend)
     /// the database transaction is rolled back and the operation will take
     /// no effect.
-    async fn process_input<'a, 'b, 'c>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'c>,
-        input: &'b <Self::Common as ModuleCommon>::Input,
+    async fn process_input(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        input: &<Self::Common as ModuleCommon>::Input,
         in_point: InPoint,
     ) -> Result<InputMeta, <Self::Common as ModuleCommon>::InputError>;
 
@@ -106,10 +106,10 @@ pub trait ServerModule: Debug + Sized {
     /// The supplied `out_point` identifies the operation (e.g. a peg-out or
     /// note issuance) and can be used to retrieve its outcome later using
     /// module-specific API endpoints.
-    async fn process_output<'a, 'b>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'b>,
-        output: &'a <Self::Common as ModuleCommon>::Output,
+    async fn process_output(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        output: &<Self::Common as ModuleCommon>::Output,
         out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, <Self::Common as ModuleCommon>::OutputError>;
 
@@ -120,7 +120,7 @@ pub trait ServerModule: Debug + Sized {
     /// occurred in the database and consensus should halt.
     async fn audit(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         audit: &mut Audit,
         module_instance_id: ModuleInstanceId,
     );
@@ -147,17 +147,17 @@ pub trait IServerModule: Debug {
     /// This module's contribution to the next consensus proposal
     async fn consensus_proposal(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         module_instance_id: ModuleInstanceId,
     ) -> Vec<DynModuleConsensusItem>;
 
     /// This function is called once for every consensus item. The function
     /// returns an error if any only if the consensus item does not change
     /// our state and therefore may be safely discarded by the atomic broadcast.
-    async fn process_consensus_item<'a, 'b>(
+    async fn process_consensus_item(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'a>,
-        consensus_item: &'b DynModuleConsensusItem,
+        dbtx: &WriteTxRef<'_>,
+        consensus_item: &DynModuleConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()>;
 
@@ -165,10 +165,10 @@ pub trait IServerModule: Debug {
     /// be part of the database transaction. On failure (e.g. double spend)
     /// the database transaction is rolled back and the operation will take
     /// no effect.
-    async fn process_input<'a, 'b, 'c>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'c>,
-        input: &'b DynInput,
+    async fn process_input(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        input: &DynInput,
         in_point: InPoint,
     ) -> Result<InputMeta, DynInputError>;
 
@@ -180,9 +180,9 @@ pub trait IServerModule: Debug {
     /// The supplied `out_point` identifies the operation (e.g. a peg-out or
     /// note issuance) and can be used to retrieve its outcome later using
     /// `output_status`.
-    async fn process_output<'a>(
+    async fn process_output(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'a>,
+        dbtx: &WriteTxRef<'_>,
         output: &DynOutput,
         out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, DynOutputError>;
@@ -194,7 +194,7 @@ pub trait IServerModule: Debug {
     /// occurred in the database and consensus should halt.
     async fn audit(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         audit: &mut Audit,
         module_instance_id: ModuleInstanceId,
     );
@@ -231,7 +231,7 @@ where
     /// This module's contribution to the next consensus proposal
     async fn consensus_proposal(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         module_instance_id: ModuleInstanceId,
     ) -> Vec<DynModuleConsensusItem> {
         <Self as ServerModule>::consensus_proposal(self, dbtx)
@@ -244,10 +244,10 @@ where
     /// This function is called once for every consensus item. The function
     /// returns an error if any only if the consensus item does not change
     /// our state and therefore may be safely discarded by the atomic broadcast.
-    async fn process_consensus_item<'a, 'b>(
+    async fn process_consensus_item(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'a>,
-        consensus_item: &'b DynModuleConsensusItem,
+        dbtx: &WriteTxRef<'_>,
+        consensus_item: &DynModuleConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()> {
         <Self as ServerModule>::process_consensus_item(
@@ -267,10 +267,10 @@ where
     /// be part of the database transaction. On failure (e.g. double spend)
     /// the database transaction is rolled back and the operation will take
     /// no effect.
-    async fn process_input<'a, 'b, 'c>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'c>,
-        input: &'b DynInput,
+    async fn process_input(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        input: &DynInput,
         in_point: InPoint,
     ) -> Result<InputMeta, DynInputError> {
         <Self as ServerModule>::process_input(
@@ -294,9 +294,9 @@ where
     /// The supplied `out_point` identifies the operation (e.g. a peg-out or
     /// note issuance) and can be used to retrieve its outcome later using
     /// `output_status`.
-    async fn process_output<'a>(
+    async fn process_output(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'a>,
+        dbtx: &WriteTxRef<'_>,
         output: &DynOutput,
         out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, DynOutputError> {
@@ -320,7 +320,7 @@ where
     /// occurred in the database and consensus should halt.
     async fn audit(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         audit: &mut Audit,
         module_instance_id: ModuleInstanceId,
     ) {

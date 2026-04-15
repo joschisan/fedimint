@@ -40,10 +40,7 @@ use crate::core::{
     ClientConfig, Decoder, DecoderBuilder, Input, InputError, ModuleConsensusItem,
     ModuleInstanceId, ModuleKind, Output, OutputError, OutputOutcome,
 };
-use crate::db::{
-    Database, DatabaseError, DatabaseKey, DatabaseKeyWithNotify, DatabaseRecord,
-    WriteDatabaseTransaction,
-};
+use crate::db::DatabaseError;
 use crate::encoding::{Decodable, DecodeError, Encodable};
 use crate::fmt_utils::AbbreviateHexBytes;
 use crate::task::MaybeSend;
@@ -247,14 +244,18 @@ impl From<DatabaseError> for ApiError {
 
 /// State made available to all API endpoints for handling a request
 pub struct ApiEndpointContext {
-    db: Database,
+    db: crate::db::v2::Database,
     has_auth: bool,
     request_auth: Option<ApiAuth>,
 }
 
 impl ApiEndpointContext {
     /// `db` should be isolated.
-    pub fn new(db: Database, has_auth: bool, request_auth: Option<ApiAuth>) -> Self {
+    pub fn new(
+        db: crate::db::v2::Database,
+        has_auth: bool,
+        request_auth: Option<ApiAuth>,
+    ) -> Self {
         Self {
             db,
             has_auth,
@@ -274,32 +275,8 @@ impl ApiEndpointContext {
         self.has_auth
     }
 
-    pub fn db(&self) -> Database {
+    pub fn db(&self) -> crate::db::v2::Database {
         self.db.clone()
-    }
-
-    /// Waits for key to be present in database.
-    pub fn wait_key_exists<K>(&self, key: K) -> impl Future<Output = K::Value> + use<K>
-    where
-        K: DatabaseKey + DatabaseRecord + DatabaseKeyWithNotify,
-    {
-        let db = self.db.clone();
-        // self contains dbtx which is !Send
-        // try removing this and see the error.
-        async move { db.wait_key_exists(&key).await }
-    }
-
-    /// Waits for key to have a value that matches.
-    pub fn wait_value_matches<K>(
-        &self,
-        key: K,
-        matcher: impl Fn(&K::Value) -> bool + Copy,
-    ) -> impl Future<Output = K::Value>
-    where
-        K: DatabaseKey + DatabaseRecord + DatabaseKeyWithNotify,
-    {
-        let db = self.db.clone();
-        async move { db.wait_key_check(&key, |v| v.filter(matcher)).await.0 }
     }
 }
 
@@ -463,39 +440,19 @@ impl ApiEndpoint<()> {
 /// `ClientModuleInit`, we can't really have a `ICommonModuleInit`, so to unify
 /// them in `ModuleInitRegistry` we move the common functionality to be an
 /// interface over their dyn newtype wrappers. A bit weird, but works.
-#[apply(async_trait_maybe_send!)]
 pub trait IDynCommonModuleInit: Debug {
     fn decoder(&self) -> Decoder;
 
     fn module_kind(&self) -> ModuleKind;
 
     fn to_dyn_common(&self) -> DynCommonModuleInit;
-
-    async fn dump_database(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_>;
 }
 
 /// Trait implemented by every `*ModuleInit` (server or client side)
 pub trait ModuleInit: Debug + Clone + Send + Sync + 'static {
     type Common: CommonModuleInit;
-
-    fn dump_database(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> maybe_add_send!(
-        impl Future<
-            Output = Box<
-                dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_,
-            >,
-        >
-    );
 }
 
-#[apply(async_trait_maybe_send!)]
 impl<T> IDynCommonModuleInit for T
 where
     T: ModuleInit,
@@ -510,14 +467,6 @@ where
 
     fn to_dyn_common(&self) -> DynCommonModuleInit {
         DynCommonModuleInit::from_inner(Arc::new(self.clone()))
-    }
-
-    async fn dump_database(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        <Self as ModuleInit>::dump_database(self, dbtx, prefix_names).await
     }
 }
 
