@@ -25,6 +25,7 @@ pub mod cli;
 pub mod db;
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Context;
 use config::ServerConfig;
@@ -92,6 +93,8 @@ pub async fn run(
     max_requests_per_connection: usize,
     cli_bind: std::net::SocketAddr,
 ) -> anyhow::Result<()> {
+    let p2p_decoders: Arc<OnceLock<_>> = Arc::new(OnceLock::new());
+
     let (cfg, connections, p2p_status_receivers) = match get_config(&data_dir)? {
         Some(cfg) => {
             let connector = IrohConnector::new(
@@ -102,6 +105,7 @@ pub async fn run(
                     .iter()
                     .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
                     .collect(),
+                p2p_decoders.clone(),
             )
             .await?
             .into_dyn();
@@ -129,6 +133,7 @@ pub async fn run(
                 module_init_registry.clone(),
                 auth.clone(),
                 cli_bind,
+                p2p_decoders.clone(),
             ))
             .await?
         }
@@ -140,6 +145,12 @@ pub async fn run(
             .iter()
             .map(|(id, config)| (*id, &config.kind)),
     )?;
+
+    // Make module decoders available to the P2P layer so that frames carrying
+    // DynModuleConsensusItem (e.g. SignedSessionOutcome) can be decoded.
+    p2p_decoders
+        .set(decoders.clone())
+        .expect("p2p decoders were already set");
 
     let db = db.with_decoders(decoders);
 
@@ -205,6 +216,7 @@ pub async fn run_config_gen(
     module_init_registry: ServerModuleInitRegistry,
     auth: ApiAuth,
     cli_bind: std::net::SocketAddr,
+    p2p_decoders: Arc<OnceLock<fedimint_core::module::registry::ModuleDecoderRegistry>>,
 ) -> anyhow::Result<(
     ServerConfig,
     DynP2PConnections<P2PMessage>,
@@ -264,6 +276,7 @@ pub async fn run_config_gen(
             .iter()
             .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
             .collect(),
+        p2p_decoders,
     )
     .await?
     .into_dyn();

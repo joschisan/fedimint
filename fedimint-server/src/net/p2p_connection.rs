@@ -1,3 +1,4 @@
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -49,38 +50,70 @@ pub trait IP2PConnection<M>: Send + 'static {
     }
 }
 
-#[async_trait]
-impl<M> IP2PFrame<M> for RecvStream
-where
-    M: Decodable + Send + 'static,
-{
-    async fn read_to_end(&mut self) -> anyhow::Result<M> {
-        let bytes = self.read_to_end(MAX_P2P_MESSAGE_SIZE).await?;
-        Ok(M::consensus_decode_whole(
-            &bytes,
-            &ModuleDecoderRegistry::default(),
-        )?)
+pub struct IrohRecvFrame {
+    stream: RecvStream,
+    decoders: Arc<OnceLock<ModuleDecoderRegistry>>,
+}
+
+impl IrohRecvFrame {
+    pub fn new(stream: RecvStream, decoders: Arc<OnceLock<ModuleDecoderRegistry>>) -> Self {
+        Self { stream, decoders }
     }
 }
 
 #[async_trait]
-impl<M> IP2PConnection<M> for Connection
+impl<M> IP2PFrame<M> for IrohRecvFrame
+where
+    M: Decodable + Send + 'static,
+{
+    async fn read_to_end(&mut self) -> anyhow::Result<M> {
+        let bytes = self.stream.read_to_end(MAX_P2P_MESSAGE_SIZE).await?;
+
+        let decoders = self.decoders.get().cloned().unwrap_or_default();
+
+        Ok(M::consensus_decode_whole(&bytes, &decoders)?)
+    }
+}
+
+pub struct IrohP2PConnection {
+    connection: Connection,
+    decoders: Arc<OnceLock<ModuleDecoderRegistry>>,
+}
+
+impl IrohP2PConnection {
+    pub fn new(connection: Connection, decoders: Arc<OnceLock<ModuleDecoderRegistry>>) -> Self {
+        Self {
+            connection,
+            decoders,
+        }
+    }
+}
+
+#[async_trait]
+impl<M> IP2PConnection<M> for IrohP2PConnection
 where
     M: Encodable + Decodable + Send + 'static,
 {
     async fn send(&mut self, message: M) -> anyhow::Result<()> {
-        let mut sink = self.open_uni().await?;
+        let mut sink = self.connection.open_uni().await?;
+
         sink.write_all(&message.consensus_encode_to_vec()).await?;
+
         sink.finish()?;
+
         Ok(())
     }
 
     async fn receive(&mut self) -> anyhow::Result<DynIP2PFrame<M>> {
-        Ok(self.accept_uni().await?.into_dyn())
+        let stream = self.connection.accept_uni().await?;
+
+        let frame = IrohRecvFrame::new(stream, self.decoders.clone());
+
+        Ok(frame.into_dyn())
     }
 
     fn rtt(&self) -> Option<Duration> {
-        let paths = self.paths();
+        let paths = self.connection.paths();
         paths
             .peek()
             .iter()

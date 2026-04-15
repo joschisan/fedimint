@@ -2,18 +2,19 @@
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context as _, ensure};
 use async_trait::async_trait;
 use fedimint_core::PeerId;
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::net::STANDARD_FEDIMINT_P2P_PORT;
 use fedimint_core::net::iroh::build_iroh_endpoint;
 use fedimint_core::util::SafeUrl;
 use iroh::{Endpoint, PublicKey, SecretKey};
 
-use crate::net::p2p_connection::{DynP2PConnection, IP2PConnection as _};
+use crate::net::p2p_connection::{DynP2PConnection, IP2PConnection as _, IrohP2PConnection};
 
 pub type DynP2PConnector<M> = Arc<dyn IP2PConnector<M>>;
 
@@ -47,12 +48,17 @@ pub fn parse_p2p(url: &SafeUrl) -> anyhow::Result<String> {
     Ok(format!("{host}:{port}"))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct IrohConnector {
     /// Map of all peers' connection information we want to be connected to
     pub(crate) node_ids: BTreeMap<PeerId, PublicKey>,
     /// The Iroh endpoint
     pub(crate) endpoint: Endpoint,
+    /// Module decoder registry shared with all connections produced by this
+    /// connector. Populated after DKG via [`IrohConnector::set_decoders`] so
+    /// that P2P frames carrying `DynModuleConsensusItem` (e.g.
+    /// `SignedSessionOutcome`) can be decoded.
+    pub(crate) decoders: Arc<OnceLock<ModuleDecoderRegistry>>,
 }
 
 pub(crate) const FEDIMINT_P2P_ALPN: &[u8] = b"FEDIMINT_P2P_ALPN";
@@ -62,6 +68,7 @@ impl IrohConnector {
         secret_key: SecretKey,
         p2p_bind_addr: SocketAddr,
         node_ids: BTreeMap<PeerId, PublicKey>,
+        decoders: Arc<OnceLock<ModuleDecoderRegistry>>,
     ) -> anyhow::Result<Self> {
         let identity = *node_ids
             .iter()
@@ -77,6 +84,7 @@ impl IrohConnector {
                 .filter(|entry| entry.0 != identity)
                 .collect(),
             endpoint,
+            decoders,
         })
     }
 }
@@ -95,7 +103,9 @@ where
 
         let connection = self.endpoint.connect(node_id, FEDIMINT_P2P_ALPN).await?;
 
-        Ok(connection.into_dyn())
+        let p2p_connection = IrohP2PConnection::new(connection, self.decoders.clone());
+
+        Ok(p2p_connection.into_dyn())
     }
 
     async fn accept(&self) -> anyhow::Result<(PeerId, DynP2PConnection<M>)> {
@@ -116,6 +126,8 @@ where
             .with_context(|| format!("Node id {node_id} is unknown"))?
             .0;
 
-        Ok((*auth_peer, connection.into_dyn()))
+        let p2p_connection = IrohP2PConnection::new(connection, self.decoders.clone());
+
+        Ok((*auth_peer, p2p_connection.into_dyn()))
     }
 }
