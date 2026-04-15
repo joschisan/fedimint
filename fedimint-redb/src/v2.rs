@@ -232,7 +232,62 @@ pub struct ReadTransaction {
 }
 
 impl ReadTransaction {
+    /// Borrow a view at this tx's root prefix.
+    pub fn as_ref(&self) -> ReadTxRef<'_> {
+        ReadTxRef {
+            tx: &self.tx,
+            db: &self.db,
+            prefix: self.prefix.clone(),
+        }
+    }
+
+    /// Borrow a view with an additional prefix segment.
+    pub fn isolate(&self, segment: impl Into<String>) -> ReadTxRef<'_> {
+        let mut view = self.as_ref();
+
+        view.prefix.push(segment.into());
+
+        view
+    }
+
     pub fn open_table<K, V>(&self, def: &TableDef<K, V>) -> ReadTable<'_, K, V>
+    where
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
+    {
+        self.as_ref().open_table(def)
+    }
+
+    pub fn get<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
+    where
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
+    {
+        self.as_ref().get(def, key)
+    }
+}
+
+/// Borrowed view of a [`ReadTransaction`] with a possibly-extended prefix.
+pub struct ReadTxRef<'tx> {
+    tx: &'tx redb::ReadTransaction,
+    db: &'tx Arc<DatabaseInner>,
+    prefix: Vec<String>,
+}
+
+impl<'tx> ReadTxRef<'tx> {
+    pub fn isolate(&self, segment: impl Into<String>) -> ReadTxRef<'tx> {
+        let mut view = ReadTxRef {
+            tx: self.tx,
+            db: self.db,
+            prefix: self.prefix.clone(),
+        };
+
+        view.prefix.push(segment.into());
+
+        view
+    }
+
+    pub fn open_table<K, V>(&self, def: &TableDef<K, V>) -> ReadTable<'tx, K, V>
     where
         K: Encodable + Decodable,
         V: Encodable + Decodable,
@@ -274,7 +329,116 @@ pub struct WriteTransaction {
 }
 
 impl WriteTransaction {
+    /// Borrow a view at this tx's root prefix.
+    pub fn as_ref(&self) -> WriteTxRef<'_> {
+        WriteTxRef {
+            tx: &self.tx,
+            db: &self.db,
+            prefix: self.prefix.clone(),
+            touched: &self.touched,
+            on_commit: &self.on_commit,
+        }
+    }
+
+    /// Borrow a view with an additional prefix segment. Used by the engine to
+    /// hand a module-scoped view of a shared transaction to a server module.
+    pub fn isolate(&self, segment: impl Into<String>) -> WriteTxRef<'_> {
+        let mut view = self.as_ref();
+
+        view.prefix.push(segment.into());
+
+        view
+    }
+
     pub fn open_table<K, V>(&self, def: &TableDef<K, V>) -> WriteTable<'_, K, V>
+    where
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
+    {
+        self.as_ref().open_table(def)
+    }
+
+    pub fn get<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
+    where
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
+    {
+        self.as_ref().get(def, key)
+    }
+
+    pub fn insert<K, V>(&self, def: &TableDef<K, V>, key: &K, value: &V) -> Option<V>
+    where
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
+    {
+        self.as_ref().insert(def, key, value)
+    }
+
+    pub fn remove<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
+    where
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
+    {
+        self.as_ref().remove(def, key)
+    }
+
+    /// Register a callback to run after a successful commit.
+    pub fn on_commit(&self, f: impl FnOnce() + Send + 'static) {
+        self.as_ref().on_commit(f);
+    }
+
+    pub async fn commit(self) {
+        let Self {
+            tx,
+            db,
+            touched,
+            on_commit,
+            ..
+        } = self;
+
+        tokio::task::spawn_blocking(move || tx.commit())
+            .await
+            .expect("spawn_blocking panicked")
+            .expect("redb commit failed");
+
+        for name in touched.into_inner().expect("touched poisoned") {
+            db.notify_for(&name).notify_waiters();
+        }
+
+        for cb in on_commit.into_inner().expect("on_commit poisoned") {
+            cb();
+        }
+    }
+}
+
+/// Borrowed view of a [`WriteTransaction`] with a possibly-extended prefix.
+/// This is what server modules receive from the consensus engine; they cannot
+/// commit, but they can read, write, isolate further, and register post-commit
+/// callbacks that the owning [`WriteTransaction::commit`] will fire.
+pub struct WriteTxRef<'tx> {
+    tx: &'tx redb::WriteTransaction,
+    db: &'tx Arc<DatabaseInner>,
+    prefix: Vec<String>,
+    touched: &'tx Mutex<BTreeSet<String>>,
+    on_commit: &'tx Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>>,
+}
+
+impl<'tx> WriteTxRef<'tx> {
+    pub fn isolate(&self, segment: impl Into<String>) -> WriteTxRef<'tx> {
+        let mut view = WriteTxRef {
+            tx: self.tx,
+            db: self.db,
+            prefix: self.prefix.clone(),
+            touched: self.touched,
+            on_commit: self.on_commit,
+        };
+
+        view.prefix.push(segment.into());
+
+        view
+    }
+
+    pub fn open_table<K, V>(&self, def: &TableDef<K, V>) -> WriteTable<'tx, K, V>
     where
         K: Encodable + Decodable,
         V: Encodable + Decodable,
@@ -327,29 +491,6 @@ impl WriteTransaction {
             .lock()
             .expect("on_commit poisoned")
             .push(Box::new(f));
-    }
-
-    pub async fn commit(self) {
-        let Self {
-            tx,
-            db,
-            touched,
-            on_commit,
-            ..
-        } = self;
-
-        tokio::task::spawn_blocking(move || tx.commit())
-            .await
-            .expect("spawn_blocking panicked")
-            .expect("redb commit failed");
-
-        for name in touched.into_inner().expect("touched poisoned") {
-            db.notify_for(&name).notify_waiters();
-        }
-
-        for cb in on_commit.into_inner().expect("on_commit poisoned") {
-            cb();
-        }
     }
 }
 
@@ -673,6 +814,33 @@ mod tests {
         tx.commit().await;
 
         assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn shared_tx_with_module_isolation() {
+        let db = Database::open_in_memory();
+
+        let tx = db.begin_write().await;
+
+        tx.insert(&USERS, &0, &"root".to_string());
+
+        let m1 = tx.isolate("m1");
+        m1.insert(&USERS, &1, &"alice".to_string());
+
+        let m2 = tx.isolate("m2");
+        m2.insert(&USERS, &1, &"bob".to_string());
+
+        tx.commit().await;
+
+        assert_eq!(db.begin_read().await.get(&USERS, &0), Some("root".into()));
+        assert_eq!(
+            db.begin_read().await.isolate("m1").get(&USERS, &1),
+            Some("alice".into())
+        );
+        assert_eq!(
+            db.begin_read().await.isolate("m2").get(&USERS, &1),
+            Some("bob".into())
+        );
     }
 
     #[tokio::test]
