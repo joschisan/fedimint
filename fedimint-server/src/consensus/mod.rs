@@ -255,18 +255,15 @@ fn submit_module_ci_proposals(
         format!("citem_proposals_{module_id}"),
         move |task_handle| async move {
             while !task_handle.is_shutting_down() {
+                let tx = db.begin_write().await;
+                let view = tx.isolate(format!("m{module_id}"));
                 let module_consensus_items = tokio::time::timeout(
                     CONSENSUS_PROPOSAL_TIMEOUT,
-                    module.consensus_proposal(
-                        &mut db
-                            .begin_write_transaction()
-                            .await
-                            .to_ref_with_prefix_module_id(module_id)
-                            .into_nc(),
-                        module_id,
-                    ),
+                    module.consensus_proposal(&view, module_id),
                 )
                 .await;
+                drop(view);
+                drop(tx);
 
                 match module_consensus_items {
                     Ok(items) => {

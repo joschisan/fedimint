@@ -211,10 +211,10 @@ impl HasApiContext<ConsensusApi> for ConsensusApi {
         request: &ApiRequestErased,
         id: Option<ModuleInstanceId>,
     ) -> (&ConsensusApi, ApiEndpointContext) {
-        let mut db = self.db.clone();
-        if let Some(id) = id {
-            db = self.db.with_prefix_module_id(id);
-        }
+        let db = match id {
+            Some(id) => self.db.isolate(format!("m{id}")),
+            None => self.db.clone(),
+        };
         (
             self,
             ApiEndpointContext::new(
