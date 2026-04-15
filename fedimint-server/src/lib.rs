@@ -121,7 +121,6 @@ pub async fn run(
             Box::pin(run_config_gen(
                 data_dir.clone(),
                 settings.clone(),
-                db.clone(),
                 &task_group,
                 code_version_str.clone(),
                 setup_ui_router,
@@ -192,7 +191,6 @@ pub fn get_config(data_dir: &Path) -> anyhow::Result<Option<ServerConfig>> {
 pub async fn run_config_gen(
     data_dir: PathBuf,
     settings: ConfigGenSettings,
-    db: Database,
     task_group: &TaskGroup,
     code_version_str: String,
     setup_ui_handler: SetupUiRouter,
@@ -209,7 +207,7 @@ pub async fn run_config_gen(
 
     let (cgp_sender, mut cgp_receiver) = tokio::sync::mpsc::channel(1);
 
-    let setup_api = SetupApi::new(settings.clone(), db.clone(), cgp_sender, auth);
+    let setup_api = SetupApi::new(settings.clone(), cgp_sender, auth);
 
     let ui_task_group = TaskGroup::new();
 

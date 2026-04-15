@@ -10,7 +10,6 @@ use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::module::{ApiAuth, ApiEndpoint, ApiRequestErased};
 use fedimint_core::setup_code::PeerEndpoints;
 use fedimint_core::{PeerId, base32};
-use fedimint_redb::v2::Database;
 use fedimint_server_core::dashboard_ui::SetupStatus;
 use fedimint_server_core::setup_ui::ISetupApi;
 use iroh::SecretKey;
@@ -69,8 +68,6 @@ pub struct SetupApi {
     settings: ConfigGenSettings,
     /// In-memory state machine
     state: Arc<Mutex<SetupState>>,
-    /// DB not really used
-    db: Database,
     /// Triggers the distributed key generation
     sender: Sender<ConfigGenParams>,
     /// Guardian auth for authentication
@@ -80,14 +77,12 @@ pub struct SetupApi {
 impl SetupApi {
     pub fn new(
         settings: ConfigGenSettings,
-        db: Database,
         sender: Sender<ConfigGenParams>,
         auth: ApiAuth,
     ) -> Self {
         Self {
             settings,
             state: Arc::new(Mutex::new(SetupState::default())),
-            db,
             sender,
             auth,
         }
