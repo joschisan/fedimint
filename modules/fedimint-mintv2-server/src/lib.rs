@@ -21,32 +21,32 @@ use fedimint_core::db::{
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
-    ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta, ModuleConsensusVersion,
-    ModuleInit, TransactionItemAmounts, api_endpoint,
+    api_endpoint, ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta,
+    ModuleConsensusVersion, ModuleInit, TransactionItemAmounts,
 };
 use fedimint_core::{
-    Amount, InPoint, OutPoint, PeerId, apply, async_trait_maybe_send, push_db_key_items,
-    push_db_pair_items,
+    apply, async_trait_maybe_send, push_db_key_items, push_db_pair_items, Amount, InPoint,
+    OutPoint, PeerId,
 };
 use fedimint_mintv2_common::config::{
-    MintClientConfig, MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
+    consensus_denominations, MintClientConfig, MintConfig, MintConfigConsensus, MintConfigPrivate,
 };
 use fedimint_mintv2_common::endpoint_constants::{
     RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
     SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
 };
 use fedimint_mintv2_common::{
-    Denomination, MODULE_CONSENSUS_VERSION, MintCommonInit, MintConsensusItem, MintInput,
-    MintInputError, MintModuleTypes, MintOutput, MintOutputError, RecoveryItem, verify_note,
+    verify_note, Denomination, MintCommonInit, MintConsensusItem, MintInput, MintInputError,
+    MintModuleTypes, MintOutput, MintOutputError, RecoveryItem, MODULE_CONSENSUS_VERSION,
 };
-use fedimint_server_core::config::{PeerHandleOps, eval_poly_g2};
+use fedimint_server_core::config::{eval_poly_g2, PeerHandleOps};
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
 use futures::StreamExt;
 use strum::IntoEnumIterator;
-use tbs::{AggregatePublicKey, BlindedSignatureShare, PublicKeyShare, derive_pk_share};
+use tbs::{derive_pk_share, AggregatePublicKey, BlindedSignatureShare, PublicKeyShare};
 use threshold_crypto::group::Curve;
 
 use crate::db::{
@@ -384,7 +384,11 @@ impl ServerModule for Mint {
                 ApiVersion::new(0, 1),
                 async |_module: &Mint, context, range: fedimint_core::OutPointRange| -> Vec<BlindedSignatureShare> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
+
+                    let mut dbtx = db
+                        .wait_key_check(&BlindedSignatureShareKey(range.start_out_point()), std::convert::identity)
+                        .await.1;
+
                     Ok(get_signature_shares(&mut dbtx, range).await)
                 }
             },
@@ -429,7 +433,7 @@ impl ServerModule for Mint {
 }
 
 async fn get_signature_shares(
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    dbtx: &mut fedimint_core::db::ReadDatabaseTransaction<'_>,
     range: fedimint_core::OutPointRange,
 ) -> Vec<BlindedSignatureShare> {
     let start_key = BlindedSignatureShareKey(range.start_out_point());
@@ -467,7 +471,7 @@ async fn get_recovery_count(dbtx: &mut WriteDatabaseTransaction<'_, NonCommittab
         .await
         .next()
         .await
-        .map_or(0, |entry| entry.0.0 + 1)
+        .map_or(0, |entry| entry.0 .0 + 1)
 }
 
 async fn get_recovery_slice(
