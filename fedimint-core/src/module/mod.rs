@@ -251,11 +251,7 @@ pub struct ApiEndpointContext {
 
 impl ApiEndpointContext {
     /// `db` should be isolated.
-    pub fn new(
-        db: crate::db::v2::Database,
-        has_auth: bool,
-        request_auth: Option<ApiAuth>,
-    ) -> Self {
+    pub fn new(db: crate::db::v2::Database, has_auth: bool, request_auth: Option<ApiAuth>) -> Self {
         Self {
             db,
             has_auth,

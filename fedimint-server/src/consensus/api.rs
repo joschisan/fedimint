@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use fedimint_core::config::{ClientConfig, META_FEDERATION_NAME_KEY};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::db::v2::{Database, ReadTransaction};
+use fedimint_core::db::v2::{Database, IReadDatabaseTransactionOpsTyped as _, ReadTransaction};
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT,
@@ -132,8 +132,7 @@ impl ConsensusApi {
         match session_index.cmp(&get_finished_session_count_static(&tx).await) {
             Ordering::Greater => SessionStatusV2::Initial,
             Ordering::Equal => SessionStatusV2::Pending(
-                tx.open_table(&ACCEPTED_ITEM)
-                    .iter()
+                tx.iter(&ACCEPTED_ITEM)
                     .into_iter()
                     .map(|(_, v)| v)
                     .collect(),
@@ -146,8 +145,9 @@ impl ConsensusApi {
     }
 
     async fn get_federation_audit(&self) -> ApiResult<AuditSummary> {
-        // Modules iterate their own tables during `audit`; we just open a write tx
-        // and drop it without commit after building the audit view.
+        // Modules read their own tables during `audit`; we open a write tx and
+        // drop it without commit after building the audit view. Matches the
+        // reference `migrate_to_redb_2` branch.
         let tx = self.db.begin_write().await;
 
         let mut audit = Audit::default();

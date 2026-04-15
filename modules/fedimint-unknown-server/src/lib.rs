@@ -12,7 +12,7 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::DatabaseVersion;
-use fedimint_core::db::v2::WriteTxRef;
+use fedimint_core::db::v2::{ReadTxRef, WriteTxRef};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
@@ -41,7 +41,6 @@ pub struct UnknownInit;
 // TODO: Boilerplate-code
 impl ModuleInit for UnknownInit {
     type Common = UnknownCommonInit;
-
 }
 
 /// Implementation of server module non-consensus functions
@@ -114,7 +113,7 @@ impl ServerModule for Unknown {
     type Common = UnknownModuleTypes;
     type Init = UnknownInit;
 
-    async fn consensus_proposal(&self, _dbtx: &WriteTxRef<'_>) -> Vec<UnknownConsensusItem> {
+    async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<UnknownConsensusItem> {
         Vec::new()
     }
 

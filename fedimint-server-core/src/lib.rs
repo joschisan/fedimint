@@ -20,6 +20,7 @@ use fedimint_core::core::{
     Decoder, DynInput, DynInputError, DynModuleConsensusItem, DynOutput, DynOutputError,
     ModuleInstanceId, ModuleKind,
 };
+use fedimint_core::db::v2::{ReadTxRef, WriteTxRef};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{
@@ -27,7 +28,6 @@ use fedimint_core::module::{
     ModuleInit, TransactionItemAmounts,
 };
 use fedimint_core::{InPoint, OutPoint, PeerId, apply, async_trait_maybe_send, dyn_newtype_define};
-use fedimint_core::db::v2::WriteTxRef;
 pub use init::*;
 
 #[apply(async_trait_maybe_send!)]
@@ -70,7 +70,7 @@ pub trait ServerModule: Debug + Sized {
     /// the Fedimint developers.
     async fn consensus_proposal(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &ReadTxRef<'_>,
     ) -> Vec<<Self::Common as ModuleCommon>::ConsensusItem>;
 
     /// This function is called once for every consensus item. The function
@@ -147,7 +147,7 @@ pub trait IServerModule: Debug {
     /// This module's contribution to the next consensus proposal
     async fn consensus_proposal(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &ReadTxRef<'_>,
         module_instance_id: ModuleInstanceId,
     ) -> Vec<DynModuleConsensusItem>;
 
@@ -231,7 +231,7 @@ where
     /// This module's contribution to the next consensus proposal
     async fn consensus_proposal(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &ReadTxRef<'_>,
         module_instance_id: ModuleInstanceId,
     ) -> Vec<DynModuleConsensusItem> {
         <Self as ServerModule>::consensus_proposal(self, dbtx)

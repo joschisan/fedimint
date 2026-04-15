@@ -22,7 +22,6 @@
 
 extern crate fedimint_core;
 pub mod cli;
-pub mod db;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};

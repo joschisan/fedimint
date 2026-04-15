@@ -38,12 +38,12 @@ use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
 use tracing::{info, warn};
 
+use crate::DashboardUiRouter;
 use crate::config::ServerConfig;
 use crate::consensus::api::{ConsensusApi, server_endpoints};
 use crate::consensus::engine::ConsensusEngine;
 use crate::net::HasApiContext;
 use crate::net::p2p::P2PStatusReceivers;
-use crate::DashboardUiRouter;
 
 /// How many txs can be stored in memory before blocking the API
 const TRANSACTION_BUFFER: usize = 1000;
@@ -255,7 +255,7 @@ fn submit_module_ci_proposals(
         format!("citem_proposals_{module_id}"),
         move |task_handle| async move {
             while !task_handle.is_shutting_down() {
-                let tx = db.begin_write().await;
+                let tx = db.begin_read().await;
                 let view = tx.isolate(format!("module-{module_id}"));
                 let module_consensus_items = tokio::time::timeout(
                     CONSENSUS_PROPOSAL_TIMEOUT,

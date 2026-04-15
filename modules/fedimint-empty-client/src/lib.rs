@@ -61,7 +61,6 @@ pub struct EmptyClientInit;
 // TODO: Boilerplate-code
 impl ModuleInit for EmptyClientInit {
     type Common = EmptyCommonInit;
-
 }
 
 /// Generates the client module

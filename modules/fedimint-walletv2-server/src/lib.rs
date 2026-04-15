@@ -35,7 +35,10 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::DatabaseVersion;
-use fedimint_core::db::v2::{Database, WriteTxRef};
+use fedimint_core::db::v2::{
+    Database, IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
+    IWriteDatabaseTransactionOpsTyped as _, ReadTxRef, WriteTxRef,
+};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
@@ -100,15 +103,13 @@ pub struct SpentTxOut {
 
 fn pending_txs_unordered(dbtx: &WriteTxRef<'_>) -> Vec<FederationTx> {
     let unsigned: Vec<FederationTx> = dbtx
-        .open_table(&UNSIGNED_TX)
-        .iter()
+        .iter(&UNSIGNED_TX)
         .into_iter()
         .map(|(_, v)| v)
         .collect();
 
     let unconfirmed: Vec<FederationTx> = dbtx
-        .open_table(&UNCONFIRMED_TX)
-        .iter()
+        .iter(&UNCONFIRMED_TX)
         .into_iter()
         .map(|(_, v)| v)
         .collect();
@@ -207,13 +208,9 @@ impl ServerModule for Wallet {
     type Common = WalletModuleTypes;
     type Init = WalletInit;
 
-    async fn consensus_proposal(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-    ) -> Vec<WalletConsensusItem> {
+    async fn consensus_proposal(&self, dbtx: &ReadTxRef<'_>) -> Vec<WalletConsensusItem> {
         let mut items: Vec<WalletConsensusItem> = dbtx
-            .open_table(&UNSIGNED_TX)
-            .iter()
+            .iter(&UNSIGNED_TX)
             .into_iter()
             .map(|(txid, unsigned_tx)| {
                 let signatures = self.sign_tx(&unsigned_tx);
@@ -293,7 +290,10 @@ impl ServerModule for Wallet {
     ) -> Result<InputMeta, WalletInputError> {
         let input = input.ensure_v0_ref()?;
 
-        if dbtx.insert(&SPENT_OUTPUT, &input.output_index, &()).is_some() {
+        if dbtx
+            .insert(&SPENT_OUTPUT, &input.output_index, &())
+            .is_some()
+        {
             return Err(WalletInputError::OutputAlreadySpent);
         }
 
@@ -569,8 +569,7 @@ impl ServerModule for Wallet {
         module_instance_id: ModuleInstanceId,
     ) {
         let items = dbtx
-            .open_table(&FEDERATION_WALLET)
-            .iter()
+            .iter(&FEDERATION_WALLET)
             .into_iter()
             .map(|(_, wallet)| {
                 (
@@ -718,8 +717,7 @@ impl Wallet {
                 let unconfirmed_txs: Vec<FederationTx> = db
                     .begin_read()
                     .await
-                    .open_table(&UNCONFIRMED_TX)
-                    .iter()
+                    .iter(&UNCONFIRMED_TX)
                     .into_iter()
                     .map(|(_, v)| v)
                     .collect();
@@ -809,8 +807,7 @@ impl Wallet {
                         };
 
                         let index = dbtx
-                            .open_table(&OUTPUT)
-                            .iter()
+                            .iter(&OUTPUT)
                             .into_iter()
                             .next_back()
                             .map_or(0, |(idx, _)| idx + 1);
@@ -852,8 +849,8 @@ impl Wallet {
         }
 
         let signatures_by_peer: BTreeMap<PeerId, Vec<Signature>> = dbtx
-            .open_table(&SIGNATURES)
             .range(
+                &SIGNATURES,
                 (txid, PeerId::from(u16::MIN))..=(txid, PeerId::from(u16::MAX)),
             )
             .into_iter()
@@ -893,12 +890,11 @@ impl Wallet {
         }
     }
 
-    pub fn consensus_block_count(&self, dbtx: &WriteTxRef<'_>) -> u64 {
+    pub fn consensus_block_count(&self, dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
         let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
 
         let mut counts: Vec<u64> = dbtx
-            .open_table(&BLOCK_COUNT_VOTE)
-            .iter()
+            .iter(&BLOCK_COUNT_VOTE)
             .into_iter()
             .map(|(_, v)| v)
             .collect();
@@ -918,12 +914,11 @@ impl Wallet {
         counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    pub fn consensus_feerate(&self, dbtx: &WriteTxRef<'_>) -> Option<u64> {
+    pub fn consensus_feerate(&self, dbtx: &impl IReadDatabaseTransactionOps) -> Option<u64> {
         let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
 
         let mut rates: Vec<u64> = dbtx
-            .open_table(&FEE_RATE_VOTE)
-            .iter()
+            .iter(&FEE_RATE_VOTE)
             .into_iter()
             .filter_map(|(_, v)| v)
             .collect();
@@ -1090,14 +1085,12 @@ impl Wallet {
         end_index: u64,
     ) -> Vec<OutputInfo> {
         let spent: BTreeSet<u64> = dbtx
-            .open_table(&SPENT_OUTPUT)
-            .range(start_index..end_index)
+            .range(&SPENT_OUTPUT, start_index..end_index)
             .into_iter()
             .map(|(idx, ())| idx)
             .collect();
 
-        dbtx.open_table(&OUTPUT)
-            .range(start_index..end_index)
+        dbtx.range(&OUTPUT, start_index..end_index)
             .into_iter()
             .filter_map(|(idx, Output(_, tx_out))| {
                 tx_out.script_pubkey.is_p2wsh().then(|| OutputInfo {
@@ -1113,12 +1106,7 @@ impl Wallet {
     fn pending_tx_chain(&self, dbtx: &WriteTxRef<'_>) -> Vec<TxInfo> {
         let n_pending = pending_txs_unordered(dbtx).len();
 
-        let mut items: Vec<TxInfo> = dbtx
-            .open_table(&TX_INFO)
-            .iter()
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect();
+        let mut items: Vec<TxInfo> = dbtx.iter(&TX_INFO).into_iter().map(|(_, v)| v).collect();
 
         items.reverse();
         items.truncate(n_pending);
@@ -1126,16 +1114,11 @@ impl Wallet {
     }
 
     fn tx_chain(&self, dbtx: &WriteTxRef<'_>) -> Vec<TxInfo> {
-        dbtx.open_table(&TX_INFO)
-            .iter()
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect()
+        dbtx.iter(&TX_INFO).into_iter().map(|(_, v)| v).collect()
     }
 
     fn total_txs(&self, dbtx: &WriteTxRef<'_>) -> u64 {
-        dbtx.open_table(&TX_INFO)
-            .iter()
+        dbtx.iter(&TX_INFO)
             .into_iter()
             .next_back()
             .map_or(0, |(idx, _)| idx + 1)

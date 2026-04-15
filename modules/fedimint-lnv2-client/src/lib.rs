@@ -84,7 +84,6 @@ impl std::fmt::Debug for LightningClientInit {
 
 impl ModuleInit for LightningClientInit {
     type Common = LightningCommonInit;
-
 }
 
 #[apply(async_trait_maybe_send!)]

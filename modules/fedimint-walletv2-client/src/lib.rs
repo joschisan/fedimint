@@ -103,7 +103,6 @@ pub struct WalletClientInit;
 
 impl ModuleInit for WalletClientInit {
     type Common = WalletCommonInit;
-
 }
 
 #[apply(async_trait_maybe_send!)]

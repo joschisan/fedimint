@@ -106,7 +106,6 @@ pub struct MintClientInit;
 
 impl ModuleInit for MintClientInit {
     type Common = MintCommonInit;
-
 }
 
 #[apply(async_trait_maybe_send!)]

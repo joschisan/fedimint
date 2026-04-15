@@ -6,7 +6,10 @@ use anyhow::{anyhow, bail};
 use async_channel::Receiver;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::core::DynOutput;
-use fedimint_core::db::v2::{Database, ReadTransaction, WriteTransaction};
+use fedimint_core::db::v2::{
+    Database, IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
+    ReadTransaction, WriteTransaction,
+};
 use fedimint_core::encoding::Decodable;
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::Audit;
@@ -233,13 +236,7 @@ impl ConsensusEngine {
     }
 
     async fn is_recovery(&self) -> bool {
-        !self
-            .db
-            .begin_read()
-            .await
-            .open_table(&ALEPH_UNITS)
-            .iter()
-            .is_empty()
+        !self.db.begin_read().await.iter(&ALEPH_UNITS).is_empty()
     }
 
     pub async fn complete_signed_session_outcome(
@@ -529,8 +526,7 @@ impl ConsensusEngine {
         self.db
             .begin_read()
             .await
-            .open_table(&ACCEPTED_ITEM)
-            .iter()
+            .iter(&ACCEPTED_ITEM)
             .into_iter()
             .map(|(_, item)| item)
             .collect()
@@ -543,25 +539,8 @@ impl ConsensusEngine {
     ) {
         let tx = self.db.begin_write().await;
 
-        let aleph_keys: Vec<u64> = tx
-            .open_table(&ALEPH_UNITS)
-            .iter()
-            .into_iter()
-            .map(|(k, _)| k)
-            .collect();
-        for k in aleph_keys {
-            tx.remove(&ALEPH_UNITS, &k);
-        }
-
-        let accepted_keys: Vec<u64> = tx
-            .open_table(&ACCEPTED_ITEM)
-            .iter()
-            .into_iter()
-            .map(|(k, _)| k)
-            .collect();
-        for k in accepted_keys {
-            tx.remove(&ACCEPTED_ITEM, &k);
-        }
+        tx.as_ref().delete_table(&ALEPH_UNITS);
+        tx.as_ref().delete_table(&ACCEPTED_ITEM);
 
         assert!(
             tx.insert(
@@ -650,9 +629,7 @@ impl ConsensusEngine {
 
             let view = tx.isolate(format!("module-{module_instance_id}"));
 
-            module
-                .audit(&view, &mut audit, module_instance_id)
-                .await;
+            module.audit(&view, &mut audit, module_instance_id).await;
         }
 
         assert!(
@@ -735,8 +712,7 @@ impl ConsensusEngine {
 }
 
 pub async fn get_finished_session_count_static(tx: &ReadTransaction) -> u64 {
-    tx.open_table(&SIGNED_SESSION_OUTCOME)
-        .iter()
+    tx.iter(&SIGNED_SESSION_OUTCOME)
         .into_iter()
         .next_back()
         .map_or(0, |(k, _)| k + 1)

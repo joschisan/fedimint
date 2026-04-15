@@ -2,7 +2,7 @@ use async_channel::Sender;
 use bitcoin::hashes::{Hash, sha256};
 use fedimint_core::PeerId;
 use fedimint_core::config::P2PMessage;
-use fedimint_core::db::v2::Database;
+use fedimint_core::db::v2::{Database, IReadDatabaseTransactionOpsTyped as _};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::net::peers::{DynP2PConnections, Recipient};
 use fedimint_core::secp256k1::schnorr;

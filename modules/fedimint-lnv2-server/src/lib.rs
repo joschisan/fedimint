@@ -16,7 +16,10 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::DatabaseVersion;
-use fedimint_core::db::v2::{Database, ReadTransaction, WriteTxRef};
+use fedimint_core::db::v2::{
+    Database, IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
+    IWriteDatabaseTransactionOpsTyped as _, ReadTxRef, WriteTxRef,
+};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta, ModuleConsensusVersion,
@@ -158,10 +161,7 @@ impl ServerModule for Lightning {
     type Common = LightningModuleTypes;
     type Init = LightningInit;
 
-    async fn consensus_proposal(
-        &self,
-        _dbtx: &WriteTxRef<'_>,
-    ) -> Vec<LightningConsensusItem> {
+    async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<LightningConsensusItem> {
         // We reduce the time granularity to deduplicate votes more often and not save
         // one consensus item every second.
         let mut items = vec![LightningConsensusItem::UnixTimeVote(
@@ -186,18 +186,14 @@ impl ServerModule for Lightning {
 
         match consensus_item {
             LightningConsensusItem::BlockCountVote(vote) => {
-                let current_vote = dbtx
-                    .insert(&BLOCK_COUNT_VOTE, &peer, &vote)
-                    .unwrap_or(0);
+                let current_vote = dbtx.insert(&BLOCK_COUNT_VOTE, &peer, &vote).unwrap_or(0);
 
                 ensure!(current_vote < vote, "Block count vote is redundant");
 
                 Ok(())
             }
             LightningConsensusItem::UnixTimeVote(vote) => {
-                let current_vote = dbtx
-                    .insert(&UNIX_TIME_VOTE, &peer, &vote)
-                    .unwrap_or(0);
+                let current_vote = dbtx.insert(&UNIX_TIME_VOTE, &peer, &vote).unwrap_or(0);
 
                 ensure!(current_vote < vote, "Unix time vote is redundant");
 
@@ -349,8 +345,7 @@ impl ServerModule for Lightning {
         // since they are obligations to issue notes.
         audit.add_items(
             module_instance_id,
-            dbtx.open_table(&OUTGOING_CONTRACT)
-                .iter()
+            dbtx.iter(&OUTGOING_CONTRACT)
                 .into_iter()
                 .map(|(outpoint, contract)| {
                     (
@@ -362,8 +357,7 @@ impl ServerModule for Lightning {
 
         audit.add_items(
             module_instance_id,
-            dbtx.open_table(&INCOMING_CONTRACT)
-                .iter()
+            dbtx.iter(&INCOMING_CONTRACT)
                 .into_iter()
                 .map(|(outpoint, contract)| {
                     (
@@ -383,7 +377,7 @@ impl ServerModule for Lightning {
                     let db = context.db();
                     let tx = db.begin_read().await;
 
-                    Ok(module.consensus_block_count_read(&tx))
+                    Ok(module.consensus_block_count(&tx))
                 }
             },
             api_endpoint! {
@@ -461,12 +455,11 @@ impl Lightning {
             .context("Block count not available yet")
     }
 
-    fn consensus_block_count(&self, dbtx: &WriteTxRef<'_>) -> u64 {
+    fn consensus_block_count(&self, dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut counts = dbtx
-            .open_table(&BLOCK_COUNT_VOTE)
-            .iter()
+            .iter(&BLOCK_COUNT_VOTE)
             .into_iter()
             .map(|(_, v)| v)
             .collect::<Vec<u64>>();
@@ -484,54 +477,11 @@ impl Lightning {
         counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    fn consensus_block_count_read(&self, tx: &ReadTransaction) -> u64 {
-        let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
-
-        let mut counts = tx
-            .open_table(&BLOCK_COUNT_VOTE)
-            .iter()
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect::<Vec<u64>>();
-
-        counts.sort_unstable();
-
-        counts.reverse();
-
-        assert!(counts.last() <= counts.first());
-
-        counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
-    }
-
-    fn consensus_unix_time(&self, dbtx: &WriteTxRef<'_>) -> u64 {
+    fn consensus_unix_time(&self, dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut times = dbtx
-            .open_table(&UNIX_TIME_VOTE)
-            .iter()
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect::<Vec<u64>>();
-
-        times.sort_unstable();
-
-        times.reverse();
-
-        assert!(times.last() <= times.first());
-
-        // The unix time we select guarantees that any threshold of correct peers can
-        // advance the consensus unix time and any consensus unix time has been
-        // confirmed by a threshold of peers.
-
-        times.get(num_peers.threshold() - 1).copied().unwrap_or(0)
-    }
-
-    fn consensus_unix_time_read(&self, tx: &ReadTransaction) -> u64 {
-        let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
-
-        let mut times = tx
-            .open_table(&UNIX_TIME_VOTE)
-            .iter()
+            .iter(&UNIX_TIME_VOTE)
             .into_iter()
             .map(|(_, v)| v)
             .collect::<Vec<u64>>();
@@ -552,7 +502,8 @@ impl Lightning {
         expiration: u64,
     ) -> Option<OutPoint> {
         loop {
-            // Wait for the contract to appear, or time out periodically to check expiration.
+            // Wait for the contract to appear, or time out periodically to check
+            // expiration.
             let wait = db.wait_key(&INCOMING_CONTRACT_OUTPOINT, &contract_id);
 
             if let Ok((outpoint, _tx)) = timeout(Duration::from_secs(10), wait).await {
@@ -566,7 +517,7 @@ impl Lightning {
                 return Some(outpoint);
             }
 
-            if expiration <= self.consensus_unix_time_read(&tx) {
+            if expiration <= self.consensus_unix_time(&tx) {
                 return None;
             }
         }
@@ -591,7 +542,7 @@ impl Lightning {
                 return Some(preimage);
             }
 
-            if expiration <= self.consensus_block_count_read(&tx) {
+            if expiration <= self.consensus_block_count(&tx) {
                 return None;
             }
         }
@@ -606,7 +557,7 @@ impl Lightning {
 
         let contract = tx.get(&OUTGOING_CONTRACT, &outpoint)?;
 
-        let consensus_block_count = self.consensus_block_count_read(&tx);
+        let consensus_block_count = self.consensus_block_count(&tx);
 
         let expiration = contract.expiration.saturating_sub(consensus_block_count);
 
@@ -628,8 +579,7 @@ impl Lightning {
         let mut contracts = Vec::with_capacity(n);
 
         for (key, contract) in tx
-            .open_table(&INCOMING_CONTRACT_STREAM)
-            .range(start..u64::MAX)
+            .range(&INCOMING_CONTRACT_STREAM, start..u64::MAX)
             .into_iter()
             .take(n)
         {
@@ -663,19 +613,18 @@ impl Lightning {
     async fn gateways(db: Database) -> Vec<SafeUrl> {
         db.begin_read()
             .await
-            .open_table(&GATEWAY)
-            .iter()
+            .iter(&GATEWAY)
             .into_iter()
             .map(|(url, ())| url)
             .collect()
     }
 
     pub async fn consensus_block_count_ui(&self) -> u64 {
-        self.consensus_block_count_read(&self.db.begin_read().await)
+        self.consensus_block_count(&self.db.begin_read().await)
     }
 
     pub async fn consensus_unix_time_ui(&self) -> u64 {
-        self.consensus_unix_time_read(&self.db.begin_read().await)
+        self.consensus_unix_time(&self.db.begin_read().await)
     }
 
     pub async fn add_gateway_ui(&self, gateway: SafeUrl) -> bool {

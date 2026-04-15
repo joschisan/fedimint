@@ -15,16 +15,17 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::DatabaseVersion;
-use fedimint_core::db::v2::{Database, WriteTxRef};
+use fedimint_core::db::v2::{
+    Database, IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
+    IWriteDatabaseTransactionOpsTyped as _, ReadTxRef, WriteTxRef,
+};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta, ModuleConsensusVersion,
     ModuleInit, TransactionItemAmounts, api_endpoint,
 };
-use fedimint_core::{
-    Amount, InPoint, OutPoint, PeerId, apply, async_trait_maybe_send,
-};
+use fedimint_core::{Amount, InPoint, OutPoint, PeerId, apply, async_trait_maybe_send};
 use fedimint_mintv2_common::config::{
     MintClientConfig, MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
 };
@@ -156,8 +157,7 @@ impl Mint {
         self.db
             .begin_read()
             .await
-            .open_table(&ISSUANCE_COUNTER)
-            .iter()
+            .iter(&ISSUANCE_COUNTER)
             .into_iter()
             .filter(|(_, count)| *count > 0)
             .collect()
@@ -169,10 +169,7 @@ impl ServerModule for Mint {
     type Common = MintModuleTypes;
     type Init = MintInit;
 
-    async fn consensus_proposal(
-        &self,
-        _dbtx: &WriteTxRef<'_>,
-    ) -> Vec<MintConsensusItem> {
+    async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<MintConsensusItem> {
         Vec::new()
     }
 
@@ -292,8 +289,7 @@ impl ServerModule for Mint {
         module_instance_id: ModuleInstanceId,
     ) {
         let items = dbtx
-            .open_table(&ISSUANCE_COUNTER)
-            .iter()
+            .iter(&ISSUANCE_COUNTER)
             .into_iter()
             .map(|(denomination, count)| {
                 (
@@ -353,7 +349,7 @@ impl ServerModule for Mint {
                 async |_module: &Mint, context, _params: ()| -> u64 {
                     let db = context.db();
                     let tx = db.begin_read().await;
-                    Ok(get_recovery_count_read(&tx))
+                    Ok(get_recovery_count(&tx))
                 }
             },
         ]
@@ -364,11 +360,13 @@ fn get_signature_shares(
     tx: &fedimint_core::db::v2::ReadTransaction,
     range: fedimint_core::OutPointRange,
 ) -> Vec<BlindedSignatureShare> {
-    tx.open_table(&BLINDED_SIGNATURE_SHARE)
-        .range(range.start_out_point()..range.end_out_point())
-        .into_iter()
-        .map(|(_, v)| v)
-        .collect()
+    tx.range(
+        &BLINDED_SIGNATURE_SHARE,
+        range.start_out_point()..range.end_out_point(),
+    )
+    .into_iter()
+    .map(|(_, v)| v)
+    .collect()
 }
 
 fn get_signature_shares_recovery(
@@ -378,11 +376,11 @@ fn get_signature_shares_recovery(
     let mut shares = Vec::new();
 
     for message in messages {
-        let share = tx
-            .get(&BLINDED_SIGNATURE_SHARE_RECOVERY, &message)
-            .ok_or(ApiError::bad_request(
-                "No blinded signature share found".to_string(),
-            ))?;
+        let share =
+            tx.get(&BLINDED_SIGNATURE_SHARE_RECOVERY, &message)
+                .ok_or(ApiError::bad_request(
+                    "No blinded signature share found".to_string(),
+                ))?;
 
         shares.push(share);
     }
@@ -390,17 +388,8 @@ fn get_signature_shares_recovery(
     Ok(shares)
 }
 
-fn get_recovery_count(dbtx: &WriteTxRef<'_>) -> u64 {
-    dbtx.open_table(&RECOVERY_ITEM)
-        .iter()
-        .into_iter()
-        .next_back()
-        .map_or(0, |(idx, _)| idx + 1)
-}
-
-fn get_recovery_count_read(tx: &fedimint_core::db::v2::ReadTransaction) -> u64 {
-    tx.open_table(&RECOVERY_ITEM)
-        .iter()
+fn get_recovery_count(dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
+    dbtx.iter(&RECOVERY_ITEM)
         .into_iter()
         .next_back()
         .map_or(0, |(idx, _)| idx + 1)
@@ -410,8 +399,7 @@ fn get_recovery_slice(
     tx: &fedimint_core::db::v2::ReadTransaction,
     range: (u64, u64),
 ) -> Vec<RecoveryItem> {
-    tx.open_table(&RECOVERY_ITEM)
-        .range(range.0..range.1)
+    tx.range(&RECOVERY_ITEM, range.0..range.1)
         .into_iter()
         .map(|(_, v)| v)
         .collect()

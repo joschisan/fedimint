@@ -1,6 +1,5 @@
-use fedimint_core::table;
 use fedimint_core::util::SafeUrl;
-use fedimint_core::{OutPoint, PeerId};
+use fedimint_core::{OutPoint, PeerId, table};
 use fedimint_lnv2_common::ContractId;
 use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract};
 use tpe::DecryptionKeyShare;
@@ -55,14 +54,13 @@ table!(
 
 // Incoming contracts are indexed in three ways:
 // 1) A sequential stream: `stream_index (u64)` -> `IncomingContract` for
-//    efficient streaming reads via range queries on
-//    `INCOMING_CONTRACT_STREAM`.
+//    efficient streaming reads via range queries on `INCOMING_CONTRACT_STREAM`.
 // 2) A monotonically-increasing index (`INCOMING_CONTRACT_STREAM_INDEX` -> u64)
-//    that stores the next stream index to assign, used to wait for new
-//    incoming contracts.
+//    that stores the next stream index to assign, used to wait for new incoming
+//    contracts.
 // 3) A reverse lookup `OutPoint` -> `stream_index` via
-//    `INCOMING_CONTRACT_INDEX`, used to remove a contract from the stream
-//    once it has been spent.
+//    `INCOMING_CONTRACT_INDEX`, used to remove a contract from the stream once
+//    it has been spent.
 table!(
     INCOMING_CONTRACT_STREAM_INDEX,
     () => u64,

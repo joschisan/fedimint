@@ -1,7 +1,6 @@
 use bitcoin::{TxOut, Txid};
-use fedimint_core::PeerId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::table;
+use fedimint_core::{PeerId, table};
 use fedimint_walletv2_common::TxInfo;
 use secp256k1::ecdsa::Signature;
 use serde::Serialize;

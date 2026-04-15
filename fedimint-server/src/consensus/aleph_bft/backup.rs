@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use fedimint_core::db::v2::Database;
+use fedimint_core::db::v2::{
+    Database, IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
+};
 use tracing::info;
 
 use crate::LOG_CONSENSUS;
@@ -20,12 +22,7 @@ impl aleph_bft::BackupReader for BackupReader {
     async fn read(&mut self) -> std::io::Result<Vec<u8>> {
         let tx = self.db.begin_read().await;
 
-        let units: Vec<Vec<u8>> = tx
-            .open_table(&ALEPH_UNITS)
-            .iter()
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect();
+        let units: Vec<Vec<u8>> = tx.iter(&ALEPH_UNITS).into_iter().map(|(_, v)| v).collect();
 
         if !units.is_empty() {
             info!(target: LOG_CONSENSUS, units_len = %units.len(), "Recovering from an in-session-shutdown");
@@ -45,8 +42,7 @@ impl BackupWriter {
         let units_index = db
             .begin_read()
             .await
-            .open_table(&ALEPH_UNITS)
-            .iter()
+            .iter(&ALEPH_UNITS)
             .into_iter()
             .next_back()
             .map_or(0, |(k, _)| k + 1);

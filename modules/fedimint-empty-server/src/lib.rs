@@ -12,7 +12,7 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::DatabaseVersion;
-use fedimint_core::db::v2::WriteTxRef;
+use fedimint_core::db::v2::{ReadTxRef, WriteTxRef};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
@@ -41,7 +41,6 @@ pub struct EmptyInit;
 // TODO: Boilerplate-code
 impl ModuleInit for EmptyInit {
     type Common = EmptyCommonInit;
-
 }
 
 /// Implementation of server module non-consensus functions
@@ -109,7 +108,7 @@ impl ServerModule for Empty {
     type Common = EmptyModuleTypes;
     type Init = EmptyInit;
 
-    async fn consensus_proposal(&self, _dbtx: &WriteTxRef<'_>) -> Vec<EmptyConsensusItem> {
+    async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<EmptyConsensusItem> {
         Vec::new()
     }
 

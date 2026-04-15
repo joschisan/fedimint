@@ -17,15 +17,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::RangeBounds;
+use std::ops::{Bound, RangeBounds};
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use redb::{ReadableDatabase, ReadableTable, TableDefinition};
+use tokio::sync::Notify;
 
 use crate::encoding::{Decodable, Encodable};
 use crate::module::registry::ModuleDecoderRegistry;
-use tokio::sync::Notify;
 
 // ─── Table definition ────────────────────────────────────────────────────
 
@@ -275,22 +275,6 @@ impl ReadTransaction {
 
         view
     }
-
-    pub fn open_table<K, V>(&self, def: &TableDef<K, V>) -> ReadTable<'_, K, V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        self.as_ref().open_table(def)
-    }
-
-    pub fn get<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        self.as_ref().get(def, key)
-    }
 }
 
 /// Borrowed view of a [`ReadTransaction`] with a possibly-extended prefix.
@@ -312,44 +296,15 @@ impl<'tx> ReadTxRef<'tx> {
 
         view
     }
-
-    pub fn open_table<K, V>(&self, def: &TableDef<K, V>) -> ReadTable<'tx, K, V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        let name = resolve_name(&self.prefix, def.name);
-
-        let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(&name);
-
-        let inner = match self.tx.open_table(td) {
-            Ok(t) => Some(t),
-            Err(redb::TableError::TableDoesNotExist(_)) => None,
-            Err(e) => panic!("redb open_table (read) failed: {e}"),
-        };
-
-        ReadTable {
-            inner,
-            decoders: &self.db.decoders,
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn get<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        self.open_table(def).get(key)
-    }
 }
 
 pub struct WriteTransaction {
     tx: redb::WriteTransaction,
     db: Arc<DatabaseInner>,
     prefix: Vec<String>,
-    /// Resolved names of tables opened for write during this tx. Populated at
-    /// `open_table` time (once per table), used to notify waiters on commit.
+    /// Resolved names of tables opened for write during this tx. Populated any
+    /// time a table is opened (including for read), used to notify waiters on
+    /// commit. Over-notifies on pure reads — harmless but slightly noisy.
     touched: Mutex<BTreeSet<String>>,
     on_commit: Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>>,
 }
@@ -374,38 +329,6 @@ impl WriteTransaction {
         view.prefix.push(segment.into());
 
         view
-    }
-
-    pub fn open_table<K, V>(&self, def: &TableDef<K, V>) -> WriteTable<'_, K, V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        self.as_ref().open_table(def)
-    }
-
-    pub fn get<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        self.as_ref().get(def, key)
-    }
-
-    pub fn insert<K, V>(&self, def: &TableDef<K, V>, key: &K, value: &V) -> Option<V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        self.as_ref().insert(def, key, value)
-    }
-
-    pub fn remove<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        self.as_ref().remove(def, key)
     }
 
     /// Register a callback to run after a successful commit.
@@ -464,53 +387,6 @@ impl<'tx> WriteTxRef<'tx> {
         view
     }
 
-    pub fn open_table<K, V>(&self, def: &TableDef<K, V>) -> WriteTable<'tx, K, V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        let name = resolve_name(&self.prefix, def.name);
-
-        let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(&name);
-
-        let inner = self
-            .tx
-            .open_table(td)
-            .expect("redb open_table (write) failed");
-
-        self.touched.lock().expect("touched poisoned").insert(name);
-
-        WriteTable {
-            inner,
-            decoders: &self.db.decoders,
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn get<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        self.open_table(def).get(key)
-    }
-
-    pub fn insert<K, V>(&self, def: &TableDef<K, V>, key: &K, value: &V) -> Option<V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        self.open_table(def).insert(key, value)
-    }
-
-    pub fn remove<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
-    where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
-    {
-        self.open_table(def).remove(key)
-    }
-
     /// Register a callback to run after a successful commit.
     pub fn on_commit(&self, f: impl FnOnce() + Send + 'static) {
         self.on_commit
@@ -520,147 +396,240 @@ impl<'tx> WriteTxRef<'tx> {
     }
 }
 
-// ─── Table handles ───────────────────────────────────────────────────────
+// ─── Trait tower ─────────────────────────────────────────────────────────
+//
+// Mirrors the `migrate_to_redb_2` reference branch: a two-layer pair of
+// traits (bytes-level plumbing, typed ergonomics), with the write traits
+// supertraiting their read counterparts so anything accepting `&impl
+// IReadDatabaseTransactionOpsTyped` works with both read and write tx
+// types. Typed methods are default-impl'd on the `…Typed` traits and
+// blanket-implemented over the bytes-level traits, so each tx type only
+// hand-writes the four bytes methods.
 
-pub struct ReadTable<'tx, K, V> {
-    inner: Option<redb::ReadOnlyTable<&'static [u8], &'static [u8]>>,
-    decoders: &'tx OnceLock<ModuleDecoderRegistry>,
-    _phantom: PhantomData<(K, V)>,
+/// Core raw read operations a database transaction supports.
+pub trait IReadDatabaseTransactionOps {
+    fn prefix(&self) -> &[String];
+
+    fn decoders(&self) -> &OnceLock<ModuleDecoderRegistry>;
+
+    fn raw_get_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>>;
+
+    fn raw_iter_bytes(&self, resolved_table: &str) -> Vec<(Vec<u8>, Vec<u8>)>;
+
+    fn raw_range_bytes(
+        &self,
+        resolved_table: &str,
+        lo: Bound<Vec<u8>>,
+        hi: Bound<Vec<u8>>,
+    ) -> Vec<(Vec<u8>, Vec<u8>)>;
 }
 
-impl<K, V> ReadTable<'_, K, V>
-where
-    K: Encodable + Decodable,
-    V: Encodable + Decodable,
-{
-    pub fn get(&self, key: &K) -> Option<V> {
-        let inner = self.inner.as_ref()?;
+/// Write extension. Anything implementing this also reads.
+pub trait IWriteDatabaseTransactionOps: IReadDatabaseTransactionOps {
+    fn raw_insert_bytes(&self, resolved_table: &str, key: &[u8], value: &[u8]) -> Option<Vec<u8>>;
 
-        let k = key.consensus_encode_to_vec();
+    fn raw_remove_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>>;
 
-        let raw = inner.get(k.as_slice()).expect("redb get failed")?;
+    fn raw_delete_table(&self, resolved_table: &str);
+}
 
-        Some(decode_value(raw.value(), self.decoders))
-    }
-
-    pub fn range<R>(&self, range: R) -> Vec<(K, V)>
+/// Typed read methods. Blanket-implemented for everything implementing
+/// [`IReadDatabaseTransactionOps`]; users just `use` this trait.
+pub trait IReadDatabaseTransactionOpsTyped: IReadDatabaseTransactionOps {
+    fn get<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
     where
-        R: RangeBounds<K>,
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
     {
-        match &self.inner {
-            Some(t) => range_collect(t, range, self.decoders),
-            None => Vec::new(),
-        }
+        let table = resolve_name(self.prefix(), def.name);
+
+        let raw = self.raw_get_bytes(&table, &key.consensus_encode_to_vec())?;
+
+        Some(decode_value(&raw, self.decoders()))
     }
 
-    pub fn iter(&self) -> Vec<(K, V)> {
-        let Some(inner) = &self.inner else {
-            return Vec::new();
-        };
+    fn iter<K, V>(&self, def: &TableDef<K, V>) -> Vec<(K, V)>
+    where
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
+    {
+        let table = resolve_name(self.prefix(), def.name);
 
-        inner
-            .iter()
-            .expect("redb iter failed")
-            .map(|r| {
-                let (k, v) = r.expect("redb iter item failed");
+        let decoders = self.decoders();
 
+        self.raw_iter_bytes(&table)
+            .into_iter()
+            .map(|(k, v)| {
                 (
-                    decode_value::<K>(k.value(), self.decoders),
-                    decode_value::<V>(v.value(), self.decoders),
+                    decode_value::<K>(&k, decoders),
+                    decode_value::<V>(&v, decoders),
                 )
             })
             .collect()
     }
-}
 
-pub struct WriteTable<'tx, K, V> {
-    inner: redb::Table<'tx, &'static [u8], &'static [u8]>,
-    decoders: &'tx OnceLock<ModuleDecoderRegistry>,
-    _phantom: PhantomData<(K, V)>,
-}
-
-impl<K, V> WriteTable<'_, K, V>
-where
-    K: Encodable + Decodable,
-    V: Encodable + Decodable,
-{
-    pub fn get(&self, key: &K) -> Option<V> {
-        let k = key.consensus_encode_to_vec();
-
-        let raw = self.inner.get(k.as_slice()).expect("redb get failed")?;
-
-        Some(decode_value(raw.value(), self.decoders))
-    }
-
-    pub fn insert(&mut self, key: &K, value: &V) -> Option<V> {
-        let k = key.consensus_encode_to_vec();
-
-        let v = value.consensus_encode_to_vec();
-
-        let prior = self
-            .inner
-            .insert(k.as_slice(), v.as_slice())
-            .expect("redb insert failed");
-
-        prior.map(|g| decode_value(g.value(), self.decoders))
-    }
-
-    pub fn remove(&mut self, key: &K) -> Option<V> {
-        let k = key.consensus_encode_to_vec();
-
-        let prior = self.inner.remove(k.as_slice()).expect("redb remove failed");
-
-        prior.map(|g| decode_value(g.value(), self.decoders))
-    }
-
-    pub fn range<R>(&self, range: R) -> Vec<(K, V)>
+    fn range<K, V, R>(&self, def: &TableDef<K, V>, range: R) -> Vec<(K, V)>
     where
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
         R: RangeBounds<K>,
     {
-        range_collect(&self.inner, range, self.decoders)
-    }
+        let table = resolve_name(self.prefix(), def.name);
 
-    pub fn iter(&self) -> Vec<(K, V)> {
-        self.inner
-            .iter()
-            .expect("redb iter failed")
-            .map(|r| {
-                let (k, v) = r.expect("redb iter item failed");
+        let decoders = self.decoders();
 
-                (
-                    decode_value::<K>(k.value(), self.decoders),
-                    decode_value::<V>(v.value(), self.decoders),
-                )
-            })
-            .collect()
-    }
-}
-
-fn range_collect<T, K, V, R>(
-    table: &T,
-    range: R,
-    decoders: &OnceLock<ModuleDecoderRegistry>,
-) -> Vec<(K, V)>
-where
-    T: ReadableTable<&'static [u8], &'static [u8]>,
-    K: Encodable + Decodable,
-    V: Encodable + Decodable,
-    R: RangeBounds<K>,
-{
-    use std::ops::Bound;
-
-    let encode_bound = |b: Bound<&K>| -> Bound<Vec<u8>> {
-        match b {
+        let lo = match range.start_bound() {
             Bound::Included(k) => Bound::Included(k.consensus_encode_to_vec()),
             Bound::Excluded(k) => Bound::Excluded(k.consensus_encode_to_vec()),
             Bound::Unbounded => Bound::Unbounded,
-        }
+        };
+
+        let hi = match range.end_bound() {
+            Bound::Included(k) => Bound::Included(k.consensus_encode_to_vec()),
+            Bound::Excluded(k) => Bound::Excluded(k.consensus_encode_to_vec()),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+
+        self.raw_range_bytes(&table, lo, hi)
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    decode_value::<K>(&k, decoders),
+                    decode_value::<V>(&v, decoders),
+                )
+            })
+            .collect()
+    }
+}
+
+impl<T: IReadDatabaseTransactionOps + ?Sized> IReadDatabaseTransactionOpsTyped for T {}
+
+/// Typed write methods. Blanket-implemented for everything implementing
+/// [`IWriteDatabaseTransactionOps`].
+pub trait IWriteDatabaseTransactionOpsTyped:
+    IWriteDatabaseTransactionOps + IReadDatabaseTransactionOpsTyped
+{
+    fn insert<K, V>(&self, def: &TableDef<K, V>, key: &K, value: &V) -> Option<V>
+    where
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
+    {
+        let table = resolve_name(self.prefix(), def.name);
+
+        let prior = self.raw_insert_bytes(
+            &table,
+            &key.consensus_encode_to_vec(),
+            &value.consensus_encode_to_vec(),
+        )?;
+
+        Some(decode_value(&prior, self.decoders()))
+    }
+
+    fn remove<K, V>(&self, def: &TableDef<K, V>, key: &K) -> Option<V>
+    where
+        K: Encodable + Decodable,
+        V: Encodable + Decodable,
+    {
+        let table = resolve_name(self.prefix(), def.name);
+
+        let prior = self.raw_remove_bytes(&table, &key.consensus_encode_to_vec())?;
+
+        Some(decode_value(&prior, self.decoders()))
+    }
+
+    /// Drop the entire on-disk table for `def` at this view's prefix. After
+    /// commit the table no longer exists; subsequent reads return empty.
+    fn delete_table<K, V>(&self, def: &TableDef<K, V>) {
+        let table = resolve_name(self.prefix(), def.name);
+
+        self.raw_delete_table(&table);
+    }
+}
+
+impl<T: IWriteDatabaseTransactionOps + ?Sized> IWriteDatabaseTransactionOpsTyped for T {}
+
+// ─── Bytes-level implementations ─────────────────────────────────────────
+
+fn read_raw_get_bytes(
+    tx: &redb::ReadTransaction,
+    resolved_table: &str,
+    key: &[u8],
+) -> Option<Vec<u8>> {
+    let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(resolved_table);
+
+    let table = match tx.open_table(td) {
+        Ok(t) => t,
+        Err(redb::TableError::TableDoesNotExist(_)) => return None,
+        Err(e) => panic!("redb open_table (read) failed: {e}"),
     };
 
-    let lo = encode_bound(range.start_bound());
+    Some(table.get(key).expect("redb get failed")?.value().to_vec())
+}
 
-    let hi = encode_bound(range.end_bound());
+fn read_raw_iter_bytes(
+    tx: &redb::ReadTransaction,
+    resolved_table: &str,
+) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(resolved_table);
 
+    match tx.open_table(td) {
+        Ok(t) => collect_iter(&t),
+        Err(redb::TableError::TableDoesNotExist(_)) => Vec::new(),
+        Err(e) => panic!("redb open_table (read) failed: {e}"),
+    }
+}
+
+fn read_raw_range_bytes(
+    tx: &redb::ReadTransaction,
+    resolved_table: &str,
+    lo: Bound<Vec<u8>>,
+    hi: Bound<Vec<u8>>,
+) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(resolved_table);
+
+    match tx.open_table(td) {
+        Ok(t) => collect_range(&t, lo, hi),
+        Err(redb::TableError::TableDoesNotExist(_)) => Vec::new(),
+        Err(e) => panic!("redb open_table (read) failed: {e}"),
+    }
+}
+
+fn write_open_table<'tx>(
+    tx: &'tx redb::WriteTransaction,
+    touched: &Mutex<BTreeSet<String>>,
+    resolved_table: &str,
+) -> redb::Table<'tx, &'static [u8], &'static [u8]> {
+    let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(resolved_table);
+
+    let table = tx.open_table(td).expect("redb open_table (write) failed");
+
+    touched
+        .lock()
+        .expect("touched poisoned")
+        .insert(resolved_table.to_owned());
+
+    table
+}
+
+fn collect_iter<T>(table: &T) -> Vec<(Vec<u8>, Vec<u8>)>
+where
+    T: ReadableTable<&'static [u8], &'static [u8]>,
+{
+    table
+        .iter()
+        .expect("redb iter failed")
+        .map(|r| {
+            let (k, v) = r.expect("redb iter item failed");
+
+            (k.value().to_vec(), v.value().to_vec())
+        })
+        .collect()
+}
+
+fn collect_range<T>(table: &T, lo: Bound<Vec<u8>>, hi: Bound<Vec<u8>>) -> Vec<(Vec<u8>, Vec<u8>)>
+where
+    T: ReadableTable<&'static [u8], &'static [u8]>,
+{
     fn as_slice(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
         match b {
             Bound::Included(v) => Bound::Included(v.as_slice()),
@@ -675,10 +644,7 @@ where
         .map(|r| {
             let (k, v) = r.expect("redb range item failed");
 
-            (
-                decode_value::<K>(k.value(), decoders),
-                decode_value::<V>(v.value(), decoders),
-            )
+            (k.value().to_vec(), v.value().to_vec())
         })
         .collect()
 }
@@ -687,6 +653,173 @@ fn decode_value<T: Decodable>(bytes: &[u8], decoders: &OnceLock<ModuleDecoderReg
     let d = decoders.get().cloned().unwrap_or_default();
 
     T::consensus_decode_whole(bytes, &d).expect("consensus_decode failed")
+}
+
+// — ReadTxRef —
+
+impl IReadDatabaseTransactionOps for ReadTxRef<'_> {
+    fn prefix(&self) -> &[String] {
+        &self.prefix
+    }
+
+    fn decoders(&self) -> &OnceLock<ModuleDecoderRegistry> {
+        &self.db.decoders
+    }
+
+    fn raw_get_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
+        read_raw_get_bytes(self.tx, resolved_table, key)
+    }
+
+    fn raw_iter_bytes(&self, resolved_table: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
+        read_raw_iter_bytes(self.tx, resolved_table)
+    }
+
+    fn raw_range_bytes(
+        &self,
+        resolved_table: &str,
+        lo: Bound<Vec<u8>>,
+        hi: Bound<Vec<u8>>,
+    ) -> Vec<(Vec<u8>, Vec<u8>)> {
+        read_raw_range_bytes(self.tx, resolved_table, lo, hi)
+    }
+}
+
+// — ReadTransaction — delegates to ReadTxRef.
+
+impl IReadDatabaseTransactionOps for ReadTransaction {
+    fn prefix(&self) -> &[String] {
+        &self.prefix
+    }
+
+    fn decoders(&self) -> &OnceLock<ModuleDecoderRegistry> {
+        &self.db.decoders
+    }
+
+    fn raw_get_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
+        read_raw_get_bytes(&self.tx, resolved_table, key)
+    }
+
+    fn raw_iter_bytes(&self, resolved_table: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
+        read_raw_iter_bytes(&self.tx, resolved_table)
+    }
+
+    fn raw_range_bytes(
+        &self,
+        resolved_table: &str,
+        lo: Bound<Vec<u8>>,
+        hi: Bound<Vec<u8>>,
+    ) -> Vec<(Vec<u8>, Vec<u8>)> {
+        read_raw_range_bytes(&self.tx, resolved_table, lo, hi)
+    }
+}
+
+// — WriteTxRef —
+
+impl IReadDatabaseTransactionOps for WriteTxRef<'_> {
+    fn prefix(&self) -> &[String] {
+        &self.prefix
+    }
+
+    fn decoders(&self) -> &OnceLock<ModuleDecoderRegistry> {
+        &self.db.decoders
+    }
+
+    fn raw_get_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
+        let table = write_open_table(self.tx, self.touched, resolved_table);
+
+        Some(table.get(key).expect("redb get failed")?.value().to_vec())
+    }
+
+    fn raw_iter_bytes(&self, resolved_table: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let table = write_open_table(self.tx, self.touched, resolved_table);
+
+        collect_iter(&table)
+    }
+
+    fn raw_range_bytes(
+        &self,
+        resolved_table: &str,
+        lo: Bound<Vec<u8>>,
+        hi: Bound<Vec<u8>>,
+    ) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let table = write_open_table(self.tx, self.touched, resolved_table);
+
+        collect_range(&table, lo, hi)
+    }
+}
+
+impl IWriteDatabaseTransactionOps for WriteTxRef<'_> {
+    fn raw_insert_bytes(&self, resolved_table: &str, key: &[u8], value: &[u8]) -> Option<Vec<u8>> {
+        let mut table = write_open_table(self.tx, self.touched, resolved_table);
+
+        table
+            .insert(key, value)
+            .expect("redb insert failed")
+            .map(|g| g.value().to_vec())
+    }
+
+    fn raw_remove_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
+        let mut table = write_open_table(self.tx, self.touched, resolved_table);
+
+        table
+            .remove(key)
+            .expect("redb remove failed")
+            .map(|g| g.value().to_vec())
+    }
+
+    fn raw_delete_table(&self, resolved_table: &str) {
+        let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(resolved_table);
+
+        self.tx.delete_table(td).expect("redb delete_table failed");
+
+        self.touched
+            .lock()
+            .expect("touched poisoned")
+            .insert(resolved_table.to_owned());
+    }
+}
+
+// — WriteTransaction — reuses the WriteTxRef bytes impls via `as_ref()`.
+
+impl IReadDatabaseTransactionOps for WriteTransaction {
+    fn prefix(&self) -> &[String] {
+        &self.prefix
+    }
+
+    fn decoders(&self) -> &OnceLock<ModuleDecoderRegistry> {
+        &self.db.decoders
+    }
+
+    fn raw_get_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
+        self.as_ref().raw_get_bytes(resolved_table, key)
+    }
+
+    fn raw_iter_bytes(&self, resolved_table: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
+        self.as_ref().raw_iter_bytes(resolved_table)
+    }
+
+    fn raw_range_bytes(
+        &self,
+        resolved_table: &str,
+        lo: Bound<Vec<u8>>,
+        hi: Bound<Vec<u8>>,
+    ) -> Vec<(Vec<u8>, Vec<u8>)> {
+        self.as_ref().raw_range_bytes(resolved_table, lo, hi)
+    }
+}
+
+impl IWriteDatabaseTransactionOps for WriteTransaction {
+    fn raw_insert_bytes(&self, resolved_table: &str, key: &[u8], value: &[u8]) -> Option<Vec<u8>> {
+        self.as_ref().raw_insert_bytes(resolved_table, key, value)
+    }
+
+    fn raw_remove_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
+        self.as_ref().raw_remove_bytes(resolved_table, key)
+    }
+
+    fn raw_delete_table(&self, resolved_table: &str) {
+        self.as_ref().raw_delete_table(resolved_table);
+    }
 }
 
 // ─── Playground tests ────────────────────────────────────────────────────
@@ -777,8 +910,7 @@ mod tests {
         tx.commit().await;
 
         let tx = db.begin_read().await;
-        let table = tx.open_table(&BALANCES);
-        let items = table.range(3u64..7u64);
+        let items = tx.range(&BALANCES, 3u64..7u64);
 
         assert_eq!(items, vec![(3, 30), (4, 40), (5, 50), (6, 60)]);
     }

@@ -1,11 +1,6 @@
-use std::collections::BTreeMap;
-
-use fedimint_core::TransactionId;
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::DatabaseVersion;
 use fedimint_core::session_outcome::{AcceptedItem, SignedSessionOutcome};
-use fedimint_core::table;
-use fedimint_server_core::migration::DynServerDbMigrationFn;
+use fedimint_core::{TransactionId, table};
 
 table!(
     ACCEPTED_ITEM,
@@ -30,12 +25,3 @@ table!(
     u64 => Vec<u8>,
     "aleph-units",
 );
-
-pub fn get_global_database_migrations() -> BTreeMap<DatabaseVersion, DynServerDbMigrationFn> {
-    BTreeMap::new()
-}
-
-/// Placeholder retained during the v2 migration — the old migration system
-/// operated on v1 dbtx. Kept as a unit struct so existing wiring still
-/// compiles; no v2 migrations are defined.
-pub struct ServerDbMigrationContext;

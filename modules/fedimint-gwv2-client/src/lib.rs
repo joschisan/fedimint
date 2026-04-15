@@ -62,7 +62,6 @@ pub struct GatewayClientInitV2 {
 
 impl ModuleInit for GatewayClientInitV2 {
     type Common = LightningCommonInit;
-
 }
 
 #[apply(async_trait_maybe_send!)]
