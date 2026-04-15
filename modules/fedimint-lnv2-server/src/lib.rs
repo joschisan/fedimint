@@ -17,8 +17,8 @@ use fedimint_core::config::{
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::DatabaseVersion;
 use fedimint_core::db::v2::{
-    Database, IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
-    IWriteDatabaseTransactionOpsTyped as _, ReadTxRef, WriteTxRef,
+    IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
+    IWriteDatabaseTransactionOpsTyped as _,
 };
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
@@ -46,6 +46,7 @@ use fedimint_lnv2_common::{
     LightningOutputV0, MODULE_CONSENSUS_VERSION, OutgoingWitness,
 };
 use fedimint_logging::LOG_MODULE_LNV2;
+use fedimint_redb::v2::{Database, ReadTxRef, WriteTxRef};
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, eval_poly_g1};
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
@@ -373,8 +374,8 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 CONSENSUS_BLOCK_COUNT_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, context, _params : () | -> u64 {
-                    let db = context.db();
+                async |module: &Lightning, _context, _params : () | -> u64 {
+                    let db = module.db.clone();
                     let tx = db.begin_read().await;
 
                     Ok(module.consensus_block_count(&tx))
@@ -383,8 +384,8 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 AWAIT_INCOMING_CONTRACT_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, context, params: (ContractId, u64) | -> Option<OutPoint> {
-                    let db = context.db();
+                async |module: &Lightning, _context, params: (ContractId, u64) | -> Option<OutPoint> {
+                    let db = module.db.clone();
 
                     Ok(module.await_incoming_contract(db, params.0, params.1).await)
                 }
@@ -392,8 +393,8 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 AWAIT_PREIMAGE_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, context, params: (OutPoint, u64)| -> Option<[u8; 32]> {
-                    let db = context.db();
+                async |module: &Lightning, _context, params: (OutPoint, u64)| -> Option<[u8; 32]> {
+                    let db = module.db.clone();
 
                     Ok(module.await_preimage(db, params.0, params.1).await)
                 }
@@ -401,9 +402,9 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 DECRYPTION_KEY_SHARE_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |_module: &Lightning, context, params: OutPoint| -> DecryptionKeyShare {
-                    let share = context
-                        .db()
+                async |module: &Lightning, _context, params: OutPoint| -> DecryptionKeyShare {
+                    let share = module
+                        .db
                         .begin_read()
                         .await
                         .get(&DECRYPTION_KEY_SHARE, &params)
@@ -415,8 +416,8 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, context, outpoint: OutPoint| -> Option<(ContractId, u64)> {
-                    let db = context.db();
+                async |module: &Lightning, _context, outpoint: OutPoint| -> Option<(ContractId, u64)> {
+                    let db = module.db.clone();
 
                     Ok(module.outgoing_contract_expiration(db, outpoint).await)
                 }
@@ -424,8 +425,8 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 AWAIT_INCOMING_CONTRACTS_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, context, params: (u64, usize)| -> (Vec<IncomingContract>, u64) {
-                    let db = context.db();
+                async |module: &Lightning, _context, params: (u64, usize)| -> (Vec<IncomingContract>, u64) {
+                    let db = module.db.clone();
 
                     if params.1 == 0 {
                         return Err(ApiError::bad_request("Batch size must be greater than 0".to_string()));
@@ -437,8 +438,8 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 GATEWAYS_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |_module: &Lightning, context, _params : () | -> Vec<SafeUrl> {
-                    let db = context.db();
+                async |module: &Lightning, _context, _params : () | -> Vec<SafeUrl> {
+                    let db = module.db.clone();
 
                     Ok(Lightning::gateways(db).await)
                 }

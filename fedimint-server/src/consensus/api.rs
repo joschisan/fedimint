@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use fedimint_core::config::{ClientConfig, META_FEDERATION_NAME_KEY};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::db::v2::{Database, IReadDatabaseTransactionOpsTyped as _, ReadTransaction};
+use fedimint_core::db::v2::IReadDatabaseTransactionOpsTyped as _;
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT,
@@ -28,6 +28,7 @@ use fedimint_core::transaction::{
 use fedimint_core::util::{FmtCompact, SafeUrl};
 use fedimint_core::{PeerId, TransactionId};
 use fedimint_logging::LOG_NET_API;
+use fedimint_redb::v2::{Database, ReadTransaction};
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::dashboard_ui::{
     GuardianConfigBackup, IDashboardApi, P2PConnectionStatus, ServerBitcoinRpcStatus,
@@ -208,16 +209,11 @@ impl HasApiContext<ConsensusApi> for ConsensusApi {
     async fn context(
         &self,
         request: &ApiRequestErased,
-        id: Option<ModuleInstanceId>,
+        _id: Option<ModuleInstanceId>,
     ) -> (&ConsensusApi, ApiEndpointContext) {
-        let db = match id {
-            Some(id) => self.db.isolate(format!("module-{id}")),
-            None => self.db.clone(),
-        };
         (
             self,
             ApiEndpointContext::new(
-                db,
                 request
                     .auth
                     .as_ref()

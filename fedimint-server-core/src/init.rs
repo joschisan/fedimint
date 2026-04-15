@@ -15,13 +15,13 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::db::DatabaseVersion;
-use fedimint_core::db::v2::Database as V2Database;
 use fedimint_core::module::{
     CommonModuleInit, CoreConsensusVersion, IDynCommonModuleInit, ModuleConsensusVersion,
     ModuleInit,
 };
 use fedimint_core::task::TaskGroup;
 use fedimint_core::{NumPeers, PeerId, apply, async_trait_maybe_send, dyn_newtype_define};
+use fedimint_redb::v2::Database as V2Database;
 
 use crate::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use crate::config::PeerHandleOps;

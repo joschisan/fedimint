@@ -242,18 +242,18 @@ impl From<DatabaseError> for ApiError {
     }
 }
 
-/// State made available to all API endpoints for handling a request
+/// State made available to all API endpoints for handling a request. DB
+/// access is not part of this context — modules access their own
+/// (already module-isolated) `Database` field via `module.db` or an
+/// equivalent accessor.
 pub struct ApiEndpointContext {
-    db: crate::db::v2::Database,
     has_auth: bool,
     request_auth: Option<ApiAuth>,
 }
 
 impl ApiEndpointContext {
-    /// `db` should be isolated.
-    pub fn new(db: crate::db::v2::Database, has_auth: bool, request_auth: Option<ApiAuth>) -> Self {
+    pub fn new(has_auth: bool, request_auth: Option<ApiAuth>) -> Self {
         Self {
-            db,
             has_auth,
             request_auth,
         }
@@ -269,10 +269,6 @@ impl ApiEndpointContext {
     /// fedimint server
     pub fn has_auth(&self) -> bool {
         self.has_auth
-    }
-
-    pub fn db(&self) -> crate::db::v2::Database {
-        self.db.clone()
     }
 }
 

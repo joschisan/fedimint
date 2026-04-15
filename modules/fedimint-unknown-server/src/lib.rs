@@ -12,13 +12,13 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::DatabaseVersion;
-use fedimint_core::db::v2::{ReadTxRef, WriteTxRef};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
     TransactionItemAmounts,
 };
 use fedimint_core::{InPoint, OutPoint, PeerId};
+use fedimint_redb::v2::{ReadTxRef, WriteTxRef};
 use fedimint_server_core::config::PeerHandleOps;
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{

@@ -20,7 +20,6 @@ use fedimint_core::core::{
     Decoder, DynInput, DynInputError, DynModuleConsensusItem, DynOutput, DynOutputError,
     ModuleInstanceId, ModuleKind,
 };
-use fedimint_core::db::v2::{ReadTxRef, WriteTxRef};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{
@@ -28,6 +27,7 @@ use fedimint_core::module::{
     ModuleInit, TransactionItemAmounts,
 };
 use fedimint_core::{InPoint, OutPoint, PeerId, apply, async_trait_maybe_send, dyn_newtype_define};
+use fedimint_redb::v2::{ReadTxRef, WriteTxRef};
 pub use init::*;
 
 #[apply(async_trait_maybe_send!)]

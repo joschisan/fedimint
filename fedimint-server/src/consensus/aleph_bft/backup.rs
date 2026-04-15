@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use fedimint_core::db::v2::{
-    Database, IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
+    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
 };
+use fedimint_redb::v2::Database;
 use tracing::info;
 
 use crate::LOG_CONSENSUS;

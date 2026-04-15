@@ -12,7 +12,6 @@ use fedimint_core::config::{
 };
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::DatabaseVersion;
-use fedimint_core::db::v2::{ReadTxRef, WriteTxRef};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
@@ -27,6 +26,7 @@ use fedimint_empty_common::{
     EmptyCommonInit, EmptyConsensusItem, EmptyInput, EmptyInputError, EmptyModuleTypes,
     EmptyOutput, EmptyOutputError, MODULE_CONSENSUS_VERSION,
 };
+use fedimint_redb::v2::{ReadTxRef, WriteTxRef};
 use fedimint_server_core::config::PeerHandleOps;
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{

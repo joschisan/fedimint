@@ -16,8 +16,8 @@ use fedimint_core::config::{
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::DatabaseVersion;
 use fedimint_core::db::v2::{
-    Database, IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
-    IWriteDatabaseTransactionOpsTyped as _, ReadTxRef, WriteTxRef,
+    IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
+    IWriteDatabaseTransactionOpsTyped as _,
 };
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::audit::Audit;
@@ -37,6 +37,7 @@ use fedimint_mintv2_common::{
     Denomination, MODULE_CONSENSUS_VERSION, MintCommonInit, MintConsensusItem, MintInput,
     MintInputError, MintModuleTypes, MintOutput, MintOutputError, RecoveryItem, verify_note,
 };
+use fedimint_redb::v2::{Database, ReadTxRef, WriteTxRef};
 use fedimint_server_core::config::{PeerHandleOps, eval_poly_g2};
 use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
@@ -306,8 +307,8 @@ impl ServerModule for Mint {
             api_endpoint! {
                 SIGNATURE_SHARES_ENDPOINT,
                 ApiVersion::new(0, 1),
-                async |_module: &Mint, context, range: fedimint_core::OutPointRange| -> Vec<BlindedSignatureShare> {
-                    let db = context.db();
+                async |module: &Mint, _context, range: fedimint_core::OutPointRange| -> Vec<BlindedSignatureShare> {
+                    let db = module.db.clone();
 
                     let tx = db
                         .wait_key_check(&BLINDED_SIGNATURE_SHARE, &range.start_out_point(), std::convert::identity)
@@ -319,8 +320,8 @@ impl ServerModule for Mint {
             api_endpoint! {
                 SIGNATURE_SHARES_RECOVERY_ENDPOINT,
                 ApiVersion::new(0, 1),
-                async |_module: &Mint, context, messages: Vec<tbs::BlindedMessage>| -> Vec<BlindedSignatureShare> {
-                    let db = context.db();
+                async |module: &Mint, _context, messages: Vec<tbs::BlindedMessage>| -> Vec<BlindedSignatureShare> {
+                    let db = module.db.clone();
                     let tx = db.begin_read().await;
                     get_signature_shares_recovery(&tx, messages)
                 }
@@ -328,8 +329,8 @@ impl ServerModule for Mint {
             api_endpoint! {
                 RECOVERY_SLICE_ENDPOINT,
                 ApiVersion::new(0, 1),
-                async |_module: &Mint, context, range: (u64, u64)| -> Vec<RecoveryItem> {
-                    let db = context.db();
+                async |module: &Mint, _context, range: (u64, u64)| -> Vec<RecoveryItem> {
+                    let db = module.db.clone();
                     let tx = db.begin_read().await;
                     Ok(get_recovery_slice(&tx, range))
                 }
@@ -337,8 +338,8 @@ impl ServerModule for Mint {
             api_endpoint! {
                 RECOVERY_SLICE_HASH_ENDPOINT,
                 ApiVersion::new(0, 1),
-                async |_module: &Mint, context, range: (u64, u64)| -> bitcoin::hashes::sha256::Hash {
-                    let db = context.db();
+                async |module: &Mint, _context, range: (u64, u64)| -> bitcoin::hashes::sha256::Hash {
+                    let db = module.db.clone();
                     let tx = db.begin_read().await;
                     Ok(get_recovery_slice(&tx, range).consensus_hash())
                 }
@@ -346,8 +347,8 @@ impl ServerModule for Mint {
             api_endpoint! {
                 RECOVERY_COUNT_ENDPOINT,
                 ApiVersion::new(0, 1),
-                async |_module: &Mint, context, _params: ()| -> u64 {
-                    let db = context.db();
+                async |module: &Mint, _context, _params: ()| -> u64 {
+                    let db = module.db.clone();
                     let tx = db.begin_read().await;
                     Ok(get_recovery_count(&tx))
                 }
@@ -357,7 +358,7 @@ impl ServerModule for Mint {
 }
 
 fn get_signature_shares(
-    tx: &fedimint_core::db::v2::ReadTransaction,
+    tx: &fedimint_redb::v2::ReadTransaction,
     range: fedimint_core::OutPointRange,
 ) -> Vec<BlindedSignatureShare> {
     tx.range(
@@ -370,7 +371,7 @@ fn get_signature_shares(
 }
 
 fn get_signature_shares_recovery(
-    tx: &fedimint_core::db::v2::ReadTransaction,
+    tx: &fedimint_redb::v2::ReadTransaction,
     messages: Vec<tbs::BlindedMessage>,
 ) -> Result<Vec<BlindedSignatureShare>, ApiError> {
     let mut shares = Vec::new();
@@ -396,7 +397,7 @@ fn get_recovery_count(dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
 }
 
 fn get_recovery_slice(
-    tx: &fedimint_core::db::v2::ReadTransaction,
+    tx: &fedimint_redb::v2::ReadTransaction,
     range: (u64, u64),
 ) -> Vec<RecoveryItem> {
     tx.range(&RECOVERY_ITEM, range.0..range.1)
