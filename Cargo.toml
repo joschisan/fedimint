@@ -35,9 +35,6 @@ members = [
     "fedimint-util-error",
     "fedimintd",
     "fedimintd-envs",
-    "modules/fedimint-empty-client",
-    "modules/fedimint-empty-common",
-    "modules/fedimint-empty-server",
     "modules/fedimint-gwv2-client",
     "modules/fedimint-lnv2-client",
     "modules/fedimint-lnv2-common",
@@ -139,7 +136,6 @@ fedimint-client-module = { path = "./fedimint-client-module", version = "=0.11.0
 fedimint-core = { path = "./fedimint-core", version = "=0.11.0-alpha" }
 fedimint-derive = { path = "./fedimint-derive", version = "=0.11.0-alpha" }
 fedimint-derive-secret = { path = "./crypto/derive-secret", version = "=0.11.0-alpha" }
-fedimint-empty-common = { path = "./modules/fedimint-empty-common", version = "=0.11.0-alpha" }
 fedimint-eventlog = { path = "./fedimint-eventlog", version = "=0.11.0-alpha" }
 fedimint-gateway-cli-core = { path = "./fedimint-gateway-cli-core", version = "=0.11.0-alpha" }
 fedimint-gateway-daemon = { path = "./fedimint-gateway-daemon", version = "=0.11.0-alpha" }

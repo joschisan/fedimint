@@ -2277,51 +2277,6 @@ name = "fedimint-docs"
 version = "0.11.0-alpha"
 
 [[package]]
-name = "fedimint-empty-client"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "erased-serde",
- "fedimint-api-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-empty-common",
- "fedimint-redb",
- "serde",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "fedimint-empty-common"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "fedimint-core",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "fedimint-empty-server"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "erased-serde",
- "fedimint-core",
- "fedimint-empty-common",
- "fedimint-redb",
- "fedimint-server-core",
- "futures",
- "serde",
- "strum 0.27.1",
- "strum_macros 0.27.1",
-]
-
-[[package]]
 name = "fedimint-eventlog"
 version = "0.11.0-alpha"
 dependencies = [
