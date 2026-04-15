@@ -38,8 +38,8 @@ use fedimint_core::{
     maybe_add_send_sync,
 };
 use fedimint_eventlog::{
-    DBTransactionEventLogReadExt as _, DynEventLogTrimableTracker, Event, EventKind, EventLogEntry,
-    EventLogId, EventLogTrimableId, EventLogTrimableTracker, EventPersistence, PersistedLogEntry,
+    DBTransactionEventLogReadExt as _, Event, EventKind, EventLogEntry, EventLogId,
+    EventLogTrimableId, EventPersistence, PersistedLogEntry,
 };
 use fedimint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
 use fedimint_redb::{Database, WriteTxRef};
@@ -49,14 +49,12 @@ use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, warn};
 
 use crate::ClientBuilder;
-use crate::client::event_log::DEFAULT_APPLICATION_EVENT_LOG_POS;
 use crate::db::{
     CLIENT_CONFIG, CLIENT_MODULE_RECOVERY, ClientModuleRecovery, ClientModuleRecoveryState,
 };
 use crate::module_init::{DynClientModuleInit, IClientModuleInit};
 
 pub(crate) mod builder;
-pub(crate) mod event_log;
 pub(crate) mod handle;
 
 /// Main client type
@@ -816,41 +814,6 @@ impl Client {
         );
     }
 
-    /// Built in event log (trimmable) tracker
-    ///
-    /// For the convenience of downstream applications, [`Client`] can store
-    /// internally event log position for the main application using/driving it.
-    ///
-    /// Note that this position is a singleton, so this tracker should not be
-    /// used for multiple purposes or applications, etc. at the same time.
-    ///
-    /// If the application has a need to follow log using multiple trackers, it
-    /// should implement own [`DynEventLogTrimableTracker`] and store its
-    /// persient data by itself.
-    pub fn built_in_application_event_log_tracker(&self) -> DynEventLogTrimableTracker {
-        struct BuiltInApplicationEventLogTracker;
-
-        #[apply(async_trait_maybe_send!)]
-        impl EventLogTrimableTracker for BuiltInApplicationEventLogTracker {
-            async fn store(
-                &mut self,
-                dbtx: &WriteTxRef<'_>,
-                pos: EventLogTrimableId,
-            ) -> anyhow::Result<()> {
-                dbtx.insert(&DEFAULT_APPLICATION_EVENT_LOG_POS, &(), &pos);
-                Ok(())
-            }
-
-            async fn load(
-                &mut self,
-                dbtx: &WriteTxRef<'_>,
-            ) -> anyhow::Result<Option<EventLogTrimableId>> {
-                Ok(dbtx.get(&DEFAULT_APPLICATION_EVENT_LOG_POS, &()))
-            }
-        }
-        Box::new(BuiltInApplicationEventLogTracker)
-    }
-
     /// Like [`Self::handle_events`] but for historical data.
     ///
     ///
@@ -882,10 +845,7 @@ impl Client {
     /// processing of events emitted by the client.
     ///
     /// It needs a `tracker` that will persist the position in the log
-    /// as it is being handled. You can use the
-    /// [`Client::built_in_application_event_log_tracker`] if this call is
-    /// used for the single main application handling this instance of the
-    /// [`Client`]. Otherwise you should implement your own tracker.
+    /// as it is being handled.
     ///
     /// This handler will call `handle_fn` with ever event emitted by
     /// [`Client`], including transient ones. The caller should atomically
