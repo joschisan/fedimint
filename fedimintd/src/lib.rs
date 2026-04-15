@@ -369,10 +369,9 @@ pub async fn run(
         default_modules: module_init_registry.default_modules(),
     };
 
-    let db = Database::new(
-        RedbDatabase::open(server_opts.data_dir.join(DB_FILE)).unwrap(),
-        ModuleRegistry::default(),
-    );
+    let db = fedimint_core::db::v2::Database::open(server_opts.data_dir.join(DB_FILE))
+        .await
+        .expect("Failed to open fedimintd database");
 
     let dyn_server_bitcoin_rpc = match (
         server_opts.bitcoind_url.as_ref(),

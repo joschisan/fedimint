@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use fedimint_core::base32::FEDIMINT_PREFIX;
 use fedimint_core::config::META_FEDERATION_NAME_KEY;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::db::Database;
+use fedimint_core::db::v2::Database;
 use fedimint_core::module::{ApiAuth, ApiEndpoint, ApiEndpointContext, ApiRequestErased};
 use fedimint_core::setup_code::PeerEndpoints;
 use fedimint_core::{PeerId, base32};

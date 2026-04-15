@@ -31,10 +31,7 @@ use anyhow::Context;
 use config::ServerConfig;
 use config::io::read_server_config;
 use fedimint_core::config::P2PMessage;
-use fedimint_core::db::{
-    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped as _,
-    WriteDatabaseTransaction,
-};
+use fedimint_core::db::v2::Database;
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::ApiAuth;
 use fedimint_core::net::peers::DynP2PConnections;
@@ -55,7 +52,6 @@ use tracing::info;
 use crate::config::ConfigGenSettings;
 use crate::config::io::write_server_config;
 use crate::config::setup::SetupApi;
-use crate::db::{ServerInfo, ServerInfoKey};
 use crate::fedimint_core::net::peers::IP2PConnections;
 use crate::net::p2p::{ReconnectP2PConnections, p2p_status_channels};
 use crate::net::p2p_connector::IP2PConnector;
@@ -152,7 +148,7 @@ pub async fn run(
         .set(decoders.clone())
         .expect("p2p decoders were already set");
 
-    let db = db.with_decoders(decoders);
+    db.set_decoders(decoders);
 
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 
@@ -183,18 +179,6 @@ pub async fn run(
     task_group.shutdown();
 
     Ok(())
-}
-
-async fn update_server_info_version_dbtx(
-    dbtx: &mut WriteDatabaseTransaction<'_>,
-    code_version_str: &str,
-) {
-    let mut server_info = dbtx.get_value(&ServerInfoKey).await.unwrap_or(ServerInfo {
-        init_version: code_version_str.to_string(),
-        last_version: code_version_str.to_string(),
-    });
-    server_info.last_version = code_version_str.to_string();
-    dbtx.insert_entry(&ServerInfoKey, &server_info).await;
 }
 
 pub fn get_config(data_dir: &Path) -> anyhow::Result<Option<ServerConfig>> {
