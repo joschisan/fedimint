@@ -18,6 +18,7 @@ async-trait = { workspace = true }
 fedimint-core = { workspace = true }
 futures = { workspace = true }
 redb = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
