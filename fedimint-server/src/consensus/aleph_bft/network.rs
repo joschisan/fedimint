@@ -2,7 +2,7 @@ use async_channel::Sender;
 use bitcoin::hashes::{Hash, sha256};
 use fedimint_core::PeerId;
 use fedimint_core::config::P2PMessage;
-use fedimint_core::db::{Database, IReadDatabaseTransactionOpsTyped};
+use fedimint_core::db::v2::Database;
 use fedimint_core::encoding::Encodable;
 use fedimint_core::net::peers::{DynP2PConnections, Recipient};
 use fedimint_core::secp256k1::schnorr;
@@ -12,7 +12,7 @@ use fedimint_logging::LOG_CONSENSUS;
 use parity_scale_codec::{Decode, Encode, IoReader};
 use tracing::error;
 
-use super::super::db::SignedSessionOutcomeKey;
+use super::super::db::SIGNED_SESSION_OUTCOME;
 use super::data_provider::UnitData;
 use super::keychain::Keychain;
 
@@ -108,10 +108,9 @@ impl aleph_bft::Network<NetworkData> for Network {
                 P2PMessage::SessionIndex(their_session) => {
                     if let Some(outcome) = self
                         .db
-                        .begin_write_transaction()
+                        .begin_read()
                         .await
-                        .get_value(&SignedSessionOutcomeKey(their_session))
-                        .await
+                        .get(&SIGNED_SESSION_OUTCOME, &their_session)
                     {
                         self.connections.send(
                             Recipient::Peer(peer_id),

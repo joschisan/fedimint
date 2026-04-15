@@ -26,19 +26,16 @@ use common::{
     OutputInfo, WalletCommonInit, WalletConsensusItem, WalletInput, WalletModuleTypes, WalletOutput,
 };
 use db::{
-    DbKeyPrefix, FederationWalletKey, FederationWalletPrefix, Output, OutputKey, OutputPrefix,
-    SignaturesKey, SignaturesPrefix, SignaturesTxidPrefix, SpentOutputKey, SpentOutputPrefix,
-    TxInfoIndexKey, TxInfoIndexPrefix,
+    BLOCK_COUNT_VOTE, FEDERATION_WALLET, FEE_RATE_VOTE, OUTPUT, Output, SIGNATURES, SPENT_OUTPUT,
+    TX_INFO, TX_INFO_INDEX, UNCONFIRMED_TX, UNSIGNED_TX,
 };
 use fedimint_core::config::{
     ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{
-    Database, DatabaseVersion, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
-    NonCommittable, WriteDatabaseTransaction,
-};
+use fedimint_core::db::DatabaseVersion;
+use fedimint_core::db::v2::{Database, WriteTxRef};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
@@ -48,9 +45,7 @@ use fedimint_core::module::{
 #[cfg(not(target_family = "wasm"))]
 use fedimint_core::task::TaskGroup;
 use fedimint_core::task::sleep;
-use fedimint_core::{
-    InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send, push_db_pair_items, util,
-};
+use fedimint_core::{InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send, util};
 use fedimint_logging::LOG_MODULE_WALLETV2;
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
@@ -69,19 +64,12 @@ use fedimint_walletv2_common::{
     FederationWallet, MODULE_CONSENSUS_VERSION, TxInfo, WalletInputError, WalletOutputError,
     descriptor, is_potential_receive, tweak_public_key,
 };
-use futures::StreamExt;
 use miniscript::descriptor::Wsh;
 use rand::rngs::OsRng;
 use secp256k1::ecdsa::Signature;
 use secp256k1::{PublicKey, Scalar};
 use serde::{Deserialize, Serialize};
-use strum::IntoEnumIterator;
 use tracing::info;
-
-use crate::db::{
-    BlockCountVoteKey, BlockCountVotePrefix, FeeRateVoteKey, FeeRateVotePrefix, TxInfoKey,
-    TxInfoPrefix, UnconfirmedTxKey, UnconfirmedTxPrefix, UnsignedTxKey, UnsignedTxPrefix,
-};
 
 /// Number of confirmations required for a transaction to be considered as
 /// final by the federation. The block that mines the transaction does
@@ -110,22 +98,20 @@ pub struct SpentTxOut {
     pub tweak: sha256::Hash,
 }
 
-async fn pending_txs_unordered(
-    dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-) -> Vec<FederationTx> {
+fn pending_txs_unordered(dbtx: &WriteTxRef<'_>) -> Vec<FederationTx> {
     let unsigned: Vec<FederationTx> = dbtx
-        .find_by_prefix(&UnsignedTxPrefix)
-        .await
-        .map(|entry| entry.1)
-        .collect()
-        .await;
+        .open_table(&UNSIGNED_TX)
+        .iter()
+        .into_iter()
+        .map(|(_, v)| v)
+        .collect();
 
     let unconfirmed: Vec<FederationTx> = dbtx
-        .find_by_prefix(&UnconfirmedTxPrefix)
-        .await
-        .map(|entry| entry.1)
-        .collect()
-        .await;
+        .open_table(&UNCONFIRMED_TX)
+        .iter()
+        .into_iter()
+        .map(|(_, v)| v)
+        .collect();
 
     unsigned.into_iter().chain(unconfirmed).collect()
 }
@@ -135,125 +121,6 @@ pub struct WalletInit;
 
 impl ModuleInit for WalletInit {
     type Common = WalletCommonInit;
-
-    async fn dump_database(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        let mut wallet: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> = BTreeMap::new();
-
-        let filtered_prefixes = DbKeyPrefix::iter().filter(|f| {
-            prefix_names.is_empty() || prefix_names.contains(&f.to_string().to_lowercase())
-        });
-
-        for table in filtered_prefixes {
-            match table {
-                DbKeyPrefix::Output => {
-                    push_db_pair_items!(
-                        dbtx,
-                        OutputPrefix,
-                        OutputKey,
-                        Output,
-                        wallet,
-                        "Wallet Outputs"
-                    );
-                }
-                DbKeyPrefix::SpentOutput => {
-                    push_db_pair_items!(
-                        dbtx,
-                        SpentOutputPrefix,
-                        SpentOutputKey,
-                        (),
-                        wallet,
-                        "Wallet Spent Outputs"
-                    );
-                }
-                DbKeyPrefix::BlockCountVote => {
-                    push_db_pair_items!(
-                        dbtx,
-                        BlockCountVotePrefix,
-                        BlockCountVoteKey,
-                        u64,
-                        wallet,
-                        "Wallet Block Count Votes"
-                    );
-                }
-                DbKeyPrefix::FeeRateVote => {
-                    push_db_pair_items!(
-                        dbtx,
-                        FeeRateVotePrefix,
-                        FeeRateVoteKey,
-                        Option<u64>,
-                        wallet,
-                        "Wallet Fee Rate Votes"
-                    );
-                }
-                DbKeyPrefix::TxLog => {
-                    push_db_pair_items!(
-                        dbtx,
-                        TxInfoPrefix,
-                        TxInfoKey,
-                        TxInfo,
-                        wallet,
-                        "Wallet Tx Log"
-                    );
-                }
-                DbKeyPrefix::TxInfoIndex => {
-                    push_db_pair_items!(
-                        dbtx,
-                        TxInfoIndexPrefix,
-                        TxInfoIndexKey,
-                        u64,
-                        wallet,
-                        "Wallet Tx Info Index"
-                    );
-                }
-                DbKeyPrefix::UnsignedTx => {
-                    push_db_pair_items!(
-                        dbtx,
-                        UnsignedTxPrefix,
-                        UnsignedTxKey,
-                        FederationTx,
-                        wallet,
-                        "Wallet Unsigned Transactions"
-                    );
-                }
-                DbKeyPrefix::Signatures => {
-                    push_db_pair_items!(
-                        dbtx,
-                        SignaturesPrefix,
-                        SignaturesKey,
-                        Vec<Signature>,
-                        wallet,
-                        "Wallet Signatures"
-                    );
-                }
-                DbKeyPrefix::UnconfirmedTx => {
-                    push_db_pair_items!(
-                        dbtx,
-                        UnconfirmedTxPrefix,
-                        UnconfirmedTxKey,
-                        FederationTx,
-                        wallet,
-                        "Wallet Unconfirmed Transactions"
-                    );
-                }
-                DbKeyPrefix::FederationWallet => {
-                    push_db_pair_items!(
-                        dbtx,
-                        FederationWalletPrefix,
-                        FederationWalletKey,
-                        FederationWallet,
-                        wallet,
-                        "Federation Wallet"
-                    );
-                }
-            }
-        }
-
-        Box::new(wallet.into_iter())
-    }
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -333,10 +200,6 @@ impl ServerModuleInit for WalletInit {
     ) -> BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<Wallet>> {
         BTreeMap::new()
     }
-
-    fn used_db_prefixes(&self) -> Option<BTreeSet<u8>> {
-        Some(DbKeyPrefix::iter().map(|p| p as u8).collect())
-    }
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -344,14 +207,15 @@ impl ServerModule for Wallet {
     type Common = WalletModuleTypes;
     type Init = WalletInit;
 
-    async fn consensus_proposal<'a>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+    async fn consensus_proposal(
+        &self,
+        dbtx: &WriteTxRef<'_>,
     ) -> Vec<WalletConsensusItem> {
-        let mut items = dbtx
-            .find_by_prefix(&UnsignedTxPrefix)
-            .await
-            .map(|(key, unsigned_tx)| {
+        let mut items: Vec<WalletConsensusItem> = dbtx
+            .open_table(&UNSIGNED_TX)
+            .iter()
+            .into_iter()
+            .map(|(txid, unsigned_tx)| {
                 let signatures = self.sign_tx(&unsigned_tx);
 
                 self.verify_signatures(
@@ -361,10 +225,9 @@ impl ServerModule for Wallet {
                 )
                 .expect("Our signatures failed verification against our private key");
 
-                WalletConsensusItem::Signatures(key.0, signatures)
+                WalletConsensusItem::Signatures(txid, signatures)
             })
-            .collect::<Vec<WalletConsensusItem>>()
-            .await;
+            .collect();
 
         if let Some(status) = self.btc_rpc.status() {
             assert_eq!(status.network, self.cfg.consensus.network);
@@ -373,7 +236,7 @@ impl ServerModule for Wallet {
                 .block_count
                 .saturating_sub(CONFIRMATION_FINALITY_DELAY);
 
-            let consensus_block_count = self.consensus_block_count(dbtx).await;
+            let consensus_block_count = self.consensus_block_count(dbtx);
 
             let block_count_vote = match consensus_block_count {
                 0 => block_count_vote,
@@ -396,9 +259,9 @@ impl ServerModule for Wallet {
         items
     }
 
-    async fn process_consensus_item<'a, 'b>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'b>,
+    async fn process_consensus_item(
+        &self,
+        dbtx: &WriteTxRef<'_>,
         consensus_item: WalletConsensusItem,
         peer: PeerId,
     ) -> anyhow::Result<()> {
@@ -407,7 +270,7 @@ impl ServerModule for Wallet {
                 self.process_block_count(dbtx, block_count_vote, peer).await
             }
             WalletConsensusItem::Feerate(feerate) => {
-                if Some(feerate) == dbtx.insert_entry(&FeeRateVoteKey(peer), &feerate).await {
+                if Some(feerate) == dbtx.insert(&FEE_RATE_VOTE, &peer, &feerate) {
                     return Err(anyhow!("Fee rate vote is redundant"));
                 }
 
@@ -422,25 +285,20 @@ impl ServerModule for Wallet {
         }
     }
 
-    async fn process_input<'a, 'b, 'c>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'c>,
-        input: &'b WalletInput,
+    async fn process_input(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        input: &WalletInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, WalletInputError> {
         let input = input.ensure_v0_ref()?;
 
-        if dbtx
-            .insert_entry(&SpentOutputKey(input.output_index), &())
-            .await
-            .is_some()
-        {
+        if dbtx.insert(&SPENT_OUTPUT, &input.output_index, &()).is_some() {
             return Err(WalletInputError::OutputAlreadySpent);
         }
 
         let Output(tracked_outpoint, tracked_output) = dbtx
-            .get_value(&OutputKey(input.output_index))
-            .await
+            .get(&OUTPUT, &input.output_index)
             .ok_or(WalletInputError::UnknownOutputIndex)?;
 
         let tweaked_pubkey = self
@@ -453,7 +311,6 @@ impl ServerModule for Wallet {
 
         let consensus_receive_fee = self
             .receive_fee(dbtx)
-            .await
             .ok_or(WalletInputError::NoConsensusFeerateAvailable)?;
 
         // We allow for a higher fee such that a guardian could construct a CPFP
@@ -469,7 +326,7 @@ impl ServerModule for Wallet {
             .checked_sub(input.fee)
             .ok_or(WalletInputError::ArithmeticOverflow)?;
 
-        if let Some(wallet) = dbtx.remove_entry(&FederationWalletKey).await {
+        if let Some(wallet) = dbtx.remove(&FEDERATION_WALLET, &()) {
             // Assuming the first receive into the federation is made through a
             // standard transaction, its output value is over the P2WSH dust
             // limit. By induction so is this change value.
@@ -501,8 +358,9 @@ impl ServerModule for Wallet {
                 }],
             };
 
-            dbtx.insert_new_entry(
-                &FederationWalletKey,
+            dbtx.insert(
+                &FEDERATION_WALLET,
+                &(),
                 &FederationWallet {
                     value: change_value,
                     outpoint: bitcoin::OutPoint {
@@ -511,15 +369,15 @@ impl ServerModule for Wallet {
                     },
                     tweak: wallet.consensus_hash(),
                 },
-            )
-            .await;
+            );
 
-            let tx_index = self.total_txs(dbtx).await;
+            let tx_index = self.total_txs(dbtx);
 
-            let created = self.consensus_block_count(dbtx).await;
+            let created = self.consensus_block_count(dbtx);
 
-            dbtx.insert_new_entry(
-                &TxInfoKey(tx_index),
+            dbtx.insert(
+                &TX_INFO,
+                &tx_index,
                 &TxInfo {
                     index: tx_index,
                     txid: tx.compute_txid(),
@@ -529,13 +387,13 @@ impl ServerModule for Wallet {
                     fee: input.fee,
                     created,
                 },
-            )
-            .await;
+            );
 
-            dbtx.insert_new_entry(
-                &UnsignedTxKey(tx.compute_txid()),
+            dbtx.insert(
+                &UNSIGNED_TX,
+                &tx.compute_txid(),
                 &FederationTx {
-                    tx,
+                    tx: tx.clone(),
                     spent_tx_outs: vec![
                         SpentTxOut {
                             value: wallet.value,
@@ -549,18 +407,17 @@ impl ServerModule for Wallet {
                     vbytes: self.cfg.consensus.receive_tx_vbytes,
                     fee: input.fee,
                 },
-            )
-            .await;
+            );
         } else {
-            dbtx.insert_new_entry(
-                &FederationWalletKey,
+            dbtx.insert(
+                &FEDERATION_WALLET,
+                &(),
                 &FederationWallet {
                     value: tracked_output.value,
                     outpoint: tracked_outpoint,
                     tweak: input.tweak.consensus_hash(),
                 },
-            )
-            .await;
+            );
         }
 
         let amount = output_value
@@ -578,10 +435,10 @@ impl ServerModule for Wallet {
         })
     }
 
-    async fn process_output<'a, 'b>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'b>,
-        output: &'a WalletOutput,
+    async fn process_output(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        output: &WalletOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, WalletOutputError> {
         let output = output.ensure_v0_ref()?;
@@ -591,13 +448,11 @@ impl ServerModule for Wallet {
         }
 
         let wallet = dbtx
-            .remove_entry(&FederationWalletKey)
-            .await
+            .remove(&FEDERATION_WALLET, &())
             .ok_or(WalletOutputError::NoFederationUTXO)?;
 
         let consensus_send_fee = self
             .send_fee(dbtx)
-            .await
             .ok_or(WalletOutputError::NoConsensusFeerateAvailable)?;
 
         // We allow for a higher fee such that a guardian could construct a CPFP
@@ -648,8 +503,9 @@ impl ServerModule for Wallet {
             ],
         };
 
-        dbtx.insert_new_entry(
-            &FederationWalletKey,
+        dbtx.insert(
+            &FEDERATION_WALLET,
+            &(),
             &FederationWallet {
                 value: change_value,
                 outpoint: bitcoin::OutPoint {
@@ -658,15 +514,15 @@ impl ServerModule for Wallet {
                 },
                 tweak: wallet.consensus_hash(),
             },
-        )
-        .await;
+        );
 
-        let tx_index = self.total_txs(dbtx).await;
+        let tx_index = self.total_txs(dbtx);
 
-        let created = self.consensus_block_count(dbtx).await;
+        let created = self.consensus_block_count(dbtx);
 
-        dbtx.insert_new_entry(
-            &TxInfoKey(tx_index),
+        dbtx.insert(
+            &TX_INFO,
+            &tx_index,
             &TxInfo {
                 index: tx_index,
                 txid: tx.compute_txid(),
@@ -676,16 +532,15 @@ impl ServerModule for Wallet {
                 fee: output.fee,
                 created,
             },
-        )
-        .await;
+        );
 
-        dbtx.insert_new_entry(&TxInfoIndexKey(outpoint), &tx_index)
-            .await;
+        dbtx.insert(&TX_INFO_INDEX, &outpoint, &tx_index);
 
-        dbtx.insert_new_entry(
-            &UnsignedTxKey(tx.compute_txid()),
+        dbtx.insert(
+            &UNSIGNED_TX,
+            &tx.compute_txid(),
             &FederationTx {
-                tx,
+                tx: tx.clone(),
                 spent_tx_outs: vec![SpentTxOut {
                     value: wallet.value,
                     tweak: wallet.tweak,
@@ -693,8 +548,7 @@ impl ServerModule for Wallet {
                 vbytes: self.cfg.consensus.send_tx_vbytes,
                 fee: output.fee,
             },
-        )
-        .await;
+        );
 
         let amount = output_value
             .to_sat()
@@ -710,18 +564,22 @@ impl ServerModule for Wallet {
 
     async fn audit(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         audit: &mut Audit,
         module_instance_id: ModuleInstanceId,
     ) {
-        audit
-            .add_items(
-                dbtx,
-                module_instance_id,
-                &FederationWalletPrefix,
-                |_, wallet| 1000 * wallet.value.to_sat() as i64,
-            )
-            .await;
+        let items = dbtx
+            .open_table(&FEDERATION_WALLET)
+            .iter()
+            .into_iter()
+            .map(|(_, wallet)| {
+                (
+                    "FederationWallet".to_string(),
+                    1000 * wallet.value.to_sat() as i64,
+                )
+            });
+
+        audit.add_items(module_instance_id, items);
     }
 
     fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
@@ -731,8 +589,10 @@ impl ServerModule for Wallet {
                 ApiVersion::new(0, 0),
                 async |module: &Wallet, context, _params: ()| -> u64 {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(module.consensus_block_count(&mut dbtx).await)
+                    let dbtx = db.begin_write().await;
+                    let result = module.consensus_block_count(&dbtx.as_ref());
+                    dbtx.commit().await;
+                    Ok(result)
                 }
             },
             api_endpoint! {
@@ -740,8 +600,10 @@ impl ServerModule for Wallet {
                 ApiVersion::new(0, 0),
                 async |module: &Wallet, context, _params: ()| -> Option<u64> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(module.consensus_feerate(&mut dbtx).await)
+                    let dbtx = db.begin_write().await;
+                    let result = module.consensus_feerate(&dbtx.as_ref());
+                    dbtx.commit().await;
+                    Ok(result)
                 }
             },
             api_endpoint! {
@@ -749,8 +611,8 @@ impl ServerModule for Wallet {
                 ApiVersion::new(0, 0),
                 async |_module: &Wallet, context, _params: ()| -> Option<FederationWallet> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(dbtx.get_value(&FederationWalletKey).await)
+                    let tx = db.begin_read().await;
+                    Ok(tx.get(&FEDERATION_WALLET, &()))
                 }
             },
             api_endpoint! {
@@ -758,8 +620,10 @@ impl ServerModule for Wallet {
                 ApiVersion::new(0, 0),
                 async |module: &Wallet, context, _params: ()| -> Option<Amount> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(module.send_fee(&mut dbtx).await)
+                    let dbtx = db.begin_write().await;
+                    let result = module.send_fee(&dbtx.as_ref());
+                    dbtx.commit().await;
+                    Ok(result)
                 }
             },
             api_endpoint! {
@@ -767,8 +631,10 @@ impl ServerModule for Wallet {
                 ApiVersion::new(0, 0),
                 async |module: &Wallet, context, _params: ()| -> Option<Amount> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(module.receive_fee(&mut dbtx).await)
+                    let dbtx = db.begin_write().await;
+                    let result = module.receive_fee(&dbtx.as_ref());
+                    dbtx.commit().await;
+                    Ok(result)
                 }
             },
             api_endpoint! {
@@ -776,8 +642,10 @@ impl ServerModule for Wallet {
                 ApiVersion::new(0, 0),
                 async |module: &Wallet, context, params: OutPoint| -> Option<Txid> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(module.tx_id(&mut dbtx, params).await)
+                    let dbtx = db.begin_write().await;
+                    let result = module.tx_id(&dbtx.as_ref(), params);
+                    dbtx.commit().await;
+                    Ok(result)
                 }
             },
             api_endpoint! {
@@ -785,8 +653,10 @@ impl ServerModule for Wallet {
                 ApiVersion::new(0, 0),
                 async |module: &Wallet, context, params: (u64, u64)| -> Vec<OutputInfo> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(module.get_outputs(&mut dbtx, params.0, params.1).await)
+                    let dbtx = db.begin_write().await;
+                    let result = module.get_outputs(&dbtx.as_ref(), params.0, params.1);
+                    dbtx.commit().await;
+                    Ok(result)
                 }
             },
             api_endpoint! {
@@ -794,8 +664,10 @@ impl ServerModule for Wallet {
                 ApiVersion::new(0, 0),
                 async |module: &Wallet, context, _params: ()| -> Vec<TxInfo> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(module.pending_tx_chain(&mut dbtx).await)
+                    let dbtx = db.begin_write().await;
+                    let result = module.pending_tx_chain(&dbtx.as_ref());
+                    dbtx.commit().await;
+                    Ok(result)
                 }
             },
             api_endpoint! {
@@ -803,8 +675,10 @@ impl ServerModule for Wallet {
                 ApiVersion::new(0, 0),
                 async |module: &Wallet, context, _params: ()| -> Vec<TxInfo> {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
-                    Ok(module.tx_chain(&mut dbtx).await)
+                    let dbtx = db.begin_write().await;
+                    let result = module.tx_chain(&dbtx.as_ref());
+                    dbtx.commit().await;
+                    Ok(result)
                 }
             },
         ]
@@ -841,14 +715,14 @@ impl Wallet {
     ) {
         task_group.spawn_cancellable("broadcast_unconfirmed_transactions", async move {
             loop {
-                let unconfirmed_txs = db
-                    .begin_write_transaction()
+                let unconfirmed_txs: Vec<FederationTx> = db
+                    .begin_read()
                     .await
-                    .find_by_prefix(&UnconfirmedTxPrefix)
-                    .await
-                    .map(|entry| entry.1)
-                    .collect::<Vec<FederationTx>>()
-                    .await;
+                    .open_table(&UNCONFIRMED_TX)
+                    .iter()
+                    .into_iter()
+                    .map(|(_, v)| v)
+                    .collect();
 
                 for unconfirmed_tx in unconfirmed_txs {
                     btc_rpc.submit_transaction(unconfirmed_tx.tx).await;
@@ -861,15 +735,14 @@ impl Wallet {
 
     async fn process_block_count(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         block_count_vote: u64,
         peer: PeerId,
     ) -> anyhow::Result<()> {
-        let old_consensus_block_count = self.consensus_block_count(dbtx).await;
+        let old_consensus_block_count = self.consensus_block_count(dbtx);
 
         let current_vote = dbtx
-            .insert_entry(&BlockCountVoteKey(peer), &block_count_vote)
-            .await
+            .insert(&BLOCK_COUNT_VOTE, &peer, &block_count_vote)
             .unwrap_or(0);
 
         ensure!(
@@ -877,7 +750,7 @@ impl Wallet {
             "Block count vote is redundant"
         );
 
-        let new_consensus_block_count = self.consensus_block_count(dbtx).await;
+        let new_consensus_block_count = self.consensus_block_count(dbtx);
 
         assert!(old_consensus_block_count <= new_consensus_block_count);
 
@@ -920,8 +793,7 @@ impl Wallet {
             let pks_hash = self.cfg.consensus.bitcoin_pks.consensus_hash();
 
             for tx in block.txdata {
-                dbtx.remove_entry(&UnconfirmedTxKey(tx.compute_txid()))
-                    .await;
+                dbtx.remove(&UNCONFIRMED_TX, &tx.compute_txid());
 
                 // We maintain an append-only log of transaction outputs that pass
                 // the probabilistic receive filter created since the federation was
@@ -937,14 +809,13 @@ impl Wallet {
                         };
 
                         let index = dbtx
-                            .find_by_prefix_sorted_descending(&OutputPrefix)
-                            .await
-                            .next()
-                            .await
-                            .map_or(0, |entry| entry.0.0 + 1);
+                            .open_table(&OUTPUT)
+                            .iter()
+                            .into_iter()
+                            .next_back()
+                            .map_or(0, |(idx, _)| idx + 1);
 
-                        dbtx.insert_new_entry(&OutputKey(index), &Output(outpoint, tx_out.clone()))
-                            .await;
+                        dbtx.insert(&OUTPUT, &index, &Output(outpoint, tx_out.clone()));
                     }
                 }
             }
@@ -955,14 +826,13 @@ impl Wallet {
 
     async fn process_signatures(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         txid: bitcoin::Txid,
         signatures: Vec<Signature>,
         peer: PeerId,
     ) -> anyhow::Result<()> {
         let mut unsigned = dbtx
-            .get_value(&UnsignedTxKey(txid))
-            .await
+            .get(&UNSIGNED_TX, &txid)
             .context("Unsigned transaction does not exist")?;
 
         let pk = self
@@ -975,29 +845,31 @@ impl Wallet {
         self.verify_signatures(&unsigned, &signatures, *pk)?;
 
         if dbtx
-            .insert_entry(&SignaturesKey(txid, peer), &signatures)
-            .await
+            .insert(&SIGNATURES, &(txid, peer), &signatures)
             .is_some()
         {
             bail!("Already received valid signatures from this peer")
         }
 
-        let signatures = dbtx
-            .find_by_prefix(&SignaturesTxidPrefix(txid))
-            .await
-            .map(|(key, signatures)| (key.1, signatures))
-            .collect::<BTreeMap<PeerId, Vec<Signature>>>()
-            .await;
+        let signatures_by_peer: BTreeMap<PeerId, Vec<Signature>> = dbtx
+            .open_table(&SIGNATURES)
+            .range(
+                (txid, PeerId::from(u16::MIN))..=(txid, PeerId::from(u16::MAX)),
+            )
+            .into_iter()
+            .map(|((_, peer), sigs)| (peer, sigs))
+            .collect();
 
-        if signatures.len() == self.cfg.consensus.bitcoin_pks.to_num_peers().threshold() {
-            dbtx.remove_entry(&UnsignedTxKey(txid)).await;
+        if signatures_by_peer.len() == self.cfg.consensus.bitcoin_pks.to_num_peers().threshold() {
+            dbtx.remove(&UNSIGNED_TX, &txid);
 
-            dbtx.remove_by_prefix(&SignaturesTxidPrefix(txid)).await;
+            for peer in signatures_by_peer.keys() {
+                dbtx.remove(&SIGNATURES, &(txid, *peer));
+            }
 
-            self.finalize_tx(&mut unsigned, &signatures);
+            self.finalize_tx(&mut unsigned, &signatures_by_peer);
 
-            dbtx.insert_new_entry(&UnconfirmedTxKey(txid), &unsigned)
-                .await;
+            dbtx.insert(&UNCONFIRMED_TX, &txid, &unsigned);
 
             self.btc_rpc.submit_transaction(unsigned.tx).await;
         }
@@ -1021,18 +893,15 @@ impl Wallet {
         }
     }
 
-    pub async fn consensus_block_count(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-    ) -> u64 {
+    pub fn consensus_block_count(&self, dbtx: &WriteTxRef<'_>) -> u64 {
         let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
 
-        let mut counts = dbtx
-            .find_by_prefix(&BlockCountVotePrefix)
-            .await
-            .map(|entry| entry.1)
-            .collect::<Vec<u64>>()
-            .await;
+        let mut counts: Vec<u64> = dbtx
+            .open_table(&BLOCK_COUNT_VOTE)
+            .iter()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect();
 
         assert!(counts.len() <= num_peers.total());
 
@@ -1049,18 +918,15 @@ impl Wallet {
         counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    pub async fn consensus_feerate(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-    ) -> Option<u64> {
+    pub fn consensus_feerate(&self, dbtx: &WriteTxRef<'_>) -> Option<u64> {
         let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
 
-        let mut rates = dbtx
-            .find_by_prefix(&FeeRateVotePrefix)
-            .await
-            .filter_map(|entry| async move { entry.1 })
-            .collect::<Vec<u64>>()
-            .await;
+        let mut rates: Vec<u64> = dbtx
+            .open_table(&FEE_RATE_VOTE)
+            .iter()
+            .into_iter()
+            .filter_map(|(_, v)| v)
+            .collect();
 
         assert!(rates.len() <= num_peers.total());
 
@@ -1071,21 +937,16 @@ impl Wallet {
         rates.get(num_peers.threshold() - 1).copied()
     }
 
-    pub async fn consensus_fee(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
-        tx_vbytes: u64,
-    ) -> Option<Amount> {
+    pub fn consensus_fee(&self, dbtx: &WriteTxRef<'_>, tx_vbytes: u64) -> Option<Amount> {
         // The minimum feerate is a protection against a catastrophic error in the
         // feerate estimation and limits the length of the pending transaction stack.
 
-        let pending_txs = pending_txs_unordered(dbtx).await;
+        let pending_txs = pending_txs_unordered(dbtx);
 
         assert!(pending_txs.len() <= 32);
 
         let feerate = self
-            .consensus_feerate(dbtx)
-            .await?
+            .consensus_feerate(dbtx)?
             .max(self.cfg.consensus.feerate_base << pending_txs.len());
 
         let tx_fee = tx_vbytes.saturating_mul(feerate).saturating_div(1000);
@@ -1107,20 +968,12 @@ impl Wallet {
         Some(Amount::from_sat(tx_fee.max(stack_fee)))
     }
 
-    pub async fn send_fee(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-    ) -> Option<Amount> {
+    pub fn send_fee(&self, dbtx: &WriteTxRef<'_>) -> Option<Amount> {
         self.consensus_fee(dbtx, self.cfg.consensus.send_tx_vbytes)
-            .await
     }
 
-    pub async fn receive_fee(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-    ) -> Option<Amount> {
+    pub fn receive_fee(&self, dbtx: &WriteTxRef<'_>) -> Option<Amount> {
         self.consensus_fee(dbtx, self.cfg.consensus.receive_tx_vbytes)
-            .await
     }
 
     fn descriptor(&self, tweak: &sha256::Hash) -> Wsh<secp256k1::PublicKey> {
@@ -1224,76 +1077,68 @@ impl Wallet {
         }
     }
 
-    async fn tx_id(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
-        outpoint: OutPoint,
-    ) -> Option<Txid> {
-        let index = dbtx.get_value(&TxInfoIndexKey(outpoint)).await?;
+    fn tx_id(&self, dbtx: &WriteTxRef<'_>, outpoint: OutPoint) -> Option<Txid> {
+        let index = dbtx.get(&TX_INFO_INDEX, &outpoint)?;
 
-        dbtx.get_value(&TxInfoKey(index))
-            .await
-            .map(|entry| entry.txid)
+        dbtx.get(&TX_INFO, &index).map(|entry| entry.txid)
     }
 
-    async fn get_outputs(
+    fn get_outputs(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         start_index: u64,
         end_index: u64,
     ) -> Vec<OutputInfo> {
         let spent: BTreeSet<u64> = dbtx
-            .find_by_range(SpentOutputKey(start_index)..SpentOutputKey(end_index))
-            .await
-            .map(|entry| entry.0.0)
-            .collect()
-            .await;
+            .open_table(&SPENT_OUTPUT)
+            .range(start_index..end_index)
+            .into_iter()
+            .map(|(idx, ())| idx)
+            .collect();
 
-        dbtx.find_by_range(OutputKey(start_index)..OutputKey(end_index))
-            .await
-            .filter_map(|entry| {
-                std::future::ready(entry.1.1.script_pubkey.is_p2wsh().then(|| OutputInfo {
-                    index: entry.0.0,
-                    script: entry.1.1.script_pubkey,
-                    value: entry.1.1.value,
-                    spent: spent.contains(&entry.0.0),
-                }))
+        dbtx.open_table(&OUTPUT)
+            .range(start_index..end_index)
+            .into_iter()
+            .filter_map(|(idx, Output(_, tx_out))| {
+                tx_out.script_pubkey.is_p2wsh().then(|| OutputInfo {
+                    index: idx,
+                    script: tx_out.script_pubkey,
+                    value: tx_out.value,
+                    spent: spent.contains(&idx),
+                })
             })
             .collect()
-            .await
     }
 
-    async fn pending_tx_chain(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-    ) -> Vec<TxInfo> {
-        let n_pending = pending_txs_unordered(dbtx).await.len();
+    fn pending_tx_chain(&self, dbtx: &WriteTxRef<'_>) -> Vec<TxInfo> {
+        let n_pending = pending_txs_unordered(dbtx).len();
 
-        dbtx.find_by_prefix_sorted_descending(&TxInfoPrefix)
-            .await
-            .take(n_pending)
-            .map(|entry| entry.1)
+        let mut items: Vec<TxInfo> = dbtx
+            .open_table(&TX_INFO)
+            .iter()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect();
+
+        items.reverse();
+        items.truncate(n_pending);
+        items
+    }
+
+    fn tx_chain(&self, dbtx: &WriteTxRef<'_>) -> Vec<TxInfo> {
+        dbtx.open_table(&TX_INFO)
+            .iter()
+            .into_iter()
+            .map(|(_, v)| v)
             .collect()
-            .await
     }
 
-    async fn tx_chain(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-    ) -> Vec<TxInfo> {
-        dbtx.find_by_prefix(&TxInfoPrefix)
-            .await
-            .map(|entry| entry.1)
-            .collect()
-            .await
-    }
-
-    async fn total_txs(&self, dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>) -> u64 {
-        dbtx.find_by_prefix_sorted_descending(&TxInfoPrefix)
-            .await
-            .next()
-            .await
-            .map_or(0, |entry| entry.0.0 + 1)
+    fn total_txs(&self, dbtx: &WriteTxRef<'_>) -> u64 {
+        dbtx.open_table(&TX_INFO)
+            .iter()
+            .into_iter()
+            .next_back()
+            .map_or(0, |(idx, _)| idx + 1)
     }
 
     /// Get the network for UI display
@@ -1303,48 +1148,55 @@ impl Wallet {
 
     /// Get the current federation wallet info for UI display
     pub async fn federation_wallet_ui(&self) -> Option<FederationWallet> {
-        self.db
-            .begin_write_transaction()
-            .await
-            .get_value(&FederationWalletKey)
-            .await
+        self.db.begin_read().await.get(&FEDERATION_WALLET, &())
     }
 
     /// Get the current consensus block count for UI display
     pub async fn consensus_block_count_ui(&self) -> u64 {
-        self.consensus_block_count(&mut self.db.begin_write_transaction().await.to_ref_nc())
-            .await
+        let dbtx = self.db.begin_write().await;
+        let result = self.consensus_block_count(&dbtx.as_ref());
+        dbtx.commit().await;
+        result
     }
 
     /// Get the current consensus feerate for UI display
     pub async fn consensus_feerate_ui(&self) -> Option<u64> {
-        self.consensus_feerate(&mut self.db.begin_write_transaction().await.to_ref_nc())
-            .await
-            .map(|feerate| feerate / 1000)
+        let dbtx = self.db.begin_write().await;
+        let result = self.consensus_feerate(&dbtx.as_ref()).map(|f| f / 1000);
+        dbtx.commit().await;
+        result
     }
 
     /// Get the current send fee for UI display
     pub async fn send_fee_ui(&self) -> Option<Amount> {
-        self.send_fee(&mut self.db.begin_write_transaction().await.to_ref_nc())
-            .await
+        let dbtx = self.db.begin_write().await;
+        let result = self.send_fee(&dbtx.as_ref());
+        dbtx.commit().await;
+        result
     }
 
     /// Get the current receive fee for UI display
     pub async fn receive_fee_ui(&self) -> Option<Amount> {
-        self.receive_fee(&mut self.db.begin_write_transaction().await.to_ref_nc())
-            .await
+        let dbtx = self.db.begin_write().await;
+        let result = self.receive_fee(&dbtx.as_ref());
+        dbtx.commit().await;
+        result
     }
 
     /// Get the current pending transaction info for UI display
     pub async fn pending_tx_chain_ui(&self) -> Vec<TxInfo> {
-        self.pending_tx_chain(&mut self.db.begin_write_transaction().await.to_ref_nc())
-            .await
+        let dbtx = self.db.begin_write().await;
+        let result = self.pending_tx_chain(&dbtx.as_ref());
+        dbtx.commit().await;
+        result
     }
 
     /// Get the current transaction log for UI display
     pub async fn tx_chain_ui(&self) -> Vec<TxInfo> {
-        self.tx_chain(&mut self.db.begin_write_transaction().await.to_ref_nc())
-            .await
+        let dbtx = self.db.begin_write().await;
+        let result = self.tx_chain(&dbtx.as_ref());
+        dbtx.commit().await;
+        result
     }
 
     /// Export recovery keys for federation shutdown. Returns None if the

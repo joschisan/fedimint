@@ -1,12 +1,9 @@
 use async_trait::async_trait;
-use fedimint_core::db::{
-    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
-};
-use futures::StreamExt as _;
+use fedimint_core::db::v2::Database;
 use tracing::info;
 
 use crate::LOG_CONSENSUS;
-use crate::consensus::db::{AlephUnitsKey, AlephUnitsPrefix};
+use crate::consensus::db::ALEPH_UNITS;
 
 pub struct BackupReader {
     db: Database,
@@ -21,14 +18,14 @@ impl BackupReader {
 #[async_trait]
 impl aleph_bft::BackupReader for BackupReader {
     async fn read(&mut self) -> std::io::Result<Vec<u8>> {
-        let mut dbtx = self.db.begin_write_transaction().await;
+        let tx = self.db.begin_read().await;
 
-        let units = dbtx
-            .find_by_prefix(&AlephUnitsPrefix)
-            .await
-            .map(|entry| entry.1)
-            .collect::<Vec<Vec<u8>>>()
-            .await;
+        let units: Vec<Vec<u8>> = tx
+            .open_table(&ALEPH_UNITS)
+            .iter()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect();
 
         if !units.is_empty() {
             info!(target: LOG_CONSENSUS, units_len = %units.len(), "Recovering from an in-session-shutdown");
@@ -46,13 +43,13 @@ pub struct BackupWriter {
 impl BackupWriter {
     pub async fn new(db: Database) -> Self {
         let units_index = db
-            .begin_write_transaction()
+            .begin_read()
             .await
-            .find_by_prefix_sorted_descending(&AlephUnitsPrefix)
-            .await
-            .next()
-            .await
-            .map_or(0, |entry| (entry.0.0) + 1);
+            .open_table(&ALEPH_UNITS)
+            .iter()
+            .into_iter()
+            .next_back()
+            .map_or(0, |(k, _)| k + 1);
 
         Self { db, units_index }
     }
@@ -61,16 +58,13 @@ impl BackupWriter {
 #[async_trait]
 impl aleph_bft::BackupWriter for BackupWriter {
     async fn append(&mut self, data: &[u8]) -> std::io::Result<()> {
-        let mut dbtx = self.db.begin_write_transaction().await;
+        let tx = self.db.begin_write().await;
 
-        dbtx.insert_new_entry(&AlephUnitsKey(self.units_index), &data.to_owned())
-            .await;
+        tx.insert(&ALEPH_UNITS, &self.units_index, &data.to_owned());
 
         self.units_index += 1;
 
-        dbtx.commit_tx_result()
-            .await
-            .expect("This is the only place where we write to this key");
+        tx.commit().await;
 
         Ok(())
     }

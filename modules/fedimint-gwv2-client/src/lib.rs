@@ -63,13 +63,6 @@ pub struct GatewayClientInitV2 {
 impl ModuleInit for GatewayClientInitV2 {
     type Common = LightningCommonInit;
 
-    async fn dump_database(
-        &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
-        _prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        Box::new(vec![].into_iter())
-    }
 }
 
 #[apply(async_trait_maybe_send!)]

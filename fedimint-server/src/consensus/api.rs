@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use fedimint_core::config::{ClientConfig, META_FEDERATION_NAME_KEY};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::db::{Database, IReadDatabaseTransactionOpsTyped, ReadDatabaseTransaction};
+use fedimint_core::db::v2::{Database, ReadTransaction};
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT,
@@ -39,7 +39,7 @@ use tracing::{debug, warn};
 
 use crate::config::ServerConfig;
 use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG};
-use crate::consensus::db::{AcceptedItemPrefix, AcceptedTransactionKey, SignedSessionOutcomeKey};
+use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION, SIGNED_SESSION_OUTCOME};
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::transaction::process_transaction_with_dbtx;
 use crate::net::HasApiContext;
@@ -86,27 +86,21 @@ impl ConsensusApi {
 
         debug!(target: LOG_NET_API, %txid, "Received a submitted transaction");
 
-        // Create read-only DB tx so that the read state is consistent
-        let mut dbtx = self.db.begin_write_transaction().await;
-        // we already processed the transaction before
-        if dbtx
-            .get_value(&AcceptedTransactionKey(txid))
-            .await
-            .is_some()
-        {
+        // Create write tx — we only use it to verify the transaction is valid;
+        // dropped without commit so no state is mutated.
+        let tx = self.db.begin_write().await;
+        if tx.get(&ACCEPTED_TRANSACTION, &txid).is_some() {
             debug!(target: LOG_NET_API, %txid, "Transaction already accepted");
             return Ok(txid);
         }
 
-        // We ignore any writes, as we only verify if the transaction is valid here
-        dbtx.ignore_uncommitted();
-        let mut dbtx = dbtx.into_nc();
-
-        process_transaction_with_dbtx(self.modules.clone(), &mut dbtx, &transaction)
+        process_transaction_with_dbtx(self.modules.clone(), &tx, &transaction)
         .await
         .inspect_err(|err| {
             debug!(target: LOG_NET_API, %txid, err = %err.fmt_compact(), "Transaction rejected");
         })?;
+
+        drop(tx);
 
         let _ = self
             .submission_sender
@@ -122,57 +116,47 @@ impl ConsensusApi {
     pub async fn await_transaction(
         &self,
         txid: TransactionId,
-    ) -> (Vec<ModuleInstanceId>, ReadDatabaseTransaction<'_>) {
+    ) -> (Vec<ModuleInstanceId>, ReadTransaction) {
         debug!(target: LOG_NET_API, %txid, "Awaiting transaction acceptance");
         self.db
-            .wait_key_check(&AcceptedTransactionKey(txid), std::convert::identity)
+            .wait_key_check(&ACCEPTED_TRANSACTION, &txid, std::convert::identity)
             .await
     }
 
     async fn session_count_internal(&self) -> u64 {
-        get_finished_session_count_static(&mut self.db.begin_write_transaction().await.to_ref_nc())
-            .await
+        get_finished_session_count_static(&self.db.begin_read().await).await
     }
 
     async fn session_status_internal(&self, session_index: u64) -> SessionStatusV2 {
-        let mut dbtx = self.db.begin_write_transaction().await.into_nc();
+        let tx = self.db.begin_read().await;
 
-        match session_index.cmp(&get_finished_session_count_static(&mut dbtx).await) {
+        match session_index.cmp(&get_finished_session_count_static(&tx).await) {
             Ordering::Greater => SessionStatusV2::Initial,
             Ordering::Equal => SessionStatusV2::Pending(
-                dbtx.find_by_prefix(&AcceptedItemPrefix)
-                    .await
-                    .map(|entry| entry.1)
-                    .collect()
-                    .await,
+                tx.open_table(&ACCEPTED_ITEM)
+                    .iter()
+                    .into_iter()
+                    .map(|(_, v)| v)
+                    .collect(),
             ),
             Ordering::Less => SessionStatusV2::Complete(
-                dbtx.get_value(&SignedSessionOutcomeKey(session_index))
-                    .await
+                tx.get(&SIGNED_SESSION_OUTCOME, &session_index)
                     .expect("There are no gaps in session outcomes"),
             ),
         }
     }
 
     async fn get_federation_audit(&self) -> ApiResult<AuditSummary> {
-        let mut dbtx = self.db.begin_write_transaction().await;
-        // Writes are related to compacting audit keys, which we can safely ignore
-        // within an API request since the compaction will happen when constructing an
-        // audit in the consensus server
-        dbtx.ignore_uncommitted();
-        let mut dbtx = dbtx.into_nc();
+        // Modules iterate their own tables during `audit`; we just open a write tx
+        // and drop it without commit after building the audit view.
+        let tx = self.db.begin_write().await;
 
         let mut audit = Audit::default();
         let mut module_instance_id_to_kind: HashMap<ModuleInstanceId, String> = HashMap::new();
         for (module_instance_id, kind, module) in self.modules.iter_modules() {
             module_instance_id_to_kind.insert(module_instance_id, kind.as_str().to_string());
-            module
-                .audit(
-                    &mut dbtx.to_ref_with_prefix_module_id(module_instance_id),
-                    &mut audit,
-                    module_instance_id,
-                )
-                .await;
+            let view = tx.isolate(format!("m{module_instance_id}"));
+            module.audit(&view, &mut audit, module_instance_id).await;
         }
         Ok(AuditSummary::from_audit(
             &audit,

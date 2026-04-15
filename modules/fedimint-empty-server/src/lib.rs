@@ -11,13 +11,14 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{DatabaseVersion, WriteDatabaseTransaction};
+use fedimint_core::db::DatabaseVersion;
+use fedimint_core::db::v2::WriteTxRef;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
     TransactionItemAmounts,
 };
-use fedimint_core::{InPoint, OutPoint, PeerId, push_db_pair_items};
+use fedimint_core::{InPoint, OutPoint, PeerId};
 pub use fedimint_empty_common as common;
 use fedimint_empty_common::config::{
     EmptyClientConfig, EmptyConfig, EmptyConfigConsensus, EmptyConfigPrivate,
@@ -31,11 +32,6 @@ use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
-use futures::StreamExt;
-use strum::IntoEnumIterator;
-
-use crate::db::{DbKeyPrefix, EmptyExampleKeyPrefix};
-
 pub mod db;
 
 /// Generates the module
@@ -46,35 +42,6 @@ pub struct EmptyInit;
 impl ModuleInit for EmptyInit {
     type Common = EmptyCommonInit;
 
-    /// Dumps all database items for debugging
-    async fn dump_database(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        // TODO: Boilerplate-code
-        let mut items: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> = BTreeMap::new();
-        let filtered_prefixes = DbKeyPrefix::iter().filter(|f| {
-            prefix_names.is_empty() || prefix_names.contains(&f.to_string().to_lowercase())
-        });
-
-        for table in filtered_prefixes {
-            match table {
-                DbKeyPrefix::Example => {
-                    push_db_pair_items!(
-                        dbtx,
-                        EmptyExampleKeyPrefix,
-                        EmptyExampleKey,
-                        Vec<u8>,
-                        items,
-                        "Empty Example"
-                    );
-                }
-            }
-        }
-
-        Box::new(items.into_iter())
-    }
 }
 
 /// Implementation of server module non-consensus functions
@@ -142,40 +109,32 @@ impl ServerModule for Empty {
     type Common = EmptyModuleTypes;
     type Init = EmptyInit;
 
-    async fn consensus_proposal(
-        &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
-    ) -> Vec<EmptyConsensusItem> {
+    async fn consensus_proposal(&self, _dbtx: &WriteTxRef<'_>) -> Vec<EmptyConsensusItem> {
         Vec::new()
     }
 
-    async fn process_consensus_item<'a, 'b>(
-        &'a self,
-        _dbtx: &mut WriteDatabaseTransaction<'b>,
+    async fn process_consensus_item(
+        &self,
+        _dbtx: &WriteTxRef<'_>,
         _consensus_item: EmptyConsensusItem,
         _peer_id: PeerId,
     ) -> anyhow::Result<()> {
-        // WARNING: `process_consensus_item` should return an `Err` for items that do
-        // not change any internal consensus state. Failure to do so, will result in an
-        // (potentially significantly) increased consensus history size.
-        // If you are using this code as a template,
-        // make sure to read the [`ServerModule::process_consensus_item`] documentation,
         bail!("The empty module does not use consensus items");
     }
 
-    async fn process_input<'a, 'b, 'c>(
-        &'a self,
-        _dbtx: &mut WriteDatabaseTransaction<'c>,
-        _input: &'b EmptyInput,
+    async fn process_input(
+        &self,
+        _dbtx: &WriteTxRef<'_>,
+        _input: &EmptyInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, EmptyInputError> {
         Err(EmptyInputError::NotSupported)
     }
 
-    async fn process_output<'a, 'b>(
-        &'a self,
-        _dbtx: &mut WriteDatabaseTransaction<'b>,
-        _output: &'a EmptyOutput,
+    async fn process_output(
+        &self,
+        _dbtx: &WriteTxRef<'_>,
+        _output: &EmptyOutput,
         _out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, EmptyOutputError> {
         Err(EmptyOutputError::NotSupported)
@@ -183,7 +142,7 @@ impl ServerModule for Empty {
 
     async fn audit(
         &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
+        _dbtx: &WriteTxRef<'_>,
         _audit: &mut Audit,
         _module_instance_id: ModuleInstanceId,
     ) {

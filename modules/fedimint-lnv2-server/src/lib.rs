@@ -6,7 +6,7 @@ pub use fedimint_lnv2_common as common;
 
 mod db;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow, ensure};
@@ -15,10 +15,8 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{
-    Database, DatabaseVersion, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
-    NonCommittable, WriteDatabaseTransaction,
-};
+use fedimint_core::db::DatabaseVersion;
+use fedimint_core::db::v2::{Database, ReadTransaction, WriteTxRef};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta, ModuleConsensusVersion,
@@ -29,12 +27,11 @@ use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{
     Amount, InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send,
-    push_db_pair_items,
 };
 use fedimint_lnv2_common::config::{
     LightningClientConfig, LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
-use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract};
+use fedimint_lnv2_common::contracts::IncomingContract;
 use fedimint_lnv2_common::endpoint_constants::{
     AWAIT_INCOMING_CONTRACT_ENDPOINT, AWAIT_INCOMING_CONTRACTS_ENDPOINT, AWAIT_PREIMAGE_ENDPOINT,
     CONSENSUS_BLOCK_COUNT_ENDPOINT, DECRYPTION_KEY_SHARE_ENDPOINT, GATEWAYS_ENDPOINT,
@@ -52,19 +49,14 @@ use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
-use futures::StreamExt;
 use group::Curve;
-use strum::IntoEnumIterator;
 use tpe::{DecryptionKeyShare, PublicKeyShare, SecretKeyShare};
 use tracing::trace;
 
 use crate::db::{
-    BlockCountVoteKey, BlockCountVotePrefix, DbKeyPrefix, DecryptionKeyShareKey,
-    DecryptionKeySharePrefix, GatewayKey, GatewayPrefix, IncomingContractIndexKey,
-    IncomingContractIndexPrefix, IncomingContractKey, IncomingContractOutpointKey,
-    IncomingContractOutpointPrefix, IncomingContractPrefix, IncomingContractStreamIndexKey,
-    IncomingContractStreamKey, IncomingContractStreamPrefix, OutgoingContractKey,
-    OutgoingContractPrefix, PreimageKey, PreimagePrefix, UnixTimeVoteKey, UnixTimeVotePrefix,
+    BLOCK_COUNT_VOTE, DECRYPTION_KEY_SHARE, GATEWAY, INCOMING_CONTRACT, INCOMING_CONTRACT_INDEX,
+    INCOMING_CONTRACT_OUTPOINT, INCOMING_CONTRACT_STREAM, INCOMING_CONTRACT_STREAM_INDEX,
+    OUTGOING_CONTRACT, PREIMAGE, UNIX_TIME_VOTE,
 };
 
 #[derive(Debug, Clone)]
@@ -72,137 +64,6 @@ pub struct LightningInit;
 
 impl ModuleInit for LightningInit {
     type Common = LightningCommonInit;
-
-    #[allow(clippy::too_many_lines)]
-    async fn dump_database(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        let mut lightning: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> =
-            BTreeMap::new();
-
-        let filtered_prefixes = DbKeyPrefix::iter().filter(|f| {
-            prefix_names.is_empty() || prefix_names.contains(&f.to_string().to_lowercase())
-        });
-
-        for table in filtered_prefixes {
-            match table {
-                DbKeyPrefix::BlockCountVote => {
-                    push_db_pair_items!(
-                        dbtx,
-                        BlockCountVotePrefix,
-                        BlockCountVoteKey,
-                        u64,
-                        lightning,
-                        "Lightning Block Count Votes"
-                    );
-                }
-                DbKeyPrefix::UnixTimeVote => {
-                    push_db_pair_items!(
-                        dbtx,
-                        UnixTimeVotePrefix,
-                        UnixTimeVoteKey,
-                        u64,
-                        lightning,
-                        "Lightning Unix Time Votes"
-                    );
-                }
-                DbKeyPrefix::OutgoingContract => {
-                    push_db_pair_items!(
-                        dbtx,
-                        OutgoingContractPrefix,
-                        LightningOutgoingContractKey,
-                        OutgoingContract,
-                        lightning,
-                        "Lightning Outgoing Contracts"
-                    );
-                }
-                DbKeyPrefix::IncomingContract => {
-                    push_db_pair_items!(
-                        dbtx,
-                        IncomingContractPrefix,
-                        LightningIncomingContractKey,
-                        IncomingContract,
-                        lightning,
-                        "Lightning Incoming Contracts"
-                    );
-                }
-                DbKeyPrefix::IncomingContractOutpoint => {
-                    push_db_pair_items!(
-                        dbtx,
-                        IncomingContractOutpointPrefix,
-                        LightningIncomingContractOutpointKey,
-                        OutPoint,
-                        lightning,
-                        "Lightning Incoming Contracts Outpoints"
-                    );
-                }
-                DbKeyPrefix::DecryptionKeyShare => {
-                    push_db_pair_items!(
-                        dbtx,
-                        DecryptionKeySharePrefix,
-                        DecryptionKeyShareKey,
-                        DecryptionKeyShare,
-                        lightning,
-                        "Lightning Decryption Key Share"
-                    );
-                }
-                DbKeyPrefix::Preimage => {
-                    push_db_pair_items!(
-                        dbtx,
-                        PreimagePrefix,
-                        LightningPreimageKey,
-                        [u8; 32],
-                        lightning,
-                        "Lightning Preimages"
-                    );
-                }
-                DbKeyPrefix::Gateway => {
-                    push_db_pair_items!(
-                        dbtx,
-                        GatewayPrefix,
-                        GatewayKey,
-                        (),
-                        lightning,
-                        "Lightning Gateways"
-                    );
-                }
-                DbKeyPrefix::IncomingContractStreamIndex => {
-                    push_db_pair_items!(
-                        dbtx,
-                        IncomingContractStreamIndexKey,
-                        IncomingContractStreamIndexKey,
-                        u64,
-                        lightning,
-                        "Lightning Incoming Contract Stream Index"
-                    );
-                }
-                DbKeyPrefix::IncomingContractStream => {
-                    push_db_pair_items!(
-                        dbtx,
-                        IncomingContractStreamPrefix(0),
-                        IncomingContractStreamKey,
-                        IncomingContract,
-                        lightning,
-                        "Lightning Incoming Contract Stream"
-                    );
-                }
-                DbKeyPrefix::IncomingContractIndex => {
-                    push_db_pair_items!(
-                        dbtx,
-                        IncomingContractIndexPrefix,
-                        IncomingContractIndexKey,
-                        u64,
-                        lightning,
-                        "Lightning Incoming Contract Index"
-                    );
-                }
-            }
-        }
-
-        Box::new(lightning.into_iter())
-    }
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -281,19 +142,7 @@ impl ServerModuleInit for LightningInit {
     fn get_database_migrations(
         &self,
     ) -> BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<Lightning>> {
-        let mut migrations: BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<Lightning>> =
-            BTreeMap::new();
-
-        migrations.insert(
-            DatabaseVersion(0),
-            Box::new(move |ctx| Box::pin(crate::db::migrate_to_v1(ctx))),
-        );
-
-        migrations
-    }
-
-    fn used_db_prefixes(&self) -> Option<BTreeSet<u8>> {
-        Some(DbKeyPrefix::iter().map(|p| p as u8).collect())
+        BTreeMap::new()
     }
 }
 
@@ -311,7 +160,7 @@ impl ServerModule for Lightning {
 
     async fn consensus_proposal(
         &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
+        _dbtx: &WriteTxRef<'_>,
     ) -> Vec<LightningConsensusItem> {
         // We reduce the time granularity to deduplicate votes more often and not save
         // one consensus item every second.
@@ -327,9 +176,9 @@ impl ServerModule for Lightning {
         items
     }
 
-    async fn process_consensus_item<'a, 'b>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'b>,
+    async fn process_consensus_item(
+        &self,
+        dbtx: &WriteTxRef<'_>,
         consensus_item: LightningConsensusItem,
         peer: PeerId,
     ) -> anyhow::Result<()> {
@@ -338,8 +187,7 @@ impl ServerModule for Lightning {
         match consensus_item {
             LightningConsensusItem::BlockCountVote(vote) => {
                 let current_vote = dbtx
-                    .insert_entry(&BlockCountVoteKey(peer), &vote)
-                    .await
+                    .insert(&BLOCK_COUNT_VOTE, &peer, &vote)
                     .unwrap_or(0);
 
                 ensure!(current_vote < vote, "Block count vote is redundant");
@@ -348,8 +196,7 @@ impl ServerModule for Lightning {
             }
             LightningConsensusItem::UnixTimeVote(vote) => {
                 let current_vote = dbtx
-                    .insert_entry(&UnixTimeVoteKey(peer), &vote)
-                    .await
+                    .insert(&UNIX_TIME_VOTE, &peer, &vote)
                     .unwrap_or(0);
 
                 ensure!(current_vote < vote, "Unix time vote is redundant");
@@ -362,22 +209,21 @@ impl ServerModule for Lightning {
         }
     }
 
-    async fn process_input<'a, 'b, 'c>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'c>,
-        input: &'b LightningInput,
+    async fn process_input(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        input: &LightningInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, LightningInputError> {
         let (pub_key, amount) = match input.ensure_v0_ref()? {
             LightningInputV0::Outgoing(outpoint, outgoing_witness) => {
                 let contract = dbtx
-                    .remove_entry(&OutgoingContractKey(*outpoint))
-                    .await
+                    .remove(&OUTGOING_CONTRACT, outpoint)
                     .ok_or(LightningInputError::UnknownContract)?;
 
                 let pub_key = match outgoing_witness {
                     OutgoingWitness::Claim(preimage) => {
-                        if contract.expiration <= self.consensus_block_count(dbtx).await {
+                        if contract.expiration <= self.consensus_block_count(dbtx) {
                             return Err(LightningInputError::Expired);
                         }
 
@@ -385,12 +231,12 @@ impl ServerModule for Lightning {
                             return Err(LightningInputError::InvalidPreimage);
                         }
 
-                        dbtx.insert_entry(&PreimageKey(*outpoint), preimage).await;
+                        dbtx.insert(&PREIMAGE, outpoint, preimage);
 
                         contract.claim_pk
                     }
                     OutgoingWitness::Refund => {
-                        if contract.expiration > self.consensus_block_count(dbtx).await {
+                        if contract.expiration > self.consensus_block_count(dbtx) {
                             return Err(LightningInputError::NotExpired);
                         }
 
@@ -409,16 +255,14 @@ impl ServerModule for Lightning {
             }
             LightningInputV0::Incoming(outpoint, agg_decryption_key) => {
                 let contract = dbtx
-                    .remove_entry(&IncomingContractKey(*outpoint))
-                    .await
+                    .remove(&INCOMING_CONTRACT, outpoint)
                     .ok_or(LightningInputError::UnknownContract)?;
 
                 let index = dbtx
-                    .remove_entry(&IncomingContractIndexKey(*outpoint))
-                    .await
+                    .remove(&INCOMING_CONTRACT_INDEX, outpoint)
                     .expect("Incoming contract index should exist");
 
-                dbtx.remove_entry(&IncomingContractStreamKey(index)).await;
+                dbtx.remove(&INCOMING_CONTRACT_STREAM, &index);
 
                 if !contract
                     .verify_agg_decryption_key(&self.cfg.consensus.tpe_agg_pk, agg_decryption_key)
@@ -444,16 +288,15 @@ impl ServerModule for Lightning {
         })
     }
 
-    async fn process_output<'a, 'b>(
-        &'a self,
-        dbtx: &mut WriteDatabaseTransaction<'b>,
-        output: &'a LightningOutput,
+    async fn process_output(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        output: &LightningOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, LightningOutputError> {
         let amount = match output.ensure_v0_ref()? {
             LightningOutputV0::Outgoing(contract) => {
-                dbtx.insert_new_entry(&OutgoingContractKey(outpoint), contract)
-                    .await;
+                dbtx.insert(&OUTGOING_CONTRACT, &outpoint, contract);
 
                 contract.amount
             }
@@ -462,37 +305,29 @@ impl ServerModule for Lightning {
                     return Err(LightningOutputError::InvalidContract);
                 }
 
-                if contract.commitment.expiration <= self.consensus_unix_time(dbtx).await {
+                if contract.commitment.expiration <= self.consensus_unix_time(dbtx) {
                     return Err(LightningOutputError::ContractExpired);
                 }
 
-                dbtx.insert_new_entry(&IncomingContractKey(outpoint), contract)
-                    .await;
+                dbtx.insert(&INCOMING_CONTRACT, &outpoint, contract);
 
-                dbtx.insert_entry(
-                    &IncomingContractOutpointKey(contract.contract_id()),
+                dbtx.insert(
+                    &INCOMING_CONTRACT_OUTPOINT,
+                    &contract.contract_id(),
                     &outpoint,
-                )
-                .await;
+                );
 
-                let stream_index = dbtx
-                    .get_value(&IncomingContractStreamIndexKey)
-                    .await
-                    .unwrap_or(0);
+                let stream_index = dbtx.get(&INCOMING_CONTRACT_STREAM_INDEX, &()).unwrap_or(0);
 
-                dbtx.insert_entry(&IncomingContractStreamKey(stream_index), contract)
-                    .await;
+                dbtx.insert(&INCOMING_CONTRACT_STREAM, &stream_index, contract);
 
-                dbtx.insert_entry(&IncomingContractIndexKey(outpoint), &stream_index)
-                    .await;
+                dbtx.insert(&INCOMING_CONTRACT_INDEX, &outpoint, &stream_index);
 
-                dbtx.insert_entry(&IncomingContractStreamIndexKey, &(stream_index + 1))
-                    .await;
+                dbtx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &(stream_index + 1));
 
                 let dk_share = contract.create_decryption_key_share(&self.cfg.private.sk);
 
-                dbtx.insert_entry(&DecryptionKeyShareKey(outpoint), &dk_share)
-                    .await;
+                dbtx.insert(&DECRYPTION_KEY_SHARE, &outpoint, &dk_share);
 
                 contract.commitment.amount
             }
@@ -506,29 +341,37 @@ impl ServerModule for Lightning {
 
     async fn audit(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         audit: &mut Audit,
         module_instance_id: ModuleInstanceId,
     ) {
         // Both incoming and outgoing contracts represent liabilities to the federation
         // since they are obligations to issue notes.
-        audit
-            .add_items(
-                dbtx,
-                module_instance_id,
-                &OutgoingContractPrefix,
-                |_, contract| -(contract.amount.msats as i64),
-            )
-            .await;
+        audit.add_items(
+            module_instance_id,
+            dbtx.open_table(&OUTGOING_CONTRACT)
+                .iter()
+                .into_iter()
+                .map(|(outpoint, contract)| {
+                    (
+                        format!("OutgoingContract({outpoint:?})"),
+                        -(contract.amount.msats as i64),
+                    )
+                }),
+        );
 
-        audit
-            .add_items(
-                dbtx,
-                module_instance_id,
-                &IncomingContractPrefix,
-                |_, contract| -(contract.commitment.amount.msats as i64),
-            )
-            .await;
+        audit.add_items(
+            module_instance_id,
+            dbtx.open_table(&INCOMING_CONTRACT)
+                .iter()
+                .into_iter()
+                .map(|(outpoint, contract)| {
+                    (
+                        format!("IncomingContract({outpoint:?})"),
+                        -(contract.commitment.amount.msats as i64),
+                    )
+                }),
+        );
     }
 
     fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
@@ -538,9 +381,9 @@ impl ServerModule for Lightning {
                 ApiVersion::new(0, 0),
                 async |module: &Lightning, context, _params : () | -> u64 {
                     let db = context.db();
-                    let mut dbtx = db.begin_write_transaction().await.into_nc();
+                    let tx = db.begin_read().await;
 
-                    Ok(module.consensus_block_count(&mut dbtx).await)
+                    Ok(module.consensus_block_count_read(&tx))
                 }
             },
             api_endpoint! {
@@ -567,10 +410,9 @@ impl ServerModule for Lightning {
                 async |_module: &Lightning, context, params: OutPoint| -> DecryptionKeyShare {
                     let share = context
                         .db()
-                        .begin_write_transaction()
+                        .begin_read()
                         .await
-                        .get_value(&DecryptionKeyShareKey(params))
-                        .await
+                        .get(&DECRYPTION_KEY_SHARE, &params)
                         .ok_or(ApiError::bad_request("No decryption key share found".to_string()))?;
 
                     Ok(share)
@@ -619,18 +461,15 @@ impl Lightning {
             .context("Block count not available yet")
     }
 
-    async fn consensus_block_count(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-    ) -> u64 {
+    fn consensus_block_count(&self, dbtx: &WriteTxRef<'_>) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut counts = dbtx
-            .find_by_prefix(&BlockCountVotePrefix)
-            .await
-            .map(|entry| entry.1)
-            .collect::<Vec<u64>>()
-            .await;
+            .open_table(&BLOCK_COUNT_VOTE)
+            .iter()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect::<Vec<u64>>();
 
         counts.sort_unstable();
 
@@ -645,18 +484,34 @@ impl Lightning {
         counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    async fn consensus_unix_time(
-        &self,
-        dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-    ) -> u64 {
+    fn consensus_block_count_read(&self, tx: &ReadTransaction) -> u64 {
+        let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
+
+        let mut counts = tx
+            .open_table(&BLOCK_COUNT_VOTE)
+            .iter()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect::<Vec<u64>>();
+
+        counts.sort_unstable();
+
+        counts.reverse();
+
+        assert!(counts.last() <= counts.first());
+
+        counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
+    }
+
+    fn consensus_unix_time(&self, dbtx: &WriteTxRef<'_>) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut times = dbtx
-            .find_by_prefix(&UnixTimeVotePrefix)
-            .await
-            .map(|entry| entry.1)
-            .collect::<Vec<u64>>()
-            .await;
+            .open_table(&UNIX_TIME_VOTE)
+            .iter()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect::<Vec<u64>>();
 
         times.sort_unstable();
 
@@ -671,6 +526,25 @@ impl Lightning {
         times.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
+    fn consensus_unix_time_read(&self, tx: &ReadTransaction) -> u64 {
+        let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
+
+        let mut times = tx
+            .open_table(&UNIX_TIME_VOTE)
+            .iter()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect::<Vec<u64>>();
+
+        times.sort_unstable();
+
+        times.reverse();
+
+        assert!(times.last() <= times.first());
+
+        times.get(num_peers.threshold() - 1).copied().unwrap_or(0)
+    }
+
     async fn await_incoming_contract(
         &self,
         db: Database,
@@ -678,25 +552,21 @@ impl Lightning {
         expiration: u64,
     ) -> Option<OutPoint> {
         loop {
-            timeout(
-                Duration::from_secs(10),
-                db.wait_key_exists(&IncomingContractOutpointKey(contract_id)),
-            )
-            .await
-            .ok();
+            // Wait for the contract to appear, or time out periodically to check expiration.
+            let wait = db.wait_key(&INCOMING_CONTRACT_OUTPOINT, &contract_id);
 
-            // to avoid race conditions we have to check for the contract and
-            // its expiration in the same database transaction
-            let mut dbtx = db.begin_write_transaction().await.into_nc();
-
-            if let Some(outpoint) = dbtx
-                .get_value(&IncomingContractOutpointKey(contract_id))
-                .await
-            {
+            if let Ok((outpoint, _tx)) = timeout(Duration::from_secs(10), wait).await {
                 return Some(outpoint);
             }
 
-            if expiration <= self.consensus_unix_time(&mut dbtx).await {
+            // Timed out; check whether the contract arrived or has expired.
+            let tx = db.begin_read().await;
+
+            if let Some(outpoint) = tx.get(&INCOMING_CONTRACT_OUTPOINT, &contract_id) {
+                return Some(outpoint);
+            }
+
+            if expiration <= self.consensus_unix_time_read(&tx) {
                 return None;
             }
         }
@@ -709,22 +579,19 @@ impl Lightning {
         expiration: u64,
     ) -> Option<[u8; 32]> {
         loop {
-            timeout(
-                Duration::from_secs(10),
-                db.wait_key_exists(&PreimageKey(outpoint)),
-            )
-            .await
-            .ok();
+            let wait = db.wait_key(&PREIMAGE, &outpoint);
 
-            // to avoid race conditions we have to check for the preimage and
-            // the contracts expiration in the same database transaction
-            let mut dbtx = db.begin_write_transaction().await.into_nc();
-
-            if let Some(preimage) = dbtx.get_value(&PreimageKey(outpoint)).await {
+            if let Ok((preimage, _tx)) = timeout(Duration::from_secs(10), wait).await {
                 return Some(preimage);
             }
 
-            if expiration <= self.consensus_block_count(&mut dbtx).await {
+            let tx = db.begin_read().await;
+
+            if let Some(preimage) = tx.get(&PREIMAGE, &outpoint) {
+                return Some(preimage);
+            }
+
+            if expiration <= self.consensus_block_count_read(&tx) {
                 return None;
             }
         }
@@ -735,11 +602,11 @@ impl Lightning {
         db: Database,
         outpoint: OutPoint,
     ) -> Option<(ContractId, u64)> {
-        let mut dbtx = db.begin_write_transaction().await.into_nc();
+        let tx = db.begin_read().await;
 
-        let contract = dbtx.get_value(&OutgoingContractKey(outpoint)).await?;
+        let contract = tx.get(&OUTGOING_CONTRACT, &outpoint)?;
 
-        let consensus_block_count = self.consensus_block_count(&mut dbtx).await;
+        let consensus_block_count = self.consensus_block_count_read(&tx);
 
         let expiration = contract.expiration.saturating_sub(consensus_block_count);
 
@@ -754,66 +621,61 @@ impl Lightning {
     ) -> (Vec<IncomingContract>, u64) {
         let filter = |next_index: Option<u64>| next_index.filter(|i| *i > start);
 
-        let (mut next_index, mut dbtx) = db
-            .wait_key_check(&IncomingContractStreamIndexKey, filter)
+        let (mut next_index, tx) = db
+            .wait_key_check(&INCOMING_CONTRACT_STREAM_INDEX, &(), filter)
             .await;
 
         let mut contracts = Vec::with_capacity(n);
 
-        let range = IncomingContractStreamKey(start)..IncomingContractStreamKey(u64::MAX);
-
-        for (key, contract) in dbtx
-            .find_by_range(range)
-            .await
+        for (key, contract) in tx
+            .open_table(&INCOMING_CONTRACT_STREAM)
+            .range(start..u64::MAX)
+            .into_iter()
             .take(n)
-            .collect::<Vec<(IncomingContractStreamKey, IncomingContract)>>()
-            .await
         {
-            contracts.push(contract.clone());
-            next_index = key.0 + 1;
+            contracts.push(contract);
+            next_index = key + 1;
         }
 
         (contracts, next_index)
     }
 
     async fn add_gateway(db: Database, gateway: SafeUrl) -> bool {
-        let mut dbtx = db.begin_write_transaction().await;
+        let tx = db.begin_write().await;
 
-        let is_new_entry = dbtx.insert_entry(&GatewayKey(gateway), &()).await.is_none();
+        let is_new_entry = tx.insert(&GATEWAY, &gateway, &()).is_none();
 
-        dbtx.commit_tx().await;
+        tx.commit().await;
 
         is_new_entry
     }
 
     async fn remove_gateway(db: Database, gateway: SafeUrl) -> bool {
-        let mut dbtx = db.begin_write_transaction().await;
+        let tx = db.begin_write().await;
 
-        let entry_existed = dbtx.remove_entry(&GatewayKey(gateway)).await.is_some();
+        let entry_existed = tx.remove(&GATEWAY, &gateway).is_some();
 
-        dbtx.commit_tx().await;
+        tx.commit().await;
 
         entry_existed
     }
 
     async fn gateways(db: Database) -> Vec<SafeUrl> {
-        db.begin_write_transaction()
+        db.begin_read()
             .await
-            .find_by_prefix(&GatewayPrefix)
-            .await
-            .map(|entry| entry.0.0)
+            .open_table(&GATEWAY)
+            .iter()
+            .into_iter()
+            .map(|(url, ())| url)
             .collect()
-            .await
     }
 
     pub async fn consensus_block_count_ui(&self) -> u64 {
-        self.consensus_block_count(&mut self.db.begin_write_transaction().await.to_ref_nc())
-            .await
+        self.consensus_block_count_read(&self.db.begin_read().await)
     }
 
     pub async fn consensus_unix_time_ui(&self) -> u64 {
-        self.consensus_unix_time(&mut self.db.begin_write_transaction().await.to_ref_nc())
-            .await
+        self.consensus_unix_time_read(&self.db.begin_read().await)
     }
 
     pub async fn add_gateway_ui(&self, gateway: SafeUrl) -> bool {

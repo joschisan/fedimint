@@ -1,4 +1,4 @@
-use fedimint_core::db::WriteDatabaseTransaction;
+use fedimint_core::db::v2::WriteTransaction;
 use fedimint_core::module::TransactionItemAmounts;
 use fedimint_core::transaction::{TRANSACTION_OVERFLOW_ERROR, Transaction, TransactionError};
 use fedimint_core::{Amount, InPoint, OutPoint};
@@ -6,7 +6,7 @@ use fedimint_server_core::ServerModuleRegistry;
 
 pub async fn process_transaction_with_dbtx(
     modules: ServerModuleRegistry,
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    tx: &WriteTransaction,
     transaction: &Transaction,
 ) -> Result<(), TransactionError> {
     let mut funding_verifier = FundingVerifier::default();
@@ -15,13 +15,12 @@ pub async fn process_transaction_with_dbtx(
     let txid = transaction.tx_hash();
 
     for (input, in_idx) in transaction.inputs.iter().zip(0u64..) {
+        let instance_id = input.module_instance_id();
+        let view = tx.isolate(format!("m{instance_id}"));
+
         let meta = modules
-            .get_expect(input.module_instance_id())
-            .process_input(
-                &mut dbtx.to_ref_with_prefix_module_id(input.module_instance_id()),
-                input,
-                InPoint { txid, in_idx },
-            )
+            .get_expect(instance_id)
+            .process_input(&view, input, InPoint { txid, in_idx })
             .await
             .map_err(TransactionError::Input)?;
 
@@ -32,13 +31,12 @@ pub async fn process_transaction_with_dbtx(
     transaction.validate_signatures(&public_keys)?;
 
     for (output, out_idx) in transaction.outputs.iter().zip(0u64..) {
+        let instance_id = output.module_instance_id();
+        let view = tx.isolate(format!("m{instance_id}"));
+
         let amount = modules
-            .get_expect(output.module_instance_id())
-            .process_output(
-                &mut dbtx.to_ref_with_prefix_module_id(output.module_instance_id()),
-                output,
-                OutPoint { txid, out_idx },
-            )
+            .get_expect(instance_id)
+            .process_output(&view, output, OutPoint { txid, out_idx })
             .await
             .map_err(TransactionError::Output)?;
 

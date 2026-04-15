@@ -6,10 +6,7 @@ use anyhow::{anyhow, bail};
 use async_channel::Receiver;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::core::DynOutput;
-use fedimint_core::db::{
-    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped, NonCommittable,
-    WriteDatabaseTransaction,
-};
+use fedimint_core::db::v2::{Database, ReadTransaction, WriteTransaction, WriteTxRef};
 use fedimint_core::encoding::Decodable;
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::Audit;
@@ -38,8 +35,7 @@ use crate::consensus::aleph_bft::keychain::Keychain;
 use crate::consensus::aleph_bft::network::Network;
 use crate::consensus::aleph_bft::spawner::Spawner;
 use crate::consensus::db::{
-    AcceptedItemKey, AcceptedItemPrefix, AcceptedTransactionKey, AlephUnitsPrefix,
-    SignedSessionOutcomeKey, SignedSessionOutcomePrefix,
+    ACCEPTED_ITEM, ACCEPTED_TRANSACTION, ALEPH_UNITS, SIGNED_SESSION_OUTCOME,
 };
 use crate::consensus::debug::DebugConsensusItem;
 use crate::consensus::transaction::process_transaction_with_dbtx;
@@ -238,14 +234,13 @@ impl ConsensusEngine {
     }
 
     async fn is_recovery(&self) -> bool {
-        self.db
-            .begin_write_transaction()
+        !self
+            .db
+            .begin_read()
             .await
-            .find_by_prefix(&AlephUnitsPrefix)
-            .await
-            .next()
-            .await
-            .is_some()
+            .open_table(&ALEPH_UNITS)
+            .iter()
+            .is_empty()
     }
 
     pub async fn complete_signed_session_outcome(
@@ -533,13 +528,13 @@ impl ConsensusEngine {
 
     pub async fn pending_accepted_items(&self) -> Vec<AcceptedItem> {
         self.db
-            .begin_write_transaction()
+            .begin_read()
             .await
-            .find_by_prefix(&AcceptedItemPrefix)
-            .await
-            .map(|entry| entry.1)
+            .open_table(&ACCEPTED_ITEM)
+            .iter()
+            .into_iter()
+            .map(|(_, item)| item)
             .collect()
-            .await
     }
 
     pub async fn complete_session(
@@ -547,26 +542,39 @@ impl ConsensusEngine {
         session_index: u64,
         signed_session_outcome: SignedSessionOutcome,
     ) {
-        let mut dbtx = self.db.begin_write_transaction().await;
+        let tx = self.db.begin_write().await;
 
-        dbtx.remove_by_prefix(&AlephUnitsPrefix).await;
-
-        dbtx.remove_by_prefix(&AcceptedItemPrefix).await;
-
-        if dbtx
-            .insert_entry(
-                &SignedSessionOutcomeKey(session_index),
-                &signed_session_outcome,
-            )
-            .await
-            .is_some()
-        {
-            panic!("We tried to overwrite a signed session outcome");
+        let aleph_keys: Vec<u64> = tx
+            .open_table(&ALEPH_UNITS)
+            .iter()
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        for k in aleph_keys {
+            tx.remove(&ALEPH_UNITS, &k);
         }
 
-        dbtx.commit_tx_result()
-            .await
-            .expect("This is the only place where we write to this key");
+        let accepted_keys: Vec<u64> = tx
+            .open_table(&ACCEPTED_ITEM)
+            .iter()
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        for k in accepted_keys {
+            tx.remove(&ACCEPTED_ITEM, &k);
+        }
+
+        assert!(
+            tx.insert(
+                &SIGNED_SESSION_OUTCOME,
+                &session_index,
+                &signed_session_outcome,
+            )
+            .is_none(),
+            "We tried to overwrite a signed session outcome"
+        );
+
+        tx.commit().await;
     }
 
     #[instrument(target = LOG_CONSENSUS, skip(self, item), level = "info")]
@@ -591,17 +599,12 @@ impl ConsensusEngine {
             .expect("No ci status sender for peer")
             .send_replace(Some(session_index));
 
-        let mut dbtx = self.db.begin_write_transaction().await;
-
-        dbtx.ignore_uncommitted();
+        let tx = self.db.begin_write().await;
 
         // When we recover from a mid-session crash aleph bft will replay the units that
         // were already processed before the crash. We therefore skip all consensus
         // items until we have seen every previously accepted items again.
-        if let Some(existing_item) = dbtx
-            .get_value(&AcceptedItemKey(item_index.to_owned()))
-            .await
-        {
+        if let Some(existing_item) = tx.get(&ACCEPTED_ITEM, &item_index) {
             if existing_item.item == item && existing_item.peer == peer {
                 return Ok(());
             }
@@ -612,7 +615,7 @@ impl ConsensusEngine {
             );
         }
 
-        self.process_consensus_item_with_db_transaction(&mut dbtx.to_ref_nc(), item.clone(), peer)
+        self.process_consensus_item_with_db_transaction(&tx, item.clone(), peer)
             .await
             .inspect_err(|err| {
                 // Rejected items are very common, so only trace level
@@ -625,18 +628,14 @@ impl ConsensusEngine {
                 );
             })?;
 
-        // After this point we have to commit the database transaction since the
-        // item has been fully processed without errors
-        dbtx.warn_uncommitted();
-
-        dbtx.insert_entry(
-            &AcceptedItemKey(item_index),
+        tx.insert(
+            &ACCEPTED_ITEM,
+            &item_index,
             &AcceptedItem {
                 item: item.clone(),
                 peer,
             },
-        )
-        .await;
+        );
 
         debug!(
             target: LOG_CONSENSUS,
@@ -650,14 +649,10 @@ impl ConsensusEngine {
             let _module_audit_timing =
                 TimeReporter::new(format!("audit module {module_instance_id}")).level(Level::TRACE);
 
+            let view = tx.isolate(format!("m{module_instance_id}"));
+
             module
-                .audit(
-                    &mut dbtx
-                        .to_ref_with_prefix_module_id(module_instance_id)
-                        .into_nc(),
-                    &mut audit,
-                    module_instance_id,
-                )
+                .audit(&view, &mut audit, module_instance_id)
                 .await;
         }
 
@@ -670,16 +665,14 @@ impl ConsensusEngine {
             "Balance sheet of the fed has gone negative, this should never happen! {audit}"
         );
 
-        dbtx.commit_tx_result()
-            .await
-            .expect("Committing consensus epoch failed");
+        tx.commit().await;
 
         Ok(())
     }
 
     async fn process_consensus_item_with_db_transaction(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        tx: &WriteTransaction,
         consensus_item: ConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()> {
@@ -691,20 +684,16 @@ impl ConsensusEngine {
             ConsensusItem::Module(module_item) => {
                 let instance_id = module_item.module_instance_id();
 
-                let module_dbtx = &mut dbtx.to_ref_with_prefix_module_id(instance_id);
+                let view = tx.isolate(format!("m{instance_id}"));
 
                 self.modules
                     .get_expect(instance_id)
-                    .process_consensus_item(module_dbtx, &module_item, peer_id)
+                    .process_consensus_item(&view, &module_item, peer_id)
                     .await
             }
             ConsensusItem::Transaction(transaction) => {
                 let txid = transaction.tx_hash();
-                if dbtx
-                    .get_value(&AcceptedTransactionKey(txid))
-                    .await
-                    .is_some()
-                {
+                if tx.get(&ACCEPTED_TRANSACTION, &txid).is_some() {
                     debug!(
                         target: LOG_CONSENSUS,
                         %txid,
@@ -719,13 +708,12 @@ impl ConsensusEngine {
                     .map(DynOutput::module_instance_id)
                     .collect::<Vec<_>>();
 
-                process_transaction_with_dbtx(self.modules.clone(), dbtx, &transaction)
+                process_transaction_with_dbtx(self.modules.clone(), tx, &transaction)
                     .await
                     .map_err(|error| anyhow!(error.to_string()))?;
 
                 debug!(target: LOG_CONSENSUS, %txid,  "Transaction accepted");
-                dbtx.insert_entry(&AcceptedTransactionKey(txid), &modules_ids)
-                    .await;
+                tx.insert(&ACCEPTED_TRANSACTION, &txid, &modules_ids);
 
                 Ok(())
             }
@@ -743,17 +731,14 @@ impl ConsensusEngine {
     /// Returns the number of sessions already saved in the database. This count
     /// **does not** include the currently running session.
     async fn get_finished_session_count(&self) -> u64 {
-        get_finished_session_count_static(&mut self.db.begin_write_transaction().await.to_ref_nc())
-            .await
+        get_finished_session_count_static(&self.db.begin_read().await).await
     }
 }
 
-pub async fn get_finished_session_count_static(
-    dbtx: &mut WriteDatabaseTransaction<'_, NonCommittable>,
-) -> u64 {
-    dbtx.find_by_prefix_sorted_descending(&SignedSessionOutcomePrefix)
-        .await
-        .next()
-        .await
-        .map_or(0, |entry| (entry.0.0) + 1)
+pub async fn get_finished_session_count_static(tx: &ReadTransaction) -> u64 {
+    tx.open_table(&SIGNED_SESSION_OUTCOME)
+        .iter()
+        .into_iter()
+        .next_back()
+        .map_or(0, |(k, _)| k + 1)
 }

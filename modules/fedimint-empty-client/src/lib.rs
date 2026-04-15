@@ -64,23 +64,6 @@ pub struct EmptyClientInit;
 impl ModuleInit for EmptyClientInit {
     type Common = EmptyCommonInit;
 
-    async fn dump_database(
-        &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        let items: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> = BTreeMap::new();
-        let filtered_prefixes = DbKeyPrefix::iter().filter(|f| {
-            prefix_names.is_empty() || prefix_names.contains(&f.to_string().to_lowercase())
-        });
-
-        #[allow(clippy::never_loop)]
-        for table in filtered_prefixes {
-            match table {}
-        }
-
-        Box::new(items.into_iter())
-    }
 }
 
 /// Generates the client module

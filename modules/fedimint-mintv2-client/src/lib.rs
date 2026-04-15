@@ -107,13 +107,6 @@ pub struct MintClientInit;
 impl ModuleInit for MintClientInit {
     type Common = MintCommonInit;
 
-    async fn dump_database(
-        &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
-        _prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        Box::new(BTreeMap::new().into_iter())
-    }
 }
 
 #[apply(async_trait_maybe_send!)]

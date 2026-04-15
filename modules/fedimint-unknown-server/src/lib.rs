@@ -11,7 +11,8 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{DatabaseVersion, WriteDatabaseTransaction};
+use fedimint_core::db::DatabaseVersion;
+use fedimint_core::db::v2::WriteTxRef;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
@@ -41,14 +42,6 @@ pub struct UnknownInit;
 impl ModuleInit for UnknownInit {
     type Common = UnknownCommonInit;
 
-    /// Dumps all database items for debugging
-    async fn dump_database(
-        &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
-        _prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        Box::new(vec![].into_iter())
-    }
 }
 
 /// Implementation of server module non-consensus functions
@@ -121,16 +114,13 @@ impl ServerModule for Unknown {
     type Common = UnknownModuleTypes;
     type Init = UnknownInit;
 
-    async fn consensus_proposal(
-        &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
-    ) -> Vec<UnknownConsensusItem> {
+    async fn consensus_proposal(&self, _dbtx: &WriteTxRef<'_>) -> Vec<UnknownConsensusItem> {
         Vec::new()
     }
 
-    async fn process_consensus_item<'a, 'b>(
-        &'a self,
-        _dbtx: &mut WriteDatabaseTransaction<'b>,
+    async fn process_consensus_item(
+        &self,
+        _dbtx: &WriteTxRef<'_>,
         _consensus_item: UnknownConsensusItem,
         _peer_id: PeerId,
     ) -> anyhow::Result<()> {
@@ -142,19 +132,19 @@ impl ServerModule for Unknown {
         bail!("The unknown module does not use consensus items");
     }
 
-    async fn process_input<'a, 'b, 'c>(
-        &'a self,
-        _dbtx: &mut WriteDatabaseTransaction<'c>,
-        _input: &'b UnknownInput,
+    async fn process_input(
+        &self,
+        _dbtx: &WriteTxRef<'_>,
+        _input: &UnknownInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, UnknownInputError> {
         unreachable!();
     }
 
-    async fn process_output<'a, 'b>(
-        &'a self,
-        _dbtx: &mut WriteDatabaseTransaction<'b>,
-        _output: &'a UnknownOutput,
+    async fn process_output(
+        &self,
+        _dbtx: &WriteTxRef<'_>,
+        _output: &UnknownOutput,
         _out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, UnknownOutputError> {
         unreachable!();
@@ -162,7 +152,7 @@ impl ServerModule for Unknown {
 
     async fn audit(
         &self,
-        _dbtx: &mut WriteDatabaseTransaction<'_>,
+        _dbtx: &WriteTxRef<'_>,
         _audit: &mut Audit,
         _module_instance_id: ModuleInstanceId,
     ) {
