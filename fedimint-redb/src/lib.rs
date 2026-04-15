@@ -38,13 +38,6 @@ impl RedbDatabase {
     pub fn open(path: impl AsRef<Path>) -> DatabaseResult<Self> {
         let db = redb::Database::create(path).map_err(DatabaseError::backend)?;
 
-        Self::from_redb(db)
-    }
-
-    /// Creates a RedbDatabase from an existing redb::Database.
-    ///
-    /// Creates the fedimint table if it doesn't exist.
-    pub fn from_redb(db: redb::Database) -> DatabaseResult<Self> {
         // Create the table if it doesn't exist
         let tx = db.begin_write().map_err(DatabaseError::backend)?;
         tx.open_table(TABLE).map_err(DatabaseError::backend)?;
