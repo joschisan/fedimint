@@ -2329,6 +2329,7 @@ dependencies = [
  "async-trait",
  "fedimint-core",
  "fedimint-logging",
+ "fedimint-redb",
  "futures",
  "hex",
  "itertools 0.14.0",
