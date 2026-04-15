@@ -23,8 +23,8 @@ use fedimint_core::core::{
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{
-    ApiEndpoint, ApiEndpointContext, ApiRequestErased, CommonModuleInit, InputMeta, ModuleCommon,
-    ModuleInit, TransactionItemAmounts,
+    ApiEndpoint, ApiRequestErased, CommonModuleInit, InputMeta, ModuleCommon, ModuleInit,
+    TransactionItemAmounts,
 };
 use fedimint_core::{InPoint, OutPoint, PeerId, apply, async_trait_maybe_send, dyn_newtype_define};
 use fedimint_redb::v2::{ReadTxRef, WriteTxRef};
@@ -332,17 +332,13 @@ where
             .into_iter()
             .map(|ApiEndpoint { path, handler }| ApiEndpoint {
                 path,
-                handler: Box::new(
-                    move |module: &DynServerModule,
-                          context: ApiEndpointContext,
-                          value: ApiRequestErased| {
-                        let typed_module = module
-                            .as_any()
-                            .downcast_ref::<T>()
-                            .expect("the dispatcher should always call with the right module");
-                        Box::pin(handler(typed_module, context, value))
-                    },
-                ),
+                handler: Box::new(move |module: &DynServerModule, value: ApiRequestErased| {
+                    let typed_module = module
+                        .as_any()
+                        .downcast_ref::<T>()
+                        .expect("the dispatcher should always call with the right module");
+                    Box::pin(handler(typed_module, value))
+                }),
             })
             .collect()
     }

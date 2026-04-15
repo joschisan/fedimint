@@ -242,36 +242,6 @@ impl From<DatabaseError> for ApiError {
     }
 }
 
-/// State made available to all API endpoints for handling a request. DB
-/// access is not part of this context — modules access their own
-/// (already module-isolated) `Database` field via `module.db` or an
-/// equivalent accessor.
-pub struct ApiEndpointContext {
-    has_auth: bool,
-    request_auth: Option<ApiAuth>,
-}
-
-impl ApiEndpointContext {
-    pub fn new(has_auth: bool, request_auth: Option<ApiAuth>) -> Self {
-        Self {
-            has_auth,
-            request_auth,
-        }
-    }
-
-    /// Returns the auth set on the request (regardless of whether it was
-    /// correct)
-    pub fn request_auth(&self) -> Option<ApiAuth> {
-        self.request_auth.clone()
-    }
-
-    /// Whether the request was authenticated as the guardian who controls this
-    /// fedimint server
-    pub fn has_auth(&self) -> bool {
-        self.has_auth
-    }
-}
-
 #[apply(async_trait_maybe_send!)]
 pub trait TypedApiEndpoint {
     type State: Sync;
@@ -282,9 +252,8 @@ pub trait TypedApiEndpoint {
     type Param: serde::de::DeserializeOwned + Send;
     type Response: serde::Serialize;
 
-    async fn handle<'state, 'context>(
+    async fn handle<'state>(
         state: &'state Self::State,
-        context: &'context mut ApiEndpointContext,
         request: Self::Param,
     ) -> Result<Self::Response, ApiError>;
 }
@@ -301,7 +270,7 @@ pub use serde_json;
 /// let _: ApiEndpoint<State> = api_endpoint! {
 ///     "/foobar",
 ///     ApiVersion::new(0, 3),
-///     async |state: &State, _dbtx, params: ()| -> i32 {
+///     async |state: &State, params: ()| -> i32 {
 ///         Ok(0)
 ///     }
 /// };
@@ -313,7 +282,7 @@ macro_rules! __api_endpoint {
         // Api Version this endpoint was introduced in, at the current consensus level
         // Currently for documentation purposes only.
         $version_introduced:expr_2021,
-        async |$state:ident: &$state_ty:ty, $context:ident, $param:ident: $param_ty:ty| -> $resp_ty:ty $body:block
+        async |$state:ident: &$state_ty:ty, $param:ident: $param_ty:ty| -> $resp_ty:ty $body:block
     ) => {{
         struct Endpoint;
 
@@ -325,9 +294,8 @@ macro_rules! __api_endpoint {
             type Param = $param_ty;
             type Response = $resp_ty;
 
-            async fn handle<'state, 'context>(
+            async fn handle<'state>(
                 $state: &'state Self::State,
-                $context: &'context mut $crate::module::ApiEndpointContext,
                 $param: Self::Param,
             ) -> ::std::result::Result<Self::Response, $crate::module::ApiError> {
                 {
@@ -348,11 +316,8 @@ use self::registry::ModuleDecoderRegistry;
 
 type HandlerFnReturn<'a> =
     Pin<Box<maybe_add_send!(dyn Future<Output = Result<serde_json::Value, ApiError>> + 'a)>>;
-type HandlerFn<M> = Box<
-    maybe_add_send_sync!(
-        dyn for<'a> Fn(&'a M, ApiEndpointContext, ApiRequestErased) -> HandlerFnReturn<'a>
-    ),
->;
+type HandlerFn<M> =
+    Box<maybe_add_send_sync!(dyn for<'a> Fn(&'a M, ApiRequestErased) -> HandlerFnReturn<'a>)>;
 
 /// Definition of an API endpoint defined by a module `M`.
 pub struct ApiEndpoint<M> {
@@ -378,9 +343,8 @@ impl ApiEndpoint<()> {
         E::Param: Debug,
         E::Response: Debug,
     {
-        async fn handle_request<'state, 'context, E>(
+        async fn handle_request<'state, E>(
             state: &'state E::State,
-            context: &'context mut ApiEndpointContext,
             request: ApiRequest<E::Param>,
         ) -> Result<E::Response, ApiError>
         where
@@ -389,7 +353,7 @@ impl ApiEndpoint<()> {
             E::Response: Debug,
         {
             tracing::debug!(target: LOG_NET_API, path = E::PATH, ?request, "received api request");
-            let result = E::handle(state, context, request.params).await;
+            let result = E::handle(state, request.params).await;
             match &result {
                 Err(err) => {
                     tracing::warn!(target: LOG_NET_API, path = E::PATH, err = %err.fmt_compact(), "api request error");
@@ -403,7 +367,7 @@ impl ApiEndpoint<()> {
 
         ApiEndpoint {
             path: E::PATH,
-            handler: Box::new(|m, mut context, request| {
+            handler: Box::new(|m, request| {
                 Box::pin(async move {
                     let request = request
                         .to_typed()
@@ -415,9 +379,7 @@ impl ApiEndpoint<()> {
                         id = REQ_ID.fetch_add(1, Ordering::SeqCst),
                         method = E::PATH,
                     );
-                    let ret = handle_request::<E>(m, &mut context, request)
-                        .instrument(span)
-                        .await?;
+                    let ret = handle_request::<E>(m, request).instrument(span).await?;
 
                     Ok(serde_json::to_value(ret).expect("encoding error"))
                 })

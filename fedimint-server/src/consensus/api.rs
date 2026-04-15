@@ -16,8 +16,8 @@ use fedimint_core::endpoint_constants::{
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::{Audit, AuditSummary};
 use fedimint_core::module::{
-    ApiAuth, ApiEndpoint, ApiEndpointContext, ApiError, ApiRequestErased, ApiResult, ApiVersion,
-    SerdeModuleEncoding, api_endpoint,
+    ApiAuth, ApiEndpoint, ApiError, ApiRequestErased, ApiResult, ApiVersion, SerdeModuleEncoding,
+    api_endpoint,
 };
 use fedimint_core::net::auth::GuardianAuthToken;
 use fedimint_core::session_outcome::SessionStatusV2;
@@ -208,19 +208,10 @@ impl ConsensusApi {
 impl HasApiContext<ConsensusApi> for ConsensusApi {
     async fn context(
         &self,
-        request: &ApiRequestErased,
+        _request: &ApiRequestErased,
         _id: Option<ModuleInstanceId>,
-    ) -> (&ConsensusApi, ApiEndpointContext) {
-        (
-            self,
-            ApiEndpointContext::new(
-                request
-                    .auth
-                    .as_ref()
-                    .is_some_and(|a| self.auth.verify(a.as_str())),
-                request.auth.clone(),
-            ),
-        )
+    ) -> &ConsensusApi {
+        self
     }
 }
 
@@ -228,14 +219,10 @@ impl HasApiContext<ConsensusApi> for ConsensusApi {
 impl HasApiContext<DynServerModule> for ConsensusApi {
     async fn context(
         &self,
-        request: &ApiRequestErased,
+        _request: &ApiRequestErased,
         id: Option<ModuleInstanceId>,
-    ) -> (&DynServerModule, ApiEndpointContext) {
-        let (_, context): (&ConsensusApi, _) = self.context(request, id).await;
-        (
-            self.modules.get_expect(id.expect("required module id")),
-            context,
-        )
+    ) -> &DynServerModule {
+        self.modules.get_expect(id.expect("required module id"))
     }
 }
 
@@ -335,7 +322,7 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
         api_endpoint! {
             SUBMIT_TRANSACTION_ENDPOINT,
             ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, _context, transaction: SerdeTransaction| -> SerdeModuleEncoding<TransactionSubmissionOutcome> {
+            async |fedimint: &ConsensusApi, transaction: SerdeTransaction| -> SerdeModuleEncoding<TransactionSubmissionOutcome> {
                 let transaction = transaction
                     .try_into_inner(&fedimint.modules.decoder_registry())
                     .map_err(|e| ApiError::bad_request(e.to_string()))?;
@@ -348,7 +335,7 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
         api_endpoint! {
             AWAIT_TRANSACTION_ENDPOINT,
             ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, _context, tx_hash: TransactionId| -> TransactionId {
+            async |fedimint: &ConsensusApi, tx_hash: TransactionId| -> TransactionId {
                 fedimint.await_transaction(tx_hash).await;
 
                 Ok(tx_hash)
@@ -357,14 +344,14 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
         api_endpoint! {
             CLIENT_CONFIG_ENDPOINT,
             ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, _context, _v: ()| -> ClientConfig {
+            async |fedimint: &ConsensusApi, _v: ()| -> ClientConfig {
                 Ok(fedimint.client_cfg.clone())
             }
         },
         api_endpoint! {
             LIVENESS_ENDPOINT,
             ApiVersion::new(0, 0),
-            async |_fedimint: &ConsensusApi, _context, _v: ()| -> () {
+            async |_fedimint: &ConsensusApi, _v: ()| -> () {
                 Ok(())
             }
         },

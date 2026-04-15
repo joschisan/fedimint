@@ -374,7 +374,7 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 CONSENSUS_BLOCK_COUNT_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, _context, _params : () | -> u64 {
+                async |module: &Lightning, _params : () | -> u64 {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
 
@@ -384,7 +384,7 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 AWAIT_INCOMING_CONTRACT_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, _context, params: (ContractId, u64) | -> Option<OutPoint> {
+                async |module: &Lightning, params: (ContractId, u64) | -> Option<OutPoint> {
                     let db = module.db.clone();
 
                     Ok(module.await_incoming_contract(db, params.0, params.1).await)
@@ -393,7 +393,7 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 AWAIT_PREIMAGE_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, _context, params: (OutPoint, u64)| -> Option<[u8; 32]> {
+                async |module: &Lightning, params: (OutPoint, u64)| -> Option<[u8; 32]> {
                     let db = module.db.clone();
 
                     Ok(module.await_preimage(db, params.0, params.1).await)
@@ -402,7 +402,7 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 DECRYPTION_KEY_SHARE_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, _context, params: OutPoint| -> DecryptionKeyShare {
+                async |module: &Lightning, params: OutPoint| -> DecryptionKeyShare {
                     let share = module
                         .db
                         .begin_read()
@@ -416,7 +416,7 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, _context, outpoint: OutPoint| -> Option<(ContractId, u64)> {
+                async |module: &Lightning, outpoint: OutPoint| -> Option<(ContractId, u64)> {
                     let db = module.db.clone();
 
                     Ok(module.outgoing_contract_expiration(db, outpoint).await)
@@ -425,7 +425,7 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 AWAIT_INCOMING_CONTRACTS_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, _context, params: (u64, usize)| -> (Vec<IncomingContract>, u64) {
+                async |module: &Lightning, params: (u64, usize)| -> (Vec<IncomingContract>, u64) {
                     let db = module.db.clone();
 
                     if params.1 == 0 {
@@ -438,7 +438,7 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 GATEWAYS_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, _context, _params : () | -> Vec<SafeUrl> {
+                async |module: &Lightning, _params : () | -> Vec<SafeUrl> {
                     let db = module.db.clone();
 
                     Ok(Lightning::gateways(db).await)

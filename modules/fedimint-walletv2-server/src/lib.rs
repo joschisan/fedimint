@@ -587,7 +587,7 @@ impl ServerModule for Wallet {
             api_endpoint! {
                 CONSENSUS_BLOCK_COUNT_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, _context, _params: ()| -> u64 {
+                async |module: &Wallet, _params: ()| -> u64 {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
                     let result = module.consensus_block_count(&dbtx.as_ref());
@@ -598,7 +598,7 @@ impl ServerModule for Wallet {
             api_endpoint! {
                 CONSENSUS_FEERATE_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, _context, _params: ()| -> Option<u64> {
+                async |module: &Wallet, _params: ()| -> Option<u64> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
                     let result = module.consensus_feerate(&dbtx.as_ref());
@@ -609,7 +609,7 @@ impl ServerModule for Wallet {
             api_endpoint! {
                 FEDERATION_WALLET_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, _context, _params: ()| -> Option<FederationWallet> {
+                async |module: &Wallet, _params: ()| -> Option<FederationWallet> {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
                     Ok(tx.get(&FEDERATION_WALLET, &()))
@@ -618,7 +618,7 @@ impl ServerModule for Wallet {
             api_endpoint! {
                 SEND_FEE_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, _context, _params: ()| -> Option<Amount> {
+                async |module: &Wallet, _params: ()| -> Option<Amount> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
                     let result = module.send_fee(&dbtx.as_ref());
@@ -629,7 +629,7 @@ impl ServerModule for Wallet {
             api_endpoint! {
                 RECEIVE_FEE_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, _context, _params: ()| -> Option<Amount> {
+                async |module: &Wallet, _params: ()| -> Option<Amount> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
                     let result = module.receive_fee(&dbtx.as_ref());
@@ -640,7 +640,7 @@ impl ServerModule for Wallet {
             api_endpoint! {
                 TRANSACTION_ID_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, _context, params: OutPoint| -> Option<Txid> {
+                async |module: &Wallet, params: OutPoint| -> Option<Txid> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
                     let result = module.tx_id(&dbtx.as_ref(), params);
@@ -651,7 +651,7 @@ impl ServerModule for Wallet {
             api_endpoint! {
                 OUTPUT_INFO_SLICE_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, _context, params: (u64, u64)| -> Vec<OutputInfo> {
+                async |module: &Wallet, params: (u64, u64)| -> Vec<OutputInfo> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
                     let result = module.get_outputs(&dbtx.as_ref(), params.0, params.1);
@@ -662,7 +662,7 @@ impl ServerModule for Wallet {
             api_endpoint! {
                 PENDING_TRANSACTION_CHAIN_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, _context, _params: ()| -> Vec<TxInfo> {
+                async |module: &Wallet, _params: ()| -> Vec<TxInfo> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
                     let result = module.pending_tx_chain(&dbtx.as_ref());
@@ -673,7 +673,7 @@ impl ServerModule for Wallet {
             api_endpoint! {
                 TRANSACTION_CHAIN_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Wallet, _context, _params: ()| -> Vec<TxInfo> {
+                async |module: &Wallet, _params: ()| -> Vec<TxInfo> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
                     let result = module.tx_chain(&dbtx.as_ref());

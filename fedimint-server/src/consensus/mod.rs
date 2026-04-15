@@ -472,9 +472,9 @@ async fn await_response(
         ApiMethod::Core(method) => {
             let endpoint = core_api.get(&method).ok_or(ApiError::not_found(method))?;
 
-            let (state, context) = consensus_api.context(&request.request, None).await;
+            let state = consensus_api.context(&request.request, None).await;
 
-            (endpoint.handler)(state, context, request.request).await
+            (endpoint.handler)(state, request.request).await
         }
         ApiMethod::Module(module_id, method) => {
             let endpoint = module_api
@@ -483,11 +483,11 @@ async fn await_response(
                 .get(&method)
                 .ok_or(ApiError::not_found(method))?;
 
-            let (state, context) = consensus_api
+            let state = consensus_api
                 .context(&request.request, Some(module_id))
                 .await;
 
-            (endpoint.handler)(state, context, request.request).await
+            (endpoint.handler)(state, request.request).await
         }
     }
 }

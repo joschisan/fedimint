@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use fedimint_core::base32::FEDIMINT_PREFIX;
 use fedimint_core::config::META_FEDERATION_NAME_KEY;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::module::{ApiAuth, ApiEndpoint, ApiEndpointContext, ApiRequestErased};
+use fedimint_core::module::{ApiAuth, ApiEndpoint, ApiRequestErased};
 use fedimint_core::setup_code::PeerEndpoints;
 use fedimint_core::{PeerId, base32};
 use fedimint_redb::v2::Database;
@@ -378,19 +378,12 @@ impl ISetupApi for SetupApi {
 impl HasApiContext<SetupApi> for SetupApi {
     async fn context(
         &self,
-        request: &ApiRequestErased,
+        _request: &ApiRequestErased,
         id: Option<ModuleInstanceId>,
-    ) -> (&SetupApi, ApiEndpointContext) {
+    ) -> &SetupApi {
         assert!(id.is_none());
 
-        let is_authenticated = request
-            .auth
-            .as_ref()
-            .is_some_and(|auth| self.auth.verify(auth.as_str()));
-
-        let context = ApiEndpointContext::new(is_authenticated, request.auth.clone());
-
-        (self, context)
+        self
     }
 }
 

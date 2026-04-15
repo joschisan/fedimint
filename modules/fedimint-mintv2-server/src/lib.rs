@@ -307,7 +307,7 @@ impl ServerModule for Mint {
             api_endpoint! {
                 SIGNATURE_SHARES_ENDPOINT,
                 ApiVersion::new(0, 1),
-                async |module: &Mint, _context, range: fedimint_core::OutPointRange| -> Vec<BlindedSignatureShare> {
+                async |module: &Mint, range: fedimint_core::OutPointRange| -> Vec<BlindedSignatureShare> {
                     let db = module.db.clone();
 
                     let tx = db
@@ -320,7 +320,7 @@ impl ServerModule for Mint {
             api_endpoint! {
                 SIGNATURE_SHARES_RECOVERY_ENDPOINT,
                 ApiVersion::new(0, 1),
-                async |module: &Mint, _context, messages: Vec<tbs::BlindedMessage>| -> Vec<BlindedSignatureShare> {
+                async |module: &Mint, messages: Vec<tbs::BlindedMessage>| -> Vec<BlindedSignatureShare> {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
                     get_signature_shares_recovery(&tx, messages)
@@ -329,7 +329,7 @@ impl ServerModule for Mint {
             api_endpoint! {
                 RECOVERY_SLICE_ENDPOINT,
                 ApiVersion::new(0, 1),
-                async |module: &Mint, _context, range: (u64, u64)| -> Vec<RecoveryItem> {
+                async |module: &Mint, range: (u64, u64)| -> Vec<RecoveryItem> {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
                     Ok(get_recovery_slice(&tx, range))
@@ -338,7 +338,7 @@ impl ServerModule for Mint {
             api_endpoint! {
                 RECOVERY_SLICE_HASH_ENDPOINT,
                 ApiVersion::new(0, 1),
-                async |module: &Mint, _context, range: (u64, u64)| -> bitcoin::hashes::sha256::Hash {
+                async |module: &Mint, range: (u64, u64)| -> bitcoin::hashes::sha256::Hash {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
                     Ok(get_recovery_slice(&tx, range).consensus_hash())
@@ -347,7 +347,7 @@ impl ServerModule for Mint {
             api_endpoint! {
                 RECOVERY_COUNT_ENDPOINT,
                 ApiVersion::new(0, 1),
-                async |module: &Mint, _context, _params: ()| -> u64 {
+                async |module: &Mint, _params: ()| -> u64 {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
                     Ok(get_recovery_count(&tx))
