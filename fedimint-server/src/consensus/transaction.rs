@@ -16,7 +16,7 @@ pub async fn process_transaction_with_dbtx(
 
     for (input, in_idx) in transaction.inputs.iter().zip(0u64..) {
         let instance_id = input.module_instance_id();
-        let view = tx.isolate(format!("m{instance_id}"));
+        let view = tx.isolate(format!("module-{instance_id}"));
 
         let meta = modules
             .get_expect(instance_id)
@@ -32,7 +32,7 @@ pub async fn process_transaction_with_dbtx(
 
     for (output, out_idx) in transaction.outputs.iter().zip(0u64..) {
         let instance_id = output.module_instance_id();
-        let view = tx.isolate(format!("m{instance_id}"));
+        let view = tx.isolate(format!("module-{instance_id}"));
 
         let amount = modules
             .get_expect(instance_id)

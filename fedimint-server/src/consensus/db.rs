@@ -3,19 +3,33 @@ use std::collections::BTreeMap;
 use fedimint_core::TransactionId;
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::DatabaseVersion;
-use fedimint_core::db::v2::TableDef;
 use fedimint_core::session_outcome::{AcceptedItem, SignedSessionOutcome};
+use fedimint_core::table;
 use fedimint_server_core::migration::DynServerDbMigrationFn;
 
-pub const ACCEPTED_ITEM: TableDef<u64, AcceptedItem> = TableDef::new("accepted_item");
+table!(
+    ACCEPTED_ITEM,
+    u64 => AcceptedItem,
+    "accepted-item",
+);
 
-pub const ACCEPTED_TRANSACTION: TableDef<TransactionId, Vec<ModuleInstanceId>> =
-    TableDef::new("accepted_transaction");
+table!(
+    ACCEPTED_TRANSACTION,
+    TransactionId => Vec<ModuleInstanceId>,
+    "accepted-transaction",
+);
 
-pub const SIGNED_SESSION_OUTCOME: TableDef<u64, SignedSessionOutcome> =
-    TableDef::new("signed_session_outcome");
+table!(
+    SIGNED_SESSION_OUTCOME,
+    u64 => SignedSessionOutcome,
+    "signed-session-outcome",
+);
 
-pub const ALEPH_UNITS: TableDef<u64, Vec<u8>> = TableDef::new("aleph_units");
+table!(
+    ALEPH_UNITS,
+    u64 => Vec<u8>,
+    "aleph-units",
+);
 
 pub fn get_global_database_migrations() -> BTreeMap<DatabaseVersion, DynServerDbMigrationFn> {
     BTreeMap::new()

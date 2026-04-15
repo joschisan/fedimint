@@ -154,7 +154,7 @@ impl ConsensusApi {
         let mut module_instance_id_to_kind: HashMap<ModuleInstanceId, String> = HashMap::new();
         for (module_instance_id, kind, module) in self.modules.iter_modules() {
             module_instance_id_to_kind.insert(module_instance_id, kind.as_str().to_string());
-            let view = tx.isolate(format!("m{module_instance_id}"));
+            let view = tx.isolate(format!("module-{module_instance_id}"));
             module.audit(&view, &mut audit, module_instance_id).await;
         }
         Ok(AuditSummary::from_audit(
@@ -211,7 +211,7 @@ impl HasApiContext<ConsensusApi> for ConsensusApi {
         id: Option<ModuleInstanceId>,
     ) -> (&ConsensusApi, ApiEndpointContext) {
         let db = match id {
-            Some(id) => self.db.isolate(format!("m{id}")),
+            Some(id) => self.db.isolate(format!("module-{id}")),
             None => self.db.clone(),
         };
         (

@@ -1,17 +1,35 @@
 use fedimint_core::OutPoint;
-use fedimint_core::db::v2::TableDef;
 use fedimint_core::secp256k1::PublicKey;
+use fedimint_core::table;
 use fedimint_mintv2_common::{Denomination, RecoveryItem};
 use tbs::{BlindedMessage, BlindedSignatureShare};
 
-pub const NOTE_NONCE: TableDef<PublicKey, ()> = TableDef::new("note_nonce");
+table!(
+    NOTE_NONCE,
+    PublicKey => (),
+    "note-nonce",
+);
 
-pub const BLINDED_SIGNATURE_SHARE: TableDef<OutPoint, BlindedSignatureShare> =
-    TableDef::new("blinded_signature_share");
+table!(
+    BLINDED_SIGNATURE_SHARE,
+    OutPoint => BlindedSignatureShare,
+    "blinded-signature-share",
+);
 
-pub const BLINDED_SIGNATURE_SHARE_RECOVERY: TableDef<BlindedMessage, BlindedSignatureShare> =
-    TableDef::new("blinded_signature_share_recovery");
+table!(
+    BLINDED_SIGNATURE_SHARE_RECOVERY,
+    BlindedMessage => BlindedSignatureShare,
+    "blinded-signature-share-recovery",
+);
 
-pub const ISSUANCE_COUNTER: TableDef<Denomination, u64> = TableDef::new("issuance_counter");
+table!(
+    ISSUANCE_COUNTER,
+    Denomination => u64,
+    "issuance-counter",
+);
 
-pub const RECOVERY_ITEM: TableDef<u64, RecoveryItem> = TableDef::new("recovery_item");
+table!(
+    RECOVERY_ITEM,
+    u64 => RecoveryItem,
+    "recovery-item",
+);

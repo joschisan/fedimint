@@ -221,7 +221,32 @@ fn resolve_name(prefix: &[String], name: &str) -> String {
         .map(String::as_str)
         .chain(std::iter::once(name))
         .collect::<Vec<_>>()
-        .join("_")
+        .join("/")
+}
+
+/// Declare a typed [`TableDef`] constant.
+///
+/// Shape: ident, `K => V`, on-disk name literal, terminating comma.
+///
+/// ```ignore
+/// table!(
+///     UNIX_TIME_VOTE,
+///     PeerId => u64,
+///     "unix-time-vote",
+/// );
+/// ```
+#[macro_export]
+macro_rules! table {
+    (
+        $(#[$attr:meta])*
+        $name:ident,
+        $k:ty => $v:ty,
+        $label:literal $(,)?
+    ) => {
+        $(#[$attr])*
+        pub const $name: $crate::db::v2::TableDef<$k, $v> =
+            $crate::db::v2::TableDef::new($label);
+    };
 }
 
 // ─── Transactions ────────────────────────────────────────────────────────

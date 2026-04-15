@@ -99,7 +99,7 @@ pub async fn run(
                     .init(
                         NumPeers::from(cfg.consensus.api_endpoints().len()),
                         cfg.get_module_config(*module_id)?,
-                        db.isolate(format!("m{module_id}")),
+                        db.isolate(format!("module-{module_id}")),
                         task_group,
                         cfg.local.identity,
                         global_api.with_module(*module_id),
@@ -256,7 +256,7 @@ fn submit_module_ci_proposals(
         move |task_handle| async move {
             while !task_handle.is_shutting_down() {
                 let tx = db.begin_write().await;
-                let view = tx.isolate(format!("m{module_id}"));
+                let view = tx.isolate(format!("module-{module_id}"));
                 let module_consensus_items = tokio::time::timeout(
                     CONSENSUS_PROPOSAL_TIMEOUT,
                     module.consensus_proposal(&view, module_id),

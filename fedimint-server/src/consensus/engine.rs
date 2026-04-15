@@ -648,7 +648,7 @@ impl ConsensusEngine {
             let _module_audit_timing =
                 TimeReporter::new(format!("audit module {module_instance_id}")).level(Level::TRACE);
 
-            let view = tx.isolate(format!("m{module_instance_id}"));
+            let view = tx.isolate(format!("module-{module_instance_id}"));
 
             module
                 .audit(&view, &mut audit, module_instance_id)
@@ -683,7 +683,7 @@ impl ConsensusEngine {
             ConsensusItem::Module(module_item) => {
                 let instance_id = module_item.module_instance_id();
 
-                let view = tx.isolate(format!("m{instance_id}"));
+                let view = tx.isolate(format!("module-{instance_id}"));
 
                 self.modules
                     .get_expect(instance_id)
