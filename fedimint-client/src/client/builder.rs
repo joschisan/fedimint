@@ -745,7 +745,7 @@ impl ClientPreview {
     /// // as the DB name is a common pattern:
     ///
     /// // let db_path = format!("./path/to/db/{}", config.federation_id());
-    /// // let db = RocksDb::open(db_path).expect("error opening DB");
+    /// // let db = RedbDatabase::open(db_path).expect("error opening DB");
     /// # let db: Database = unimplemented!();
     /// # let connectors: Endpoint = unimplemented!();
     ///

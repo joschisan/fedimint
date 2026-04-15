@@ -237,13 +237,10 @@ async fn build_client(
     data_dir: std::path::PathBuf,
     n: u64,
 ) -> anyhow::Result<ClientHandleArc> {
-    let db_path = data_dir.join(format!("client-{n}"));
-    tokio::fs::create_dir_all(&db_path).await?;
+    let db_dir = data_dir.join(format!("client-{n}"));
+    tokio::fs::create_dir_all(&db_dir).await?;
 
-    let db = fedimint_rocksdb::RocksDb::build(&db_path)
-        .open()
-        .await?
-        .into();
+    let db = fedimint_redb::RedbDatabase::open(db_dir.join("database.redb"))?.into();
 
     let mut builder = Client::builder().await?;
     builder.with_module(fedimint_mintv2_client::MintClientInit);

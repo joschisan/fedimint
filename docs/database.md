@@ -27,10 +27,9 @@ The client uses the same isolation mechanism as `fedimintd` to store data for ea
 
 ## Database Transactions
 In Fedimint, all interactions with the database use a database transaction. Database transactions are an abstraction
-for accessing the database in an atomic, consistent, and isolated way. Underneath, Fedimint uses RocksDb's optimistic transactions
-which means database transactions are allowed to read and write to the database concurrently. If there are two concurrent transactions
-that modify the same key, RocksDb's optimistic transactions will detect this "write-write" conflict and cause the transaction that
-commits second to fail. 
+for accessing the database in an atomic, consistent, and isolated way. Underneath, Fedimint uses redb and serializes
+all write transactions through a single-permit semaphore, so there is at most one outstanding write transaction at any
+time. Read transactions remain concurrent.
 
 Fedimint has defined a number of different structs for implementing the necessary functionality for database transactions. These structs
 follow the [adapter pattern](https://en.wikipedia.org/wiki/Adapter_pattern) to wrap and isolate the features. At the bottom is an explanation of
@@ -70,8 +69,7 @@ be run to re-generate the database backup. `test_migrations` will need to be upd
 #### Raw Implementations
 
  - `MemDatabase` and `MemDatabaseTransaction` - Base implementation of an in-memory database transaction.
- - `RocksDbDatabase` and `RocksDbDatabaseTransaction` - Base implementation of a Rocksdb database. Uses optimistic transaction internally.
- - `RocksDbReadOnly` and `RocksDbReadOnlyTransaction` - Base implementation of a Rocksdb read-only database. Will panic on writes.
+ - `RedbDatabase` and `RedbWriteTransaction`/`RedbReadTransaction` - Base implementation of a redb database.
 
 ```mermaid
 classDiagram
@@ -82,14 +80,14 @@ classDiagram
     BaseDatabaseTransaction ..|> IDatabaseTransaction : implements
     BaseDatabaseTransaction ..* IRawDatabaseTransaction : wraps
     MemTransaction ..|> IRawDatabaseTransaction : implements
-    RocksDbTransaction ..|> IRawDatabaseTransaction : implements
+    RedbTransaction ..|> IRawDatabaseTransaction : implements
 
     DatabaseTransactionRef ..|> IDatabaseTransactionOpsCore : implements
     DatabaseTransaction ..|> IDatabaseTransactionOpsCore : implements
     BaseDatabaseTransaction ..|> IDatabaseTransactionOpsCore : implements
     PrefixDatabaseTransaction ..|> IDatabaseTransactionOpsCore : implements
     MemTransaction ..|> IDatabaseTransactionOpsCore : implements
-    RocksDbTransaction ..|> IDatabaseTransactionOpsCore : implements
+    RedbTransaction ..|> IDatabaseTransactionOpsCore : implements
 
     class IDatabaseTransactionOpsCore {
       <<interface>>
@@ -119,7 +117,7 @@ classDiagram
       - IRawDatabaseTransaction
     }
 
-    class RocksDbTransaction {
+    class RedbTransaction {
     }
 
     class MemTransaction {

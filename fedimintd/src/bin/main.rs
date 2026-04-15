@@ -6,7 +6,6 @@ use tikv_jemallocator::Jemalloc;
 
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
 #[global_allocator]
-// rocksdb suffers from memory fragmentation when using standard allocator
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]

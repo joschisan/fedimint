@@ -30,7 +30,7 @@ use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use fedimint_mintv2_client::MintClientInit;
-use fedimint_rocksdb::RocksDb;
+use fedimint_redb::RedbDatabase;
 use fedimint_walletv2_client::WalletClientInit;
 use lightning::types::payment::PaymentHash;
 use rand::rngs::OsRng;
@@ -41,7 +41,6 @@ use tracing::{info, warn};
 
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
 #[global_allocator]
-// rocksdb suffers from memory fragmentation when using standard allocator
 static GLOBAL: Jemalloc = Jemalloc;
 
 /// Command line parameters for starting the gateway.
@@ -140,8 +139,7 @@ fn main() -> anyhow::Result<()> {
     // 2. Open database
     runtime.block_on(install_crypto_provider());
 
-    let gateway_db = runtime
-        .block_on(RocksDb::build(opts.data_dir.join(DB_FILE)).open())
+    let gateway_db = RedbDatabase::open(opts.data_dir.join(DB_FILE))
         .map(|db| Database::new(db, ModuleDecoderRegistry::default()))?;
 
     // 3. Load or init client factory (mnemonic)

@@ -16,7 +16,7 @@ pub const LOCAL_CONFIG: &str = "local";
 pub const CONSENSUS_CONFIG: &str = "consensus";
 
 /// Database file name
-pub const DB_FILE: &str = "database";
+pub const DB_FILE: &str = "database.redb";
 
 pub const JSON_EXT: &str = "json";
 

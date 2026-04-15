@@ -189,7 +189,7 @@ pub type PrefixStream<'a> = Pin<Box<maybe_add_send!(dyn Stream<Item = (Vec<u8>, 
 /// Raw database implementation
 ///
 /// This and [`IRawWriteDatabaseTransaction`] are meant to be implemented
-/// by crates like `fedimint-rocksdb` to provide a concrete implementation
+/// by crates like `fedimint-redb` to provide a concrete implementation
 /// of a database to be used by Fedimint.
 ///
 /// This is in contrast of [`IDatabase`] which includes extra
@@ -1241,7 +1241,7 @@ pub trait WithDecoders {
     fn decoders(&self) -> &ModuleDecoderRegistry;
 }
 
-/// Raw database transaction (e.g. rocksdb implementation)
+/// Raw database transaction (e.g. redb implementation)
 #[apply(async_trait_maybe_send!)]
 pub trait IRawWriteDatabaseTransaction: MaybeSend + IWriteDatabaseTransactionOps {
     async fn commit_tx(self) -> DatabaseResult<()>;

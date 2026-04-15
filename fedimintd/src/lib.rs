@@ -25,7 +25,7 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::timing;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl, handle_version_hash_command};
 use fedimint_logging::{LOG_CORE, TracingSetup};
-use fedimint_rocksdb::RocksDb;
+use fedimint_redb::RedbDatabase;
 use fedimint_server::config::ConfigGenSettings;
 use fedimint_server::config::io::DB_FILE;
 use fedimint_server::core::ServerModuleInitRegistry;
@@ -370,10 +370,7 @@ pub async fn run(
     };
 
     let db = Database::new(
-        RocksDb::build(server_opts.data_dir.join(DB_FILE))
-            .open()
-            .await
-            .unwrap(),
+        RedbDatabase::open(server_opts.data_dir.join(DB_FILE)).unwrap(),
         ModuleRegistry::default(),
     );
 

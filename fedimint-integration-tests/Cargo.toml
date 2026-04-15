@@ -27,7 +27,7 @@ fedimint-lnv2-common = { workspace = true }
 fedimint-logging = { workspace = true }
 fedimint-mintv2-client = { workspace = true }
 fedimint-mintv2-common = { workspace = true }
-fedimint-rocksdb = { workspace = true }
+fedimint-redb = { workspace = true }
 fedimint-server-cli-core = { workspace = true }
 fedimint-walletv2-client = { workspace = true }
 fedimint-walletv2-common = { workspace = true }

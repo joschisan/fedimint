@@ -72,7 +72,7 @@ use crate::db::{
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
 
 /// Name of the gateway's database.
-pub const DB_FILE: &str = "gatewayd.db";
+pub const DB_FILE: &str = "database.redb";
 
 /// Name of the folder for LDK node data.
 pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
