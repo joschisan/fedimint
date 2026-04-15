@@ -98,8 +98,7 @@ impl StateMachine for TxSubmissionStatesSM {
                                             txid,
                                             error: error.clone(),
                                         },
-                                    )
-                                    .await;
+                                    );
                                     TxSubmissionStatesSM {
                                         state: TxSubmissionStates::Rejected(txid, error),
                                         operation_id,
@@ -124,8 +123,7 @@ impl StateMachine for TxSubmissionStatesSM {
                                         dbtx,
                                         operation_id,
                                         TxAcceptedEvent { txid },
-                                    )
-                                    .await;
+                                    );
                                     TxSubmissionStatesSM {
                                         state: TxSubmissionStates::Accepted(txid),
                                         operation_id,
@@ -143,23 +141,19 @@ impl StateMachine for TxSubmissionStatesSM {
     }
 }
 
-async fn log_tx_event<E: Event + Send>(
+fn log_tx_event<E: Event + Send>(
     ctx: &TxSubmissionSmContext,
     dbtx: &WriteTxRef<'_>,
     operation_id: OperationId,
     event: E,
 ) {
-    ctx.client
-        .get()
-        .log_event_json(
-            dbtx,
-            E::MODULE,
-            0xffff,
-            E::KIND,
-            Some(operation_id),
-            serde_json::to_value(event).expect("Serializable"),
-        )
-        .await;
+    fedimint_eventlog::log_event(
+        dbtx,
+        ctx.client.get().log_event_added_tx(),
+        None,
+        Some(operation_id),
+        event,
+    );
 }
 
 async fn tx_submission_trigger_rejected(

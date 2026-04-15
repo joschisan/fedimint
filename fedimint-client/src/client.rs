@@ -88,11 +88,9 @@ pub struct Client {
     client_recovery_progress_receiver:
         watch::Receiver<BTreeMap<ModuleInstanceId, RecoveryProgress>>,
 
-    /// Internal client sender to wake up log ordering task every time a
-    /// (unuordered) log event is added.
-    log_ordering_wakeup_tx: watch::Sender<()>,
-    /// Receiver for events fired every time (ordered) log event is added.
-    log_event_added_rx: watch::Receiver<()>,
+    /// Broadcast channel that pings on every committed event log insertion.
+    /// `.subscribe()` hands out a fresh receiver to each waiter.
+    log_event_added_tx: watch::Sender<()>,
 }
 
 impl Client {
@@ -586,7 +584,7 @@ impl Client {
         >,
     ) {
         let db = self.db.clone();
-        let log_ordering_wakeup_tx = self.log_ordering_wakeup_tx.clone();
+        let log_event_added_tx = self.log_event_added_tx.clone();
         let module_kinds: BTreeMap<ModuleInstanceId, String> = self
             .modules
             .iter_modules_id_kind()
@@ -597,7 +595,7 @@ impl Client {
             .spawn("module recoveries", |_task_handle| async move {
                 Self::run_module_recoveries_task(
                     db,
-                    log_ordering_wakeup_tx,
+                    log_event_added_tx,
                     recovery_sender,
                     module_recoveries,
                     module_recovery_progress_receivers,
@@ -610,7 +608,7 @@ impl Client {
 
     async fn run_module_recoveries_task(
         db: Database,
-        log_ordering_wakeup_tx: watch::Sender<()>,
+        log_event_added_tx: watch::Sender<()>,
         recovery_sender: watch::Sender<BTreeMap<ModuleInstanceId, RecoveryProgress>>,
         module_recoveries: BTreeMap<
             ModuleInstanceId,
@@ -701,7 +699,7 @@ impl Client {
                 );
                 fedimint_eventlog::log_event(
                     &tx,
-                    log_ordering_wakeup_tx.clone(),
+                    log_event_added_tx.clone(),
                     None,
                     None,
                     ModuleRecoveryCompleted {
@@ -764,19 +762,6 @@ impl Client {
             .expect("Guardian public keys must be present in config")
     }
 
-    pub async fn log_event<E>(
-        &self,
-        module_id: Option<ModuleInstanceId>,
-        operation_id: Option<OperationId>,
-        event: E,
-    ) where
-        E: Event + Send,
-    {
-        let dbtx = self.db.begin_write().await;
-        self.log_event_dbtx(&dbtx.as_ref(), module_id, operation_id, event);
-        dbtx.commit().await;
-    }
-
     pub fn log_event_dbtx<E>(
         &self,
         dbtx: &WriteTxRef<'_>,
@@ -788,7 +773,7 @@ impl Client {
     {
         fedimint_eventlog::log_event(
             dbtx,
-            self.log_ordering_wakeup_tx.clone(),
+            self.log_event_added_tx.clone(),
             module_id,
             operation_id,
             event,
@@ -807,7 +792,7 @@ impl Client {
         let module_kind = module.map(|m| m.0);
         fedimint_eventlog::log_event_raw(
             dbtx,
-            self.log_ordering_wakeup_tx.clone(),
+            self.log_event_added_tx.clone(),
             kind,
             module_kind,
             module_id,
@@ -830,7 +815,7 @@ impl Client {
 
     /// Get a receiver that signals when new events are added to the event log
     pub fn log_event_added_rx(&self) -> watch::Receiver<()> {
-        self.log_event_added_rx.clone()
+        self.log_event_added_tx.subscribe()
     }
 
     /// Stream every event belonging to `operation_id`, starting from the
@@ -841,7 +826,7 @@ impl Client {
     ) -> BoxStream<'static, PersistedLogEntry> {
         Box::pin(fedimint_eventlog::subscribe_operation_events(
             self.db.clone(),
-            self.log_event_added_rx.clone(),
+            self.log_event_added_tx.subscribe(),
             operation_id,
         ))
     }
@@ -913,26 +898,8 @@ impl ClientContextIface for Client {
         Client::get_internal_payment_markers(self)
     }
 
-    async fn log_event_json(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        module_kind: Option<ModuleKind>,
-        module_id: ModuleInstanceId,
-        kind: EventKind,
-        operation_id: Option<OperationId>,
-        payload: serde_json::Value,
-    ) {
-        self.log_event_raw_dbtx(
-            dbtx,
-            kind,
-            module_kind.map(|kind| (kind, module_id)),
-            operation_id,
-            serde_json::to_vec(&payload).expect("Serialization can't fail"),
-        );
-    }
-
-    fn log_event_added_rx(&self) -> watch::Receiver<()> {
-        Client::log_event_added_rx(self)
+    fn log_event_added_tx(&self) -> watch::Sender<()> {
+        self.log_event_added_tx.clone()
     }
 
     async fn get_event_log(&self, pos: Option<EventLogId>, limit: u64) -> Vec<PersistedLogEntry> {

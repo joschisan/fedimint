@@ -9,46 +9,19 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::table;
-use fedimint_logging::LOG_CLIENT_EVENT_LOG;
 use fedimint_redb::{Database, WriteTxRef};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
-use tracing::{debug, trace};
 
 pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
     const MODULE: Option<ModuleKind>;
     const KIND: EventKind;
-}
-
-/// Counter that resets on every restart, guaranteeing that
-/// [`UnordedEventLogId`]s don't conflict with each other.
-static UNORDEREDED_EVENT_LOG_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// A self-allocated ID that is mostly ordered.
-///
-/// Picked based on time and a counter to avoid dbtx conflicts on ID
-/// allocation. Mostly, but not strictly, monotonic.
-#[derive(Debug, Encodable, Decodable)]
-pub struct UnordedEventLogId {
-    ts_usecs: u64,
-    counter: u64,
-}
-
-impl UnordedEventLogId {
-    fn new() -> Self {
-        Self {
-            ts_usecs: u64::try_from(fedimint_core::time::duration_since_epoch().as_micros())
-                .unwrap_or(u64::MAX),
-            counter: UNORDEREDED_EVENT_LOG_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
-        }
-    }
 }
 
 /// Ordered, contiguous ID space — easy for event log followers to track.
@@ -133,10 +106,6 @@ pub struct EventLogEntry {
     pub kind: EventKind,
 
     /// Module that produced the event (if any).
-    ///
-    /// The meaning is "which part of the code defined this event kind". Core
-    /// events referring to a module should carry the module id in
-    /// `operation_id` or payload, not here.
     pub module: Option<(ModuleKind, ModuleInstanceId)>,
 
     /// Operation this event belongs to, if any. Set by the caller of
@@ -215,12 +184,6 @@ impl std::ops::Deref for PersistedLogEntry {
 }
 
 table!(
-    UNORDERED_EVENT_LOG,
-    UnordedEventLogId => EventLogEntry,
-    "unordered-event-log",
-);
-
-table!(
     EVENT_LOG,
     EventLogId => EventLogEntry,
     "event-log",
@@ -278,12 +241,12 @@ impl<T: IReadDatabaseTransactionOpsTyped + ?Sized> DBTransactionEventLogReadExt 
     }
 }
 
-/// Append an event to the unordered log. The ordering task picks it up after
-/// commit and moves it to [`EVENT_LOG`] plus [`EVENT_LOG_BY_OPERATION`] if
-/// `operation_id` is set.
+/// Append an event to [`EVENT_LOG`] and — if `operation_id` is set — to
+/// [`EVENT_LOG_BY_OPERATION`]. IDs are allocated inline under redb's
+/// single-writer serialization.
 pub fn log_event_raw(
     dbtx: &WriteTxRef<'_>,
-    log_ordering_wakeup_tx: watch::Sender<()>,
+    log_event_added_tx: watch::Sender<()>,
     kind: EventKind,
     module_kind: Option<ModuleKind>,
     module_id: Option<ModuleInstanceId>,
@@ -296,105 +259,52 @@ pub fn log_event_raw(
         "Events of modules must have module_id set"
     );
 
-    let unordered_id = UnordedEventLogId::new();
-    trace!(target: LOG_CLIENT_EVENT_LOG, ?unordered_id, "New unordered event log event");
-
+    let id = dbtx.get_next_event_log_id();
+    let ts_usecs =
+        u64::try_from(fedimint_core::time::duration_since_epoch().as_micros()).unwrap_or(u64::MAX);
     let entry = EventLogEntry {
         kind,
         module: module_kind.map(|kind| (kind, module_id.unwrap())),
         operation_id,
-        ts_usecs: unordered_id.ts_usecs,
+        ts_usecs,
         payload,
     };
 
     assert!(
-        dbtx.insert(&UNORDERED_EVENT_LOG, &unordered_id, &entry)
-            .is_none(),
-        "Trying to overwrite event in the client event log"
+        dbtx.insert(&EVENT_LOG, &id, &entry).is_none(),
+        "Must never overwrite existing event"
     );
 
+    if let Some(operation_id) = operation_id {
+        assert!(
+            dbtx.insert(&EVENT_LOG_BY_OPERATION, &(operation_id, id), &entry)
+                .is_none(),
+            "Must never overwrite existing event"
+        );
+    }
+
     dbtx.on_commit(move || {
-        log_ordering_wakeup_tx.send_replace(());
+        log_event_added_tx.send_replace(());
     });
 }
 
-/// Typed convenience: encode an [`Event`] into the unordered log.
+/// Typed convenience: encode an [`Event`] into the log.
 pub fn log_event<E: Event>(
     dbtx: &WriteTxRef<'_>,
-    log_ordering_wakeup_tx: watch::Sender<()>,
+    log_event_added_tx: watch::Sender<()>,
     module_id: Option<ModuleInstanceId>,
     operation_id: Option<OperationId>,
     event: E,
 ) {
     log_event_raw(
         dbtx,
-        log_ordering_wakeup_tx,
+        log_event_added_tx,
         E::KIND,
         E::MODULE,
         module_id,
         operation_id,
         serde_json::to_vec(&event).expect("Serialization can't fail"),
     );
-}
-
-/// Handles new unordered events and rewrites them fully ordered into
-/// [`EVENT_LOG`] (and indexed into [`EVENT_LOG_BY_OPERATION`] when the event
-/// has an `operation_id`).
-pub async fn run_event_log_ordering_task(
-    db: Database,
-    mut log_ordering_task_wakeup: watch::Receiver<()>,
-    log_event_added: watch::Sender<()>,
-) {
-    debug!(target: LOG_CLIENT_EVENT_LOG, "Event log ordering task started");
-
-    let mut next_entry_id = db.begin_read().await.as_ref().get_next_event_log_id();
-
-    loop {
-        let dbtx = db.begin_write().await;
-        let tx = dbtx.as_ref();
-
-        let unordered_events = tx.iter(&UNORDERED_EVENT_LOG);
-        trace!(target: LOG_CLIENT_EVENT_LOG, num=unordered_events.len(), "Fetched unordered events");
-
-        for (unordered_id, entry) in &unordered_events {
-            assert!(
-                tx.remove(&UNORDERED_EVENT_LOG, unordered_id).is_some(),
-                "Must never fail to remove entry"
-            );
-
-            assert!(
-                tx.insert(&EVENT_LOG, &next_entry_id, entry).is_none(),
-                "Must never overwrite existing event"
-            );
-
-            if let Some(operation_id) = entry.operation_id {
-                assert!(
-                    tx.insert(
-                        &EVENT_LOG_BY_OPERATION,
-                        &(operation_id, next_entry_id),
-                        entry,
-                    )
-                    .is_none(),
-                    "Must never overwrite existing event"
-                );
-            }
-
-            trace!(target: LOG_CLIENT_EVENT_LOG, ?unordered_id, id=?next_entry_id, "Ordered event log event");
-            next_entry_id = next_entry_id.next();
-        }
-
-        dbtx.commit().await;
-        if !unordered_events.is_empty() {
-            log_event_added.send_replace(());
-        }
-
-        trace!(target: LOG_CLIENT_EVENT_LOG, "Event log ordering task waits for more events");
-        if log_ordering_task_wakeup.changed().await.is_err() {
-            break;
-        }
-    }
-
-    debug!(target: LOG_CLIENT_EVENT_LOG, "Event log ordering task finished");
 }
 
 /// Stream every event belonging to `operation_id`, in insertion order.

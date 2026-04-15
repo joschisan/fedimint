@@ -24,7 +24,6 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{NumPeers, PeerId, fedimint_build_code_version_env, maybe_add_send};
 use fedimint_derive_secret::DerivableSecret;
-use fedimint_eventlog::run_event_log_ordering_task;
 use fedimint_logging::LOG_CLIENT;
 use fedimint_redb::Database;
 use tokio::sync::watch;
@@ -238,8 +237,7 @@ impl ClientBuilder {
             version = %fedimint_build_code_version_env!(),
             "Building fedimint client",
         );
-        let (log_event_added_tx, log_event_added_rx) = watch::channel(());
-        let (log_ordering_wakeup_tx, log_ordering_wakeup_rx) = watch::channel(());
+        let (log_event_added_tx, _) = watch::channel(());
 
         let decoders = self.decoders(config);
         let config = Self::config_decoded(config, &decoders)?;
@@ -353,7 +351,7 @@ impl ClientBuilder {
                             let tx = dbtx.as_ref();
                             fedimint_eventlog::log_event(
                                 &tx,
-                                log_ordering_wakeup_tx.clone(),
+                                log_event_added_tx.clone(),
                                 None,
                                 None,
                                 ModuleRecoveryStarted::new(module_instance_id),
@@ -450,27 +448,13 @@ impl ClientBuilder {
             federation_config_meta: config.global.meta,
             primary_module,
             modules,
-            log_ordering_wakeup_tx,
-            log_event_added_rx,
+            log_event_added_tx,
             tx_submission_executor,
             api,
             secp_ctx: Secp256k1::new(),
             task_group,
             client_recovery_progress_receiver,
         });
-
-        client_inner
-            .task_group
-            .spawn_cancellable("event log ordering task", {
-                async move {
-                    run_event_log_ordering_task(
-                        db.clone(),
-                        log_ordering_wakeup_rx,
-                        log_event_added_tx,
-                    )
-                    .await
-                }
-            });
 
         let client_iface = std::sync::Arc::<Client>::downgrade(&client_inner);
 

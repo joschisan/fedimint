@@ -21,7 +21,7 @@ use fedimint_core::{
     Amount, PeerId, TransactionId, apply, async_trait_maybe_send, dyn_newtype_define,
     maybe_add_send_sync,
 };
-use fedimint_eventlog::{Event, EventKind, EventLogId, PersistedLogEntry};
+use fedimint_eventlog::{Event, EventLogId, PersistedLogEntry};
 use fedimint_logging::LOG_CLIENT;
 use fedimint_redb::{Database, WriteTxRef};
 use tokio::sync::watch;
@@ -117,7 +117,7 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
 
     fn get_internal_payment_markers(&self) -> anyhow::Result<(PublicKey, u64)>;
 
-    fn log_event_added_rx(&self) -> watch::Receiver<()>;
+    fn log_event_added_tx(&self) -> watch::Sender<()>;
 
     async fn get_event_log(&self, pos: Option<EventLogId>, limit: u64) -> Vec<PersistedLogEntry>;
 
@@ -125,17 +125,6 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
         &self,
         operation_id: OperationId,
     ) -> BoxStream<'static, PersistedLogEntry>;
-
-    #[allow(clippy::too_many_arguments)]
-    async fn log_event_json(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        module_kind: Option<ModuleKind>,
-        module_id: ModuleInstanceId,
-        kind: EventKind,
-        operation_id: Option<OperationId>,
-        payload: serde_json::Value,
-    );
 }
 
 /// A final, fully initialized client
@@ -403,7 +392,7 @@ where
     /// Watch channel that signals when any new event is added to the
     /// persistent event log.
     pub fn log_event_added_rx(&self) -> watch::Receiver<()> {
-        self.client.get().log_event_added_rx()
+        self.client.get().log_event_added_tx().subscribe()
     }
 
     /// Read a batch of persisted event log entries starting at `pos`.
@@ -452,17 +441,13 @@ where
                 "Client module logging events of different module than its own. This might become an error in the future."
             );
         }
-        self.client
-            .get()
-            .log_event_json(
-                &dbtx.deisolate(),
-                <E as Event>::MODULE,
-                self.module_instance_id,
-                <E as Event>::KIND,
-                Some(operation_id),
-                serde_json::to_value(event).expect("Can't fail"),
-            )
-            .await;
+        fedimint_eventlog::log_event(
+            &dbtx.deisolate(),
+            self.client.get().log_event_added_tx(),
+            Some(self.module_instance_id),
+            Some(operation_id),
+            event,
+        );
     }
 }
 
