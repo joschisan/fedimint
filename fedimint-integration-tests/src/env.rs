@@ -45,7 +45,7 @@ fn dummy_address() -> bitcoin::Address {
 
 pub struct TestEnv {
     pub ldk_node: Arc<ldk_node::Node>,
-    pub data_dir: tempfile::TempDir,
+    pub data_dir: std::path::PathBuf,
     pub bitcoind: bitcoincore_rpc::Client,
     pub invite_code: InviteCode,
     pub gw_addr: String,
@@ -56,8 +56,8 @@ pub struct TestEnv {
 
 impl TestEnv {
     pub fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<(Self, ClientHandleArc)> {
-        let data_dir = tempfile::TempDir::new()?;
-        let base = data_dir.path();
+        let data_dir = tempfile::TempDir::new()?.keep();
+        let base = data_dir.as_path();
         info!("Test data directory: {}", base.display());
 
         let bitcoind = Self::connect_bitcoind(&runtime)?;
@@ -105,7 +105,7 @@ impl TestEnv {
         let client_send = runtime.block_on(build_client(
             endpoint.clone(),
             invite_code.clone(),
-            data_dir.path().to_path_buf(),
+            data_dir.clone(),
             client_counter.fetch_add(1, Ordering::Relaxed),
         ))?;
 
@@ -178,7 +178,7 @@ impl TestEnv {
         build_client(
             self.endpoint.clone(),
             self.invite_code.clone(),
-            self.data_dir.path().to_path_buf(),
+            self.data_dir.clone(),
             n,
         )
         .await
