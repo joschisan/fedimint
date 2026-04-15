@@ -242,17 +242,20 @@ impl LightningClientModule {
         // fees and latency.
 
         if let Ok(gateways) = self.module_api.gateways().await {
-            let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
-
+            let mut entries = Vec::new();
             for gateway in gateways {
                 if let Ok(Some(routing_info)) = self
                     .gateway_conn
                     .routing_info(gateway.clone(), &self.federation_id)
                     .await
                 {
-                    dbtx.insert_entry(&GatewayKey(routing_info.lightning_public_key), &gateway)
-                        .await;
+                    entries.push((routing_info.lightning_public_key, gateway));
                 }
+            }
+
+            let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
+            for (key, gateway) in entries {
+                dbtx.insert_entry(&GatewayKey(key), &gateway).await;
             }
 
             if let Err(e) = dbtx.commit_tx_result().await {
@@ -727,9 +730,11 @@ impl LightningClientModule {
     }
 
     async fn receive_lnurl(&self) {
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
-
-        let stream_index = dbtx
+        let stream_index = self
+            .client_ctx
+            .module_db()
+            .begin_write_transaction()
+            .await
             .get_value(&IncomingContractStreamIndexKey)
             .await
             .unwrap_or(0);
@@ -739,6 +744,7 @@ impl LightningClientModule {
             .await_incoming_contracts(stream_index, 128)
             .await;
 
+        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
         for contract in &contracts {
             self.receive_incoming_contract(
                 &mut dbtx.to_ref_nc(),

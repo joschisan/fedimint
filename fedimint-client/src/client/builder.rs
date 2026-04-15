@@ -452,12 +452,12 @@ impl ClientBuilder {
                 };
 
                 let recovery = if init_state.does_require_recovery() {
-                    match db
+                    let existing_recovery_state = db
                         .begin_write_transaction()
                         .await
                         .get_value(&ClientModuleRecovery { module_instance_id })
-                        .await
-                    {
+                        .await;
+                    match existing_recovery_state {
                         Some(module_recovery_state) => {
                             if module_recovery_state.is_done() {
                                 debug!(

@@ -396,20 +396,23 @@ impl WalletClientModule {
         let module = self.clone();
 
         task_group.spawn_cancellable("output-scanner", async move {
-            let mut dbtx = module.db.begin_write_transaction().await;
-
-            if dbtx
+            let needs_seed = module
+                .db
+                .begin_write_transaction()
+                .await
                 .find_by_prefix(&ValidAddressIndexPrefix)
                 .await
                 .next()
                 .await
-                .is_none()
-            {
-                dbtx.insert_new_entry(&ValidAddressIndexKey(module.next_valid_index(0)), &())
-                    .await;
-            }
+                .is_none();
 
-            dbtx.commit_tx().await;
+            if needs_seed {
+                let index = module.next_valid_index(0);
+                let mut dbtx = module.db.begin_write_transaction().await;
+                dbtx.insert_new_entry(&ValidAddressIndexKey(index), &())
+                    .await;
+                dbtx.commit_tx().await;
+            }
 
             loop {
                 match module.check_outputs().await {
@@ -439,6 +442,8 @@ impl WalletClientModule {
             .map(|entry| entry.0.0)
             .collect()
             .await;
+
+        drop(dbtx);
 
         let mut address_map: BTreeMap<ScriptBuf, u64> = valid_indices
             .iter()
