@@ -15,9 +15,9 @@ use std::ops::{self};
 
 use fedimint_api_client::api::DynModuleApi;
 pub use fedimint_core::core::{IInput, IOutput, ModuleInstanceId, ModuleKind, OperationId};
-use fedimint_core::db::Database;
 use fedimint_core::{PeerId, TransactionId, maybe_add_send_sync};
 use fedimint_eventlog::{Event, EventKind, EventPersistence};
+use fedimint_redb::v2::Database;
 use serde::{Deserialize, Serialize};
 use transaction::{ClientInputBundle, ClientOutput};
 

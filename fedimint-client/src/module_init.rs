@@ -11,11 +11,11 @@ use fedimint_client_module::module::{ClientContext, DynClientModule, FinalClient
 use fedimint_client_module::{ClientModule, ModuleInstanceId, ModuleKind};
 use fedimint_core::config::{ClientModuleConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::Decoder;
-use fedimint_redb::v2::Database;
 use fedimint_core::module::{CommonModuleInit, IDynCommonModuleInit, ModuleInit};
 use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::{NumPeers, apply, async_trait_maybe_send, dyn_newtype_define};
 use fedimint_derive_secret::DerivableSecret;
+use fedimint_redb::v2::Database;
 use tokio::sync::watch;
 
 pub type ClientModuleInitRegistry = ModuleInitRegistry<DynClientModuleInit>;

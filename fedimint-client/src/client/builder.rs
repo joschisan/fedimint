@@ -15,8 +15,8 @@ use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default
 use fedimint_client_module::transaction::TxSubmissionSmContext;
 use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{
-    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped as _,
+use fedimint_core::db::v2::{
+    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
 };
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -24,18 +24,18 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{NumPeers, PeerId, fedimint_build_code_version_env, maybe_add_send};
 use fedimint_derive_secret::DerivableSecret;
-use fedimint_eventlog::{
-    DBTransactionEventLogExt as _, EventLogEntry, run_event_log_ordering_task,
-};
+use fedimint_eventlog::{EventLogEntry, run_event_log_ordering_task};
 use fedimint_logging::LOG_CLIENT;
+use fedimint_redb::v2::Database;
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, trace, warn};
 
 use super::handle::ClientHandle;
 use super::{Client, client_decoders};
 use crate::db::{
-    self, ApiSecretKey, ClientInitStateKey, ClientModuleRecovery, ClientModuleRecoveryState,
-    ClientPreRootSecretHashKey, InitMode, InitState,
+    self, API_SECRET, CLIENT_CONFIG, CLIENT_INIT_STATE, CLIENT_MODULE_RECOVERY,
+    CLIENT_PRE_ROOT_SECRET_HASH, ClientModuleRecovery, ClientModuleRecoveryState, InitMode,
+    InitState,
 };
 use crate::module_init::ClientModuleInitRegistry;
 
@@ -145,30 +145,25 @@ impl ClientBuilder {
             bail!("Client database already initialized")
         }
 
-        Client::run_core_migrations(&db_no_decoders).await?;
-
-        // Note: It's important all client initialization is performed as one big
-        // transaction to avoid half-initialized client state.
         {
             debug!(target: LOG_CLIENT, "Initializing client database");
-            let mut dbtx = db_no_decoders.begin_write_transaction().await;
-            // Save config to DB
-            dbtx.insert_new_entry(&crate::db::ClientConfigKey, &config)
-                .await;
-            dbtx.insert_entry(
-                &ClientPreRootSecretHashKey,
+            let dbtx = db_no_decoders.begin_write().await;
+            let tx = dbtx.as_ref();
+            tx.insert(&CLIENT_CONFIG, &(), &config);
+            tx.insert(
+                &CLIENT_PRE_ROOT_SECRET_HASH,
+                &(),
                 &pre_root_secret.derive_pre_root_secret_hash(),
-            )
-            .await;
+            );
 
             if let Some(api_secret) = api_secret.as_ref() {
-                dbtx.insert_new_entry(&ApiSecretKey, api_secret).await;
+                tx.insert(&API_SECRET, &(), api_secret);
             }
 
             let init_state = InitState::Pending(init_mode);
-            dbtx.insert_entry(&ClientInitStateKey, &init_state).await;
+            tx.insert(&CLIENT_INIT_STATE, &(), &init_state);
 
-            dbtx.commit_tx_result().await?;
+            dbtx.commit().await;
         }
 
         let stopped = self.stopped;
@@ -219,8 +214,6 @@ impl ClientBuilder {
         db_no_decoders: Database,
         pre_root_secret: RootSecret,
     ) -> anyhow::Result<ClientHandle> {
-        Client::run_core_migrations(&db_no_decoders).await?;
-
         let Some(config) = Client::get_config_from_db(&db_no_decoders).await else {
             bail!("Client database not initialized")
         };
@@ -228,10 +221,10 @@ impl ClientBuilder {
         let pre_root_secret = pre_root_secret.to_inner(config.calculate_federation_id());
 
         match db_no_decoders
-            .begin_write_transaction()
+            .begin_read()
             .await
-            .get_value(&ClientPreRootSecretHashKey)
-            .await
+            .as_ref()
+            .get(&CLIENT_PRE_ROOT_SECRET_HASH, &())
         {
             Some(secret_hash) => {
                 ensure!(
@@ -241,13 +234,13 @@ impl ClientBuilder {
             }
             _ => {
                 debug!(target: LOG_CLIENT, "Backfilling secret hash");
-                let mut dbtx = db_no_decoders.begin_write_transaction().await;
-                dbtx.insert_entry(
-                    &ClientPreRootSecretHashKey,
+                let dbtx = db_no_decoders.begin_write().await;
+                dbtx.as_ref().insert(
+                    &CLIENT_PRE_ROOT_SECRET_HASH,
+                    &(),
                     &pre_root_secret.derive_pre_root_secret_hash(),
-                )
-                .await;
-                dbtx.commit_tx().await;
+                );
+                dbtx.commit().await;
             }
         }
 
@@ -322,7 +315,8 @@ impl ClientBuilder {
         let decoders = self.decoders(config);
         let config = Self::config_decoded(config, &decoders)?;
         let fed_id = config.calculate_federation_id();
-        let db = db_no_decoders.with_decoders(decoders.clone());
+        db_no_decoders.set_decoders(decoders.clone());
+        let db = db_no_decoders;
         let peer_urls: BTreeMap<PeerId, SafeUrl> = config
             .global
             .api_endpoints
@@ -402,11 +396,10 @@ impl ClientBuilder {
                 };
 
                 let recovery = if init_state.does_require_recovery() {
-                    let existing_recovery_state = db
-                        .begin_write_transaction()
-                        .await
-                        .get_value(&ClientModuleRecovery { module_instance_id })
-                        .await;
+                    let existing_recovery_state = db.begin_read().await.as_ref().get(
+                        &CLIENT_MODULE_RECOVERY,
+                        &ClientModuleRecovery { module_instance_id },
+                    );
                     match existing_recovery_state {
                         Some(module_recovery_state) => {
                             if module_recovery_state.is_done() {
@@ -427,20 +420,21 @@ impl ClientBuilder {
                         }
                         _ => {
                             let progress = RecoveryProgress::none();
-                            let mut dbtx = db.begin_write_transaction().await;
-                            dbtx.log_event(
+                            let dbtx = db.begin_write().await;
+                            let tx = dbtx.as_ref();
+                            fedimint_eventlog::log_event(
+                                &tx,
                                 log_ordering_wakeup_tx.clone(),
                                 None,
                                 ModuleRecoveryStarted::new(module_instance_id),
-                            )
-                            .await;
-                            dbtx.insert_entry(
+                            );
+                            tx.insert(
+                                &CLIENT_MODULE_RECOVERY,
                                 &ClientModuleRecovery { module_instance_id },
                                 &ClientModuleRecoveryState { progress },
-                            )
-                            .await;
+                            );
 
-                            dbtx.commit_tx().await;
+                            dbtx.commit().await;
 
                             debug!(
                                 id = %module_instance_id,
@@ -489,10 +483,10 @@ impl ClientBuilder {
         };
 
         if init_state.is_pending() && module_recoveries.is_empty() {
-            let mut dbtx = db.begin_write_transaction().await;
-            dbtx.insert_entry(&ClientInitStateKey, &init_state.into_complete())
-                .await;
-            dbtx.commit_tx().await;
+            let dbtx = db.begin_write().await;
+            dbtx.as_ref()
+                .insert(&CLIENT_INIT_STATE, &(), &init_state.into_complete());
+            dbtx.commit().await;
         }
 
         let primary_module = modules
@@ -578,9 +572,10 @@ impl ClientBuilder {
     }
 
     async fn load_init_state(db: &Database) -> InitState {
-        let mut dbtx = db.begin_write_transaction().await;
-        dbtx.get_value(&ClientInitStateKey)
+        db.begin_read()
             .await
+            .as_ref()
+            .get(&CLIENT_INIT_STATE, &())
             .unwrap_or_else(|| {
                 // could be turned in a hard error in the future, but for now
                 // no need to break backward compat.

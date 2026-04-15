@@ -62,9 +62,7 @@ pub type ErasedValue = Arc<maybe_add_send_sync!(dyn Any)>;
 pub type TriggerFuture = Pin<Box<maybe_add_send!(dyn Future<Output = ErasedValue> + 'static)>>;
 
 pub type TransitionFn<S> = Arc<
-    maybe_add_send_sync!(
-        dyn for<'a> Fn(&'a WriteTxRef<'_>, ErasedValue, S) -> BoxFuture<'a, S>
-    ),
+    maybe_add_send_sync!(dyn for<'a> Fn(&'a WriteTxRef<'_>, ErasedValue, S) -> BoxFuture<'a, S>),
 >;
 
 pub struct StateTransition<S> {

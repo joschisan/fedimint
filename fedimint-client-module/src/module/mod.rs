@@ -532,10 +532,7 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
 
     /// Returns the balance held by this module and available for funding
     /// transactions.
-    async fn get_balance(
-        &self,
-        _dbtx: &WriteTxRef<'_>,
-    ) -> Amount {
+    async fn get_balance(&self, _dbtx: &WriteTxRef<'_>) -> Amount {
         unimplemented!()
     }
 
@@ -600,10 +597,7 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// Calling code should allow the user to override and ignore any
     /// outstanding errors, after sufficient amount of warnings. Ideally,
     /// this should be done on per-module basis, to avoid mistakes.
-    async fn leave(
-        &self,
-        _dbtx: &WriteTxRef<'_>,
-    ) -> anyhow::Result<()> {
+    async fn leave(&self, _dbtx: &WriteTxRef<'_>) -> anyhow::Result<()> {
         bail!("Unable to determine if safe to leave the federation: Not implemented")
     }
 }
@@ -632,11 +626,8 @@ pub trait IClientModule: Debug {
         output_amount: Amount,
     ) -> anyhow::Result<DynFinalContribution>;
 
-    async fn get_balance(
-        &self,
-        module_instance: ModuleInstanceId,
-        dbtx: &WriteTxRef<'_>,
-    ) -> Amount;
+    async fn get_balance(&self, module_instance: ModuleInstanceId, dbtx: &WriteTxRef<'_>)
+    -> Amount;
 
     async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()>;
 }
@@ -726,11 +717,8 @@ where
         module_instance: ModuleInstanceId,
         dbtx: &WriteTxRef<'_>,
     ) -> Amount {
-        <T as ClientModule>::get_balance(
-            self,
-            &dbtx.isolate(format!("module-{module_instance}")),
-        )
-        .await
+        <T as ClientModule>::get_balance(self, &dbtx.isolate(format!("module-{module_instance}")))
+            .await
     }
 
     async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()> {
