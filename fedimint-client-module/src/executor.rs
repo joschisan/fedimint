@@ -56,8 +56,8 @@ pub trait StateMachine:
 
 /// Type-erased trigger value. The concrete type is captured inside the
 /// closure stored on [`StateTransition::transition`] and recovered via
-/// downcast; retries of the transition body (autocommit conflicts) clone
-/// the value from the [`Arc`].
+/// downcast; retries of the transition body (write conflicts) clone the
+/// value from the [`Arc`].
 pub type ErasedValue = Arc<maybe_add_send_sync!(dyn Any)>;
 
 pub type TriggerFuture = Pin<Box<maybe_add_send!(dyn Future<Output = ErasedValue> + 'static)>>;

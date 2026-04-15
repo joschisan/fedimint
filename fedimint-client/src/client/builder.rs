@@ -286,7 +286,6 @@ impl ClientBuilder {
             }
             _ => {
                 debug!(target: LOG_CLIENT, "Backfilling secret hash");
-                // Note: no need for dbtx autocommit, we are the only writer ATM
                 let mut dbtx = db_no_decoders.begin_write_transaction().await;
                 dbtx.insert_entry(
                     &ClientPreRootSecretHashKey,

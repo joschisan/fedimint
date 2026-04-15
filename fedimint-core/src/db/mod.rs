@@ -3124,10 +3124,6 @@ mod test_utils {
         dbtx.insert_entry(&TestKey(100), &TestVal(101)).await;
         dbtx.commit_tx().await;
 
-        // This test verifies write conflict detection.
-        // With the single-writer semaphore, we can't have concurrent write transactions
-        // from the same process, but we can still test that autocommit handles
-        // conflicts properly through retries.
         let mut dbtx2 = db.begin_write_transaction().await;
         dbtx2.insert_entry(&TestKey(100), &TestVal(102)).await;
         dbtx2.commit_tx().await;

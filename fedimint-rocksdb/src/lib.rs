@@ -405,7 +405,7 @@ impl IRawWriteDatabaseTransaction for RocksDbTransaction<'_> {
                 Err(err) => {
                     // RocksDB's OptimisticTransactionDB can return Busy/TryAgain errors
                     // when concurrent transactions conflict on the same keys.
-                    // These are retriable - return WriteConflict so autocommit retries.
+                    // These are retriable - return WriteConflict so callers retry.
                     // See: https://github.com/fedimint/fedimint/issues/8077
                     match err.kind() {
                         rocksdb::ErrorKind::Busy
