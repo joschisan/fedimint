@@ -99,6 +99,22 @@ impl Database {
         })
     }
 
+    /// Open an in-memory database. Intended for tests and ephemeral dev use.
+    pub fn open_in_memory() -> Self {
+        let env = redb::Database::builder()
+            .create_with_backend(redb::backends::InMemoryBackend::new())
+            .expect("in-memory redb create failed");
+
+        Self {
+            inner: Arc::new(DatabaseInner {
+                env,
+                notify: Mutex::new(BTreeMap::new()),
+                decoders: OnceLock::new(),
+            }),
+            prefix: Vec::new(),
+        }
+    }
+
     /// Install the decoder registry used to deserialize dynamically-typed
     /// module values. Callable once (further calls are ignored).
     pub fn set_decoders(&self, decoders: ModuleDecoderRegistry) {
@@ -225,10 +241,11 @@ impl ReadTransaction {
 
         let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(&name);
 
-        let inner = self
-            .tx
-            .open_table(td)
-            .expect("redb open_table (read) failed");
+        let inner = match self.tx.open_table(td) {
+            Ok(t) => Some(t),
+            Err(redb::TableError::TableDoesNotExist(_)) => None,
+            Err(e) => panic!("redb open_table (read) failed: {e}"),
+        };
 
         ReadTable {
             inner,
@@ -271,10 +288,7 @@ impl WriteTransaction {
             .open_table(td)
             .expect("redb open_table (write) failed");
 
-        self.touched
-            .lock()
-            .expect("touched poisoned")
-            .insert(name);
+        self.touched.lock().expect("touched poisoned").insert(name);
 
         WriteTable {
             inner,
@@ -342,7 +356,7 @@ impl WriteTransaction {
 // ─── Table handles ───────────────────────────────────────────────────────
 
 pub struct ReadTable<'tx, K, V> {
-    inner: redb::ReadOnlyTable<&'static [u8], &'static [u8]>,
+    inner: Option<redb::ReadOnlyTable<&'static [u8], &'static [u8]>>,
     decoders: &'tx OnceLock<ModuleDecoderRegistry>,
     _phantom: PhantomData<(K, V)>,
 }
@@ -353,9 +367,11 @@ where
     V: Encodable + Decodable,
 {
     pub fn get(&self, key: &K) -> Option<V> {
+        let inner = self.inner.as_ref()?;
+
         let k = key.consensus_encode_to_vec();
 
-        let raw = self.inner.get(k.as_slice()).expect("redb get failed")?;
+        let raw = inner.get(k.as_slice()).expect("redb get failed")?;
 
         Some(decode_value(raw.value(), self.decoders))
     }
@@ -364,11 +380,18 @@ where
     where
         R: RangeBounds<K>,
     {
-        range_collect(&self.inner, range, self.decoders)
+        match &self.inner {
+            Some(t) => range_collect(t, range, self.decoders),
+            None => Vec::new(),
+        }
     }
 
     pub fn iter(&self) -> Vec<(K, V)> {
-        self.inner
+        let Some(inner) = &self.inner else {
+            return Vec::new();
+        };
+
+        inner
             .iter()
             .expect("redb iter failed")
             .map(|r| {
@@ -418,10 +441,7 @@ where
     pub fn remove(&mut self, key: &K) -> Option<V> {
         let k = key.consensus_encode_to_vec();
 
-        let prior = self
-            .inner
-            .remove(k.as_slice())
-            .expect("redb remove failed");
+        let prior = self.inner.remove(k.as_slice()).expect("redb remove failed");
 
         prior.map(|g| decode_value(g.value(), self.decoders))
     }
@@ -502,3 +522,171 @@ fn decode_value<T: Decodable>(bytes: &[u8], decoders: &OnceLock<ModuleDecoderReg
     T::consensus_decode_whole(bytes, &d).expect("consensus_decode failed")
 }
 
+// ─── Playground tests ────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    const USERS: TableDef<u64, String> = TableDef::new("users");
+    const BALANCES: TableDef<u64, u64> = TableDef::new("balances");
+
+    #[tokio::test]
+    async fn basic_read_write() {
+        let db = Database::open_in_memory();
+
+        let tx = db.begin_write().await;
+        tx.insert(&USERS, &1, &"alice".to_string());
+        tx.insert(&USERS, &2, &"bob".to_string());
+        tx.insert(&BALANCES, &1, &100);
+        tx.commit().await;
+
+        let tx = db.begin_read().await;
+        assert_eq!(tx.get(&USERS, &1), Some("alice".to_string()));
+        assert_eq!(tx.get(&USERS, &2), Some("bob".to_string()));
+        assert_eq!(tx.get(&USERS, &3), None);
+        assert_eq!(tx.get(&BALANCES, &1), Some(100));
+    }
+
+    #[tokio::test]
+    async fn uncommitted_writes_are_discarded() {
+        let db = Database::open_in_memory();
+
+        let tx = db.begin_write().await;
+        tx.insert(&USERS, &1, &"alice".to_string());
+        drop(tx);
+
+        let tx = db.begin_read().await;
+        assert_eq!(tx.get(&USERS, &1), None);
+    }
+
+    #[tokio::test]
+    async fn isolation_separates_namespaces() {
+        let db = Database::open_in_memory();
+        let client_a = db.isolate("client_a");
+        let client_b = db.isolate("client_b");
+
+        let tx = client_a.begin_write().await;
+        tx.insert(&USERS, &1, &"alice".to_string());
+        tx.commit().await;
+
+        let tx = client_b.begin_write().await;
+        tx.insert(&USERS, &1, &"bob".to_string());
+        tx.commit().await;
+
+        assert_eq!(
+            client_a.begin_read().await.get(&USERS, &1),
+            Some("alice".to_string())
+        );
+        assert_eq!(
+            client_b.begin_read().await.get(&USERS, &1),
+            Some("bob".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn nested_isolation_composes() {
+        let db = Database::open_in_memory();
+        let nested = db.isolate("gateway").isolate("client_7").isolate("mint");
+
+        let tx = nested.begin_write().await;
+        tx.insert(&BALANCES, &42, &999);
+        tx.commit().await;
+
+        assert_eq!(nested.begin_read().await.get(&BALANCES, &42), Some(999));
+        assert_eq!(db.begin_read().await.get(&BALANCES, &42), None);
+    }
+
+    #[tokio::test]
+    async fn range_iterates_sorted() {
+        let db = Database::open_in_memory();
+
+        let tx = db.begin_write().await;
+        for i in 0u64..10 {
+            tx.insert(&BALANCES, &i, &(i * 10));
+        }
+        tx.commit().await;
+
+        let tx = db.begin_read().await;
+        let table = tx.open_table(&BALANCES);
+        let items = table.range(3u64..7u64);
+
+        assert_eq!(items, vec![(3, 30), (4, 40), (5, 50), (6, 60)]);
+    }
+
+    #[tokio::test]
+    async fn wait_key_wakes_after_commit() {
+        let db = Database::open_in_memory();
+
+        let db_writer = db.clone();
+        let writer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let tx = db_writer.begin_write().await;
+            tx.insert(&USERS, &1, &"alice".to_string());
+            tx.commit().await;
+        });
+
+        let (value, _tx) = db.wait_key(&USERS, &1).await;
+        assert_eq!(value, "alice");
+
+        writer.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_key_check_returns_consistent_tx() {
+        let db = Database::open_in_memory();
+
+        let tx = db.begin_write().await;
+        tx.insert(&BALANCES, &1, &50);
+        tx.commit().await;
+
+        let db_writer = db.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let tx = db_writer.begin_write().await;
+            tx.insert(&BALANCES, &1, &150);
+            tx.commit().await;
+        });
+
+        let (v, tx) = db
+            .wait_key_check(&BALANCES, &1, |v| v.filter(|n| *n >= 100))
+            .await;
+
+        assert_eq!(v, 150);
+        assert_eq!(tx.get(&BALANCES, &1), Some(150));
+    }
+
+    #[tokio::test]
+    async fn on_commit_fires_after_commit() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let db = Database::open_in_memory();
+        let fired = Arc::new(AtomicBool::new(false));
+
+        let tx = db.begin_write().await;
+        tx.insert(&USERS, &1, &"alice".to_string());
+        let f = fired.clone();
+        tx.on_commit(move || f.store(true, Ordering::SeqCst));
+        assert!(!fired.load(Ordering::SeqCst));
+        tx.commit().await;
+
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn on_commit_does_not_fire_if_dropped() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let db = Database::open_in_memory();
+        let fired = Arc::new(AtomicBool::new(false));
+
+        let tx = db.begin_write().await;
+        let f = fired.clone();
+        tx.on_commit(move || f.store(true, Ordering::SeqCst));
+        drop(tx);
+
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+}
