@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 
-use db::DbKeyPrefix;
 use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
@@ -13,7 +12,6 @@ use fedimint_core::{Amount, apply, async_trait_maybe_send};
 pub use fedimint_empty_common as common;
 use fedimint_empty_common::config::EmptyClientConfig;
 use fedimint_empty_common::{EmptyCommonInit, EmptyModuleTypes};
-use strum::IntoEnumIterator;
 
 pub mod api;
 pub mod db;

@@ -33,7 +33,6 @@ use fedimint_server_core::dashboard_ui::{
     GuardianConfigBackup, IDashboardApi, P2PConnectionStatus, ServerBitcoinRpcStatus,
 };
 use fedimint_server_core::{DynServerModule, ServerModuleRegistry, ServerModuleRegistryExt};
-use futures::StreamExt;
 use tokio::sync::watch::{self, Receiver, Sender};
 use tracing::{debug, warn};
 

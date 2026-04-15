@@ -15,17 +15,14 @@ use std::time::Duration;
 use anyhow::Context as _;
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
-use fedimint_core::db::Database;
 use fedimint_core::envs::{
     FM_IROH_DNS_ENV, FM_IROH_RELAY_ENV, FM_USE_UNKNOWN_MODULE_ENV, is_env_var_set,
 };
-use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::timing;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl, handle_version_hash_command};
 use fedimint_logging::{LOG_CORE, TracingSetup};
-use fedimint_redb::RedbDatabase;
 use fedimint_server::config::ConfigGenSettings;
 use fedimint_server::config::io::DB_FILE;
 use fedimint_server::core::ServerModuleInitRegistry;

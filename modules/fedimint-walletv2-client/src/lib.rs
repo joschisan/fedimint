@@ -32,7 +32,6 @@ use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{
     Database, DatabaseVersion, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
-    WriteDatabaseTransaction,
 };
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};

@@ -12,7 +12,7 @@ pub mod events;
 mod receive_sm;
 mod send_sm;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bitcoin::hashes::{Hash, sha256};
