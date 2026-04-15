@@ -127,9 +127,9 @@ Schema:
 
 ```json
 {
-  "summary": "One paragraph describing what the PR does.",
-  "consensus_impact": "\"None\", or a description of what changed and why it is (or isn't) safe.",
   "verdict": "APPROVE or COMMENT",
+  "consensus_impact": "null, or a description of consensus implications that a human reviewer must evaluate.",
+  "reason": "null, or a short explanation of why the PR was not auto-approved (only when verdict is COMMENT and the reason is non-obvious).",
   "inline_comments": [
     {
       "path": "relative/path/to/file.rs",
@@ -138,8 +138,7 @@ Schema:
       "severity": "critical | warning | nit",
       "body": "Explanation of the issue."
     }
-  ],
-  "body": "Optional overall review body in markdown. Use this for high-level feedback that doesn't belong on a specific line."
+  ]
 }
 ```
 
@@ -148,7 +147,16 @@ Field details:
   and the PR does NOT touch consensus-critical paths. `COMMENT` — use for all
   other cases: consensus-critical PRs, PRs with issues found, or when unsure.
   Never block a PR.
-- **inline_comments**: Array of line-level comments. Can be empty.
+- **consensus_impact**: `null` if no consensus-critical code is affected. If
+  consensus-critical paths are touched, describe the specific implications a
+  human reviewer should evaluate. Do NOT write "None" — use `null`.
+- **reason**: `null` when approving, or when the inline comments already make
+  the reason obvious. Only set this to a short sentence when the verdict is
+  COMMENT and a human needs to understand what to focus on beyond the inline
+  comments (e.g. "touches consensus encoding", "diff was truncated").
+- **inline_comments**: Array of line-level comments. All findings — bugs, nits,
+  warnings — MUST go here as inline comments, not in a top-level summary.
+  Can be empty if the change is clean.
   - **path**: File path relative to repo root, as shown in the diff.
   - **line**: The line number in the diff to attach the comment to.
   - **side**: `RIGHT` for lines in the new version (additions, context on new
@@ -158,5 +166,10 @@ Field details:
     code smells or risky patterns, `nit` for style suggestions.
   - **body**: The comment text. Be specific and actionable. For critical/warning
     issues, explain what could go wrong.
-- **body**: Overall review comment. Summarize the review, mention consensus
-  impact if relevant. Can be empty string if inline comments cover everything.
+
+**Verbosity rules**: Be concise. Do NOT write a summary of what the PR does —
+the reviewer can read the diff. Do NOT restate findings in a top-level body
+that are already covered by inline comments. The top-level review comment
+should be minimal or empty; only include information a human reviewer needs
+that cannot be expressed as an inline comment (consensus implications, reasons
+for withholding approval).
