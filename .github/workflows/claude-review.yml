@@ -286,32 +286,38 @@ jobs:
             VERDICT="COMMENT"
           fi
 
-          # Build the overall review body from JSON fields
-          SUMMARY=$(jq -r '.summary // ""' < /tmp/review.json)
-          CONSENSUS_IMPACT=$(jq -r '.consensus_impact // "None"' < /tmp/review.json)
-          BODY=$(jq -r '.body // ""' < /tmp/review.json)
+          # Build a minimal review body — only show information a human needs
+          CONSENSUS_IMPACT=$(jq -r '.consensus_impact // ""' < /tmp/review.json)
+          REASON=$(jq -r '.reason // ""' < /tmp/review.json)
 
-          {
-            echo "## Summary"
-            echo "$SUMMARY"
-            echo ""
-            echo "## Consensus Impact"
-            echo "$CONSENSUS_IMPACT"
-            if [ -n "$BODY" ]; then
-              echo ""
-              echo "$BODY"
-            fi
-            if [ "$IS_CONSENSUS" = "true" ] && [ "$VERDICT" = "COMMENT" ]; then
-              echo ""
-              echo "---"
-              echo "*Auto-approval is disabled for PRs touching consensus-critical code. A human reviewer must approve this PR.*"
-            fi
-            if [ "$TRUNCATED" = "true" ]; then
-              echo ""
-              echo "---"
-              echo "*The diff was too large for complete automated review. A human reviewer should verify the full changeset.*"
-            fi
-          } > /tmp/review_body.txt
+          # Treat JSON null as empty
+          [ "$CONSENSUS_IMPACT" = "null" ] && CONSENSUS_IMPACT=""
+          [ "$REASON" = "null" ] && REASON=""
+
+          BODY_PARTS=()
+
+          if [ -n "$CONSENSUS_IMPACT" ]; then
+            BODY_PARTS+=("**Consensus impact:** $CONSENSUS_IMPACT")
+          fi
+
+          if [ -n "$REASON" ]; then
+            BODY_PARTS+=("$REASON")
+          fi
+
+          if [ "$IS_CONSENSUS" = "true" ] && [ "$VERDICT" = "COMMENT" ]; then
+            BODY_PARTS+=("*Auto-approval is disabled for PRs touching consensus-critical code. A human reviewer must approve this PR.*")
+          fi
+
+          if [ "$TRUNCATED" = "true" ]; then
+            BODY_PARTS+=("*The diff was too large for complete automated review. A human reviewer should verify the full changeset.*")
+          fi
+
+          # Join parts with blank lines, or use a minimal default
+          if [ ${#BODY_PARTS[@]} -gt 0 ]; then
+            printf '%s\n\n' "${BODY_PARTS[@]}" | sed '$ d' > /tmp/review_body.txt
+          else
+            echo "LGTM" > /tmp/review_body.txt
+          fi
 
           # Check if there are inline comments
           INLINE_COUNT=$(jq '.inline_comments | length' < /tmp/review.json)
