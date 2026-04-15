@@ -25,7 +25,7 @@ use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_client_module::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::IWriteDatabaseTransactionOpsTyped;
+use fedimint_core::db::v2::IWriteDatabaseTransactionOpsTyped;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::hex::ToHex;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
@@ -241,19 +241,16 @@ impl GatewayClientModuleV2 {
             .min_contract_amount(&payload.federation_id, amount)
             .await?;
 
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let tx = dbtx.as_ref();
 
-        if dbtx
-            .insert_entry(&db::OperationKey(operation_id), &())
-            .await
-            .is_some()
-        {
+        if tx.insert(&db::OPERATION, &operation_id, &()).is_some() {
             return Ok(self.subscribe_send(operation_id).await);
         }
 
         self.send_executor
             .add_state_machine_dbtx(
-                &mut dbtx.to_ref_nc(),
+                &tx,
                 SendStateMachine {
                     common: SendSMCommon {
                         operation_id,
@@ -269,7 +266,7 @@ impl GatewayClientModuleV2 {
             )
             .await;
 
-        dbtx.commit_tx().await;
+        dbtx.commit().await;
 
         Ok(self.subscribe_send(operation_id).await)
     }
@@ -313,19 +310,16 @@ impl GatewayClientModuleV2 {
         ]));
         let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
 
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let tx = dbtx.as_ref();
 
-        if dbtx
-            .insert_entry(&db::OperationKey(operation_id), &())
-            .await
-            .is_some()
-        {
+        if tx.insert(&db::OPERATION, &operation_id, &()).is_some() {
             return Ok(());
         }
 
         let range = self
             .client_ctx
-            .finalize_and_submit_transaction_dbtx(&mut dbtx.to_ref_nc(), operation_id, transaction)
+            .finalize_and_submit_transaction_dbtx(&tx, operation_id, transaction)
             .await?;
 
         let outpoint = OutPoint {
@@ -335,7 +329,7 @@ impl GatewayClientModuleV2 {
 
         self.receive_executor
             .add_state_machine_dbtx(
-                &mut dbtx.to_ref_nc(),
+                &tx,
                 ReceiveStateMachine {
                     common: ReceiveSMCommon {
                         operation_id,
@@ -350,7 +344,7 @@ impl GatewayClientModuleV2 {
 
         self.complete_executor
             .add_state_machine_dbtx(
-                &mut dbtx.to_ref_nc(),
+                &tx,
                 CompleteStateMachine {
                     common: CompleteSMCommon {
                         operation_id,
@@ -363,7 +357,7 @@ impl GatewayClientModuleV2 {
             )
             .await;
 
-        dbtx.commit_tx().await;
+        dbtx.commit().await;
 
         Ok(())
     }
@@ -389,19 +383,16 @@ impl GatewayClientModuleV2 {
         ]));
         let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
 
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let tx = dbtx.as_ref();
 
-        if dbtx
-            .insert_entry(&db::OperationKey(operation_id), &())
-            .await
-            .is_some()
-        {
+        if tx.insert(&db::OPERATION, &operation_id, &()).is_some() {
             return Ok(self.await_receive(operation_id).await);
         }
 
         let range = self
             .client_ctx
-            .finalize_and_submit_transaction_dbtx(&mut dbtx.to_ref_nc(), operation_id, transaction)
+            .finalize_and_submit_transaction_dbtx(&tx, operation_id, transaction)
             .await?;
 
         let outpoint = OutPoint {
@@ -411,7 +402,7 @@ impl GatewayClientModuleV2 {
 
         self.receive_executor
             .add_state_machine_dbtx(
-                &mut dbtx.to_ref_nc(),
+                &tx,
                 ReceiveStateMachine {
                     common: ReceiveSMCommon {
                         operation_id,
@@ -424,7 +415,7 @@ impl GatewayClientModuleV2 {
             )
             .await;
 
-        dbtx.commit_tx().await;
+        dbtx.commit().await;
 
         Ok(self.await_receive(operation_id).await)
     }

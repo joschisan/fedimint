@@ -3,61 +3,24 @@ use std::collections::{BTreeMap, BTreeSet};
 use bitcoin_hashes::hash160;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::{impl_db_lookup, impl_db_record};
-use fedimint_mintv2_common::Denomination;
-use strum::Display;
-use strum_macros::EnumIter;
+use fedimint_core::table;
 
 use crate::SpendableNote;
 use crate::issuance::NoteIssuanceRequest;
 
-#[repr(u8)]
-#[derive(Clone, Display, EnumIter, Debug)]
-pub enum DbKeyPrefix {
-    Note = 0x20,
-    RecoveryState = 0x21,
-    InputStateMachine = 0x22,
-    OutputStateMachine = 0x23,
-    ReceiveStateMachine = 0x24,
-    ReceiveOperation = 0x25,
-}
-
-/// Tracks that a `receive(ecash)` has been started for this deterministic
-/// [`OperationId`]. Used to make `receive` idempotent.
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct ReceiveOperationKey(pub OperationId);
-
-impl_db_record!(
-    key = ReceiveOperationKey,
-    value = (),
-    db_prefix = DbKeyPrefix::ReceiveOperation,
+// Tracks that a `receive(ecash)` has been started for this deterministic
+// [`OperationId`]. Used to make `receive` idempotent.
+table!(
+    RECEIVE_OPERATION,
+    OperationId => (),
+    "receive-operation",
 );
 
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SpendableNoteKey(pub SpendableNote);
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SpendableNotePrefix;
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SpendableNoteAmountPrefix(pub Denomination);
-
-impl_db_record!(
-    key = SpendableNoteKey,
-    value = (),
-    db_prefix = DbKeyPrefix::Note,
+table!(
+    NOTE,
+    SpendableNote => (),
+    "note",
 );
-
-impl_db_lookup!(key = SpendableNoteKey, query_prefix = SpendableNotePrefix);
-
-impl_db_lookup!(
-    key = SpendableNoteKey,
-    query_prefix = SpendableNoteAmountPrefix
-);
-
-/// Key for storing recovery progress state
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct RecoveryStateKey;
 
 /// Recovery state that can be checkpointed and resumed
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -73,8 +36,8 @@ pub struct RecoveryState {
     pub nonces: BTreeSet<hash160::Hash>,
 }
 
-impl_db_record!(
-    key = RecoveryStateKey,
-    value = RecoveryState,
-    db_prefix = DbKeyPrefix::RecoveryState,
+table!(
+    RECOVERY_STATE,
+    () => RecoveryState,
+    "recovery-state",
 );

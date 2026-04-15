@@ -40,6 +40,7 @@ fedimint-derive-secret = { workspace = true }
 fedimint-eventlog = { workspace = true }
 fedimint-logging = { workspace = true }
 fedimint-mintv2-common = { workspace = true }
+fedimint-redb = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 itertools = { workspace = true }

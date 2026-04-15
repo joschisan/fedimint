@@ -29,6 +29,7 @@ fedimint-eventlog = { workspace = true }
 fedimint-lnurl = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 fedimint-logging = { workspace = true }
+fedimint-redb = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 lightning-invoice = { workspace = true }

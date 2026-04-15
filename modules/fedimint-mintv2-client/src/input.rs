@@ -3,9 +3,9 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::module::OutPointRange;
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_mintv2_common::MintInput;
+use fedimint_redb::v2::WriteTxRef;
 
 use crate::{MintSmContext, SpendableNote};
 
@@ -30,7 +30,7 @@ pub enum InputSMState {
 }
 
 impl StateMachine for InputStateMachine {
-    const DB_PREFIX: u8 = crate::client_db::DbKeyPrefix::InputStateMachine as u8;
+    const TABLE_NAME: &'static str = "input-sm";
 
     type Context = MintSmContext;
 
@@ -58,7 +58,7 @@ async fn await_pending_sm(ctx: MintSmContext, txid: TransactionId) -> Result<(),
 
 async fn transition_pending_sm(
     ctx: MintSmContext,
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    dbtx: &WriteTxRef<'_>,
     result: Result<(), String>,
     old_state: InputStateMachine,
 ) -> InputStateMachine {

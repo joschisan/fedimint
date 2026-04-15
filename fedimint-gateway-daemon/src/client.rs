@@ -5,16 +5,17 @@ use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::{Client, ClientBuilder, RootSecret};
 use fedimint_client_module::secret::RootSecretStrategy;
 use fedimint_core::config::{ClientConfig, FederationId};
-use fedimint_core::db::{
-    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+use fedimint_core::db::v2::{
+    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
 };
 use fedimint_core::invite_code::InviteCode;
 use fedimint_gwv2_client::GatewayClientInitV2;
+use fedimint_redb::v2::Database;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 
 use crate::AppState;
-use crate::db::{ClientConfigKey, DbKeyPrefix, RootEntropyKey};
+use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
 
 #[derive(Debug, Clone)]
 pub struct GatewayClientFactory {
@@ -31,12 +32,13 @@ impl GatewayClientFactory {
         mnemonic: Mnemonic,
         registry: ClientModuleInitRegistry,
     ) -> anyhow::Result<Self> {
-        let mut dbtx = db.begin_write_transaction().await;
-        dbtx.insert_new_entry(&RootEntropyKey, &mnemonic.to_entropy())
-            .await;
-        dbtx.commit_tx_result()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to store mnemonic: {e}"))?;
+        let dbtx = db.begin_write().await;
+        assert!(
+            dbtx.as_ref()
+                .insert(&ROOT_ENTROPY, &(), &mnemonic.to_entropy())
+                .is_none()
+        );
+        dbtx.commit().await;
 
         let endpoint = Endpoint::builder(N0).bind().await?;
 
@@ -53,11 +55,7 @@ impl GatewayClientFactory {
         db: Database,
         registry: ClientModuleInitRegistry,
     ) -> anyhow::Result<Option<Self>> {
-        let entropy = db
-            .begin_write_transaction()
-            .await
-            .get_value(&RootEntropyKey)
-            .await;
+        let entropy = db.begin_read().await.as_ref().get(&ROOT_ENTROPY, &());
 
         match entropy {
             Some(entropy) => {
@@ -88,11 +86,7 @@ impl GatewayClientFactory {
     }
 
     fn client_database(&self, federation_id: FederationId) -> Database {
-        self.db.with_prefix(
-            std::iter::once(DbKeyPrefix::ClientDatabase as u8)
-                .chain(federation_id.consensus_encode_to_vec())
-                .collect::<Vec<u8>>(),
-        )
+        self.db.isolate(format!("client-{federation_id}"))
     }
 
     async fn client_builder(&self, gateway: Arc<AppState>) -> anyhow::Result<ClientBuilder> {
@@ -107,10 +101,10 @@ impl GatewayClientFactory {
     }
 
     async fn save_config(&self, config: &ClientConfig) {
-        let mut dbtx = self.db.begin_write_transaction().await;
-        dbtx.insert_entry(&ClientConfigKey(config.calculate_federation_id()), config)
-            .await;
-        dbtx.commit_tx().await;
+        let dbtx = self.db.begin_write().await;
+        dbtx.as_ref()
+            .insert(&CLIENT_CONFIG, &config.calculate_federation_id(), config);
+        dbtx.commit().await;
     }
 
     /// Join a federation for the first time.
@@ -168,20 +162,6 @@ impl GatewayClientFactory {
 
     /// List all federation configs stored in the database.
     pub async fn list_federations(&self) -> Vec<(FederationId, ClientConfig)> {
-        use futures::StreamExt;
-
-        use crate::db::ClientConfigPrefix;
-
-        self.db
-            .begin_write_transaction()
-            .await
-            .find_by_prefix(&ClientConfigPrefix)
-            .await
-            .map(|(key, config)| (key.0, config))
-            .collect()
-            .await
+        self.db.begin_read().await.as_ref().iter(&CLIENT_CONFIG)
     }
 }
-
-// Need this for consensus_encode_to_vec
-use fedimint_core::encoding::Encodable;

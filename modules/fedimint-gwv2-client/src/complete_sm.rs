@@ -2,8 +2,8 @@ use std::fmt;
 
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_core::core::OperationId;
-use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_redb::v2::WriteTxRef;
 
 use super::FinalReceiveState;
 use super::events::CompleteLightningPaymentEvent;
@@ -75,7 +75,7 @@ impl fmt::Display for CompleteSMState {
 }
 
 impl StateMachine for CompleteStateMachine {
-    const DB_PREFIX: u8 = crate::db::DbKeyPrefix::CompleteStateMachine as u8;
+    const TABLE_NAME: &'static str = "complete-sm";
 
     type Context = GwV2SmContext;
 
@@ -86,7 +86,7 @@ impl StateMachine for CompleteStateMachine {
                 let operation_id = self.common.operation_id;
                 vec![SmStateTransition::new(
                     async move { await_receive_from_log(&ctx_clone.client_ctx, operation_id).await },
-                    |_dbtx: &mut WriteDatabaseTransaction<'_>,
+                    |_dbtx: &WriteTxRef<'_>,
                      result: FinalReceiveState,
                      old_state: CompleteStateMachine| {
                         Box::pin(
@@ -145,7 +145,7 @@ async fn await_completion_sm(
 
 async fn transition_completion_sm(
     ctx: GwV2SmContext,
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    dbtx: &WriteTxRef<'_>,
     old_state: CompleteStateMachine,
 ) -> CompleteStateMachine {
     ctx.client_ctx

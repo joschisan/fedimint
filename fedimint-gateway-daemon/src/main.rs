@@ -19,8 +19,6 @@ use clap::{ArgGroup, Parser};
 use fedimint_bip39::Bip39RootSecretStrategy;
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
-use fedimint_core::db::Database;
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
 use fedimint_core::{Amount, fedimint_build_code_version_env};
@@ -30,7 +28,6 @@ use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use fedimint_mintv2_client::MintClientInit;
-use fedimint_redb::RedbDatabase;
 use fedimint_walletv2_client::WalletClientInit;
 use lightning::types::payment::PaymentHash;
 use rand::rngs::OsRng;
@@ -139,8 +136,8 @@ fn main() -> anyhow::Result<()> {
     // 2. Open database
     runtime.block_on(install_crypto_provider());
 
-    let gateway_db = RedbDatabase::open(opts.data_dir.join(DB_FILE))
-        .map(|db| Database::new(db, ModuleDecoderRegistry::default()))?;
+    let gateway_db =
+        runtime.block_on(fedimint_redb::v2::Database::open(opts.data_dir.join(DB_FILE)))?;
 
     // 3. Load or init client factory (mnemonic)
     let mut registry = ClientModuleInitRegistry::new();

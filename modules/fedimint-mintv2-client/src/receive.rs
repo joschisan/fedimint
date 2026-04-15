@@ -1,8 +1,8 @@
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_redb::v2::WriteTxRef;
 
 use crate::MintSmContext;
 use crate::events::{ReceivePaymentStatus, ReceivePaymentUpdateEvent};
@@ -36,7 +36,7 @@ pub enum ReceiveSMState {
 }
 
 impl StateMachine for ReceiveStateMachine {
-    const DB_PREFIX: u8 = crate::client_db::DbKeyPrefix::ReceiveStateMachine as u8;
+    const TABLE_NAME: &'static str = "receive-sm";
 
     type Context = MintSmContext;
 
@@ -61,7 +61,7 @@ impl StateMachine for ReceiveStateMachine {
 
 async fn transition_tx_outcome_sm(
     ctx: MintSmContext,
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    dbtx: &WriteTxRef<'_>,
     result: Result<(), String>,
     old_state: ReceiveStateMachine,
 ) -> ReceiveStateMachine {

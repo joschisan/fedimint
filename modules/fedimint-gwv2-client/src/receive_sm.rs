@@ -7,8 +7,8 @@ use fedimint_api_client::query::FilterMapThreshold;
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::core::OperationId;
-use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_redb::v2::WriteTxRef;
 use fedimint_core::module::ApiRequestErased;
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::{NumPeersExt, OutPoint, PeerId};
@@ -89,7 +89,7 @@ impl fmt::Display for ReceiveSMState {
 ///     Funding -- decrypted preimage is invalid --> Refunding
 /// ```
 impl StateMachine for ReceiveStateMachine {
-    const DB_PREFIX: u8 = crate::db::DbKeyPrefix::ReceiveStateMachine as u8;
+    const TABLE_NAME: &'static str = "receive-sm";
 
     type Context = GwV2SmContext;
 
@@ -156,7 +156,7 @@ async fn await_decryption_shares_sm(
 
 async fn transition_decryption_shares_sm(
     ctx: GwV2SmContext,
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    dbtx: &WriteTxRef<'_>,
     old_state: ReceiveStateMachine,
     decryption_shares: Result<BTreeMap<PeerId, DecryptionKeyShare>, String>,
 ) -> ReceiveStateMachine {

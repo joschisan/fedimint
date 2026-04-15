@@ -4,8 +4,8 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_redb::v2::WriteTxRef;
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::{Amount, OutPoint};
 use fedimint_lnv2_common::contracts::OutgoingContract;
@@ -105,7 +105,7 @@ pub enum Cancelled {
 ///     Sending -- payment fails --> Cancelled
 /// ```
 impl StateMachine for SendStateMachine {
-    const DB_PREFIX: u8 = crate::db::DbKeyPrefix::SendStateMachine as u8;
+    const TABLE_NAME: &'static str = "send-sm";
 
     type Context = GwV2SmContext;
 
@@ -219,7 +219,7 @@ async fn send_payment_sm(
 
 async fn transition_send_payment_sm(
     ctx: GwV2SmContext,
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    dbtx: &WriteTxRef<'_>,
     old_state: SendStateMachine,
     result: Result<PaymentResponse, Cancelled>,
 ) -> SendStateMachine {

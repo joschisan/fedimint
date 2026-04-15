@@ -5,13 +5,14 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::module::OutPointRange;
 use fedimint_core::PeerId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{IWriteDatabaseTransactionOpsTyped, WriteDatabaseTransaction};
+use fedimint_core::db::v2::IWriteDatabaseTransactionOpsTyped;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_mintv2_common::{Denomination, verify_note};
+use fedimint_redb::v2::WriteTxRef;
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use crate::api::MintV2ModuleApi;
-use crate::client_db::SpendableNoteKey;
+use crate::client_db::NOTE;
 use crate::events::OutputFinalisedEvent;
 use crate::{MintSmContext, NoteIssuanceRequest};
 
@@ -45,7 +46,7 @@ pub enum OutputSMState {
 }
 
 impl StateMachine for MintOutputStateMachine {
-    const DB_PREFIX: u8 = crate::client_db::DbKeyPrefix::OutputStateMachine as u8;
+    const TABLE_NAME: &'static str = "output-sm";
 
     type Context = MintSmContext;
 
@@ -96,7 +97,7 @@ async fn await_signature_shares_sm(
 
 async fn transition_outcome_ready_sm(
     ctx: MintSmContext,
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    dbtx: &WriteTxRef<'_>,
     signature_shares: Result<
         std::collections::BTreeMap<PeerId, Vec<BlindedSignatureShare>>,
         String,
@@ -132,8 +133,7 @@ async fn transition_outcome_ready_sm(
             };
         }
 
-        dbtx.insert_new_entry(&SpendableNoteKey(spendable_note), &())
-            .await;
+        assert!(dbtx.insert(&NOTE, &spendable_note, &()).is_none());
     }
 
     if let Some(range) = old_state.common.range {

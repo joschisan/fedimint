@@ -33,10 +33,11 @@ use client::GatewayClientFactory;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{
-    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+use fedimint_core::db::v2::{
+    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
 };
 use fedimint_core::invite_code::InviteCode;
+use fedimint_redb::v2::Database;
 use fedimint_core::module::CommonModuleInit;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::secp256k1::schnorr::Signature;
@@ -65,7 +66,7 @@ use tokio::sync::RwLock;
 use tracing::{info_span, warn};
 
 use crate::db::{
-    RegisteredIncomingContract as DbRegisteredIncomingContract, RegisteredIncomingContractKey,
+    REGISTERED_INCOMING_CONTRACT, RegisteredIncomingContract as DbRegisteredIncomingContract,
 };
 
 /// Default Bitcoin network for testing purposes.
@@ -379,18 +380,19 @@ impl AppState {
             )
             .await?;
 
-        let mut dbtx = self.gateway_db.begin_write_transaction().await;
+        let dbtx = self.gateway_db.begin_write().await;
 
         if dbtx
-            .insert_entry(
-                &RegisteredIncomingContractKey(payload.contract.commitment.payment_image.clone()),
+            .as_ref()
+            .insert(
+                &REGISTERED_INCOMING_CONTRACT,
+                &payload.contract.commitment.payment_image.clone(),
                 &DbRegisteredIncomingContract {
                     federation_id: payload.federation_id,
                     incoming_amount_msats: payload.amount.msats,
                     contract: payload.contract,
                 },
             )
-            .await
             .is_some()
         {
             return Err(anyhow::anyhow!(
@@ -398,9 +400,7 @@ impl AppState {
             ));
         }
 
-        dbtx.commit_tx_result().await.map_err(|_| {
-            anyhow::anyhow!("LNv2 incoming payment error: Payment hash is already registered")
-        })?;
+        dbtx.commit().await;
 
         Ok(invoice)
     }
@@ -442,12 +442,13 @@ impl AppState {
     ) -> std::result::Result<VerifyResponse, String> {
         let registered_contract = self
             .gateway_db
-            .begin_write_transaction()
+            .begin_read()
             .await
-            .get_value(&RegisteredIncomingContractKey(PaymentImage::Hash(
-                payment_hash,
-            )))
-            .await
+            .as_ref()
+            .get(
+                &REGISTERED_INCOMING_CONTRACT,
+                &PaymentImage::Hash(payment_hash),
+            )
             .ok_or("Unknown payment hash".to_string())?;
 
         let client = self
@@ -491,10 +492,10 @@ impl AppState {
     ) -> anyhow::Result<(IncomingContract, ClientHandleArc)> {
         let registered_incoming_contract = self
             .gateway_db
-            .begin_write_transaction()
+            .begin_read()
             .await
-            .get_value(&RegisteredIncomingContractKey(payment_image))
-            .await
+            .as_ref()
+            .get(&REGISTERED_INCOMING_CONTRACT, &payment_image)
             .context(
                 "LNv2 incoming payment error: No corresponding decryption contract available",
             )?;

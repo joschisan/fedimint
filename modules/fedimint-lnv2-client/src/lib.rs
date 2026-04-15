@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
-use db::{GatewayKey, IncomingContractStreamIndexKey, SendOperationKey};
+use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
@@ -24,9 +24,7 @@ use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_client_module::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{
-    IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped, WriteDatabaseTransaction,
-};
+use fedimint_core::db::v2::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::SECP256K1;
@@ -35,6 +33,7 @@ use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
+use fedimint_redb::v2::WriteTxRef;
 use fedimint_lnv2_common::config::LightningClientConfig;
 use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::{
@@ -49,7 +48,6 @@ use lightning_invoice::{Bolt11Invoice, Currency};
 use secp256k1::{Keypair, PublicKey, Scalar, SecretKey, ecdh};
 use thiserror::Error;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
-use tracing::warn;
 
 use crate::api::LightningFederationApi;
 use crate::events::SendPaymentEvent;
@@ -232,14 +230,15 @@ impl LightningClientModule {
                 }
             }
 
-            let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
-            for (key, gateway) in entries {
-                dbtx.insert_entry(&GatewayKey(key), &gateway).await;
+            let dbtx = self.client_ctx.module_db().begin_write().await;
+            {
+                let tx = dbtx.as_ref();
+                for (key, gateway) in entries {
+                    tx.insert(&GATEWAY, &GatewayKey(key), &gateway);
+                }
             }
 
-            if let Err(e) = dbtx.commit_tx_result().await {
-                warn!("Failed to commit the updated gateway mapping to the database: {e}");
-            }
+            dbtx.commit().await;
         }
     }
 
@@ -265,10 +264,9 @@ impl LightningClientModule {
             && let Some(gateway) = self
                 .client_ctx
                 .module_db()
-                .begin_write_transaction()
+                .begin_read()
                 .await
-                .get_value(&GatewayKey(invoice.recover_payee_pub_key()))
-                .await
+                .get(&GATEWAY, &GatewayKey(invoice.recover_payee_pub_key()))
                 .filter(|gateway| gateways.contains(gateway))
             && let Ok(Some(routing_info)) = self.routing_info(&gateway).await
         {
@@ -412,25 +410,22 @@ impl LightningClientModule {
 
         let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
 
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let tx = dbtx.as_ref();
 
-        if dbtx
-            .insert_entry(&SendOperationKey(operation_id), &())
-            .await
-            .is_some()
-        {
+        if tx.insert(&SEND_OPERATION, &operation_id, &()).is_some() {
             return Err(SendPaymentError::InvoiceAlreadyAttempted(operation_id));
         }
 
         let range = self
             .client_ctx
-            .finalize_and_submit_transaction_dbtx(&mut dbtx.to_ref_nc(), operation_id, transaction)
+            .finalize_and_submit_transaction_dbtx(&tx, operation_id, transaction)
             .await
             .map_err(|e| SendPaymentError::FailedToFundPayment(e.to_string()))?;
 
         self.send_executor
             .add_state_machine_dbtx(
-                &mut dbtx.to_ref_nc(),
+                &tx,
                 SendStateMachine {
                     common: SendSMCommon {
                         operation_id,
@@ -450,7 +445,7 @@ impl LightningClientModule {
 
         self.client_ctx
             .log_event(
-                &mut dbtx,
+                &tx,
                 SendPaymentEvent {
                     operation_id,
                     amount: send_fee.add_to(amount),
@@ -459,7 +454,7 @@ impl LightningClientModule {
             )
             .await;
 
-        dbtx.commit_tx().await;
+        dbtx.commit().await;
 
         Ok(operation_id)
     }
@@ -492,14 +487,15 @@ impl LightningClientModule {
             )
             .await?;
 
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let tx = dbtx.as_ref();
 
         let operation_id = self
-            .receive_incoming_contract(&mut dbtx.to_ref_nc(), self.keypair.secret_key(), contract)
+            .receive_incoming_contract(&tx, self.keypair.secret_key(), contract)
             .await
             .expect("The contract has been generated with our public key");
 
-        dbtx.commit_tx().await;
+        dbtx.commit().await;
 
         Ok((invoice, operation_id))
     }
@@ -602,7 +598,7 @@ impl LightningClientModule {
     // index in [`Self::receive_lnurl`]).
     async fn receive_incoming_contract(
         &self,
-        dbtx: &mut WriteDatabaseTransaction<'_>,
+        dbtx: &WriteTxRef<'_>,
         sk: SecretKey,
         contract: IncomingContract,
     ) -> Option<OperationId> {
@@ -712,10 +708,9 @@ impl LightningClientModule {
         let stream_index = self
             .client_ctx
             .module_db()
-            .begin_write_transaction()
+            .begin_read()
             .await
-            .get_value(&IncomingContractStreamIndexKey)
-            .await
+            .get(&INCOMING_CONTRACT_STREAM_INDEX, &())
             .unwrap_or(0);
 
         let (contracts, next_index) = self
@@ -723,20 +718,20 @@ impl LightningClientModule {
             .await_incoming_contracts(stream_index, 128)
             .await;
 
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let tx = dbtx.as_ref();
         for contract in &contracts {
             self.receive_incoming_contract(
-                &mut dbtx.to_ref_nc(),
+                &tx,
                 self.lnurl_keypair.secret_key(),
                 contract.clone(),
             )
             .await;
         }
 
-        dbtx.insert_entry(&IncomingContractStreamIndexKey, &next_index)
-            .await;
+        tx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &next_index);
 
-        dbtx.commit_tx().await;
+        dbtx.commit().await;
     }
 }
 
