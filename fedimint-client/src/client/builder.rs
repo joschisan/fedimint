@@ -24,10 +24,10 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{NumPeers, PeerId, fedimint_build_code_version_env, maybe_add_send};
 use fedimint_derive_secret::DerivableSecret;
-use fedimint_eventlog::{EventLogEntry, run_event_log_ordering_task};
+use fedimint_eventlog::run_event_log_ordering_task;
 use fedimint_logging::LOG_CLIENT;
 use fedimint_redb::Database;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::watch;
 use tracing::{debug, trace, warn};
 
 use super::handle::ClientHandle;
@@ -88,7 +88,6 @@ impl RootSecret {
 pub struct ClientBuilder {
     module_inits: ClientModuleInitRegistry,
     stopped: bool,
-    log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
 }
 
 impl ClientBuilder {
@@ -98,13 +97,10 @@ impl ClientBuilder {
             version = %fedimint_build_code_version_env!(),
             "Initializing fedimint client",
         );
-        let (log_event_added_transient_tx, _log_event_added_transient_rx) =
-            broadcast::channel(1024);
 
         ClientBuilder {
             module_inits: ModuleInitRegistry::new(),
             stopped: false,
-            log_event_added_transient_tx,
         }
     }
 
@@ -200,15 +196,8 @@ impl ClientBuilder {
 
         let stopped = self.stopped;
 
-        let log_event_added_transient_tx = self.log_event_added_transient_tx.clone();
         let client = self
-            .build_stopped(
-                connectors,
-                db_no_decoders,
-                pre_root_secret,
-                &config,
-                log_event_added_transient_tx,
-            )
+            .build_stopped(connectors, db_no_decoders, pre_root_secret, &config)
             .await?;
         if !stopped {
             client.start_executor();
@@ -225,15 +214,8 @@ impl ClientBuilder {
         config: ClientConfig,
         stopped: bool,
     ) -> anyhow::Result<ClientHandle> {
-        let log_event_added_transient_tx = self.log_event_added_transient_tx.clone();
         let client = self
-            .build_stopped(
-                connectors,
-                db_no_decoders,
-                pre_root_secret,
-                &config,
-                log_event_added_transient_tx,
-            )
+            .build_stopped(connectors, db_no_decoders, pre_root_secret, &config)
             .await?;
         if !stopped {
             client.start_executor();
@@ -250,7 +232,6 @@ impl ClientBuilder {
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: &ClientConfig,
-        log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
     ) -> anyhow::Result<ClientHandle> {
         debug!(
             target: LOG_CLIENT,
@@ -374,6 +355,7 @@ impl ClientBuilder {
                                 &tx,
                                 log_ordering_wakeup_tx.clone(),
                                 None,
+                                None,
                                 ModuleRecoveryStarted::new(module_instance_id),
                             );
                             tx.insert(
@@ -470,7 +452,6 @@ impl ClientBuilder {
             modules,
             log_ordering_wakeup_tx,
             log_event_added_rx,
-            log_event_added_transient_tx: log_event_added_transient_tx.clone(),
             tx_submission_executor,
             api,
             secp_ctx: Secp256k1::new(),
@@ -486,7 +467,6 @@ impl ClientBuilder {
                         db.clone(),
                         log_ordering_wakeup_rx,
                         log_event_added_tx,
-                        log_event_added_transient_tx,
                     )
                     .await
                 }
@@ -561,11 +541,6 @@ impl ClientBuilder {
         config: &ClientConfig,
     ) -> DerivableSecret {
         pre_root_secret.federation_key(&config.global.calculate_federation_id())
-    }
-
-    /// Register to receiver all new transient (unpersisted) events
-    pub fn get_event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry> {
-        self.log_event_added_transient_tx.subscribe()
     }
 }
 

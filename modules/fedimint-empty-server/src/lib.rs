@@ -81,7 +81,6 @@ impl ServerModuleInit for EmptyInit {
     ) -> anyhow::Result<()> {
         Ok(())
     }
-
 }
 
 /// Empty module

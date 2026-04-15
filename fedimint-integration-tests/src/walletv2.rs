@@ -25,7 +25,9 @@ enum WalletEvent {
     ReceiveUpdate(ReceivePaymentUpdateEvent),
 }
 
-fn wallet_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = WalletEvent> {
+fn wallet_event_stream(
+    client: &ClientHandleArc,
+) -> impl futures::Stream<Item = (fedimint_core::core::OperationId, WalletEvent)> {
     let client = client.clone();
     let mut log_rx = client.log_event_added_rx();
     let mut next_id = EventLogId::LOG_START;
@@ -37,8 +39,8 @@ fn wallet_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = 
             for entry in events {
                 next_id = entry.id().saturating_add(1);
 
-                if let Some(event) = try_parse_wallet_event(entry.as_raw()) {
-                    yield event;
+                if let Some((op, event)) = try_parse_wallet_event(entry.as_raw()) {
+                    yield (op, event);
                 }
             }
 
@@ -47,25 +49,30 @@ fn wallet_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = 
     }
 }
 
-fn try_parse_wallet_event(entry: &EventLogEntry) -> Option<WalletEvent> {
+fn try_parse_wallet_event(
+    entry: &EventLogEntry,
+) -> Option<(fedimint_core::core::OperationId, WalletEvent)> {
     if entry.module_kind() != Some(&fedimint_walletv2_common::KIND) {
         return None;
     }
+    let op = entry.operation_id?;
 
     if entry.kind == SendPaymentEvent::KIND {
-        return entry.to_event().map(WalletEvent::Send);
+        return entry.to_event().map(|e| (op, WalletEvent::Send(e)));
     }
 
     if entry.kind == SendPaymentUpdateEvent::KIND {
-        return entry.to_event().map(WalletEvent::SendUpdate);
+        return entry.to_event().map(|e| (op, WalletEvent::SendUpdate(e)));
     }
 
     if entry.kind == ReceivePaymentEvent::KIND {
-        return entry.to_event().map(WalletEvent::Receive);
+        return entry.to_event().map(|e| (op, WalletEvent::Receive(e)));
     }
 
     if entry.kind == ReceivePaymentUpdateEvent::KIND {
-        return entry.to_event().map(WalletEvent::ReceiveUpdate);
+        return entry
+            .to_event()
+            .map(|e| (op, WalletEvent::ReceiveUpdate(e)));
     }
 
     None
@@ -80,10 +87,10 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
         .await?;
 
     // Drain the walletv2 events emitted by the pegin itself.
-    let Some(WalletEvent::Receive(_)) = send_events.next().await else {
+    let Some((_, WalletEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected pegin Receive event");
     };
-    let Some(WalletEvent::ReceiveUpdate(_)) = send_events.next().await else {
+    let Some((_, WalletEvent::ReceiveUpdate(_))) = send_events.next().await else {
         panic!("Expected pegin ReceiveUpdate event");
     };
 
@@ -101,15 +108,15 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
         )
         .await?;
 
-    let Some(WalletEvent::Send(send)) = send_events.next().await else {
+    let Some((op, WalletEvent::Send(_))) = send_events.next().await else {
         panic!("Expected Send event");
     };
-    assert_eq!(send.operation_id, operation_id);
+    assert_eq!(op, operation_id);
 
-    let Some(WalletEvent::SendUpdate(update)) = send_events.next().await else {
+    let Some((op, WalletEvent::SendUpdate(update))) = send_events.next().await else {
         panic!("Expected SendUpdate event");
     };
-    assert_eq!(update.operation_id, operation_id);
+    assert_eq!(op, operation_id);
 
     let SendPaymentStatus::Success(txid) = update.status else {
         panic!("On-chain send failed: {:?}", update.status);
@@ -137,15 +144,15 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
         )
         .await?;
 
-    let Some(WalletEvent::Send(send)) = send_events.next().await else {
+    let Some((op, WalletEvent::Send(_))) = send_events.next().await else {
         panic!("Expected Send event");
     };
-    assert_eq!(send.operation_id, abort_op);
+    assert_eq!(op, abort_op);
 
-    let Some(WalletEvent::SendUpdate(update)) = send_events.next().await else {
+    let Some((op, WalletEvent::SendUpdate(update))) = send_events.next().await else {
         panic!("Expected SendUpdate event");
     };
-    assert_eq!(update.operation_id, abort_op);
+    assert_eq!(op, abort_op);
     assert_eq!(update.status, SendPaymentStatus::Aborted);
 
     info!("walletv2: zero_fee_send_aborts passed");

@@ -2,93 +2,39 @@
 
 //! Client Event Log
 //!
-//! The goal here is to maintain a single, ordered, append only
-//! log of all important client-side events: low or high level,
-//! and move as much of coordination between different parts of
-//! the system in a natural and decomposed way.
-//!
-//! Any event log "follower" can just keep going through
-//! all events and react to ones it is interested in (and understands),
-//! potentially emitting events of its own, and atomically updating persisted
-//! event log position ("cursor") of events that were already processed.
+//! Single, ordered, append-only log of all important client-side events.
+//! Events that carry an `operation_id` are additionally duplicated into a
+//! secondary table keyed by `(operation_id, event_log_id)` so a subscriber
+//! can tail events for a specific operation cheaply via a stream API.
 use std::borrow::Cow;
+use std::fmt;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
-use std::{fmt, ops};
 
-use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::db::{
-    IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
-};
+use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
+use fedimint_core::db::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::task::MaybeSend;
-use fedimint_core::{Amount, apply, async_trait_maybe_send, table};
+use fedimint_core::table;
 use fedimint_logging::LOG_CLIENT_EVENT_LOG;
 use fedimint_redb::{Database, WriteTxRef};
-use futures::Future;
-use itertools::Itertools;
+use futures::Stream;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::watch;
 use tracing::{debug, trace};
-
-/// Minimum age in ID count for trimable events to be deleted
-const TRIMABLE_EVENTLOG_MIN_ID_AGE: u64 = 10_000;
-/// Minimum age in microseconds for trimable events to be deleted (14 days)
-const TRIMABLE_EVENTLOG_MIN_TS_AGE: u64 = 14 * 24 * 60 * 60 * 1_000_000;
-/// Maximum number of entries to trim in one operation
-const TRIMABLE_EVENTLOG_MAX_TRIMMED_EVENTS: usize = 100_000;
-
-/// Type of persistence the [`Event`] uses.
-///
-/// As a compromise between richness of events and amount of data to store
-/// Fedimint maintains two event logs in parallel:
-///
-/// * untrimable
-/// * trimable
-///
-/// Untrimable log will append only a subset of events that are infrequent,
-/// but important enough to be forever useful, e.g. for processing or debugging
-/// of historical events.
-///
-/// Trimable log will append all persistent events, but will over time remove
-/// the oldest ones. It will always retain enough events, that no log follower
-/// actively processing it should ever miss any event, but restarting processing
-/// from the start (index 0) can't be used for processing historical data.
-///
-/// Notably the positions in both logs are not interchangeable, so they use
-/// different types.
-///
-/// On top of it, some events are transient and are not persisted at all,
-/// and emitted only at runtime.
-///
-/// Consult [`Event::PERSISTENCE`] to know which event uses which persistence.
-pub enum EventPersistence {
-    /// Not written anywhere, just broadcasted as notification at runtime
-    Transient,
-    /// Persised only to log that gets trimmed
-    Trimable,
-    /// Persisted in both trimmed and untrimmed logs, so potentially
-    /// stored forever.
-    Persistent,
-}
 
 pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
     const MODULE: Option<ModuleKind>;
     const KIND: EventKind;
-    const PERSISTENCE: EventPersistence;
 }
 
-/// An counter that resets on every restart, that guarantees that
+/// Counter that resets on every restart, guaranteeing that
 /// [`UnordedEventLogId`]s don't conflict with each other.
 static UNORDEREDED_EVENT_LOG_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// A self-allocated ID that is mostly ordered
+/// A self-allocated ID that is mostly ordered.
 ///
-/// The goal here is to avoid concurrent database transaction
-/// conflicts due the ID allocation. Instead they are picked based on
-/// a time and a counter, so they are mostly but not strictly ordered and
-/// monotonic, and even more importantly: not contiguous.
+/// Picked based on time and a counter to avoid dbtx conflicts on ID
+/// allocation. Mostly, but not strictly, monotonic.
 #[derive(Debug, Encodable, Decodable)]
 pub struct UnordedEventLogId {
     ts_usecs: u64,
@@ -99,15 +45,13 @@ impl UnordedEventLogId {
     fn new() -> Self {
         Self {
             ts_usecs: u64::try_from(fedimint_core::time::duration_since_epoch().as_micros())
-                // This will never happen
                 .unwrap_or(u64::MAX),
             counter: UNORDEREDED_EVENT_LOG_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
         }
     }
 }
 
-/// Ordered, contiguous ID space, which is easy for event log followers to
-/// track.
+/// Ordered, contiguous ID space — easy for event log followers to track.
 #[derive(
     Copy,
     Clone,
@@ -126,6 +70,7 @@ pub struct EventLogId(u64);
 
 impl EventLogId {
     pub const LOG_START: EventLogId = EventLogId(0);
+    pub const LOG_END: EventLogId = EventLogId(u64::MAX);
 
     fn next(self) -> EventLogId {
         Self(self.0 + 1)
@@ -133,14 +78,6 @@ impl EventLogId {
 
     pub fn saturating_add(self, rhs: u64) -> EventLogId {
         Self(self.0.saturating_add(rhs))
-    }
-
-    pub fn saturating_sub(self, rhs: u64) -> EventLogId {
-        Self(self.0.saturating_sub(rhs))
-    }
-
-    pub fn checked_sub(self, rhs: u64) -> Option<EventLogId> {
-        self.0.checked_sub(rhs).map(EventLogId)
     }
 }
 
@@ -192,48 +129,25 @@ impl fmt::Display for EventKind {
 }
 
 #[derive(Debug, Encodable, Decodable, Clone)]
-pub struct UnorderedEventLogEntry {
-    pub flags: u8,
-    pub inner: EventLogEntry,
-}
-
-impl UnorderedEventLogEntry {
-    pub const FLAG_PERSIST: u8 = 1;
-    pub const FLAG_TRIMABLE: u8 = 2;
-
-    fn persist(&self) -> bool {
-        self.flags & Self::FLAG_PERSIST != 0
-    }
-
-    fn trimable(&self) -> bool {
-        self.flags & Self::FLAG_TRIMABLE != 0
-    }
-}
-
-#[derive(Debug, Encodable, Decodable, Clone)]
 pub struct EventLogEntry {
-    /// Type/kind of the event
-    ///
-    /// Any part of the client is free to self-allocate identifier, denoting a
-    /// certain kind of an event. Notably one event kind have multiple
-    /// instances. E.g. "successful wallet deposit" can be an event kind,
-    /// and it can happen multiple times with different payloads.
     pub kind: EventKind,
 
-    /// To prevent accidental conflicts between `kind`s, a module kind the
-    /// given event kind belong is used as well.
+    /// Module that produced the event (if any).
     ///
-    /// Note: the meaning of this field is mostly about which part of the code
-    /// defines this event kind. Oftentime a core (non-module)-defined event
-    /// will refer in some way to a module. It should use a separate `module_id`
-    /// field in the `payload`, instead of this field.
+    /// The meaning is "which part of the code defined this event kind". Core
+    /// events referring to a module should carry the module id in
+    /// `operation_id` or payload, not here.
     pub module: Option<(ModuleKind, ModuleInstanceId)>,
 
-    /// Timestamp in microseconds after unix epoch
+    /// Operation this event belongs to, if any. Set by the caller of
+    /// [`log_event`]; used to index the event into
+    /// [`EVENT_LOG_BY_OPERATION`] for op-scoped tailing.
+    pub operation_id: Option<OperationId>,
+
+    /// Timestamp in microseconds after unix epoch.
     pub ts_usecs: u64,
 
-    /// Event-kind specific payload, typically encoded as a json string for
-    /// flexibility.
+    /// Event-kind specific payload, typically json-encoded.
     pub payload: Vec<u8>,
 }
 
@@ -246,7 +160,6 @@ impl EventLogEntry {
         self.module.as_ref().map(|m| m.1)
     }
 
-    /// Get the event payload as typed value
     pub fn to_event<E>(&self) -> Option<E>
     where
         E: Event,
@@ -255,7 +168,7 @@ impl EventLogEntry {
     }
 }
 
-/// An `EventLogEntry` that was already persisted (so has an id)
+/// An `EventLogEntry` that was already persisted (so has an id).
 #[derive(Debug, Clone)]
 pub struct PersistedLogEntry {
     id: EventLogId,
@@ -269,113 +182,18 @@ impl Serialize for PersistedLogEntry {
     {
         use serde::ser::SerializeStruct;
 
-        let mut state = serializer.serialize_struct("PersistedLogEntry", 5)?;
+        let mut state = serializer.serialize_struct("PersistedLogEntry", 6)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("kind", &self.inner.kind)?;
         state.serialize_field("module", &self.inner.module)?;
+        state.serialize_field("operation_id", &self.inner.operation_id)?;
         state.serialize_field("ts_usecs", &self.inner.ts_usecs)?;
 
-        // Try to deserialize payload as JSON, fall back to hex encoding
         let payload_value: serde_json::Value = serde_json::from_slice(&self.inner.payload)
             .unwrap_or_else(|_| serde_json::Value::String(hex::encode(&self.inner.payload)));
         state.serialize_field("payload", &payload_value)?;
 
         state.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for PersistedLogEntry {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::{self, MapAccess, Visitor};
-
-        #[derive(Deserialize)]
-        #[serde(field_identifier, rename_all = "snake_case")]
-        enum Field {
-            Id,
-            Kind,
-            Module,
-            TsUsecs,
-            Payload,
-        }
-
-        struct PersistedLogEntryVisitor;
-
-        impl<'de> Visitor<'de> for PersistedLogEntryVisitor {
-            type Value = PersistedLogEntry;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("struct PersistedLogEntry")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<PersistedLogEntry, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut id = None;
-                let mut kind = None;
-                let mut module = None;
-                let mut ts_usecs = None;
-                let mut payload = None;
-
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Id => {
-                            if id.is_some() {
-                                return Err(de::Error::duplicate_field("id"));
-                            }
-                            id = Some(map.next_value()?);
-                        }
-                        Field::Kind => {
-                            if kind.is_some() {
-                                return Err(de::Error::duplicate_field("kind"));
-                            }
-                            kind = Some(map.next_value()?);
-                        }
-                        Field::Module => {
-                            if module.is_some() {
-                                return Err(de::Error::duplicate_field("module"));
-                            }
-                            module = Some(map.next_value()?);
-                        }
-                        Field::TsUsecs => {
-                            if ts_usecs.is_some() {
-                                return Err(de::Error::duplicate_field("ts_usecs"));
-                            }
-                            ts_usecs = Some(map.next_value()?);
-                        }
-                        Field::Payload => {
-                            if payload.is_some() {
-                                return Err(de::Error::duplicate_field("payload"));
-                            }
-                            let value: serde_json::Value = map.next_value()?;
-                            payload = Some(serde_json::to_vec(&value).map_err(de::Error::custom)?);
-                        }
-                    }
-                }
-
-                let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
-                let kind = kind.ok_or_else(|| de::Error::missing_field("kind"))?;
-                let module = module.ok_or_else(|| de::Error::missing_field("module"))?;
-                let ts_usecs = ts_usecs.ok_or_else(|| de::Error::missing_field("ts_usecs"))?;
-                let payload = payload.ok_or_else(|| de::Error::missing_field("payload"))?;
-
-                Ok(PersistedLogEntry {
-                    id,
-                    inner: EventLogEntry {
-                        kind,
-                        module,
-                        ts_usecs,
-                        payload,
-                    },
-                })
-            }
-        }
-
-        const FIELDS: &[&str] = &["id", "kind", "module", "ts_usecs", "payload"];
-        deserializer.deserialize_struct("PersistedLogEntry", FIELDS, PersistedLogEntryVisitor)
     }
 }
 
@@ -389,7 +207,7 @@ impl PersistedLogEntry {
     }
 }
 
-impl ops::Deref for PersistedLogEntry {
+impl std::ops::Deref for PersistedLogEntry {
     type Target = EventLogEntry;
 
     fn deref(&self) -> &Self::Target {
@@ -399,7 +217,7 @@ impl ops::Deref for PersistedLogEntry {
 
 table!(
     UNORDERED_EVENT_LOG,
-    UnordedEventLogId => UnorderedEventLogEntry,
+    UnordedEventLogId => EventLogEntry,
     "unordered-event-log",
 );
 
@@ -410,52 +228,19 @@ table!(
 );
 
 table!(
-    EVENT_LOG_TRIMABLE,
-    EventLogTrimableId => EventLogEntry,
-    "event-log-trimable",
+    EVENT_LOG_BY_OPERATION,
+    (OperationId, EventLogId) => EventLogEntry,
+    "event-log-by-operation",
 );
 
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Encodable,
-    Decodable,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
-pub struct EventLogTrimableId(EventLogId);
-
-impl EventLogTrimableId {
-    fn next(&self) -> Self {
-        Self(self.0.next())
-    }
-
-    pub fn saturating_add(self, rhs: u64) -> Self {
-        Self(self.0.saturating_add(rhs))
-    }
-}
-
-impl From<u64> for EventLogTrimableId {
-    fn from(value: u64) -> Self {
-        Self(EventLogId(value))
-    }
-}
-
-/// Read-only event log operations. Blanket-implemented for every typed read
-/// view.
+/// Read-only event log operations.
 pub trait DBTransactionEventLogReadExt {
     fn get_next_event_log_id(&self) -> EventLogId;
-    fn get_next_event_log_trimable_id(&self) -> EventLogTrimableId;
     fn get_event_log(&self, pos: Option<EventLogId>, limit: u64) -> Vec<PersistedLogEntry>;
-    fn get_event_log_trimable(
+    fn get_events_for_operation(
         &self,
-        pos: Option<EventLogTrimableId>,
+        operation_id: OperationId,
+        pos: Option<EventLogId>,
         limit: u64,
     ) -> Vec<PersistedLogEntry>;
 }
@@ -463,14 +248,6 @@ pub trait DBTransactionEventLogReadExt {
 impl<T: IReadDatabaseTransactionOpsTyped + ?Sized> DBTransactionEventLogReadExt for T {
     fn get_next_event_log_id(&self) -> EventLogId {
         self.iter(&EVENT_LOG)
-            .into_iter()
-            .next_back()
-            .map(|(k, _)| k.next())
-            .unwrap_or_default()
-    }
-
-    fn get_next_event_log_trimable_id(&self) -> EventLogTrimableId {
-        self.iter(&EVENT_LOG_TRIMABLE)
             .into_iter()
             .next_back()
             .map(|(k, _)| k.next())
@@ -485,30 +262,34 @@ impl<T: IReadDatabaseTransactionOpsTyped + ?Sized> DBTransactionEventLogReadExt 
             .collect()
     }
 
-    fn get_event_log_trimable(
+    fn get_events_for_operation(
         &self,
-        pos: Option<EventLogTrimableId>,
+        operation_id: OperationId,
+        pos: Option<EventLogId>,
         limit: u64,
     ) -> Vec<PersistedLogEntry> {
         let pos = pos.unwrap_or_default();
-        self.range(&EVENT_LOG_TRIMABLE, pos..pos.saturating_add(limit))
-            .into_iter()
-            .map(|(k, v)| PersistedLogEntry { id: k.0, inner: v })
-            .collect()
+        self.range(
+            &EVENT_LOG_BY_OPERATION,
+            (operation_id, pos)..(operation_id, pos.saturating_add(limit)),
+        )
+        .into_iter()
+        .map(|((_, id), entry)| PersistedLogEntry { id, inner: entry })
+        .collect()
     }
 }
 
-/// Append an event to the unordered log. The ordering task will pick it up
-/// after commit and move it to the ordered log(s).
-#[allow(clippy::too_many_arguments)]
+/// Append an event to the unordered log. The ordering task picks it up after
+/// commit and moves it to [`EVENT_LOG`] plus [`EVENT_LOG_BY_OPERATION`] if
+/// `operation_id` is set.
 pub fn log_event_raw(
     dbtx: &WriteTxRef<'_>,
     log_ordering_wakeup_tx: watch::Sender<()>,
     kind: EventKind,
     module_kind: Option<ModuleKind>,
     module_id: Option<ModuleInstanceId>,
+    operation_id: Option<OperationId>,
     payload: Vec<u8>,
-    persist: EventPersistence,
 ) {
     assert_eq!(
         module_kind.is_some(),
@@ -519,18 +300,12 @@ pub fn log_event_raw(
     let unordered_id = UnordedEventLogId::new();
     trace!(target: LOG_CLIENT_EVENT_LOG, ?unordered_id, "New unordered event log event");
 
-    let entry = UnorderedEventLogEntry {
-        flags: match persist {
-            EventPersistence::Transient => 0,
-            EventPersistence::Trimable => UnorderedEventLogEntry::FLAG_TRIMABLE,
-            EventPersistence::Persistent => UnorderedEventLogEntry::FLAG_PERSIST,
-        },
-        inner: EventLogEntry {
-            kind,
-            module: module_kind.map(|kind| (kind, module_id.unwrap())),
-            ts_usecs: unordered_id.ts_usecs,
-            payload,
-        },
+    let entry = EventLogEntry {
+        kind,
+        module: module_kind.map(|kind| (kind, module_id.unwrap())),
+        operation_id,
+        ts_usecs: unordered_id.ts_usecs,
+        payload,
     };
 
     assert!(
@@ -549,6 +324,7 @@ pub fn log_event<E: Event>(
     dbtx: &WriteTxRef<'_>,
     log_ordering_wakeup_tx: watch::Sender<()>,
     module_id: Option<ModuleInstanceId>,
+    operation_id: Option<OperationId>,
     event: E,
 ) {
     log_event_raw(
@@ -557,59 +333,22 @@ pub fn log_event<E: Event>(
         E::KIND,
         E::MODULE,
         module_id,
+        operation_id,
         serde_json::to_vec(&event).expect("Serialization can't fail"),
-        <E as Event>::PERSISTENCE,
     );
 }
 
-/// Trims old entries from the trimable event log
-pub(crate) async fn trim_trimable_log(db: &Database, current_time_usecs: u64) {
-    let dbtx = db.begin_write().await;
-    let tx = dbtx.as_ref();
-
-    let current_trimable_id = tx.get_next_event_log_trimable_id();
-    let min_id_threshold = current_trimable_id
-        .0
-        .saturating_sub(TRIMABLE_EVENTLOG_MIN_ID_AGE);
-    let min_ts_threshold = current_time_usecs.saturating_sub(TRIMABLE_EVENTLOG_MIN_TS_AGE);
-
-    let entries_to_delete: Vec<_> = tx
-        .iter(&EVENT_LOG_TRIMABLE)
-        .into_iter()
-        .take_while(|(id, entry)| {
-            id.0 <= min_id_threshold && entry.ts_usecs <= min_ts_threshold
-        })
-        .take(TRIMABLE_EVENTLOG_MAX_TRIMMED_EVENTS)
-        .map(|(id, _entry)| id)
-        .collect();
-
-    for id in &entries_to_delete {
-        tx.remove(&EVENT_LOG_TRIMABLE, id);
-    }
-
-    dbtx.commit().await;
-}
-
-/// The code that handles new unordered events and rewriters them fully ordered
-/// into the final event log.
+/// Handles new unordered events and rewrites them fully ordered into
+/// [`EVENT_LOG`] (and indexed into [`EVENT_LOG_BY_OPERATION`] when the event
+/// has an `operation_id`).
 pub async fn run_event_log_ordering_task(
     db: Database,
     mut log_ordering_task_wakeup: watch::Receiver<()>,
     log_event_added: watch::Sender<()>,
-    log_event_added_transient: broadcast::Sender<EventLogEntry>,
 ) {
     debug!(target: LOG_CLIENT_EVENT_LOG, "Event log ordering task started");
 
-    let current_time_usecs =
-        u64::try_from(fedimint_core::time::duration_since_epoch().as_micros()).unwrap_or(u64::MAX);
-    trim_trimable_log(&db, current_time_usecs).await;
-
     let mut next_entry_id = db.begin_read().await.as_ref().get_next_event_log_id();
-    let mut next_entry_id_trimable = db
-        .begin_read()
-        .await
-        .as_ref()
-        .get_next_event_log_trimable_id();
 
     loop {
         let dbtx = db.begin_write().await;
@@ -623,40 +362,26 @@ pub async fn run_event_log_ordering_task(
                 tx.remove(&UNORDERED_EVENT_LOG, unordered_id).is_some(),
                 "Must never fail to remove entry"
             );
-            if entry.persist() {
-                // Non-trimable events get persisted in both the default event log
-                // and trimable event log
-                if !entry.trimable() {
-                    assert!(
-                        tx.insert(&EVENT_LOG, &next_entry_id, &entry.inner)
-                            .is_none(),
-                        "Must never overwrite existing event"
-                    );
-                    trace!(target: LOG_CLIENT_EVENT_LOG, ?unordered_id, id=?next_entry_id, "Ordered event log event");
-                    next_entry_id = next_entry_id.next();
-                }
 
-                // Trimable events get persisted only in trimable log
+            assert!(
+                tx.insert(&EVENT_LOG, &next_entry_id, entry).is_none(),
+                "Must never overwrite existing event"
+            );
+
+            if let Some(operation_id) = entry.operation_id {
                 assert!(
-                    tx.insert(&EVENT_LOG_TRIMABLE, &next_entry_id_trimable, &entry.inner)
-                        .is_none(),
+                    tx.insert(
+                        &EVENT_LOG_BY_OPERATION,
+                        &(operation_id, next_entry_id),
+                        entry,
+                    )
+                    .is_none(),
                     "Must never overwrite existing event"
                 );
-                trace!(target: LOG_CLIENT_EVENT_LOG, ?unordered_id, id=?next_entry_id, "Ordered event log event");
-                next_entry_id_trimable = next_entry_id_trimable.next();
-            } else {
-                // Transient events don't get persisted at all
-                trace!(target: LOG_CLIENT_EVENT_LOG, ?unordered_id, id=?next_entry_id, "Transient event log event");
-                tx.on_commit({
-                    let log_event_added_transient = log_event_added_transient.clone();
-                    let entry = entry.inner.clone();
-
-                    move || {
-                        // we ignore the no-subscribers
-                        let _ = log_event_added_transient.send(entry);
-                    }
-                });
             }
+
+            trace!(target: LOG_CLIENT_EVENT_LOG, ?unordered_id, id=?next_entry_id, "Ordered event log event");
+            next_entry_id = next_entry_id.next();
         }
 
         dbtx.commit().await;
@@ -673,224 +398,48 @@ pub async fn run_event_log_ordering_task(
     debug!(target: LOG_CLIENT_EVENT_LOG, "Event log ordering task finished");
 }
 
-/// Persistent tracker of a position in the event log
+/// Stream every event belonging to `operation_id`, in insertion order.
 ///
-/// During processing of event log the downstream consumer needs to
-/// keep track of which event were processed already. It needs to do it
-/// atomically and persist it so event in the presence of crashes no
-/// event is ever missed or processed twice.
-///
-/// This trait allows abstracting away where and how is such position stored,
-/// e.g. which key exactly is used, in what prefixed namespace etc.
-///
-/// ## Trimmable vs Non-Trimable log
-///
-/// See [`EventPersistence`]
-#[apply(async_trait_maybe_send!)]
-pub trait EventLogNonTrimableTracker: MaybeSend {
-    async fn store(&mut self, dbtx: &WriteTxRef<'_>, pos: EventLogId) -> anyhow::Result<()>;
-
-    async fn load(&mut self, dbtx: &WriteTxRef<'_>) -> anyhow::Result<Option<EventLogId>>;
-}
-pub type DynEventLogTracker = Box<dyn EventLogNonTrimableTracker>;
-
-/// Like [`EventLogNonTrimableTracker`] but for trimable event log
-#[apply(async_trait_maybe_send!)]
-pub trait EventLogTrimableTracker: MaybeSend {
-    async fn store(
-        &mut self,
-        dbtx: &WriteTxRef<'_>,
-        pos: EventLogTrimableId,
-    ) -> anyhow::Result<()>;
-
-    async fn load(&mut self, dbtx: &WriteTxRef<'_>) -> anyhow::Result<Option<EventLogTrimableId>>;
-}
-pub type DynEventLogTrimableTracker = Box<dyn EventLogTrimableTracker>;
-
-pub async fn handle_events<F, R>(
+/// Yields existing events first, then live ones. The cursor is kept internally
+/// — callers never manage an `EventLogId`. The stream ends when the
+/// `log_event_added` watch channel is dropped (typically at client shutdown).
+pub fn subscribe_operation_events(
     db: Database,
-    mut tracker: DynEventLogTracker,
     mut log_event_added: watch::Receiver<()>,
-    call_fn: F,
-) -> anyhow::Result<()>
-where
-    F: Fn(&WriteTxRef<'_>, EventLogEntry) -> R,
-    R: Future<Output = anyhow::Result<()>>,
-{
-    let mut next_key: EventLogId = {
-        let dbtx = db.begin_write().await;
-        let loaded = tracker.load(&dbtx.as_ref()).await?;
-        dbtx.commit().await;
-        loaded.unwrap_or_default()
-    };
-
-    trace!(target: LOG_CLIENT_EVENT_LOG, ?next_key, "Handling events");
-
-    loop {
-        let dbtx = db.begin_write().await;
-        let tx = dbtx.as_ref();
-
-        match tx.get(&EVENT_LOG, &next_key) {
-            Some(event) => {
-                (call_fn)(&tx, event).await?;
-
-                next_key = next_key.next();
-
-                tracker.store(&tx, next_key).await?;
-
-                dbtx.commit().await;
+    operation_id: OperationId,
+) -> impl Stream<Item = PersistedLogEntry> {
+    async_stream::stream! {
+        let mut next_id = EventLogId::LOG_START;
+        loop {
+            let batch = db
+                .begin_read()
+                .await
+                .as_ref()
+                .get_events_for_operation(operation_id, Some(next_id), u64::MAX);
+            for entry in batch {
+                next_id = entry.id().next();
+                yield entry;
             }
-            _ => {
-                drop(dbtx);
-
-                if log_event_added.changed().await.is_err() {
-                    break Ok(());
-                }
+            if log_event_added.changed().await.is_err() {
+                break;
             }
         }
     }
 }
 
-pub async fn handle_trimable_events<F, R>(
+/// Typed variant of [`subscribe_operation_events`] — filters by
+/// `E::KIND`/`E::MODULE` and decodes each matching entry.
+pub fn subscribe_operation_events_typed<E: Event + 'static>(
     db: Database,
-    mut tracker: DynEventLogTrimableTracker,
-    mut log_event_added: watch::Receiver<()>,
-    call_fn: F,
-) -> anyhow::Result<()>
-where
-    F: Fn(&WriteTxRef<'_>, EventLogEntry) -> R,
-    R: Future<Output = anyhow::Result<()>>,
-{
-    let mut next_key: EventLogTrimableId = {
-        let dbtx = db.begin_write().await;
-        let loaded = tracker.load(&dbtx.as_ref()).await?;
-        dbtx.commit().await;
-        loaded.unwrap_or_default()
-    };
-    trace!(target: LOG_CLIENT_EVENT_LOG, ?next_key, "Handling trimable events");
-
-    loop {
-        let dbtx = db.begin_write().await;
-        let tx = dbtx.as_ref();
-
-        match tx.get(&EVENT_LOG_TRIMABLE, &next_key) {
-            Some(event) => {
-                (call_fn)(&tx, event).await?;
-
-                next_key = next_key.next();
-                tracker.store(&tx, next_key).await?;
-
-                dbtx.commit().await;
-            }
-            _ => {
-                drop(dbtx);
-
-                if log_event_added.changed().await.is_err() {
-                    break Ok(());
-                }
-            }
-        }
-    }
-}
-
-/// Filters the `PersistedLogEntries` by the `EventKind` and
-/// `ModuleKind`.
-pub fn filter_events_by_kind<'a, I>(
-    all_events: I,
-    module_kind: ModuleKind,
-    event_kind: EventKind,
-) -> impl Iterator<Item = &'a PersistedLogEntry> + 'a
-where
-    I: IntoIterator<Item = &'a PersistedLogEntry> + 'a,
-{
-    all_events.into_iter().filter(move |e| {
-        if let Some((m, _)) = &e.inner.module {
-            e.inner.kind == event_kind && *m == module_kind
-        } else {
-            false
-        }
+    log_event_added: watch::Receiver<()>,
+    operation_id: OperationId,
+) -> impl Stream<Item = E> {
+    use futures::StreamExt as _;
+    subscribe_operation_events(db, log_event_added, operation_id).filter_map(|entry| async move {
+        (entry.module_kind() == E::MODULE.as_ref() && entry.kind == E::KIND)
+            .then(|| entry.to_event::<E>())
+            .flatten()
     })
-}
-
-/// Joins two sets of events on a predicate.
-///
-/// This function computes a "nested loop join" by first computing the cross
-/// product of the start event vector and the success/failure event vectors. The
-/// resulting cartesian product is then filtered according to the join predicate
-/// supplied in the parameters.
-///
-/// This function is intended for small data sets. If the data set relations
-/// grow, this function should implement a different join algorithm or be moved
-/// out of the gateway.
-pub fn join_events<'a, L, R, Res>(
-    events_l: &'a [&PersistedLogEntry],
-    events_r: &'a [&PersistedLogEntry],
-    max_time_distance: Option<Duration>,
-    predicate: impl Fn(L, R, Duration) -> Option<Res> + 'a,
-) -> impl Iterator<Item = Res> + 'a
-where
-    L: Event,
-    R: Event,
-{
-    events_l
-        .iter()
-        .cartesian_product(events_r)
-        .filter_map(move |(l, r)| {
-            if L::MODULE.as_ref() == l.as_raw().module_kind()
-                && L::KIND == l.as_raw().kind
-                && R::MODULE.as_ref() == r.as_raw().module_kind()
-                && R::KIND == r.as_raw().kind
-                && let Some(latency_usecs) = r.inner.ts_usecs.checked_sub(l.inner.ts_usecs)
-                && max_time_distance.is_none_or(|max| u128::from(latency_usecs) <= max.as_millis())
-                && let Some(l) = l.as_raw().to_event()
-                && let Some(r) = r.as_raw().to_event()
-            {
-                predicate(l, r, Duration::from_millis(latency_usecs))
-            } else {
-                None
-            }
-        })
-}
-
-/// Helper struct for storing computed data about outgoing and incoming
-/// payments.
-#[derive(Debug, Default)]
-pub struct StructuredPaymentEvents {
-    pub latencies_usecs: Vec<u64>,
-    pub fees: Vec<Amount>,
-    pub latencies_failure: Vec<u64>,
-}
-
-impl StructuredPaymentEvents {
-    pub fn new(
-        success_stats: &[(u64, Amount)],
-        failure_stats: Vec<u64>,
-    ) -> StructuredPaymentEvents {
-        let mut events = StructuredPaymentEvents {
-            latencies_usecs: success_stats.iter().map(|(l, _)| *l).collect(),
-            fees: success_stats.iter().map(|(_, f)| *f).collect(),
-            latencies_failure: failure_stats,
-        };
-        events.sort();
-        events
-    }
-
-    /// Combines this `StructuredPaymentEvents` with the `other`
-    /// `StructuredPaymentEvents` by appending all of the internal vectors.
-    pub fn combine(&mut self, other: &mut StructuredPaymentEvents) {
-        self.latencies_usecs.append(&mut other.latencies_usecs);
-        self.fees.append(&mut other.fees);
-        self.latencies_failure.append(&mut other.latencies_failure);
-        self.sort();
-    }
-
-    /// Sorts this `StructuredPaymentEvents` by sorting all of the internal
-    /// vectors.
-    fn sort(&mut self) {
-        self.latencies_usecs.sort_unstable();
-        self.fees.sort_unstable();
-        self.latencies_failure.sort_unstable();
-    }
 }
 
 #[cfg(test)]

@@ -18,13 +18,16 @@ use crate::cli;
 use crate::env::{NUM_GUARDIANS, TestEnv, retry};
 
 #[derive(Debug)]
+#[allow(dead_code)]
 enum LnEvent {
     Send(SendPaymentEvent),
     SendUpdate(SendPaymentUpdateEvent),
     Receive(ReceivePaymentEvent),
 }
 
-fn ln_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = LnEvent> {
+fn ln_event_stream(
+    client: &ClientHandleArc,
+) -> impl futures::Stream<Item = (fedimint_core::core::OperationId, LnEvent)> {
     let client = client.clone();
     let mut log_rx = client.log_event_added_rx();
     let mut next_id = EventLogId::LOG_START;
@@ -36,8 +39,8 @@ fn ln_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = LnEv
             for entry in events {
                 next_id = entry.id().saturating_add(1);
 
-                if let Some(event) = try_parse_ln_event(entry.as_raw()) {
-                    yield event;
+                if let Some((op, event)) = try_parse_ln_event(entry.as_raw()) {
+                    yield (op, event);
                 }
             }
 
@@ -46,21 +49,24 @@ fn ln_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = LnEv
     }
 }
 
-fn try_parse_ln_event(entry: &EventLogEntry) -> Option<LnEvent> {
+fn try_parse_ln_event(
+    entry: &EventLogEntry,
+) -> Option<(fedimint_core::core::OperationId, LnEvent)> {
     if entry.module_kind() != Some(&fedimint_lnv2_common::KIND) {
         return None;
     }
+    let op = entry.operation_id?;
 
     if entry.kind == SendPaymentEvent::KIND {
-        return entry.to_event().map(LnEvent::Send);
+        return entry.to_event().map(|e| (op, LnEvent::Send(e)));
     }
 
     if entry.kind == SendPaymentUpdateEvent::KIND {
-        return entry.to_event().map(LnEvent::SendUpdate);
+        return entry.to_event().map(|e| (op, LnEvent::SendUpdate(e)));
     }
 
     if entry.kind == ReceivePaymentEvent::KIND {
-        return entry.to_event().map(LnEvent::Receive);
+        return entry.to_event().map(|e| (op, LnEvent::Receive(e)));
     }
 
     None
@@ -177,15 +183,15 @@ async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Resul
 
         let send_op = lnv2.send(invoice, Some(gw.clone())).await?;
 
-        let Some(LnEvent::Send(send)) = events.next().await else {
+        let Some((op, LnEvent::Send(_))) = events.next().await else {
             panic!("Expected Send event");
         };
-        assert_eq!(send.operation_id, send_op);
+        assert_eq!(op, send_op);
 
-        let Some(LnEvent::SendUpdate(update)) = events.next().await else {
+        let Some((op, LnEvent::SendUpdate(update))) = events.next().await else {
             panic!("Expected SendUpdate event");
         };
-        assert_eq!(update.operation_id, send_op);
+        assert_eq!(op, send_op);
         assert!(matches!(update.status, SendPaymentStatus::Success(_)));
     }
 
@@ -216,10 +222,10 @@ async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Resul
 
         env.ldk_node.bolt11_payment().send(&invoice, None)?;
 
-        let Some(LnEvent::Receive(receive)) = events.next().await else {
+        let Some((op, LnEvent::Receive(_))) = events.next().await else {
             panic!("Expected Receive event");
         };
-        assert_eq!(receive.operation_id, receive_op);
+        assert_eq!(op, receive_op);
 
         // Verify the freestanding LDK node observes the payment as successful,
         // i.e. the gateway settled the HTLC back to it via the CompleteSM.
@@ -253,10 +259,10 @@ async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Resul
 
         let send_op = lnv2.send(invoice, Some(gw.clone())).await?;
 
-        let Some(LnEvent::Send(send)) = events.next().await else {
+        let Some((op, LnEvent::Send(_))) = events.next().await else {
             panic!("Expected Send event");
         };
-        assert_eq!(send.operation_id, send_op);
+        assert_eq!(op, send_op);
 
         // Wait until the HTLC is actually held by LDK, then fail it. Failing
         // before the HTLC arrives is a no-op in LDK's ChannelManager, so the
@@ -275,10 +281,10 @@ async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Resul
         }
         env.ldk_node.bolt11_payment().fail_for_hash(payment_hash)?;
 
-        let Some(LnEvent::SendUpdate(update)) = events.next().await else {
+        let Some((op, LnEvent::SendUpdate(update))) = events.next().await else {
             panic!("Expected SendUpdate event");
         };
-        assert_eq!(update.operation_id, send_op);
+        assert_eq!(op, send_op);
         assert_eq!(update.status, SendPaymentStatus::Refunded);
     }
 

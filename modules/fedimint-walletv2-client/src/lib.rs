@@ -132,7 +132,6 @@ impl ClientModuleInit for WalletClientInit {
 
         Ok(module)
     }
-
 }
 
 impl WalletClientModule {
@@ -245,8 +244,8 @@ impl WalletClientModule {
         self.client_ctx
             .log_event(
                 &tx,
+                operation_id,
                 SendPaymentEvent {
-                    operation_id,
                     address,
                     value,
                     fee,
@@ -263,11 +262,7 @@ impl WalletClientModule {
     /// address derivation has completed.
     pub async fn receive(&self) -> Address {
         loop {
-            let indices = self
-                .db
-                .begin_read()
-                .await
-                .iter(&VALID_ADDRESS_INDEX);
+            let indices = self.db.begin_read().await.iter(&VALID_ADDRESS_INDEX);
 
             if let Some((idx, ())) = indices.into_iter().next_back() {
                 return self.derive_address(idx);
@@ -310,7 +305,7 @@ impl WalletClientModule {
         value: bitcoin::Amount,
         address_index: u64,
         fee: bitcoin::Amount,
-    ) -> TransactionId {
+    ) -> (OperationId, TransactionId) {
         let operation_id = OperationId::new_random();
 
         let client_input = ClientInput::<WalletInput> {
@@ -358,8 +353,8 @@ impl WalletClientModule {
         self.client_ctx
             .log_event(
                 &tx,
+                operation_id,
                 ReceivePaymentEvent {
-                    operation_id,
                     address: self.derive_address(address_index).as_unchecked().clone(),
                     value,
                     fee,
@@ -369,7 +364,7 @@ impl WalletClientModule {
 
         dbtx.commit().await;
 
-        range.txid()
+        (operation_id, range.txid())
     }
 
     fn spawn_output_scanner(&self, task_group: &TaskGroup) {
@@ -469,12 +464,12 @@ impl WalletClientModule {
                         .ok_or(anyhow!("No consensus feerate is available"))?;
 
                     if output.value > receive_fee {
-                        let txid = self
+                        let (operation_id, txid) = self
                             .receive_output(output.index, output.value, address_index, receive_fee)
                             .await;
 
                         self.client_ctx
-                            .await_tx_accepted(txid)
+                            .await_tx_accepted(operation_id, txid)
                             .await
                             .map_err(|e| anyhow!("Claim transaction was rejected: {e}"))?;
                     }

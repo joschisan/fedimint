@@ -48,11 +48,11 @@ use fedimint_core::secp256k1::{Keypair, PublicKey};
 use fedimint_core::util::BoxStream;
 use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::DerivableSecret;
-use fedimint_redb::WriteTxRef;
 use fedimint_mintv2_common::config::{MintClientConfig, client_denominations};
 use fedimint_mintv2_common::{
     Denomination, MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, RecoveryItem,
 };
+use fedimint_redb::WriteTxRef;
 use futures::StreamExt;
 use rand::seq::IteratorRandom;
 use tbs::AggregatePublicKey;
@@ -109,11 +109,7 @@ impl ClientModuleInit for MintClientInit {
     type Module = MintClientModule;
 
     async fn recover(&self, args: &ClientModuleRecoverArgs<Self>) -> anyhow::Result<()> {
-        let mut state = if let Some(state) = args
-            .db()
-            .begin_read()
-            .await
-            .get(&RECOVERY_STATE, &())
+        let mut state = if let Some(state) = args.db().begin_read().await.get(&RECOVERY_STATE, &())
         {
             state
         } else {
@@ -225,8 +221,7 @@ impl ClientModuleInit for MintClientInit {
                 };
 
                 fedimint_client_module::executor::ModuleExecutor::add_state_machine_unstarted(
-                    &tx,
-                    sm,
+                    &tx, sm,
                 )
                 .await;
 
@@ -304,7 +299,6 @@ impl ClientModuleInit for MintClientInit {
             receive_executor,
         })
     }
-
 }
 
 #[derive(Debug)]
@@ -698,8 +692,6 @@ impl MintClientModule {
             .make_client_outputs(ClientOutputBundle::new(outputs));
 
         // Subscribe before submitting so we cannot miss the finalisation event.
-        let mut events = self.client_ctx.event_log_transient_receiver();
-
         let dbtx = self.client_ctx.module_db().begin_write().await;
         let tx = dbtx.as_ref();
 
@@ -733,7 +725,7 @@ impl MintClientModule {
 
         dbtx.commit().await;
 
-        await_output_finalisation(&mut events, operation_id, caller_range).await;
+        await_output_finalisation(&self.client_ctx, operation_id, caller_range).await;
 
         Box::pin(self.send(amount)).await
     }
@@ -776,8 +768,8 @@ impl MintClientModule {
         self.client_ctx
             .log_event(
                 dbtx,
+                operation_id,
                 SendPaymentEvent {
-                    operation_id,
                     amount,
                     ecash: base32::encode_prefixed(FEDIMINT_PREFIX, &ecash),
                 },
@@ -860,8 +852,8 @@ impl MintClientModule {
         self.client_ctx
             .log_event(
                 &tx,
+                operation_id,
                 ReceivePaymentEvent {
-                    operation_id,
                     amount: ecash.amount(),
                 },
             )
@@ -872,11 +864,7 @@ impl MintClientModule {
         Ok(operation_id)
     }
 
-    async fn remove_spendable_note(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        spendable_note: &SpendableNote,
-    ) {
+    async fn remove_spendable_note(&self, dbtx: &WriteTxRef<'_>, spendable_note: &SpendableNote) {
         dbtx.remove(&NOTE, spendable_note)
             .expect("Must delete existing spendable note");
     }
@@ -964,30 +952,17 @@ async fn download_slice_with_hash(
 }
 
 async fn await_output_finalisation(
-    rx: &mut tokio::sync::broadcast::Receiver<fedimint_eventlog::EventLogEntry>,
+    client_ctx: &fedimint_client_module::module::ClientContext<MintClientModule>,
     operation_id: OperationId,
     range: OutPointRange,
 ) {
-    use fedimint_eventlog::Event as _;
-    use tokio::sync::broadcast::error::RecvError;
+    use futures::StreamExt as _;
 
-    loop {
-        match rx.recv().await {
-            Ok(entry) => {
-                if entry.module_kind() != Some(&fedimint_mintv2_common::KIND)
-                    || entry.kind != events::OutputFinalisedEvent::KIND
-                {
-                    continue;
-                }
-                let Some(ev) = entry.to_event::<events::OutputFinalisedEvent>() else {
-                    continue;
-                };
-                if ev.operation_id == operation_id && ev.range == range {
-                    return;
-                }
-            }
-            Err(RecvError::Lagged(_)) => continue,
-            Err(RecvError::Closed) => return,
+    let mut stream = client_ctx
+        .subscribe_operation_events_typed::<events::OutputFinalisedEvent>(operation_id);
+    while let Some(ev) = stream.next().await {
+        if ev.range == range {
+            return;
         }
     }
 }

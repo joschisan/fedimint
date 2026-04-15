@@ -46,9 +46,10 @@ impl StateMachine for ReceiveStateMachine {
         match &self.state {
             ReceiveSMState::Funding => {
                 let ctx = ctx.clone();
+                let operation_id = self.common.operation_id;
                 let txid = self.common.txid;
                 vec![SmStateTransition::new(
-                    await_funding_sm(ctx.clone(), txid),
+                    await_funding_sm(ctx.clone(), operation_id, txid),
                     move |dbtx, result, old_state| {
                         let ctx = ctx.clone();
                         Box::pin(transition_funding_sm(ctx, dbtx, result, old_state))
@@ -60,8 +61,12 @@ impl StateMachine for ReceiveStateMachine {
     }
 }
 
-async fn await_funding_sm(ctx: WalletClientContext, txid: TransactionId) -> Result<(), String> {
-    ctx.client_ctx.await_tx_accepted(txid).await
+async fn await_funding_sm(
+    ctx: WalletClientContext,
+    operation_id: OperationId,
+    txid: TransactionId,
+) -> Result<(), String> {
+    ctx.client_ctx.await_tx_accepted(operation_id, txid).await
 }
 
 async fn transition_funding_sm(
@@ -75,8 +80,8 @@ async fn transition_funding_sm(
             ctx.client_ctx
                 .log_event(
                     dbtx,
+                    old_state.common.operation_id,
                     ReceivePaymentUpdateEvent {
-                        operation_id: old_state.common.operation_id,
                         status: ReceivePaymentStatus::Success,
                     },
                 )
@@ -88,8 +93,8 @@ async fn transition_funding_sm(
             ctx.client_ctx
                 .log_event(
                     dbtx,
+                    old_state.common.operation_id,
                     ReceivePaymentUpdateEvent {
-                        operation_id: old_state.common.operation_id,
                         status: ReceivePaymentStatus::Aborted,
                     },
                 )

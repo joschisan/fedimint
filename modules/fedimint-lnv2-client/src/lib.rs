@@ -33,7 +33,6 @@ use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
-use fedimint_redb::WriteTxRef;
 use fedimint_lnv2_common::config::LightningClientConfig;
 use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::{
@@ -44,6 +43,7 @@ use fedimint_lnv2_common::{
     LightningModuleTypes, LightningOutput, LightningOutputV0, MINIMUM_INCOMING_CONTRACT_AMOUNT,
     lnurl, tweak,
 };
+use fedimint_redb::WriteTxRef;
 use lightning_invoice::{Bolt11Invoice, Currency};
 use secp256k1::{Keypair, PublicKey, Scalar, SecretKey, ecdh};
 use thiserror::Error;
@@ -103,7 +103,6 @@ impl ClientModuleInit for LightningClientInit {
             args.task_group(),
         ))
     }
-
 }
 
 #[derive(Debug, Clone)]
@@ -446,8 +445,8 @@ impl LightningClientModule {
         self.client_ctx
             .log_event(
                 &tx,
+                operation_id,
                 SendPaymentEvent {
-                    operation_id,
                     amount: send_fee.add_to(amount),
                     fee: send_fee.fee(amount),
                 },
@@ -721,12 +720,8 @@ impl LightningClientModule {
         let dbtx = self.client_ctx.module_db().begin_write().await;
         let tx = dbtx.as_ref();
         for contract in &contracts {
-            self.receive_incoming_contract(
-                &tx,
-                self.lnurl_keypair.secret_key(),
-                contract.clone(),
-            )
-            .await;
+            self.receive_incoming_contract(&tx, self.lnurl_keypair.secret_key(), contract.clone())
+                .await;
         }
 
         tx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &next_index);

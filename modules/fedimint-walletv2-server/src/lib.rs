@@ -194,7 +194,6 @@ impl ServerModuleInit for WalletInit {
             network: config.network,
         })
     }
-
 }
 
 #[apply(async_trait_maybe_send!)]

@@ -78,13 +78,7 @@ async fn send_update_event_sm(
     status: SendPaymentStatus,
 ) {
     ctx.client_ctx
-        .log_event(
-            dbtx,
-            SendPaymentUpdateEvent {
-                operation_id,
-                status,
-            },
-        )
+        .log_event(dbtx, operation_id, SendPaymentUpdateEvent { status })
         .await;
 }
 
@@ -97,9 +91,15 @@ impl StateMachine for SendStateMachine {
         match &self.state {
             SendSMState::Funding => {
                 let ctx_clone = ctx.clone();
+                let operation_id = self.common.operation_id;
                 let txid = self.common.outpoint.txid;
                 vec![SmStateTransition::new(
-                    async move { ctx_clone.client_ctx.await_tx_accepted(txid).await },
+                    async move {
+                        ctx_clone
+                            .client_ctx
+                            .await_tx_accepted(operation_id, txid)
+                            .await
+                    },
                     |_dbtx, result: Result<(), String>, old_state: SendStateMachine| {
                         Box::pin(async move {
                             match result {

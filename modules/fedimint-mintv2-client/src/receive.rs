@@ -45,9 +45,15 @@ impl StateMachine for ReceiveStateMachine {
             ReceiveSMState::Pending => {
                 let ctx_trigger = ctx.clone();
                 let ctx_transition = ctx.clone();
+                let operation_id = self.common.operation_id;
                 let txid = self.common.txid;
                 vec![SmStateTransition::new(
-                    async move { ctx_trigger.client_ctx.await_tx_accepted(txid).await },
+                    async move {
+                        ctx_trigger
+                            .client_ctx
+                            .await_tx_accepted(operation_id, txid)
+                            .await
+                    },
                     move |dbtx, result, old_state| {
                         let ctx = ctx_transition.clone();
                         Box::pin(transition_tx_outcome_sm(ctx, dbtx, result, old_state))
@@ -73,10 +79,8 @@ async fn transition_tx_outcome_sm(
     ctx.client_ctx
         .log_event(
             dbtx,
-            ReceivePaymentUpdateEvent {
-                operation_id: old_state.common.operation_id,
-                status,
-            },
+            old_state.common.operation_id,
+            ReceivePaymentUpdateEvent { status },
         )
         .await;
 

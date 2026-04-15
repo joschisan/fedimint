@@ -139,7 +139,6 @@ impl ServerModuleInit for LightningInit {
             network: config.network,
         })
     }
-
 }
 
 #[derive(Debug)]

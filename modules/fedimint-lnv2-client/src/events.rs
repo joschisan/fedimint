@@ -1,12 +1,11 @@
 use fedimint_core::Amount;
-use fedimint_core::core::{ModuleKind, OperationId};
-use fedimint_eventlog::{Event, EventKind, EventPersistence};
+use fedimint_core::core::ModuleKind;
+use fedimint_eventlog::{Event, EventKind};
 use serde::{Deserialize, Serialize};
 
 /// Event emitted when a send operation is created.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendPaymentEvent {
-    pub operation_id: OperationId,
     pub amount: Amount,
     pub fee: Amount,
 }
@@ -14,7 +13,6 @@ pub struct SendPaymentEvent {
 impl Event for SendPaymentEvent {
     const MODULE: Option<ModuleKind> = Some(fedimint_lnv2_common::KIND);
     const KIND: EventKind = EventKind::from_static("payment-send");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
 
 /// Status of a send operation.
@@ -29,26 +27,22 @@ pub enum SendPaymentStatus {
 /// Event emitted when a send operation reaches a final state.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendPaymentUpdateEvent {
-    pub operation_id: OperationId,
     pub status: SendPaymentStatus,
 }
 
 impl Event for SendPaymentUpdateEvent {
     const MODULE: Option<ModuleKind> = Some(fedimint_lnv2_common::KIND);
     const KIND: EventKind = EventKind::from_static("payment-send-update");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
 
 /// Event emitted when a receive operation successfully completes and
 /// transitions to the claiming state.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReceivePaymentEvent {
-    pub operation_id: OperationId,
     pub amount: Amount,
 }
 
 impl Event for ReceivePaymentEvent {
     const MODULE: Option<ModuleKind> = Some(fedimint_lnv2_common::KIND);
     const KIND: EventKind = EventKind::from_static("payment-receive");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }

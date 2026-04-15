@@ -21,7 +21,9 @@ enum MintEvent {
     ReceiveUpdate(ReceivePaymentUpdateEvent),
 }
 
-fn mint_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = MintEvent> {
+fn mint_event_stream(
+    client: &ClientHandleArc,
+) -> impl futures::Stream<Item = (fedimint_core::core::OperationId, MintEvent)> {
     let client = client.clone();
     let mut log_rx = client.log_event_added_rx();
     let mut next_id = EventLogId::LOG_START;
@@ -33,8 +35,8 @@ fn mint_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = Mi
             for entry in events {
                 next_id = entry.id().saturating_add(1);
 
-                if let Some(event) = try_parse_mint_event(entry.as_raw()) {
-                    yield event;
+                if let Some((op, event)) = try_parse_mint_event(entry.as_raw()) {
+                    yield (op, event);
                 }
             }
 
@@ -43,21 +45,26 @@ fn mint_event_stream(client: &ClientHandleArc) -> impl futures::Stream<Item = Mi
     }
 }
 
-fn try_parse_mint_event(entry: &EventLogEntry) -> Option<MintEvent> {
+fn try_parse_mint_event(
+    entry: &EventLogEntry,
+) -> Option<(fedimint_core::core::OperationId, MintEvent)> {
     if entry.module_kind() != Some(&fedimint_mintv2_common::KIND) {
         return None;
     }
+    let op = entry.operation_id?;
 
     if entry.kind == SendPaymentEvent::KIND {
-        return entry.to_event().map(MintEvent::Send);
+        return entry.to_event().map(|e| (op, MintEvent::Send(e)));
     }
 
     if entry.kind == ReceivePaymentUpdateEvent::KIND {
-        return entry.to_event().map(MintEvent::ReceiveUpdate);
+        return entry
+            .to_event()
+            .map(|e| (op, MintEvent::ReceiveUpdate(e)));
     }
 
     if entry.kind == ReceivePaymentEvent::KIND {
-        return entry.to_event().map(MintEvent::Receive);
+        return entry.to_event().map(|e| (op, MintEvent::Receive(e)));
     }
 
     None
@@ -79,7 +86,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
             .send(Amount::from_sats(1_000))
             .await?;
 
-        let Some(MintEvent::Send(_)) = send_events.next().await else {
+        let Some((_, MintEvent::Send(_))) = send_events.next().await else {
             panic!("Expected Send event");
         };
 
@@ -88,15 +95,15 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
             .receive(ecash)
             .await?;
 
-        let Some(MintEvent::Receive(receive)) = receive_events.next().await else {
+        let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
             panic!("Expected Receive event");
         };
-        assert_eq!(receive.operation_id, operation_id);
+        assert_eq!(op, operation_id);
 
-        let Some(MintEvent::ReceiveUpdate(update)) = receive_events.next().await else {
+        let Some((op, MintEvent::ReceiveUpdate(update))) = receive_events.next().await else {
             panic!("Expected ReceiveUpdate event");
         };
-        assert_eq!(update.operation_id, operation_id);
+        assert_eq!(op, operation_id);
         assert_eq!(update.status, ReceivePaymentStatus::Success);
     }
 
@@ -109,7 +116,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
         .send(Amount::from_sats(1_000))
         .await?;
 
-    let Some(MintEvent::Send(_)) = send_events.next().await else {
+    let Some((_, MintEvent::Send(_))) = send_events.next().await else {
         panic!("Expected Send event");
     };
 
@@ -119,15 +126,15 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
         .receive(ecash.clone())
         .await?;
 
-    let Some(MintEvent::Receive(receive)) = send_events.next().await else {
+    let Some((op, MintEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected Receive event");
     };
-    assert_eq!(receive.operation_id, operation_id);
+    assert_eq!(op, operation_id);
 
-    let Some(MintEvent::ReceiveUpdate(update)) = send_events.next().await else {
+    let Some((op, MintEvent::ReceiveUpdate(update))) = send_events.next().await else {
         panic!("Expected ReceiveUpdate event");
     };
-    assert_eq!(update.operation_id, operation_id);
+    assert_eq!(op, operation_id);
     assert_eq!(update.status, ReceivePaymentStatus::Success);
 
     // Second receive with same ecash is rejected
@@ -136,15 +143,15 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
         .receive(ecash)
         .await?;
 
-    let Some(MintEvent::Receive(receive)) = receive_events.next().await else {
+    let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
         panic!("Expected Receive event");
     };
-    assert_eq!(receive.operation_id, operation_id);
+    assert_eq!(op, operation_id);
 
-    let Some(MintEvent::ReceiveUpdate(update)) = receive_events.next().await else {
+    let Some((op, MintEvent::ReceiveUpdate(update))) = receive_events.next().await else {
         panic!("Expected ReceiveUpdate event");
     };
-    assert_eq!(update.operation_id, operation_id);
+    assert_eq!(op, operation_id);
     assert_eq!(update.status, ReceivePaymentStatus::Rejected);
 
     info!("mintv2: double_spend_is_rejected passed");

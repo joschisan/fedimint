@@ -54,10 +54,11 @@ impl StateMachine for MintOutputStateMachine {
         match &self.state {
             OutputSMState::Pending => {
                 let ctx = ctx.clone();
+                let operation_id = self.common.operation_id;
                 let range = self.common.range;
                 let issuance_requests = self.common.issuance_requests.clone();
                 vec![SmStateTransition::new(
-                    await_signature_shares_sm(ctx.clone(), range, issuance_requests),
+                    await_signature_shares_sm(ctx.clone(), operation_id, range, issuance_requests),
                     move |dbtx, shares, old_state| {
                         let ctx = ctx.clone();
                         let balance_update_sender = ctx.balance_update_sender.clone();
@@ -75,12 +76,15 @@ impl StateMachine for MintOutputStateMachine {
 
 async fn await_signature_shares_sm(
     ctx: MintSmContext,
+    operation_id: OperationId,
     range: Option<OutPointRange>,
     issuance_requests: Vec<NoteIssuanceRequest>,
 ) -> Result<std::collections::BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String> {
     let tbs_pks = ctx.tbs_pks.clone();
     if let Some(range) = range {
-        ctx.client_ctx.await_tx_accepted(range.txid).await?;
+        ctx.client_ctx
+            .await_tx_accepted(operation_id, range.txid)
+            .await?;
         Ok(ctx
             .client_ctx
             .module_api()
@@ -140,10 +144,8 @@ async fn transition_outcome_ready_sm(
         ctx.client_ctx
             .log_event(
                 dbtx,
-                OutputFinalisedEvent {
-                    operation_id: old_state.common.operation_id,
-                    range,
-                },
+                old_state.common.operation_id,
+                OutputFinalisedEvent { range },
             )
             .await;
     }

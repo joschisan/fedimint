@@ -82,7 +82,6 @@ impl ServerModuleInit for UnknownInit {
     ) -> anyhow::Result<()> {
         Ok(())
     }
-
 }
 
 /// Unknown module

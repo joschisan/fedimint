@@ -55,9 +55,10 @@ impl StateMachine for SendStateMachine {
         match &self.state {
             SendSMState::Funding => {
                 let ctx = ctx.clone();
+                let operation_id = self.common.operation_id;
                 let outpoint = self.common.outpoint;
                 vec![SmStateTransition::new(
-                    await_funding_sm(ctx.clone(), outpoint),
+                    await_funding_sm(ctx.clone(), operation_id, outpoint),
                     move |dbtx, result, old_state| {
                         let ctx = ctx.clone();
                         Box::pin(transition_funding_sm(ctx, dbtx, result, old_state))
@@ -69,8 +70,16 @@ impl StateMachine for SendStateMachine {
     }
 }
 
-async fn await_funding_sm(ctx: WalletClientContext, outpoint: OutPoint) -> AwaitFundingResult {
-    if let Err(error) = ctx.client_ctx.await_tx_accepted(outpoint.txid).await {
+async fn await_funding_sm(
+    ctx: WalletClientContext,
+    operation_id: OperationId,
+    outpoint: OutPoint,
+) -> AwaitFundingResult {
+    if let Err(error) = ctx
+        .client_ctx
+        .await_tx_accepted(operation_id, outpoint.txid)
+        .await
+    {
         return AwaitFundingResult::Aborted(error);
     }
 
@@ -91,8 +100,8 @@ async fn transition_funding_sm(
             ctx.client_ctx
                 .log_event(
                     dbtx,
+                    old_state.common.operation_id,
                     SendPaymentUpdateEvent {
-                        operation_id: old_state.common.operation_id,
                         status: SendPaymentStatus::Success(txid),
                     },
                 )
@@ -104,8 +113,8 @@ async fn transition_funding_sm(
             ctx.client_ctx
                 .log_event(
                     dbtx,
+                    old_state.common.operation_id,
                     SendPaymentUpdateEvent {
-                        operation_id: old_state.common.operation_id,
                         status: SendPaymentStatus::Aborted,
                     },
                 )

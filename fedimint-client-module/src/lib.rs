@@ -16,7 +16,7 @@ use std::ops::{self};
 use fedimint_api_client::api::DynModuleApi;
 pub use fedimint_core::core::{IInput, IOutput, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::{PeerId, TransactionId, maybe_add_send_sync};
-use fedimint_eventlog::{Event, EventKind, EventPersistence};
+use fedimint_eventlog::{Event, EventKind};
 use fedimint_redb::Database;
 use serde::{Deserialize, Serialize};
 use transaction::{ClientInputBundle, ClientOutput};
@@ -38,37 +38,31 @@ pub mod transaction;
 #[derive(Serialize, Deserialize)]
 pub struct TxCreatedEvent {
     pub txid: TransactionId,
-    pub operation_id: OperationId,
 }
 
 impl Event for TxCreatedEvent {
     const MODULE: Option<ModuleKind> = None;
     const KIND: EventKind = EventKind::from_static("tx-created");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct TxAcceptedEvent {
     pub txid: TransactionId,
-    pub operation_id: OperationId,
 }
 
 impl Event for TxAcceptedEvent {
     const MODULE: Option<ModuleKind> = None;
     const KIND: EventKind = EventKind::from_static("tx-accepted");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct TxRejectedEvent {
     pub txid: TransactionId,
     pub error: String,
-    pub operation_id: OperationId,
 }
 impl Event for TxRejectedEvent {
     const MODULE: Option<ModuleKind> = None;
     const KIND: EventKind = EventKind::from_static("tx-rejected");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -85,7 +79,6 @@ impl ModuleRecoveryStarted {
 impl Event for ModuleRecoveryStarted {
     const MODULE: Option<ModuleKind> = None;
     const KIND: EventKind = EventKind::from_static("module-recovery-started");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -96,7 +89,6 @@ pub struct ModuleRecoveryCompleted {
 impl Event for ModuleRecoveryCompleted {
     const MODULE: Option<ModuleKind> = None;
     const KIND: EventKind = EventKind::from_static("module-recovery-completed");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
 
 pub type InstancelessDynClientInput = ClientInput<Box<maybe_add_send_sync!(dyn IInput + 'static)>>;

@@ -1,30 +1,27 @@
 use fedimint_client_module::module::OutPointRange;
 use fedimint_core::Amount;
-use fedimint_core::core::{ModuleKind, OperationId};
-use fedimint_eventlog::{Event, EventKind, EventPersistence};
+use fedimint_core::core::ModuleKind;
+use fedimint_eventlog::{Event, EventKind};
 use fedimint_mintv2_common::KIND;
 use serde::{Deserialize, Serialize};
 
-/// Transient event emitted when an output state machine reaches its terminal
-/// state. Used internally by the `send` flow to wait for a reissuance bundle
-/// to finalise before retrying note selection.
+/// Emitted when an output state machine reaches its terminal state. Used by
+/// the `send` flow to wait for a reissuance bundle to finalise before
+/// retrying note selection.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OutputFinalisedEvent {
-    pub operation_id: OperationId,
     pub range: OutPointRange,
 }
 
 impl Event for OutputFinalisedEvent {
     const MODULE: Option<ModuleKind> = Some(KIND);
     const KIND: EventKind = EventKind::from_static("output-finalised");
-    const PERSISTENCE: EventPersistence = EventPersistence::Transient;
 }
 
 /// Event emitted when e-cash is sent out-of-band.
 /// This is a final event - once e-cash is sent, the operation is complete.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendPaymentEvent {
-    pub operation_id: OperationId,
     pub amount: Amount,
     pub ecash: String,
 }
@@ -32,20 +29,17 @@ pub struct SendPaymentEvent {
 impl Event for SendPaymentEvent {
     const MODULE: Option<ModuleKind> = Some(KIND);
     const KIND: EventKind = EventKind::from_static("payment-send");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
 
 /// Event emitted when a receive (reissuance) operation is initiated.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReceivePaymentEvent {
-    pub operation_id: OperationId,
     pub amount: Amount,
 }
 
 impl Event for ReceivePaymentEvent {
     const MODULE: Option<ModuleKind> = Some(KIND);
     const KIND: EventKind = EventKind::from_static("payment-receive");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }
 
 /// Status of a receive (reissuance) operation.
@@ -60,12 +54,10 @@ pub enum ReceivePaymentStatus {
 /// Event emitted when a receive (reissuance) operation reaches a final state.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReceivePaymentUpdateEvent {
-    pub operation_id: OperationId,
     pub status: ReceivePaymentStatus,
 }
 
 impl Event for ReceivePaymentUpdateEvent {
     const MODULE: Option<ModuleKind> = Some(KIND);
     const KIND: EventKind = EventKind::from_static("payment-receive-update");
-    const PERSISTENCE: EventPersistence = EventPersistence::Persistent;
 }

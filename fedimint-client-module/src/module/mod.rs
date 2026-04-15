@@ -21,12 +21,10 @@ use fedimint_core::{
     Amount, PeerId, TransactionId, apply, async_trait_maybe_send, dyn_newtype_define,
     maybe_add_send_sync,
 };
-use fedimint_eventlog::{
-    Event, EventKind, EventLogEntry, EventLogId, EventPersistence, PersistedLogEntry,
-};
+use fedimint_eventlog::{Event, EventKind, EventLogId, PersistedLogEntry};
 use fedimint_logging::LOG_CLIENT;
 use fedimint_redb::{Database, WriteTxRef};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::watch;
 use tracing::warn;
 
 use self::init::ClientModuleInit;
@@ -105,7 +103,11 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
 
-    async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String>;
+    async fn await_tx_accepted(
+        &self,
+        operation_id: OperationId,
+        txid: TransactionId,
+    ) -> Result<(), String>;
 
     async fn config(&self) -> ClientConfig;
 
@@ -115,11 +117,14 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
 
     fn get_internal_payment_markers(&self) -> anyhow::Result<(PublicKey, u64)>;
 
-    fn event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry>;
-
     fn log_event_added_rx(&self) -> watch::Receiver<()>;
 
     async fn get_event_log(&self, pos: Option<EventLogId>, limit: u64) -> Vec<PersistedLogEntry>;
+
+    fn subscribe_operation_events(
+        &self,
+        operation_id: OperationId,
+    ) -> BoxStream<'static, PersistedLogEntry>;
 
     #[allow(clippy::too_many_arguments)]
     async fn log_event_json(
@@ -128,8 +133,8 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
         module_kind: Option<ModuleKind>,
         module_id: ModuleInstanceId,
         kind: EventKind,
+        operation_id: Option<OperationId>,
         payload: serde_json::Value,
-        persist: EventPersistence,
     );
 }
 
@@ -332,8 +337,15 @@ where
         &self.module_db
     }
 
-    pub async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String> {
-        self.client.get().await_tx_accepted(txid).await
+    pub async fn await_tx_accepted(
+        &self,
+        operation_id: OperationId,
+        txid: TransactionId,
+    ) -> Result<(), String> {
+        self.client
+            .get()
+            .await_tx_accepted(operation_id, txid)
+            .await
     }
 
     pub async fn get_config(&self) -> ClientConfig {
@@ -388,13 +400,6 @@ where
             .await
     }
 
-    /// Subscribe to the broadcast of all transient (unpersisted) events
-    /// emitted by the client. Subscribe before triggering the action that
-    /// produces the event to avoid missing it.
-    pub fn event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry> {
-        self.client.get().event_log_transient_receiver()
-    }
-
     /// Watch channel that signals when any new event is added to the
     /// persistent event log.
     pub fn log_event_added_rx(&self) -> watch::Receiver<()> {
@@ -410,7 +415,36 @@ where
         self.client.get().get_event_log(pos, limit).await
     }
 
-    pub async fn log_event<E>(&self, dbtx: &WriteTxRef<'_>, event: E)
+    /// Stream every event belonging to `operation_id`, starting from the
+    /// beginning of the log (existing events first, then live ones).
+    pub fn subscribe_operation_events(
+        &self,
+        operation_id: OperationId,
+    ) -> BoxStream<'static, PersistedLogEntry> {
+        self.client.get().subscribe_operation_events(operation_id)
+    }
+
+    /// Typed variant of [`Self::subscribe_operation_events`] — yields only
+    /// entries of kind `E`, decoded.
+    pub fn subscribe_operation_events_typed<E>(
+        &self,
+        operation_id: OperationId,
+    ) -> BoxStream<'static, E>
+    where
+        E: Event + Send + 'static,
+    {
+        use futures::StreamExt as _;
+        Box::pin(
+            self.subscribe_operation_events(operation_id)
+                .filter_map(|entry| async move {
+                    (entry.module_kind() == E::MODULE.as_ref() && entry.kind == E::KIND)
+                        .then(|| entry.to_event::<E>())
+                        .flatten()
+                }),
+        )
+    }
+
+    pub async fn log_event<E>(&self, dbtx: &WriteTxRef<'_>, operation_id: OperationId, event: E)
     where
         E: Event + Send,
     {
@@ -429,8 +463,8 @@ where
                 <E as Event>::MODULE,
                 self.module_instance_id,
                 <E as Event>::KIND,
+                Some(operation_id),
                 serde_json::to_value(event).expect("Can't fail"),
-                <E as Event>::PERSISTENCE,
             )
             .await;
     }

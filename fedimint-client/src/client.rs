@@ -38,13 +38,12 @@ use fedimint_core::{
     maybe_add_send_sync,
 };
 use fedimint_eventlog::{
-    DBTransactionEventLogReadExt as _, Event, EventKind, EventLogEntry, EventLogId,
-    EventLogTrimableId, EventPersistence, PersistedLogEntry,
+    DBTransactionEventLogReadExt as _, Event, EventKind, EventLogId, PersistedLogEntry,
 };
 use fedimint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
 use fedimint_redb::{Database, WriteTxRef};
 use futures::{Stream, StreamExt as _};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, warn};
 
@@ -94,7 +93,6 @@ pub struct Client {
     log_ordering_wakeup_tx: watch::Sender<()>,
     /// Receiver for events fired every time (ordered) log event is added.
     log_event_added_rx: watch::Receiver<()>,
-    log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
 }
 
 impl Client {
@@ -377,7 +375,7 @@ impl Client {
             )
             .await;
 
-        self.log_event_dbtx(dbtx, None, TxCreatedEvent { txid, operation_id });
+        self.log_event_dbtx(dbtx, None, Some(operation_id), TxCreatedEvent { txid });
 
         Ok(OutPointRange::new(
             txid,
@@ -385,31 +383,27 @@ impl Client {
         ))
     }
 
-    pub async fn await_tx_accepted(&self, query_txid: TransactionId) -> Result<(), String> {
-        let mut log_rx = self.log_event_added_rx();
-        let mut next_id = EventLogId::LOG_START;
-        loop {
-            for entry in self.get_event_log(Some(next_id), 100).await {
-                next_id = entry.id().saturating_add(1);
-                let raw = entry.as_raw();
-                if raw.module_kind().is_some() {
-                    continue;
-                }
-                if raw.kind == TxAcceptedEvent::KIND
-                    && let Some(ev) = raw.to_event::<TxAcceptedEvent>()
-                    && ev.txid == query_txid
-                {
-                    return Ok(());
-                }
-                if raw.kind == TxRejectedEvent::KIND
-                    && let Some(ev) = raw.to_event::<TxRejectedEvent>()
-                    && ev.txid == query_txid
-                {
-                    return Err(ev.error);
-                }
+    pub async fn await_tx_accepted(
+        &self,
+        operation_id: OperationId,
+        query_txid: TransactionId,
+    ) -> Result<(), String> {
+        let mut stream = self.subscribe_operation_events(operation_id);
+        while let Some(entry) = stream.next().await {
+            if entry.kind == TxAcceptedEvent::KIND
+                && let Some(ev) = entry.to_event::<TxAcceptedEvent>()
+                && ev.txid == query_txid
+            {
+                return Ok(());
             }
-            let _ = log_rx.changed().await;
+            if entry.kind == TxRejectedEvent::KIND
+                && let Some(ev) = entry.to_event::<TxRejectedEvent>()
+                && ev.txid == query_txid
+            {
+                return Err(ev.error);
+            }
         }
+        unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
     /// Returns a reference to a typed module client instance by kind
@@ -711,6 +705,7 @@ impl Client {
                     &tx,
                     log_ordering_wakeup_tx.clone(),
                     None,
+                    None,
                     ModuleRecoveryCompleted {
                         module_id: module_instance_id,
                     },
@@ -757,9 +752,7 @@ impl Client {
             .await
             .into_iter()
             .find_map(|(peer_id, url)| (peer == peer_id).then_some(url))
-            .map(|peer_url| {
-                InviteCode::new(peer_url.clone(), peer, self.federation_id())
-            })
+            .map(|peer_url| InviteCode::new(peer_url.clone(), peer, self.federation_id()))
     }
 
     /// Returns the guardian public key set from the client config.
@@ -773,12 +766,16 @@ impl Client {
             .expect("Guardian public keys must be present in config")
     }
 
-    pub async fn log_event<E>(&self, module_id: Option<ModuleInstanceId>, event: E)
-    where
+    pub async fn log_event<E>(
+        &self,
+        module_id: Option<ModuleInstanceId>,
+        operation_id: Option<OperationId>,
+        event: E,
+    ) where
         E: Event + Send,
     {
         let dbtx = self.db.begin_write().await;
-        self.log_event_dbtx(&dbtx.as_ref(), module_id, event);
+        self.log_event_dbtx(&dbtx.as_ref(), module_id, operation_id, event);
         dbtx.commit().await;
     }
 
@@ -786,11 +783,18 @@ impl Client {
         &self,
         dbtx: &WriteTxRef<'_>,
         module_id: Option<ModuleInstanceId>,
+        operation_id: Option<OperationId>,
         event: E,
     ) where
         E: Event + Send,
     {
-        fedimint_eventlog::log_event(dbtx, self.log_ordering_wakeup_tx.clone(), module_id, event);
+        fedimint_eventlog::log_event(
+            dbtx,
+            self.log_ordering_wakeup_tx.clone(),
+            module_id,
+            operation_id,
+            event,
+        );
     }
 
     pub fn log_event_raw_dbtx(
@@ -798,8 +802,8 @@ impl Client {
         dbtx: &WriteTxRef<'_>,
         kind: EventKind,
         module: Option<(ModuleKind, ModuleInstanceId)>,
+        operation_id: Option<OperationId>,
         payload: Vec<u8>,
-        persist: EventPersistence,
     ) {
         let module_id = module.as_ref().map(|m| m.1);
         let module_kind = module.map(|m| m.0);
@@ -809,67 +813,9 @@ impl Client {
             kind,
             module_kind,
             module_id,
+            operation_id,
             payload,
-            persist,
         );
-    }
-
-    /// Like [`Self::handle_events`] but for historical data.
-    ///
-    ///
-    /// This function can be used to process subset of events
-    /// that is infrequent and important enough to be persisted
-    /// forever. Most applications should prefer to use [`Self::handle_events`]
-    /// which emits *all* events.
-    pub async fn handle_historical_events<F, R>(
-        &self,
-        tracker: fedimint_eventlog::DynEventLogTracker,
-        handler_fn: F,
-    ) -> anyhow::Result<()>
-    where
-        F: Fn(&WriteTxRef<'_>, EventLogEntry) -> R,
-        R: Future<Output = anyhow::Result<()>>,
-    {
-        fedimint_eventlog::handle_events(
-            self.db.clone(),
-            tracker,
-            self.log_event_added_rx.clone(),
-            handler_fn,
-        )
-        .await
-    }
-
-    /// Handle events emitted by the client
-    ///
-    /// This is a preferred method for reactive & asynchronous
-    /// processing of events emitted by the client.
-    ///
-    /// It needs a `tracker` that will persist the position in the log
-    /// as it is being handled.
-    ///
-    /// This handler will call `handle_fn` with ever event emitted by
-    /// [`Client`], including transient ones. The caller should atomically
-    /// handle each event it is interested in and ignore other ones.
-    ///
-    /// This method returns only when client is shutting down or on internal
-    /// error, so typically should be called in a background task dedicated
-    /// to handling events.
-    pub async fn handle_events<F, R>(
-        &self,
-        tracker: fedimint_eventlog::DynEventLogTrimableTracker,
-        handler_fn: F,
-    ) -> anyhow::Result<()>
-    where
-        F: Fn(&WriteTxRef<'_>, EventLogEntry) -> R,
-        R: Future<Output = anyhow::Result<()>>,
-    {
-        fedimint_eventlog::handle_trimable_events(
-            self.db.clone(),
-            tracker,
-            self.log_event_added_rx.clone(),
-            handler_fn,
-        )
-        .await
     }
 
     pub async fn get_event_log(
@@ -884,26 +830,22 @@ impl Client {
             .get_event_log(pos, limit)
     }
 
-    pub async fn get_event_log_trimable(
-        &self,
-        pos: Option<EventLogTrimableId>,
-        limit: u64,
-    ) -> Vec<PersistedLogEntry> {
-        self.db
-            .begin_read()
-            .await
-            .as_ref()
-            .get_event_log_trimable(pos, limit)
-    }
-
-    /// Register to receiver all new transient (unpersisted) events
-    pub fn get_event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry> {
-        self.log_event_added_transient_tx.subscribe()
-    }
-
     /// Get a receiver that signals when new events are added to the event log
     pub fn log_event_added_rx(&self) -> watch::Receiver<()> {
         self.log_event_added_rx.clone()
+    }
+
+    /// Stream every event belonging to `operation_id`, starting from the
+    /// beginning of the log (existing events first, then live ones).
+    pub fn subscribe_operation_events(
+        &self,
+        operation_id: OperationId,
+    ) -> BoxStream<'static, PersistedLogEntry> {
+        Box::pin(fedimint_eventlog::subscribe_operation_events(
+            self.db.clone(),
+            self.log_event_added_rx.clone(),
+            operation_id,
+        ))
     }
 
     /// Returns the primary module, if any
@@ -979,20 +921,16 @@ impl ClientContextIface for Client {
         module_kind: Option<ModuleKind>,
         module_id: ModuleInstanceId,
         kind: EventKind,
+        operation_id: Option<OperationId>,
         payload: serde_json::Value,
-        persist: EventPersistence,
     ) {
         self.log_event_raw_dbtx(
             dbtx,
             kind,
             module_kind.map(|kind| (kind, module_id)),
+            operation_id,
             serde_json::to_vec(&payload).expect("Serialization can't fail"),
-            persist,
         );
-    }
-
-    fn event_log_transient_receiver(&self) -> broadcast::Receiver<EventLogEntry> {
-        self.get_event_log_transient_receiver()
     }
 
     fn log_event_added_rx(&self) -> watch::Receiver<()> {
@@ -1003,8 +941,19 @@ impl ClientContextIface for Client {
         Client::get_event_log(self, pos, limit).await
     }
 
-    async fn await_tx_accepted(&self, txid: TransactionId) -> Result<(), String> {
-        Client::await_tx_accepted(self, txid).await
+    fn subscribe_operation_events(
+        &self,
+        operation_id: OperationId,
+    ) -> BoxStream<'static, PersistedLogEntry> {
+        Client::subscribe_operation_events(self, operation_id)
+    }
+
+    async fn await_tx_accepted(
+        &self,
+        operation_id: OperationId,
+        txid: TransactionId,
+    ) -> Result<(), String> {
+        Client::await_tx_accepted(self, operation_id, txid).await
     }
 }
 

@@ -93,9 +93,9 @@ impl StateMachine for TxSubmissionStatesSM {
                                     log_tx_event(
                                         &ctx,
                                         dbtx,
+                                        operation_id,
                                         TxRejectedEvent {
                                             txid,
-                                            operation_id,
                                             error: error.clone(),
                                         },
                                     )
@@ -122,7 +122,8 @@ impl StateMachine for TxSubmissionStatesSM {
                                     log_tx_event(
                                         &ctx,
                                         dbtx,
-                                        TxAcceptedEvent { txid, operation_id },
+                                        operation_id,
+                                        TxAcceptedEvent { txid },
                                     )
                                     .await;
                                     TxSubmissionStatesSM {
@@ -145,6 +146,7 @@ impl StateMachine for TxSubmissionStatesSM {
 async fn log_tx_event<E: Event + Send>(
     ctx: &TxSubmissionSmContext,
     dbtx: &WriteTxRef<'_>,
+    operation_id: OperationId,
     event: E,
 ) {
     ctx.client
@@ -154,8 +156,8 @@ async fn log_tx_event<E: Event + Send>(
             E::MODULE,
             0xffff,
             E::KIND,
+            Some(operation_id),
             serde_json::to_value(event).expect("Serializable"),
-            E::PERSISTENCE,
         )
         .await;
 }

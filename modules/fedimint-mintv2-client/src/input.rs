@@ -38,9 +38,10 @@ impl StateMachine for InputStateMachine {
         match &self.state {
             InputSMState::Pending => {
                 let ctx = ctx.clone();
+                let operation_id = self.common.operation_id;
                 let txid = self.common.txid;
                 vec![SmStateTransition::new(
-                    await_pending_sm(ctx.clone(), txid),
+                    await_pending_sm(ctx.clone(), operation_id, txid),
                     move |dbtx, result, old_state| {
                         let ctx = ctx.clone();
                         Box::pin(transition_pending_sm(ctx, dbtx, result, old_state))
@@ -52,8 +53,12 @@ impl StateMachine for InputStateMachine {
     }
 }
 
-async fn await_pending_sm(ctx: MintSmContext, txid: TransactionId) -> Result<(), String> {
-    ctx.client_ctx.await_tx_accepted(txid).await
+async fn await_pending_sm(
+    ctx: MintSmContext,
+    operation_id: OperationId,
+    txid: TransactionId,
+) -> Result<(), String> {
+    ctx.client_ctx.await_tx_accepted(operation_id, txid).await
 }
 
 async fn transition_pending_sm(

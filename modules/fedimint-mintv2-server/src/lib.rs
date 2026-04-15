@@ -137,7 +137,6 @@ impl ServerModuleInit for MintInit {
             output_fee: config.output_fee,
         })
     }
-
 }
 
 #[derive(Debug)]
@@ -389,10 +388,7 @@ fn get_recovery_count(dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
         .map_or(0, |(idx, _)| idx + 1)
 }
 
-fn get_recovery_slice(
-    tx: &fedimint_redb::ReadTransaction,
-    range: (u64, u64),
-) -> Vec<RecoveryItem> {
+fn get_recovery_slice(tx: &fedimint_redb::ReadTransaction, range: (u64, u64)) -> Vec<RecoveryItem> {
     tx.range(&RECOVERY_ITEM, range.0..range.1)
         .into_iter()
         .map(|(_, v)| v)

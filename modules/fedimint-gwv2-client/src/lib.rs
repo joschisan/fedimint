@@ -32,7 +32,6 @@ use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::util::Spanned;
 use fedimint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send, secp256k1};
-use fedimint_eventlog::EventLogId;
 use fedimint_lnv2_common::config::LightningClientConfig;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::SendPaymentPayload;
@@ -272,9 +271,11 @@ impl GatewayClientModuleV2 {
     }
 
     pub async fn subscribe_send(&self, operation_id: OperationId) -> Result<[u8; 32], Signature> {
-        let status = await_event::<SendPaymentUpdateEvent, _>(&self.client_ctx, |ev| {
-            (ev.operation_id == operation_id).then(|| ev.status.clone())
-        })
+        let status = await_event::<SendPaymentUpdateEvent, _>(
+            &self.client_ctx,
+            operation_id,
+            |ev| Some(ev.status.clone()),
+        )
         .await;
 
         match status {
@@ -421,9 +422,11 @@ impl GatewayClientModuleV2 {
     }
 
     pub async fn await_receive(&self, operation_id: OperationId) -> FinalReceiveState {
-        let status = await_event::<ReceivePaymentUpdateEvent, _>(&self.client_ctx, |ev| {
-            (ev.operation_id == operation_id).then(|| ev.status.clone())
-        })
+        let status = await_event::<ReceivePaymentUpdateEvent, _>(
+            &self.client_ctx,
+            operation_id,
+            |ev| Some(ev.status.clone()),
+        )
         .await;
 
         match status {
@@ -437,8 +440,8 @@ impl GatewayClientModuleV2 {
     /// For the given `OperationId`, this function will wait until the Complete
     /// state machine has finished.
     pub async fn await_completion(&self, operation_id: OperationId) {
-        await_event::<CompleteLightningPaymentEvent, _>(&self.client_ctx, |ev| {
-            (ev.operation_id == operation_id).then_some(())
+        await_event::<CompleteLightningPaymentEvent, _>(&self.client_ctx, operation_id, |_| {
+            Some(())
         })
         .await;
     }
@@ -448,10 +451,11 @@ pub(crate) async fn await_receive_from_log(
     client_ctx: &ClientContext<GatewayClientModuleV2>,
     operation_id: OperationId,
 ) -> FinalReceiveState {
-    let status = await_event::<ReceivePaymentUpdateEvent, _>(client_ctx, |ev| {
-        (ev.operation_id == operation_id).then(|| ev.status.clone())
-    })
-    .await;
+    let status =
+        await_event::<ReceivePaymentUpdateEvent, _>(client_ctx, operation_id, |ev| {
+            Some(ev.status.clone())
+        })
+        .await;
 
     match status {
         ReceivePaymentStatus::Success(preimage) => FinalReceiveState::Success(preimage),
@@ -461,34 +465,25 @@ pub(crate) async fn await_receive_from_log(
     }
 }
 
-/// Tail the persistent event log waiting for an event of type `E` for which
-/// `predicate` returns `Some(value)`. Returns the matched value.
+/// Tail the op-scoped sublog, yielding the first match of `predicate` applied
+/// to an event of type `E`.
 async fn await_event<E, T>(
     client_ctx: &ClientContext<GatewayClientModuleV2>,
+    operation_id: OperationId,
     predicate: impl Fn(&E) -> Option<T>,
 ) -> T
 where
-    E: fedimint_eventlog::Event,
+    E: fedimint_eventlog::Event + Send + 'static,
 {
-    let mut log_rx = client_ctx.log_event_added_rx();
-    let mut next_id = EventLogId::LOG_START;
+    use futures::StreamExt as _;
 
-    loop {
-        for entry in client_ctx.get_event_log(Some(next_id), 100).await {
-            next_id = entry.id().saturating_add(1);
-            let raw = entry.as_raw();
-            if raw.module_kind() != E::MODULE.as_ref() || raw.kind != E::KIND {
-                continue;
-            }
-            let Some(ev) = raw.to_event::<E>() else {
-                continue;
-            };
-            if let Some(out) = predicate(&ev) {
-                return out;
-            }
+    let mut stream = client_ctx.subscribe_operation_events_typed::<E>(operation_id);
+    while let Some(ev) = stream.next().await {
+        if let Some(out) = predicate(&ev) {
+            return out;
         }
-        let _ = log_rx.changed().await;
     }
+    unreachable!("subscribe_operation_events_typed only ends at client shutdown")
 }
 
 /// An interface between module implementation and the general `Gateway`

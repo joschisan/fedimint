@@ -8,7 +8,6 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_redb::WriteTxRef;
 use fedimint_core::module::ApiRequestErased;
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::{NumPeersExt, OutPoint, PeerId};
@@ -16,6 +15,7 @@ use fedimint_lnv2_common::contracts::IncomingContract;
 use fedimint_lnv2_common::endpoint_constants::DECRYPTION_KEY_SHARE_ENDPOINT;
 use fedimint_lnv2_common::{LightningInput, LightningInputV0};
 use fedimint_logging::LOG_CLIENT_MODULE_GW;
+use fedimint_redb::WriteTxRef;
 use tpe::{DecryptionKeyShare, aggregate_dk_shares};
 use tracing::warn;
 
@@ -97,10 +97,11 @@ impl StateMachine for ReceiveStateMachine {
         match &self.state {
             ReceiveSMState::Funding => {
                 let ctx_clone = ctx.clone();
+                let operation_id = self.common.operation_id;
                 let outpoint = self.common.outpoint;
                 let contract = self.common.contract.clone();
                 vec![SmStateTransition::new(
-                    await_decryption_shares_sm(ctx_clone.clone(), outpoint, contract),
+                    await_decryption_shares_sm(ctx_clone.clone(), operation_id, outpoint, contract),
                     move |dbtx, shares, old_state| {
                         let ctx = ctx_clone.clone();
                         Box::pin(transition_decryption_shares_sm(
@@ -119,10 +120,13 @@ impl StateMachine for ReceiveStateMachine {
 
 async fn await_decryption_shares_sm(
     ctx: GwV2SmContext,
+    operation_id: OperationId,
     outpoint: OutPoint,
     contract: IncomingContract,
 ) -> Result<BTreeMap<PeerId, DecryptionKeyShare>, String> {
-    ctx.client_ctx.await_tx_accepted(outpoint.txid).await?;
+    ctx.client_ctx
+        .await_tx_accepted(operation_id, outpoint.txid)
+        .await?;
 
     let tpe_pks = ctx.tpe_pks.clone();
     Ok(ctx
@@ -169,8 +173,8 @@ async fn transition_decryption_shares_sm(
             ctx.client_ctx
                 .log_event(
                     dbtx,
+                    old_state.common.operation_id,
                     ReceivePaymentUpdateEvent {
-                        operation_id: old_state.common.operation_id,
                         status: ReceivePaymentStatus::Rejected,
                     },
                 )
@@ -192,8 +196,8 @@ async fn transition_decryption_shares_sm(
         ctx.client_ctx
             .log_event(
                 dbtx,
+                old_state.common.operation_id,
                 ReceivePaymentUpdateEvent {
-                    operation_id: old_state.common.operation_id,
                     status: ReceivePaymentStatus::Failure,
                 },
             )
@@ -210,8 +214,8 @@ async fn transition_decryption_shares_sm(
         ctx.client_ctx
             .log_event(
                 dbtx,
+                old_state.common.operation_id,
                 ReceivePaymentUpdateEvent {
-                    operation_id: old_state.common.operation_id,
                     status: ReceivePaymentStatus::Success(preimage),
                 },
             )
@@ -244,8 +248,8 @@ async fn transition_decryption_shares_sm(
     ctx.client_ctx
         .log_event(
             dbtx,
+            old_state.common.operation_id,
             ReceivePaymentUpdateEvent {
-                operation_id: old_state.common.operation_id,
                 status: ReceivePaymentStatus::Refunded,
             },
         )

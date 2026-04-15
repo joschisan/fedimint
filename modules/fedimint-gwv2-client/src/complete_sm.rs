@@ -151,9 +151,8 @@ async fn transition_completion_sm(
     ctx.client_ctx
         .log_event(
             dbtx,
-            CompleteLightningPaymentEvent {
-                operation_id: old_state.common.operation_id,
-            },
+            old_state.common.operation_id,
+            CompleteLightningPaymentEvent,
         )
         .await;
     old_state.update(CompleteSMState::Completed)

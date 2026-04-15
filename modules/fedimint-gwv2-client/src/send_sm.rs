@@ -5,11 +5,11 @@ use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_redb::WriteTxRef;
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::{Amount, OutPoint};
 use fedimint_lnv2_common::contracts::OutgoingContract;
 use fedimint_lnv2_common::{LightningInput, LightningInputV0, LightningInvoice, OutgoingWitness};
+use fedimint_redb::WriteTxRef;
 use serde::{Deserialize, Serialize};
 
 use super::FinalReceiveState;
@@ -228,8 +228,8 @@ async fn transition_send_payment_sm(
             ctx.client_ctx
                 .log_event(
                     dbtx,
+                    old_state.common.operation_id,
                     SendPaymentUpdateEvent {
-                        operation_id: old_state.common.operation_id,
                         status: SendPaymentStatus::Success(payment_response.preimage),
                     },
                 )
@@ -269,8 +269,8 @@ async fn transition_send_payment_sm(
             ctx.client_ctx
                 .log_event(
                     dbtx,
+                    old_state.common.operation_id,
                     SendPaymentUpdateEvent {
-                        operation_id: old_state.common.operation_id,
                         status: SendPaymentStatus::Cancelled(signature),
                     },
                 )

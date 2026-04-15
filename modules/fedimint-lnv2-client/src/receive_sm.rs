@@ -4,10 +4,10 @@ use fedimint_core::OutPoint;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::secp256k1::Keypair;
-use fedimint_redb::WriteTxRef;
 use fedimint_lnv2_common::contracts::IncomingContract;
 use fedimint_lnv2_common::{LightningInput, LightningInputV0};
 use fedimint_logging::LOG_CLIENT_MODULE_LNV2;
+use fedimint_redb::WriteTxRef;
 use tpe::AggregateDecryptionKey;
 use tracing::instrument;
 
@@ -123,8 +123,8 @@ async fn transition_incoming_contract_sm(
     ctx.client_ctx
         .log_event(
             dbtx,
+            old_state.common.operation_id,
             ReceivePaymentEvent {
-                operation_id: old_state.common.operation_id,
                 amount: old_state.common.contract.commitment.amount,
             },
         )
