@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -eou pipefail
 
+function should_skip_step() {
+    local env_var_name="$1"
+    [[ "${!env_var_name:-false}" == "true" ]]
+}
+
 # check the things involving cargo
 # We're using Nix + crane + flakebox,
 # this gives us caching between different
@@ -12,17 +17,29 @@ function job_cargo() {
     fi
 
     # there's not point continuing if we can't build
-    selfci step start "build"
-    nix build -L .#ci.workspaceBuild
-
-    selfci step start "clippy"
-    if ! nix build -L .#ci.workspaceClippy ; then
-      selfci step fail
+    if should_skip_step FM_SELFCI_CHECK_SKIP_BUILD; then
+      echo "Skipping build because FM_SELFCI_CHECK_SKIP_BUILD=true"
+    else
+      selfci step start "build"
+      nix build -L .#ci.workspaceBuild
     fi
 
-    selfci step start "tests"
-    if ! nix build -L .#ci.ciTestAll ; then
-      selfci step fail
+    if should_skip_step FM_SELFCI_CHECK_SKIP_CLIPPY; then
+      echo "Skipping clippy because FM_SELFCI_CHECK_SKIP_CLIPPY=true"
+    else
+      selfci step start "clippy"
+      if ! nix build -L .#ci.workspaceClippy ; then
+        selfci step fail
+      fi
+    fi
+
+    if should_skip_step FM_SELFCI_CHECK_SKIP_TESTS; then
+      echo "Skipping tests because FM_SELFCI_CHECK_SKIP_TESTS=true"
+    else
+      selfci step start "tests"
+      if ! nix build -L .#ci.ciTestAll ; then
+        selfci step fail
+      fi
     fi
 }
 
