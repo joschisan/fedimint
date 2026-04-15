@@ -3,9 +3,8 @@
 //! Each module (and the client-level tx submission) owns a single
 //! [`ModuleExecutor<S>`] parameterised by its state type. The caller
 //! must hand the executor a [`Database`] it owns exclusively (typically
-//! via [`Database::with_prefix`]); the executor persists active states
-//! at the root of that namespace and drives transitions in a typed
-//! reactor loop.
+//! via [`Database::isolate`]); the executor persists active states in a
+//! per-state-machine table and drives transitions in a typed reactor loop.
 //!
 //! Terminal states are simply removed from the DB; inactive state
 //! history is not retained.
@@ -14,22 +13,18 @@ use std::any::Any;
 use std::fmt::Debug;
 use std::future::Future;
 use std::hash::Hash;
-use std::io::{self, Read, Write};
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use fedimint_core::db::{
-    Database, DatabaseLookup, DatabaseRecord, IReadDatabaseTransactionOpsTyped as _,
-    IWriteDatabaseTransactionOpsTyped as _, WriteDatabaseTransaction,
+use fedimint_core::db::v2::{
+    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _, TableDef,
 };
-use fedimint_core::encoding::{Decodable, DecodeError, Encodable};
-use fedimint_core::module::registry::ModuleDecoderRegistry;
+use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::util::BoxFuture;
 use fedimint_core::{maybe_add_send, maybe_add_send_sync};
+use fedimint_redb::v2::{Database, WriteTxRef};
 use futures::future::select_all;
-use futures::stream::StreamExt;
 
 /// A persistent state machine driven by a [`ModuleExecutor`].
 ///
@@ -42,16 +37,20 @@ use futures::stream::StreamExt;
 pub trait StateMachine:
     Debug + Clone + Eq + Hash + Encodable + Decodable + MaybeSend + MaybeSync + 'static
 {
-    /// DB prefix byte under which this SM's active states live in the
-    /// owning [`ModuleExecutor`]'s database. Must be unique among state
-    /// machine types sharing a module DB.
-    const DB_PREFIX: u8;
+    /// Logical table name under which this state machine's active states are
+    /// persisted in the owning [`ModuleExecutor`]'s database. Must be unique
+    /// among state machine types sharing a module DB namespace.
+    const TABLE_NAME: &'static str;
 
     /// Per-module context handed to every transition.
     type Context: Clone + MaybeSend + MaybeSync + 'static;
 
     /// Possible transitions out of this state.
     fn transitions(&self, ctx: &Self::Context) -> Vec<StateTransition<Self>>;
+}
+
+fn table<S: StateMachine>() -> TableDef<S, ()> {
+    TableDef::new(S::TABLE_NAME)
 }
 
 /// Type-erased trigger value. The concrete type is captured inside the
@@ -64,7 +63,7 @@ pub type TriggerFuture = Pin<Box<maybe_add_send!(dyn Future<Output = ErasedValue
 
 pub type TransitionFn<S> = Arc<
     maybe_add_send_sync!(
-        dyn for<'a> Fn(&'a mut WriteDatabaseTransaction<'_>, ErasedValue, S) -> BoxFuture<'a, S>
+        dyn for<'a> Fn(&'a WriteTxRef<'_>, ErasedValue, S) -> BoxFuture<'a, S>
     ),
 >;
 
@@ -78,7 +77,7 @@ impl<S: StateMachine> StateTransition<S> {
     where
         V: Clone + MaybeSend + MaybeSync + 'static,
         Trigger: Future<Output = V> + MaybeSend + 'static,
-        F: for<'a> Fn(&'a mut WriteDatabaseTransaction<'_>, V, S) -> BoxFuture<'a, S>
+        F: for<'a> Fn(&'a WriteTxRef<'_>, V, S) -> BoxFuture<'a, S>
             + MaybeSend
             + MaybeSync
             + Clone
@@ -96,52 +95,6 @@ impl<S: StateMachine> StateTransition<S> {
             }),
         }
     }
-}
-
-// ---- DB records ------------------------------------------------------------
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable)]
-pub struct ActiveStateKey<S: Encodable>(pub S);
-
-// Decodable derive does not handle generics, so we implement manually.
-impl<S: Encodable + Decodable> Decodable for ActiveStateKey<S> {
-    fn consensus_decode_partial<R: Read>(
-        r: &mut R,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        Ok(Self(S::consensus_decode_partial(r, modules)?))
-    }
-}
-
-impl<S: StateMachine> DatabaseRecord for ActiveStateKey<S> {
-    const DB_PREFIX: u8 = S::DB_PREFIX;
-    type Key = Self;
-    type Value = ();
-}
-
-/// Prefix lookup for scanning all active states.
-pub struct ActiveStatePrefixAll<S>(PhantomData<S>);
-
-impl<S> Default for ActiveStatePrefixAll<S> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<S> Debug for ActiveStatePrefixAll<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ActiveStatePrefixAll")
-    }
-}
-
-impl<S> Encodable for ActiveStatePrefixAll<S> {
-    fn consensus_encode<W: Write>(&self, _w: &mut W) -> Result<(), io::Error> {
-        Ok(())
-    }
-}
-
-impl<S: StateMachine> DatabaseLookup for ActiveStatePrefixAll<S> {
-    type Record = ActiveStateKey<S>;
 }
 
 // ---- Executor --------------------------------------------------------------
@@ -192,15 +145,12 @@ impl<S: StateMachine> ModuleExecutor<S> {
     /// Atomically insert `state` as a new active state machine. A
     /// driver task is spawned for it when the DB transaction commits.
     ///
-    /// `dbtx` must be the module-prefixed dbtx.
-    pub async fn add_state_machine_dbtx(&self, dbtx: &mut WriteDatabaseTransaction<'_>, state: S) {
-        let key = ActiveStateKey(state.clone());
-
-        if dbtx.get_value(&key).await.is_some() {
-            panic!("State already exists in executor");
-        }
-
-        dbtx.insert_new_entry(&key, &()).await;
+    /// `dbtx` must be scoped to the module's DB namespace.
+    pub async fn add_state_machine_dbtx(&self, dbtx: &WriteTxRef<'_>, state: S) {
+        assert!(
+            dbtx.insert(&table::<S>(), &state, &()).is_none(),
+            "State already exists in executor"
+        );
 
         let inner = self.inner.clone();
 
@@ -218,31 +168,29 @@ impl<S: StateMachine> ModuleExecutor<S> {
     /// [`Self::start`]. Used by pre-init paths (e.g. recovery) that need
     /// to seed state before the executor exists. `dbtx` must be scoped
     /// to the module's DB namespace.
-    pub async fn add_state_machine_unstarted(dbtx: &mut WriteDatabaseTransaction<'_>, state: S) {
-        dbtx.insert_new_entry(&ActiveStateKey(state), &()).await;
+    pub async fn add_state_machine_unstarted(dbtx: &WriteTxRef<'_>, state: S) {
+        assert!(
+            dbtx.insert(&table::<S>(), &state, &()).is_none(),
+            "State already exists in executor"
+        );
     }
 }
 
 impl<S: StateMachine> Inner<S> {
     async fn get_active_states(&self) -> Vec<S> {
         self.db
-            .begin_write_transaction()
+            .begin_read()
             .await
-            .find_by_prefix(&ActiveStatePrefixAll::<S>::default())
-            .await
-            .map(|(k, ())| k.0)
+            .iter(&table::<S>())
+            .into_iter()
+            .map(|(k, ())| k)
             .collect()
-            .await
     }
 
     async fn remove_active(&self, state: &S) {
-        loop {
-            let mut dbtx = self.db.begin_write_transaction().await;
-            dbtx.remove_entry(&ActiveStateKey(state.clone())).await;
-            if dbtx.commit_tx_result().await.is_ok() {
-                return;
-            }
-        }
+        let tx = self.db.begin_write().await;
+        tx.remove(&table::<S>(), state);
+        tx.commit().await;
     }
 
     fn spawn_drive(self: Arc<Self>, state: S) {
@@ -269,22 +217,16 @@ impl<S: StateMachine> Inner<S> {
             .await
             .0;
 
-            let next = loop {
-                let mut dbtx = self.db.begin_write_transaction().await;
-                let new_state =
-                    transition.clone()(&mut dbtx.to_ref_nc(), outcome.clone(), state.clone()).await;
-                dbtx.remove_entry(&ActiveStateKey(state.clone())).await;
-                let next = if new_state.transitions(&self.context).is_empty() {
-                    None
-                } else {
-                    dbtx.insert_entry(&ActiveStateKey(new_state.clone()), &())
-                        .await;
-                    Some(new_state)
-                };
-                if dbtx.commit_tx_result().await.is_ok() {
-                    break next;
-                }
+            let tx = self.db.begin_write().await;
+            let new_state = transition(&tx.as_ref(), outcome, state.clone()).await;
+            tx.remove(&table::<S>(), &state);
+            let next = if new_state.transitions(&self.context).is_empty() {
+                None
+            } else {
+                tx.insert(&table::<S>(), &new_state, &());
+                Some(new_state)
             };
+            tx.commit().await;
 
             match next {
                 Some(new_state) => state = new_state,

@@ -5,7 +5,6 @@ use std::time::Duration;
 use fedimint_api_client::api::{DynGlobalApi, FederationApiExt as _};
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::transaction::{Transaction, TransactionSubmissionOutcome};
@@ -13,6 +12,7 @@ use fedimint_core::util::backoff_util::custom_backoff;
 use fedimint_core::util::retry;
 use fedimint_eventlog::Event;
 use fedimint_logging::LOG_CLIENT_NET_API;
+use fedimint_redb::v2::WriteTxRef;
 use tokio::sync::watch;
 use tracing::debug;
 
@@ -67,7 +67,7 @@ pub struct TxSubmissionSmContext {
 }
 
 impl StateMachine for TxSubmissionStatesSM {
-    const DB_PREFIX: u8 = 0;
+    const TABLE_NAME: &'static str = "tx-submission-sm";
 
     type Context = TxSubmissionSmContext;
 
@@ -144,13 +144,13 @@ impl StateMachine for TxSubmissionStatesSM {
 
 async fn log_tx_event<E: Event + Send>(
     ctx: &TxSubmissionSmContext,
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    dbtx: &WriteTxRef<'_>,
     event: E,
 ) {
     ctx.client
         .get()
         .log_event_json(
-            &mut dbtx.to_ref_nc(),
+            dbtx,
             E::MODULE,
             0xffff,
             E::KIND,
