@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use api::WalletFederationApi;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
-use db::{NextOutputIndexKey, ValidAddressIndexKey, ValidAddressIndexPrefix};
+use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
 use events::{ReceivePaymentEvent, SendPaymentEvent};
 use fedimint_api_client::api::{DynModuleApi, FederationResult};
 use fedimint_client::transaction::{
@@ -29,21 +29,19 @@ use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{
-    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
-};
+use fedimint_core::db::v2::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::task::{TaskGroup, block_in_place, sleep};
 use fedimint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_logging::LOG_CLIENT_MODULE_WALLETV2;
+use fedimint_redb::v2::Database;
 use fedimint_walletv2_common::config::WalletClientConfig;
 use fedimint_walletv2_common::{
     StandardScript, WalletCommonInit, WalletInput, WalletInputV0, WalletModuleTypes, WalletOutput,
     WalletOutputV0, descriptor, is_potential_receive,
 };
-use futures::StreamExt;
 use receive_sm::{ReceiveSMCommon, ReceiveSMState, ReceiveStateMachine};
 use secp256k1::Keypair;
 use send_sm::{SendSMCommon, SendSMState, SendStateMachine};
@@ -213,12 +211,13 @@ impl WalletClientModule {
             self.client_ctx
                 .make_client_outputs(ClientOutputBundle::<WalletOutput>::new(vec![client_output]));
 
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let tx = dbtx.as_ref();
 
         let range = self
             .client_ctx
             .finalize_and_submit_transaction_dbtx(
-                &mut dbtx.to_ref_nc(),
+                &tx,
                 operation_id,
                 TransactionBuilder::new().with_outputs(client_output_bundle),
             )
@@ -227,7 +226,7 @@ impl WalletClientModule {
 
         self.send_executor
             .add_state_machine_dbtx(
-                &mut dbtx.to_ref_nc(),
+                &tx,
                 SendStateMachine {
                     common: SendSMCommon {
                         operation_id,
@@ -245,7 +244,7 @@ impl WalletClientModule {
 
         self.client_ctx
             .log_event(
-                &mut dbtx,
+                &tx,
                 SendPaymentEvent {
                     operation_id,
                     address,
@@ -255,7 +254,7 @@ impl WalletClientModule {
             )
             .await;
 
-        dbtx.commit_tx().await;
+        dbtx.commit().await;
 
         Ok(operation_id)
     }
@@ -264,16 +263,14 @@ impl WalletClientModule {
     /// address derivation has completed.
     pub async fn receive(&self) -> Address {
         loop {
-            if let Some(entry) = self
+            let indices = self
                 .db
-                .begin_write_transaction()
+                .begin_read()
                 .await
-                .find_by_prefix_sorted_descending(&ValidAddressIndexPrefix)
-                .await
-                .next()
-                .await
-            {
-                return self.derive_address(entry.0.0);
+                .iter(&VALID_ADDRESS_INDEX);
+
+            if let Some((idx, ())) = indices.into_iter().next_back() {
+                return self.derive_address(idx);
             }
 
             sleep(Duration::from_secs(1)).await;
@@ -330,12 +327,13 @@ impl WalletClientModule {
             self.client_ctx
                 .make_client_inputs(ClientInputBundle::<WalletInput>::new(vec![client_input]));
 
-        let mut dbtx = self.client_ctx.module_db().begin_write_transaction().await;
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let tx = dbtx.as_ref();
 
         let range = self
             .client_ctx
             .finalize_and_submit_transaction_dbtx(
-                &mut dbtx.to_ref_nc(),
+                &tx,
                 operation_id,
                 TransactionBuilder::new().with_inputs(client_input_bundle),
             )
@@ -344,7 +342,7 @@ impl WalletClientModule {
 
         self.receive_executor
             .add_state_machine_dbtx(
-                &mut dbtx.to_ref_nc(),
+                &tx,
                 ReceiveStateMachine {
                     common: ReceiveSMCommon {
                         operation_id,
@@ -359,7 +357,7 @@ impl WalletClientModule {
 
         self.client_ctx
             .log_event(
-                &mut dbtx,
+                &tx,
                 ReceivePaymentEvent {
                     operation_id,
                     address: self.derive_address(address_index).as_unchecked().clone(),
@@ -369,7 +367,7 @@ impl WalletClientModule {
             )
             .await;
 
-        dbtx.commit_tx().await;
+        dbtx.commit().await;
 
         range.txid()
     }
@@ -380,20 +378,19 @@ impl WalletClientModule {
         task_group.spawn_cancellable("output-scanner", async move {
             let needs_seed = module
                 .db
-                .begin_write_transaction()
+                .begin_read()
                 .await
-                .find_by_prefix(&ValidAddressIndexPrefix)
-                .await
-                .next()
-                .await
-                .is_none();
+                .iter(&VALID_ADDRESS_INDEX)
+                .is_empty();
 
             if needs_seed {
                 let index = module.next_valid_index(0);
-                let mut dbtx = module.db.begin_write_transaction().await;
-                dbtx.insert_new_entry(&ValidAddressIndexKey(index), &())
-                    .await;
-                dbtx.commit_tx().await;
+                let dbtx = module.db.begin_write().await;
+                assert!(
+                    dbtx.insert(&VALID_ADDRESS_INDEX, &index, &()).is_none(),
+                    "seed address index already present"
+                );
+                dbtx.commit().await;
             }
 
             loop {
@@ -414,16 +411,15 @@ impl WalletClientModule {
     }
 
     async fn check_outputs(&self) -> anyhow::Result<bool> {
-        let mut dbtx = self.db.begin_write_transaction().await;
+        let dbtx = self.db.begin_read().await;
 
-        let next_output_index = dbtx.get_value(&NextOutputIndexKey).await.unwrap_or(0);
+        let next_output_index = dbtx.get(&NEXT_OUTPUT_INDEX, &()).unwrap_or(0);
 
         let mut valid_indices: Vec<u64> = dbtx
-            .find_by_prefix(&ValidAddressIndexPrefix)
-            .await
-            .map(|entry| entry.0.0)
-            .collect()
-            .await;
+            .iter(&VALID_ADDRESS_INDEX)
+            .into_iter()
+            .map(|(idx, ())| idx)
+            .collect();
 
         drop(dbtx);
 
@@ -448,11 +444,11 @@ impl WalletClientModule {
                 if address_index == next_address_index {
                     let index = self.next_valid_index(next_address_index + 1);
 
-                    let mut dbtx = self.db.begin_write_transaction().await;
+                    let dbtx = self.db.begin_write().await;
 
-                    dbtx.insert_entry(&ValidAddressIndexKey(index), &()).await;
+                    dbtx.insert(&VALID_ADDRESS_INDEX, &index, &());
 
-                    dbtx.commit_tx_result().await?;
+                    dbtx.commit().await;
 
                     valid_indices.push(index);
 
@@ -485,12 +481,11 @@ impl WalletClientModule {
                 }
             }
 
-            let mut dbtx = self.db.begin_write_transaction().await;
+            let dbtx = self.db.begin_write().await;
 
-            dbtx.insert_entry(&NextOutputIndexKey, &(output.index + 1))
-                .await;
+            dbtx.insert(&NEXT_OUTPUT_INDEX, &(), &(output.index + 1));
 
-            dbtx.commit_tx_result().await?;
+            dbtx.commit().await;
         }
 
         Ok(!outputs.is_empty())

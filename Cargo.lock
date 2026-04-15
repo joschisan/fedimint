@@ -3018,6 +3018,7 @@ dependencies = [
  "fedimint-derive-secret",
  "fedimint-eventlog",
  "fedimint-logging",
+ "fedimint-redb",
  "fedimint-walletv2-common",
  "futures",
  "secp256k1",

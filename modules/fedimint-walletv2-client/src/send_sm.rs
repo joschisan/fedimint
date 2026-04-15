@@ -1,8 +1,8 @@
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_core::OutPoint;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_redb::v2::WriteTxRef;
 
 use crate::WalletClientContext;
 use crate::api::WalletFederationApi;
@@ -47,7 +47,7 @@ enum AwaitFundingResult {
 }
 
 impl StateMachine for SendStateMachine {
-    const DB_PREFIX: u8 = crate::db::DbKeyPrefix::SendStateMachine as u8;
+    const TABLE_NAME: &'static str = "send-sm";
 
     type Context = WalletClientContext;
 
@@ -82,7 +82,7 @@ async fn await_funding_sm(ctx: WalletClientContext, outpoint: OutPoint) -> Await
 
 async fn transition_funding_sm(
     ctx: WalletClientContext,
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    dbtx: &WriteTxRef<'_>,
     result: AwaitFundingResult,
     old_state: SendStateMachine,
 ) -> SendStateMachine {

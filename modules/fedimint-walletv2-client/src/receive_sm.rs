@@ -1,8 +1,8 @@
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::WriteDatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_redb::v2::WriteTxRef;
 
 use crate::WalletClientContext;
 use crate::events::{ReceivePaymentStatus, ReceivePaymentUpdateEvent};
@@ -38,7 +38,7 @@ pub enum ReceiveSMState {
 }
 
 impl StateMachine for ReceiveStateMachine {
-    const DB_PREFIX: u8 = crate::db::DbKeyPrefix::ReceiveStateMachine as u8;
+    const TABLE_NAME: &'static str = "receive-sm";
 
     type Context = WalletClientContext;
 
@@ -66,7 +66,7 @@ async fn await_funding_sm(ctx: WalletClientContext, txid: TransactionId) -> Resu
 
 async fn transition_funding_sm(
     ctx: WalletClientContext,
-    dbtx: &mut WriteDatabaseTransaction<'_>,
+    dbtx: &WriteTxRef<'_>,
     result: Result<(), String>,
     old_state: ReceiveStateMachine,
 ) -> ReceiveStateMachine {
