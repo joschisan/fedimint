@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_stream::stream;
 use bitcoincore_rpc::RpcApi;
 use fedimint_client::ClientHandleArc;
-use fedimint_eventlog::{Event, EventLogEntry, EventLogId};
+use fedimint_eventlog::{EventLogEntry, EventLogId};
 use fedimint_walletv2_client::WalletClientModule;
 use fedimint_walletv2_client::events::{
     ReceivePaymentEvent, ReceivePaymentUpdateEvent, SendPaymentEvent, SendPaymentStatus,
@@ -52,29 +52,19 @@ fn wallet_event_stream(
 fn try_parse_wallet_event(
     entry: &EventLogEntry,
 ) -> Option<(fedimint_core::core::OperationId, WalletEvent)> {
-    if entry.module_kind() != Some(&fedimint_walletv2_common::KIND) {
-        return None;
-    }
     let op = entry.operation_id?;
-
-    if entry.kind == SendPaymentEvent::KIND {
-        return entry.to_event().map(|e| (op, WalletEvent::Send(e)));
+    if let Some(e) = entry.to_event() {
+        return Some((op, WalletEvent::Send(e)));
     }
-
-    if entry.kind == SendPaymentUpdateEvent::KIND {
-        return entry.to_event().map(|e| (op, WalletEvent::SendUpdate(e)));
+    if let Some(e) = entry.to_event() {
+        return Some((op, WalletEvent::SendUpdate(e)));
     }
-
-    if entry.kind == ReceivePaymentEvent::KIND {
-        return entry.to_event().map(|e| (op, WalletEvent::Receive(e)));
+    if let Some(e) = entry.to_event() {
+        return Some((op, WalletEvent::Receive(e)));
     }
-
-    if entry.kind == ReceivePaymentUpdateEvent::KIND {
-        return entry
-            .to_event()
-            .map(|e| (op, WalletEvent::ReceiveUpdate(e)));
+    if let Some(e) = entry.to_event() {
+        return Some((op, WalletEvent::ReceiveUpdate(e)));
     }
-
     None
 }
 

@@ -5,7 +5,7 @@ use async_stream::stream;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::Amount;
 use fedimint_core::util::SafeUrl;
-use fedimint_eventlog::{Event, EventLogEntry, EventLogId};
+use fedimint_eventlog::{EventLogEntry, EventLogId};
 use fedimint_lnv2_client::LightningClientModule;
 use fedimint_lnv2_client::events::{
     ReceivePaymentEvent, SendPaymentEvent, SendPaymentStatus, SendPaymentUpdateEvent,
@@ -52,23 +52,16 @@ fn ln_event_stream(
 fn try_parse_ln_event(
     entry: &EventLogEntry,
 ) -> Option<(fedimint_core::core::OperationId, LnEvent)> {
-    if entry.module_kind() != Some(&fedimint_lnv2_common::KIND) {
-        return None;
-    }
     let op = entry.operation_id?;
-
-    if entry.kind == SendPaymentEvent::KIND {
-        return entry.to_event().map(|e| (op, LnEvent::Send(e)));
+    if let Some(e) = entry.to_event() {
+        return Some((op, LnEvent::Send(e)));
     }
-
-    if entry.kind == SendPaymentUpdateEvent::KIND {
-        return entry.to_event().map(|e| (op, LnEvent::SendUpdate(e)));
+    if let Some(e) = entry.to_event() {
+        return Some((op, LnEvent::SendUpdate(e)));
     }
-
-    if entry.kind == ReceivePaymentEvent::KIND {
-        return entry.to_event().map(|e| (op, LnEvent::Receive(e)));
+    if let Some(e) = entry.to_event() {
+        return Some((op, LnEvent::Receive(e)));
     }
-
     None
 }
 

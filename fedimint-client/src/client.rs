@@ -390,14 +390,12 @@ impl Client {
     ) -> Result<(), String> {
         let mut stream = self.subscribe_operation_events(operation_id);
         while let Some(entry) = stream.next().await {
-            if entry.kind == TxAcceptedEvent::KIND
-                && let Some(ev) = entry.to_event::<TxAcceptedEvent>()
+            if let Some(ev) = entry.to_event::<TxAcceptedEvent>()
                 && ev.txid == query_txid
             {
                 return Ok(());
             }
-            if entry.kind == TxRejectedEvent::KIND
-                && let Some(ev) = entry.to_event::<TxRejectedEvent>()
+            if let Some(ev) = entry.to_event::<TxRejectedEvent>()
                 && ev.txid == query_txid
             {
                 return Err(ev.error);

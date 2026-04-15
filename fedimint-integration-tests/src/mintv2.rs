@@ -3,7 +3,7 @@ use std::pin::pin;
 use async_stream::stream;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::Amount;
-use fedimint_eventlog::{Event, EventLogEntry, EventLogId};
+use fedimint_eventlog::{EventLogEntry, EventLogId};
 use fedimint_mintv2_client::{
     MintClientModule, ReceivePaymentEvent, ReceivePaymentStatus, ReceivePaymentUpdateEvent,
     SendPaymentEvent,
@@ -48,25 +48,16 @@ fn mint_event_stream(
 fn try_parse_mint_event(
     entry: &EventLogEntry,
 ) -> Option<(fedimint_core::core::OperationId, MintEvent)> {
-    if entry.module_kind() != Some(&fedimint_mintv2_common::KIND) {
-        return None;
-    }
     let op = entry.operation_id?;
-
-    if entry.kind == SendPaymentEvent::KIND {
-        return entry.to_event().map(|e| (op, MintEvent::Send(e)));
+    if let Some(e) = entry.to_event() {
+        return Some((op, MintEvent::Send(e)));
     }
-
-    if entry.kind == ReceivePaymentUpdateEvent::KIND {
-        return entry
-            .to_event()
-            .map(|e| (op, MintEvent::ReceiveUpdate(e)));
+    if let Some(e) = entry.to_event() {
+        return Some((op, MintEvent::ReceiveUpdate(e)));
     }
-
-    if entry.kind == ReceivePaymentEvent::KIND {
-        return entry.to_event().map(|e| (op, MintEvent::Receive(e)));
+    if let Some(e) = entry.to_event() {
+        return Some((op, MintEvent::Receive(e)));
     }
-
     None
 }
 

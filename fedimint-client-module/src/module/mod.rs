@@ -436,11 +436,7 @@ where
         use futures::StreamExt as _;
         Box::pin(
             self.subscribe_operation_events(operation_id)
-                .filter_map(|entry| async move {
-                    (entry.module_kind() == E::MODULE.as_ref() && entry.kind == E::KIND)
-                        .then(|| entry.to_event::<E>())
-                        .flatten()
-                }),
+                .filter_map(|entry| async move { entry.to_event::<E>() }),
         )
     }
 

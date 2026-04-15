@@ -160,11 +160,10 @@ impl EventLogEntry {
         self.module.as_ref().map(|m| m.1)
     }
 
-    pub fn to_event<E>(&self) -> Option<E>
-    where
-        E: Event,
-    {
-        serde_json::from_slice(&self.payload).ok()
+    pub fn to_event<E: Event>(&self) -> Option<E> {
+        (self.module_kind() == E::MODULE.as_ref() && self.kind == E::KIND)
+            .then(|| serde_json::from_slice(&self.payload).ok())
+            .flatten()
     }
 }
 
@@ -435,11 +434,8 @@ pub fn subscribe_operation_events_typed<E: Event + 'static>(
     operation_id: OperationId,
 ) -> impl Stream<Item = E> {
     use futures::StreamExt as _;
-    subscribe_operation_events(db, log_event_added, operation_id).filter_map(|entry| async move {
-        (entry.module_kind() == E::MODULE.as_ref() && entry.kind == E::KIND)
-            .then(|| entry.to_event::<E>())
-            .flatten()
-    })
+    subscribe_operation_events(db, log_event_added, operation_id)
+        .filter_map(|entry| async move { entry.to_event::<E>() })
 }
 
 #[cfg(test)]
