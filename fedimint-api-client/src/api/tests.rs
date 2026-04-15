@@ -12,7 +12,6 @@ fn converts_invite_code() {
         "ws://test1".parse().unwrap(),
         PeerId::from(1),
         FederationId::dummy(),
-        Some("api_secret".into()),
     );
 
     let bech32 = connect.to_string();

@@ -143,7 +143,6 @@ pub async fn run(
         ci_status_receivers,
         ord_latency_receiver,
         bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
-        force_api_secret: None,
         auth,
         code_version_str,
         task_group: task_group.clone(),

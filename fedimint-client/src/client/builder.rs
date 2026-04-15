@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use anyhow::{bail, ensure};
+use anyhow::bail;
 use bitcoin::key::Secp256k1;
 use fedimint_api_client::api::{DynGlobalApi, FederationApi};
 use fedimint_api_client::{Endpoint, download_from_invite_code};
@@ -33,9 +33,8 @@ use tracing::{debug, trace, warn};
 use super::handle::ClientHandle;
 use super::{Client, client_decoders};
 use crate::db::{
-    self, API_SECRET, CLIENT_CONFIG, CLIENT_INIT_STATE, CLIENT_MODULE_RECOVERY,
-    CLIENT_PRE_ROOT_SECRET_HASH, ClientModuleRecovery, ClientModuleRecoveryState, InitMode,
-    InitState,
+    self, CLIENT_CONFIG, CLIENT_INIT_STATE, CLIENT_MODULE_RECOVERY, ClientModuleRecovery,
+    ClientModuleRecoveryState, InitMode, InitState,
 };
 use crate::module_init::ClientModuleInitRegistry;
 
@@ -131,14 +130,12 @@ impl ClientBuilder {
         Ok(config)
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn init(
         self,
         connectors: Endpoint,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: ClientConfig,
-        api_secret: Option<String>,
         init_mode: InitMode,
     ) -> anyhow::Result<ClientHandle> {
         if Client::is_initialized(&db_no_decoders).await {
@@ -150,15 +147,6 @@ impl ClientBuilder {
             let dbtx = db_no_decoders.begin_write().await;
             let tx = dbtx.as_ref();
             tx.insert(&CLIENT_CONFIG, &(), &config);
-            tx.insert(
-                &CLIENT_PRE_ROOT_SECRET_HASH,
-                &(),
-                &pre_root_secret.derive_pre_root_secret_hash(),
-            );
-
-            if let Some(api_secret) = api_secret.as_ref() {
-                tx.insert(&API_SECRET, &(), api_secret);
-            }
 
             let init_state = InitState::Pending(init_mode);
             tx.insert(&CLIENT_INIT_STATE, &(), &init_state);
@@ -167,15 +155,8 @@ impl ClientBuilder {
         }
 
         let stopped = self.stopped;
-        self.build(
-            connectors,
-            db_no_decoders,
-            pre_root_secret,
-            config,
-            api_secret,
-            stopped,
-        )
-        .await
+        self.build(connectors, db_no_decoders, pre_root_secret, config, stopped)
+            .await
     }
 
     pub async fn preview(
@@ -189,7 +170,6 @@ impl ClientBuilder {
             connectors,
             inner: self,
             config,
-            api_secret: invite_code.api_secret(),
         })
     }
 
@@ -198,13 +178,11 @@ impl ClientBuilder {
         self,
         connectors: Endpoint,
         config: ClientConfig,
-        api_secret: Option<String>,
     ) -> anyhow::Result<ClientPreview> {
         Ok(ClientPreview {
             connectors,
             inner: self,
             config,
-            api_secret,
         })
     }
 
@@ -220,31 +198,6 @@ impl ClientBuilder {
 
         let pre_root_secret = pre_root_secret.to_inner(config.calculate_federation_id());
 
-        match db_no_decoders
-            .begin_read()
-            .await
-            .as_ref()
-            .get(&CLIENT_PRE_ROOT_SECRET_HASH, &())
-        {
-            Some(secret_hash) => {
-                ensure!(
-                    pre_root_secret.derive_pre_root_secret_hash() == secret_hash,
-                    "Secret hash does not match. Incorrect secret"
-                );
-            }
-            _ => {
-                debug!(target: LOG_CLIENT, "Backfilling secret hash");
-                let dbtx = db_no_decoders.begin_write().await;
-                dbtx.as_ref().insert(
-                    &CLIENT_PRE_ROOT_SECRET_HASH,
-                    &(),
-                    &pre_root_secret.derive_pre_root_secret_hash(),
-                );
-                dbtx.commit().await;
-            }
-        }
-
-        let api_secret = Client::get_api_secret_from_db(&db_no_decoders).await;
         let stopped = self.stopped;
 
         let log_event_added_transient_tx = self.log_event_added_transient_tx.clone();
@@ -254,7 +207,6 @@ impl ClientBuilder {
                 db_no_decoders,
                 pre_root_secret,
                 &config,
-                api_secret,
                 log_event_added_transient_tx,
             )
             .await?;
@@ -265,14 +217,12 @@ impl ClientBuilder {
     }
 
     /// Build a [`Client`] and start the executor
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn build(
         self,
         connectors: Endpoint,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: ClientConfig,
-        api_secret: Option<String>,
         stopped: bool,
     ) -> anyhow::Result<ClientHandle> {
         let log_event_added_transient_tx = self.log_event_added_transient_tx.clone();
@@ -282,7 +232,6 @@ impl ClientBuilder {
                 db_no_decoders,
                 pre_root_secret,
                 &config,
-                api_secret,
                 log_event_added_transient_tx,
             )
             .await?;
@@ -301,7 +250,6 @@ impl ClientBuilder {
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: &ClientConfig,
-        api_secret: Option<String>,
         log_event_added_transient_tx: broadcast::Sender<EventLogEntry>,
     ) -> anyhow::Result<ClientHandle> {
         debug!(
@@ -513,7 +461,6 @@ impl ClientBuilder {
 
         let client_inner = Arc::new(Client {
             config: tokio::sync::RwLock::new(config.clone()),
-            api_secret,
             decoders,
             db: db.clone(),
             connectors,
@@ -630,7 +577,6 @@ pub struct ClientPreview {
     inner: ClientBuilder,
     config: ClientConfig,
     connectors: Endpoint,
-    api_secret: Option<String>,
 }
 
 impl ClientPreview {
@@ -731,7 +677,6 @@ impl ClientPreview {
                 db_no_decoders,
                 pre_root_secret,
                 self.config,
-                self.api_secret,
                 InitMode::Fresh,
             )
             .await?;
@@ -764,7 +709,6 @@ impl ClientPreview {
                 db_no_decoders,
                 pre_root_secret,
                 self.config,
-                self.api_secret,
                 InitMode::Recover,
             )
             .await?;

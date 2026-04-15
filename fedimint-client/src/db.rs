@@ -1,36 +1,14 @@
-use anyhow::{anyhow, bail};
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_core::config::ClientConfig;
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::IReadDatabaseTransactionOpsTyped as _;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::table;
-use fedimint_redb::Database;
 use serde::Serialize;
-
-table!(
-    ENCODED_CLIENT_SECRET,
-    () => Vec<u8>,
-    "encoded-client-secret",
-);
-
-table!(
-    CLIENT_PRE_ROOT_SECRET_HASH,
-    () => [u8; 8],
-    "client-pre-root-secret-hash",
-);
 
 table!(
     CLIENT_CONFIG,
     () => ClientConfig,
     "client-config",
-);
-
-table!(
-    API_SECRET,
-    () => String,
-    "api-secret",
 );
 
 table!(
@@ -112,21 +90,5 @@ pub struct ClientModuleRecoveryState {
 impl ClientModuleRecoveryState {
     pub fn is_done(&self) -> bool {
         self.progress.is_done()
-    }
-}
-
-/// Fetches the encoded client secret from the database and decodes it.
-/// If an encoded client secret is not present in the database, or if
-/// decoding fails, an error is returned.
-pub async fn get_decoded_client_secret<T: Decodable>(db: &Database) -> anyhow::Result<T> {
-    let tx = db.begin_read().await;
-    let client_secret = tx.as_ref().get(&ENCODED_CLIENT_SECRET, &());
-
-    match client_secret {
-        Some(client_secret) => {
-            T::consensus_decode_whole(&client_secret, &ModuleRegistry::default())
-                .map_err(|e| anyhow!("Decoding failed: {e}"))
-        }
-        None => bail!("Encoded client secret not present in DB"),
     }
 }

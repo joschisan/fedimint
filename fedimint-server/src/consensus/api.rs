@@ -55,7 +55,6 @@ pub struct ConsensusApi {
     pub modules: ServerModuleRegistry,
     /// Cached client config
     pub client_cfg: ClientConfig,
-    pub force_api_secret: Option<String>,
     /// For sending API events to consensus such as transactions
     pub submission_sender: async_channel::Sender<ConsensusItem>,
     pub shutdown_receiver: Receiver<Option<u64>>,
@@ -70,12 +69,6 @@ pub struct ConsensusApi {
 }
 
 impl ConsensusApi {
-    pub fn get_active_api_secret(&self) -> Option<String> {
-        // TODO: In the future, we might want to fetch it from the DB, so it's possible
-        // to customize from the UX
-        self.force_api_secret.clone()
-    }
-
     // we want to return an error if and only if the submitted transaction is
     // invalid and will be rejected if we were to submit it to consensus
     pub async fn submit_transaction(
@@ -274,9 +267,7 @@ impl IDashboardApi for ConsensusApi {
     }
 
     async fn federation_invite_code(&self) -> String {
-        self.cfg
-            .get_invite_code(self.get_active_api_secret())
-            .to_string()
+        self.cfg.get_invite_code().to_string()
     }
 
     async fn federation_audit(&self) -> AuditSummary {

@@ -16,7 +16,6 @@ use fedimint_client_module::module::{
     ClientContextIface, ClientModule, ClientModuleRegistry, DynClientModule, IClientModule,
     IdxRange, OutPointRange,
 };
-use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy as _};
 use fedimint_client_module::transaction::{
     TransactionBuilder, TxSubmissionStates, TxSubmissionStatesSM,
 };
@@ -28,9 +27,9 @@ use fedimint_core::core::{DynInput, DynOutput, ModuleInstanceId, ModuleKind, Ope
 use fedimint_core::db::{
     IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
 };
-use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::encoding::Encodable as _;
 use fedimint_core::invite_code::InviteCode;
-use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
+use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::transaction::Transaction;
 use fedimint_core::util::{BoxStream, FmtCompactAnyhow as _, SafeUrl};
@@ -52,8 +51,7 @@ use tracing::{debug, info, warn};
 use crate::ClientBuilder;
 use crate::client::event_log::DEFAULT_APPLICATION_EVENT_LOG_POS;
 use crate::db::{
-    API_SECRET, CLIENT_CONFIG, CLIENT_MODULE_RECOVERY, ClientModuleRecovery,
-    ClientModuleRecoveryState, ENCODED_CLIENT_SECRET, get_decoded_client_secret,
+    CLIENT_CONFIG, CLIENT_MODULE_RECOVERY, ClientModuleRecovery, ClientModuleRecoveryState,
 };
 use crate::module_init::{DynClientModuleInit, IClientModuleInit};
 
@@ -76,7 +74,6 @@ pub(crate) mod handle;
 /// and resource freeing of the [`Client`].
 pub struct Client {
     config: tokio::sync::RwLock<ClientConfig>,
-    api_secret: Option<String>,
     decoders: ModuleDecoderRegistry,
     connectors: Endpoint,
     db: Database,
@@ -132,66 +129,6 @@ impl Client {
         db.begin_read().await.as_ref().get(&CLIENT_CONFIG, &())
     }
 
-    pub async fn get_api_secret_from_db(db: &Database) -> Option<String> {
-        db.begin_read().await.as_ref().get(&API_SECRET, &())
-    }
-
-    pub async fn store_encodable_client_secret<T: Encodable>(
-        db: &Database,
-        secret: T,
-    ) -> anyhow::Result<()> {
-        let dbtx = db.begin_write().await;
-        let tx = dbtx.as_ref();
-
-        if tx.get(&ENCODED_CLIENT_SECRET, &()).is_some() {
-            bail!("Encoded client secret already exists, cannot overwrite")
-        }
-
-        let encoded_secret = T::consensus_encode_to_vec(&secret);
-        tx.insert(&ENCODED_CLIENT_SECRET, &(), &encoded_secret);
-        dbtx.commit().await;
-        Ok(())
-    }
-
-    pub async fn load_decodable_client_secret<T: Decodable>(db: &Database) -> anyhow::Result<T> {
-        let Some(secret) = Self::load_decodable_client_secret_opt(db).await? else {
-            bail!("Encoded client secret not present in DB")
-        };
-
-        Ok(secret)
-    }
-    pub async fn load_decodable_client_secret_opt<T: Decodable>(
-        db: &Database,
-    ) -> anyhow::Result<Option<T>> {
-        let client_secret = db
-            .begin_read()
-            .await
-            .as_ref()
-            .get(&ENCODED_CLIENT_SECRET, &());
-
-        Ok(match client_secret {
-            Some(client_secret) => Some(
-                T::consensus_decode_whole(&client_secret, &ModuleRegistry::default())
-                    .map_err(|e| anyhow!("Decoding failed: {e}"))?,
-            ),
-            None => None,
-        })
-    }
-
-    pub async fn load_or_generate_client_secret(db: &Database) -> anyhow::Result<[u8; 64]> {
-        let client_secret = match Self::load_decodable_client_secret::<[u8; 64]>(db).await {
-            Ok(secret) => secret,
-            _ => {
-                let secret = PlainRootSecretStrategy::random(&mut thread_rng());
-                Self::store_encodable_client_secret(db, secret)
-                    .await
-                    .expect("Storing client secret must work");
-                secret
-            }
-        };
-        Ok(client_secret)
-    }
-
     pub async fn is_initialized(db: &Database) -> bool {
         Self::get_config_from_db(db).await.is_some()
     }
@@ -202,11 +139,6 @@ impl Client {
 
     pub async fn config(&self) -> ClientConfig {
         self.config.read().await.clone()
-    }
-
-    // TODO: change to `-> Option<&str>`
-    pub fn api_secret(&self) -> &Option<String> {
-        &self.api_secret
     }
 
     /// Returns the core API version that the federation supports
@@ -529,12 +461,6 @@ impl Client {
             .map(|(instance_id, _, _)| instance_id)
     }
 
-    /// Returns the data from which the client's root secret is derived (e.g.
-    /// BIP39 seed phrase struct).
-    pub async fn root_secret_encoding<T: Decodable>(&self) -> anyhow::Result<T> {
-        get_decoded_client_secret::<T>(self.db()).await
-    }
-
     /// Returns the config of the client in JSON format.
     ///
     /// Compared to the consensus module format where module configs are binary
@@ -834,12 +760,7 @@ impl Client {
             .into_iter()
             .find_map(|(peer_id, url)| (peer == peer_id).then_some(url))
             .map(|peer_url| {
-                InviteCode::new(
-                    peer_url.clone(),
-                    peer,
-                    self.federation_id(),
-                    self.api_secret.clone(),
-                )
+                InviteCode::new(peer_url.clone(), peer, self.federation_id())
             })
     }
 
