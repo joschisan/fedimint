@@ -2,8 +2,6 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
 
-use std::collections::BTreeMap;
-
 use anyhow::bail;
 use async_trait::async_trait;
 use fedimint_core::config::{
@@ -11,7 +9,6 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::DatabaseVersion;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
@@ -28,7 +25,6 @@ use fedimint_empty_common::{
 };
 use fedimint_redb::v2::{ReadTxRef, WriteTxRef};
 use fedimint_server_core::config::PeerHandleOps;
-use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
@@ -87,12 +83,6 @@ impl ServerModuleInit for EmptyInit {
         Ok(())
     }
 
-    /// DB migrations to move from old to newer versions
-    fn get_database_migrations(
-        &self,
-    ) -> BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<Empty>> {
-        BTreeMap::new()
-    }
 }
 
 /// Empty module

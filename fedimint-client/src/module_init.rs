@@ -1,10 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
 use fedimint_api_client::Endpoint;
 use fedimint_api_client::api::DynGlobalApi;
-use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
@@ -13,7 +11,7 @@ use fedimint_client_module::module::{ClientContext, DynClientModule, FinalClient
 use fedimint_client_module::{ClientModule, ModuleInstanceId, ModuleKind};
 use fedimint_core::config::{ClientModuleConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::Decoder;
-use fedimint_core::db::{Database, DatabaseVersion};
+use fedimint_core::db::Database;
 use fedimint_core::module::{CommonModuleInit, IDynCommonModuleInit, ModuleInit};
 use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::{NumPeers, apply, async_trait_maybe_send, dyn_newtype_define};
@@ -59,11 +57,6 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
         task_group: TaskGroup,
         connector_registry: Endpoint,
     ) -> anyhow::Result<DynClientModule>;
-
-    fn get_database_migrations(&self) -> BTreeMap<DatabaseVersion, ClientModuleMigrationFn>;
-
-    /// See [`ClientModuleInit::used_db_prefixes`]
-    fn used_db_prefixes(&self) -> Option<BTreeSet<u8>>;
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -149,14 +142,6 @@ where
         )
         .await?
         .into())
-    }
-
-    fn get_database_migrations(&self) -> BTreeMap<DatabaseVersion, ClientModuleMigrationFn> {
-        <Self as ClientModuleInit>::get_database_migrations(self)
-    }
-
-    fn used_db_prefixes(&self) -> Option<BTreeSet<u8>> {
-        <Self as ClientModuleInit>::used_db_prefixes(self)
     }
 }
 

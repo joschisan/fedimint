@@ -1,7 +1,7 @@
 // TODO: remove and fix nits
 #![allow(clippy::pedantic)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{any, marker};
@@ -14,7 +14,6 @@ use fedimint_core::config::{
     ServerModuleConsensusConfig,
 };
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::db::DatabaseVersion;
 use fedimint_core::module::{
     CommonModuleInit, CoreConsensusVersion, IDynCommonModuleInit, ModuleConsensusVersion,
     ModuleInit,
@@ -25,10 +24,6 @@ use fedimint_redb::v2::Database as V2Database;
 
 use crate::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use crate::config::PeerHandleOps;
-use crate::migration::{
-    DynServerDbMigrationFn, ServerDbMigrationFnContext, ServerModuleDbMigrationContext,
-    ServerModuleDbMigrationFn,
-};
 use crate::{DynServerModule, ServerModule};
 
 /// Arguments passed to modules during config generation
@@ -80,14 +75,6 @@ pub trait IServerModuleInit: IDynCommonModuleInit {
         module_instance_id: ModuleInstanceId,
         config: &ServerModuleConsensusConfig,
     ) -> anyhow::Result<ClientModuleConfig>;
-
-    /// Retrieves the migrations map from the server module to be applied to the
-    /// database before the module is initialized. The migrations map is
-    /// indexed on the from version.
-    fn get_database_migrations(&self) -> BTreeMap<DatabaseVersion, DynServerDbMigrationFn>;
-
-    /// See [`ServerModuleInit::used_db_prefixes`]
-    fn used_db_prefixes(&self) -> Option<BTreeSet<u8>>;
 }
 
 /// A type that can be used as module-shared value inside
@@ -188,28 +175,6 @@ pub trait ServerModuleInit: ModuleInit + Sized {
         &self,
         config: &ServerModuleConsensusConfig,
     ) -> anyhow::Result<<<Self as ModuleInit>::Common as CommonModuleInit>::ClientConfig>;
-
-    /// Retrieves the migrations map from the server module to be applied to the
-    /// database before the module is initialized. The migrations map is
-    /// indexed on the from version.
-    fn get_database_migrations(
-        &self,
-    ) -> BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<Self::Module>> {
-        BTreeMap::new()
-    }
-
-    /// Db prefixes used by the module
-    ///
-    /// If `Some` is returned, it should contain list of database
-    /// prefixes actually used by the module for it's keys.
-    ///
-    /// In (some subset of) non-production tests,
-    /// module database will be scanned for presence of keys
-    /// that do not belong to this list to verify integrity
-    /// of data and possibly catch any unforeseen bugs.
-    fn used_db_prefixes(&self) -> Option<BTreeSet<u8>> {
-        None
-    }
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -272,25 +237,6 @@ where
             config.version,
             <Self as ServerModuleInit>::get_client_config(self, config)?,
         )
-    }
-    fn get_database_migrations(&self) -> BTreeMap<DatabaseVersion, DynServerDbMigrationFn> {
-        <Self as ServerModuleInit>::get_database_migrations(self)
-            .into_iter()
-            .map(|(k, f)| {
-                (k, {
-                    let closure: DynServerDbMigrationFn =
-                        Box::new(move |ctx: ServerDbMigrationFnContext<'_>| {
-                            let map = ctx.map(ServerModuleDbMigrationContext::new);
-                            Box::pin(f(map))
-                        });
-                    closure
-                })
-            })
-            .collect()
-    }
-
-    fn used_db_prefixes(&self) -> Option<BTreeSet<u8>> {
-        <Self as ServerModuleInit>::used_db_prefixes(self)
     }
 }
 

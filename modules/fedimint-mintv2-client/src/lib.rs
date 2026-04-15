@@ -32,7 +32,6 @@ use fedimint_client::module::ClientModule;
 use fedimint_client::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
-use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
@@ -42,7 +41,7 @@ use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{
-    DatabaseVersion, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+    IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
     NonCommittable, WriteDatabaseTransaction,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
@@ -309,9 +308,6 @@ impl ClientModuleInit for MintClientInit {
         })
     }
 
-    fn get_database_migrations(&self) -> BTreeMap<DatabaseVersion, ClientModuleMigrationFn> {
-        BTreeMap::new()
-    }
 }
 
 #[derive(Debug)]

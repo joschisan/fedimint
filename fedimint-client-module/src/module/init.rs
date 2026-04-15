@@ -1,10 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use fedimint_api_client::Endpoint;
 use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::ModuleKind;
-use fedimint_core::db::{Database, DatabaseVersion};
+use fedimint_core::db::Database;
 use fedimint_core::module::{CommonModuleInit, ModuleInit};
 use fedimint_core::task::TaskGroup;
 use fedimint_core::{NumPeers, apply, async_trait_maybe_send};
@@ -14,7 +12,6 @@ use tracing::warn;
 
 use super::ClientContext;
 use super::recovery::RecoveryProgress;
-use crate::db::ClientModuleMigrationFn;
 use crate::module::ClientModule;
 
 pub struct ClientModuleInitArgs<C>
@@ -184,24 +181,4 @@ pub trait ClientModuleInit: ModuleInit + Sized {
 
     /// Initialize a [`ClientModule`] instance from its config
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module>;
-
-    /// Retrieves the database migrations from the module to be applied to the
-    /// database before the module is initialized. The database migrations map
-    /// is indexed on the "from" version.
-    fn get_database_migrations(&self) -> BTreeMap<DatabaseVersion, ClientModuleMigrationFn> {
-        BTreeMap::new()
-    }
-
-    /// Db prefixes used by the module
-    ///
-    /// If `Some` is returned, it should contain list of database
-    /// prefixes actually used by the module for it's keys.
-    ///
-    /// In (some subset of) non-production tests,
-    /// module database will be scanned for presence of keys
-    /// that do not belong to this list to verify integrity
-    /// of data and possibly catch any unforeseen bugs.
-    fn used_db_prefixes(&self) -> Option<BTreeSet<u8>> {
-        None
-    }
 }

@@ -17,9 +17,7 @@ use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{
     Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped as _,
-    verify_module_db_integrity_dbtx,
 };
-use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::TaskGroup;
@@ -37,7 +35,7 @@ use super::handle::ClientHandle;
 use super::{Client, client_decoders};
 use crate::db::{
     self, ApiSecretKey, ClientInitStateKey, ClientModuleRecovery, ClientModuleRecoveryState,
-    ClientPreRootSecretHashKey, InitMode, InitState, apply_migrations_client_module_dbtx,
+    ClientPreRootSecretHashKey, InitMode, InitState,
 };
 use crate::module_init::ClientModuleInitRegistry;
 
@@ -123,49 +121,6 @@ impl ClientBuilder {
 
     pub fn stopped(&mut self) {
         self.stopped = true;
-    }
-
-    /// Migrate client module databases
-    ///
-    /// Note: Client core db migration are done immediately in
-    /// [`Client::builder`], to ensure db matches the code at all times,
-    /// while migrating modules requires figuring out what modules actually
-    /// are first.
-    async fn migrate_module_dbs(
-        &self,
-        db: &Database,
-        client_config: &ClientConfig,
-    ) -> anyhow::Result<()> {
-        for (module_id, module_cfg) in &client_config.modules {
-            let kind = module_cfg.kind.clone();
-            let Some(init) = self.module_inits.get(&kind) else {
-                // normal, expected and already logged about when building the client
-                continue;
-            };
-
-            let mut dbtx = db.begin_write_transaction().await;
-            apply_migrations_client_module_dbtx(
-                &mut dbtx.to_ref_nc(),
-                kind.to_string(),
-                init.get_database_migrations(),
-                *module_id,
-            )
-            .await?;
-            if let Some(used_db_prefixes) = init.used_db_prefixes()
-                && is_running_in_test_env()
-            {
-                verify_module_db_integrity_dbtx(
-                    &mut dbtx.to_ref_nc(),
-                    *module_id,
-                    kind,
-                    &used_db_prefixes,
-                )
-                .await;
-            }
-            dbtx.commit_tx_result().await?;
-        }
-
-        Ok(())
     }
 
     pub async fn load_existing_config(&self, db: &Database) -> anyhow::Result<ClientConfig> {
@@ -377,10 +332,6 @@ impl ClientBuilder {
         let api: DynGlobalApi = FederationApi::new(connectors.clone(), peer_urls).into();
 
         let task_group = TaskGroup::new();
-
-        // Migrate the database before interacting with it in case any on-disk data
-        // structures have changed.
-        self.migrate_module_dbs(&db, &config).await?;
 
         let init_state = Self::load_init_state(&db).await;
 

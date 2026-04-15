@@ -1,12 +1,9 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-use std::collections::BTreeMap;
-
-use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
-use fedimint_core::db::{Database, DatabaseVersion, NonCommittable, WriteDatabaseTransaction};
+use fedimint_core::db::{Database, NonCommittable, WriteDatabaseTransaction};
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::{Amount, apply, async_trait_maybe_send};
 pub use fedimint_empty_common as common;
@@ -74,9 +71,5 @@ impl ClientModuleInit for EmptyClientInit {
             client_ctx: args.context(),
             db: args.db().clone(),
         })
-    }
-
-    fn get_database_migrations(&self) -> BTreeMap<DatabaseVersion, ClientModuleMigrationFn> {
-        BTreeMap::new()
     }
 }

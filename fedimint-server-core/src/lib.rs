@@ -9,7 +9,6 @@ pub mod bitcoin_rpc;
 pub mod config;
 pub mod dashboard_ui;
 mod init;
-pub mod migration;
 pub mod setup_ui;
 
 use std::any::Any;

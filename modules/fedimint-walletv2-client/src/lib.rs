@@ -12,7 +12,7 @@ pub mod events;
 mod receive_sm;
 mod send_sm;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -25,13 +25,12 @@ use fedimint_api_client::api::{DynModuleApi, FederationResult};
 use fedimint_client::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
-use fedimint_client_module::db::ClientModuleMigrationFn;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{
-    Database, DatabaseVersion, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
+    Database, IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
 };
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
@@ -48,7 +47,6 @@ use futures::StreamExt;
 use receive_sm::{ReceiveSMCommon, ReceiveSMState, ReceiveStateMachine};
 use secp256k1::Keypair;
 use send_sm::{SendSMCommon, SendSMState, SendStateMachine};
-use strum::IntoEnumIterator as _;
 use thiserror::Error;
 use tracing::warn;
 
@@ -137,13 +135,6 @@ impl ClientModuleInit for WalletClientInit {
         Ok(module)
     }
 
-    fn get_database_migrations(&self) -> BTreeMap<DatabaseVersion, ClientModuleMigrationFn> {
-        BTreeMap::new()
-    }
-
-    fn used_db_prefixes(&self) -> Option<BTreeSet<u8>> {
-        Some(db::DbKeyPrefix::iter().map(|p| p as u8).collect())
-    }
 }
 
 impl WalletClientModule {

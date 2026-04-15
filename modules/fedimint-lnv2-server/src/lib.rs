@@ -6,7 +6,6 @@ pub use fedimint_lnv2_common as common;
 
 mod db;
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow, ensure};
@@ -15,7 +14,6 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::DatabaseVersion;
 use fedimint_core::db::v2::{
     IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
     IWriteDatabaseTransactionOpsTyped as _,
@@ -49,7 +47,6 @@ use fedimint_logging::LOG_MODULE_LNV2;
 use fedimint_redb::v2::{Database, ReadTxRef, WriteTxRef};
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, eval_poly_g1};
-use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
@@ -143,11 +140,6 @@ impl ServerModuleInit for LightningInit {
         })
     }
 
-    fn get_database_migrations(
-        &self,
-    ) -> BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<Lightning>> {
-        BTreeMap::new()
-    }
 }
 
 #[derive(Debug)]

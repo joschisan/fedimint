@@ -34,7 +34,6 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::DatabaseVersion;
 use fedimint_core::db::v2::{
     IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
     IWriteDatabaseTransactionOpsTyped as _,
@@ -53,7 +52,6 @@ use fedimint_logging::LOG_MODULE_WALLETV2;
 use fedimint_redb::v2::{Database, ReadTxRef, WriteTxRef};
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
-use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
@@ -197,11 +195,6 @@ impl ServerModuleInit for WalletInit {
         })
     }
 
-    fn get_database_migrations(
-        &self,
-    ) -> BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<Wallet>> {
-        BTreeMap::new()
-    }
 }
 
 #[apply(async_trait_maybe_send!)]

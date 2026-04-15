@@ -12,12 +12,11 @@ pub mod events;
 mod receive_sm;
 mod send_sm;
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
-use db::{DbKeyPrefix, GatewayKey, IncomingContractStreamIndexKey, SendOperationKey};
+use db::{GatewayKey, IncomingContractStreamIndexKey, SendOperationKey};
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
@@ -48,7 +47,6 @@ use fedimint_lnv2_common::{
 };
 use lightning_invoice::{Bolt11Invoice, Currency};
 use secp256k1::{Keypair, PublicKey, Scalar, SecretKey, ecdh};
-use strum::IntoEnumIterator as _;
 use thiserror::Error;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
 use tracing::warn;
@@ -108,17 +106,6 @@ impl ClientModuleInit for LightningClientInit {
         ))
     }
 
-    fn used_db_prefixes(&self) -> Option<BTreeSet<u8>> {
-        Some(
-            DbKeyPrefix::iter()
-                .map(|p| p as u8)
-                .chain(
-                    DbKeyPrefix::ExternalReservedStart as u8
-                        ..=DbKeyPrefix::CoreInternalReservedEnd as u8,
-                )
-                .collect(),
-        )
-    }
 }
 
 #[derive(Debug, Clone)]

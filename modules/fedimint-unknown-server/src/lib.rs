@@ -2,8 +2,6 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
 
-use std::collections::BTreeMap;
-
 use anyhow::bail;
 use async_trait::async_trait;
 use fedimint_core::config::{
@@ -11,7 +9,6 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::DatabaseVersion;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
@@ -20,7 +17,6 @@ use fedimint_core::module::{
 use fedimint_core::{InPoint, OutPoint, PeerId};
 use fedimint_redb::v2::{ReadTxRef, WriteTxRef};
 use fedimint_server_core::config::PeerHandleOps;
-use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
@@ -87,17 +83,6 @@ impl ServerModuleInit for UnknownInit {
         Ok(())
     }
 
-    /// DB migrations to move from old to newer versions
-    fn get_database_migrations(
-        &self,
-    ) -> BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<Unknown>> {
-        let mut migrations: BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<_>> =
-            BTreeMap::new();
-        // Unknown module prior to v0.5.0 had a `DATABASE_VERSION` of 1, so we must
-        // insert a no-op migration to ensure that upgrades work.
-        migrations.insert(DatabaseVersion(0), Box::new(|_| Box::pin(async { Ok(()) })));
-        migrations
-    }
 }
 
 /// Unknown module

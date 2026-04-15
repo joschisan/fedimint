@@ -14,7 +14,6 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::DatabaseVersion;
 use fedimint_core::db::v2::{
     IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
     IWriteDatabaseTransactionOpsTyped as _,
@@ -39,7 +38,6 @@ use fedimint_mintv2_common::{
 };
 use fedimint_redb::v2::{Database, ReadTxRef, WriteTxRef};
 use fedimint_server_core::config::{PeerHandleOps, eval_poly_g2};
-use fedimint_server_core::migration::ServerModuleDbMigrationFn;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
@@ -140,11 +138,6 @@ impl ServerModuleInit for MintInit {
         })
     }
 
-    fn get_database_migrations(
-        &self,
-    ) -> BTreeMap<DatabaseVersion, ServerModuleDbMigrationFn<Mint>> {
-        BTreeMap::new()
-    }
 }
 
 #[derive(Debug)]
