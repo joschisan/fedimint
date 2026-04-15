@@ -11,7 +11,7 @@ use fedimint_core::{OutPoint, crit, secp256k1, util};
 use fedimint_lnv2_common::contracts::OutgoingContract;
 use fedimint_lnv2_common::{LightningInput, LightningInputV0, OutgoingWitness};
 use fedimint_logging::LOG_CLIENT_MODULE_LNV2;
-use fedimint_redb::v2::WriteTxRef;
+use fedimint_redb::WriteTxRef;
 use futures::future::pending;
 use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;

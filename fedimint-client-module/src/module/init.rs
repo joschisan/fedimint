@@ -7,7 +7,7 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::{NumPeers, apply, async_trait_maybe_send};
 use fedimint_derive_secret::DerivableSecret;
 use fedimint_logging::LOG_CLIENT;
-use fedimint_redb::v2::Database;
+use fedimint_redb::Database;
 use tracing::warn;
 
 use super::ClientContext;

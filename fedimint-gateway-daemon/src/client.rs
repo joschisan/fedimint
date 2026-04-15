@@ -5,12 +5,12 @@ use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::{Client, ClientBuilder, RootSecret};
 use fedimint_client_module::secret::RootSecretStrategy;
 use fedimint_core::config::{ClientConfig, FederationId};
-use fedimint_core::db::v2::{
+use fedimint_core::db::{
     IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
 };
 use fedimint_core::invite_code::InviteCode;
 use fedimint_gwv2_client::GatewayClientInitV2;
-use fedimint_redb::v2::Database;
+use fedimint_redb::Database;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 

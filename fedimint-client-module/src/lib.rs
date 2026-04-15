@@ -17,7 +17,7 @@ use fedimint_api_client::api::DynModuleApi;
 pub use fedimint_core::core::{IInput, IOutput, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::{PeerId, TransactionId, maybe_add_send_sync};
 use fedimint_eventlog::{Event, EventKind, EventPersistence};
-use fedimint_redb::v2::Database;
+use fedimint_redb::Database;
 use serde::{Deserialize, Serialize};
 use transaction::{ClientInputBundle, ClientOutput};
 

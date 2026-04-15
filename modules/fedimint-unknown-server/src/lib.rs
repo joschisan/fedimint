@@ -15,7 +15,7 @@ use fedimint_core::module::{
     TransactionItemAmounts,
 };
 use fedimint_core::{InPoint, OutPoint, PeerId};
-use fedimint_redb::v2::{ReadTxRef, WriteTxRef};
+use fedimint_redb::{ReadTxRef, WriteTxRef};
 use fedimint_server_core::config::PeerHandleOps;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,

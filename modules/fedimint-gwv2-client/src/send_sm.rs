@@ -5,7 +5,7 @@ use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_redb::v2::WriteTxRef;
+use fedimint_redb::WriteTxRef;
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::{Amount, OutPoint};
 use fedimint_lnv2_common::contracts::OutgoingContract;

@@ -40,7 +40,6 @@ use crate::core::{
     ClientConfig, Decoder, DecoderBuilder, Input, InputError, ModuleConsensusItem,
     ModuleInstanceId, ModuleKind, Output, OutputError, OutputOutcome,
 };
-use crate::db::DatabaseError;
 use crate::encoding::{Decodable, DecodeError, Encodable};
 use crate::fmt_utils::AbbreviateHexBytes;
 use crate::task::MaybeSend;
@@ -230,15 +229,6 @@ impl ApiError {
 
     pub fn server_error(message: String) -> Self {
         Self::new(500, message)
-    }
-}
-
-impl From<DatabaseError> for ApiError {
-    fn from(err: DatabaseError) -> Self {
-        Self {
-            code: 500,
-            message: format!("API server error when writing to database: {err}"),
-        }
     }
 }
 

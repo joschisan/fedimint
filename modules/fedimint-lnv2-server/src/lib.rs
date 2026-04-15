@@ -14,7 +14,7 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::v2::{
+use fedimint_core::db::{
     IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
     IWriteDatabaseTransactionOpsTyped as _,
 };
@@ -44,7 +44,7 @@ use fedimint_lnv2_common::{
     LightningOutputV0, MODULE_CONSENSUS_VERSION, OutgoingWitness,
 };
 use fedimint_logging::LOG_MODULE_LNV2;
-use fedimint_redb::v2::{Database, ReadTxRef, WriteTxRef};
+use fedimint_redb::{Database, ReadTxRef, WriteTxRef};
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, eval_poly_g1};
 use fedimint_server_core::{

@@ -34,7 +34,7 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::v2::{
+use fedimint_core::db::{
     IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
     IWriteDatabaseTransactionOpsTyped as _,
 };
@@ -49,7 +49,7 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::task::sleep;
 use fedimint_core::{InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send, util};
 use fedimint_logging::LOG_MODULE_WALLETV2;
-use fedimint_redb::v2::{Database, ReadTxRef, WriteTxRef};
+use fedimint_redb::{Database, ReadTxRef, WriteTxRef};
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
 use fedimint_server_core::{

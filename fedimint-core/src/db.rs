@@ -78,8 +78,8 @@ macro_rules! table {
         $label:literal $(,)?
     ) => {
         $(#[$attr])*
-        pub const $name: $crate::db::v2::TableDef<$k, $v> =
-            $crate::db::v2::TableDef::new($label);
+        pub const $name: $crate::db::TableDef<$k, $v> =
+            $crate::db::TableDef::new($label);
     };
 }
 

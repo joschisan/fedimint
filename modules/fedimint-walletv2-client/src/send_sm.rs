@@ -2,7 +2,7 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_core::OutPoint;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_redb::v2::WriteTxRef;
+use fedimint_redb::WriteTxRef;
 
 use crate::WalletClientContext;
 use crate::api::WalletFederationApi;

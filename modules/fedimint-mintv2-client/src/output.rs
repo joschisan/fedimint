@@ -5,10 +5,10 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::module::OutPointRange;
 use fedimint_core::PeerId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::v2::IWriteDatabaseTransactionOpsTyped;
+use fedimint_core::db::IWriteDatabaseTransactionOpsTyped;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_mintv2_common::{Denomination, verify_note};
-use fedimint_redb::v2::WriteTxRef;
+use fedimint_redb::WriteTxRef;
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use crate::api::MintV2ModuleApi;

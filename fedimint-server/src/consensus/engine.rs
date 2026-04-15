@@ -6,7 +6,7 @@ use anyhow::{anyhow, bail};
 use async_channel::Receiver;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::core::DynOutput;
-use fedimint_core::db::v2::{
+use fedimint_core::db::{
     IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
 };
 use fedimint_core::encoding::Decodable;
@@ -21,7 +21,7 @@ use fedimint_core::task::{TaskGroup, TaskHandle, sleep};
 use fedimint_core::timing::TimeReporter;
 use fedimint_core::util::{FmtCompact as _, FmtCompactAnyhow as _};
 use fedimint_core::{NumPeers, NumPeersExt, PeerId, timing};
-use fedimint_redb::v2::{Database, ReadTransaction, WriteTransaction};
+use fedimint_redb::{Database, ReadTransaction, WriteTransaction};
 use fedimint_server_core::{ServerModuleRegistry, ServerModuleRegistryExt};
 use rand::Rng;
 use rand::seq::IteratorRandom;

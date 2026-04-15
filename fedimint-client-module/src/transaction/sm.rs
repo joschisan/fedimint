@@ -12,7 +12,7 @@ use fedimint_core::util::backoff_util::custom_backoff;
 use fedimint_core::util::retry;
 use fedimint_eventlog::Event;
 use fedimint_logging::LOG_CLIENT_NET_API;
-use fedimint_redb::v2::WriteTxRef;
+use fedimint_redb::WriteTxRef;
 use tokio::sync::watch;
 use tracing::debug;
 

@@ -18,14 +18,14 @@ use std::time::Duration;
 use std::{fmt, ops};
 
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::db::v2::{
+use fedimint_core::db::{
     IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::task::MaybeSend;
 use fedimint_core::{Amount, apply, async_trait_maybe_send, table};
 use fedimint_logging::LOG_CLIENT_EVENT_LOG;
-use fedimint_redb::v2::{Database, WriteTxRef};
+use fedimint_redb::{Database, WriteTxRef};
 use futures::Future;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};

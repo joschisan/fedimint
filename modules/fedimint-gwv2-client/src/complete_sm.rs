@@ -3,7 +3,7 @@ use std::fmt;
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_redb::v2::WriteTxRef;
+use fedimint_redb::WriteTxRef;
 
 use super::FinalReceiveState;
 use super::events::CompleteLightningPaymentEvent;

@@ -2,11 +2,11 @@ use anyhow::{anyhow, bail};
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_core::config::ClientConfig;
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::v2::IReadDatabaseTransactionOpsTyped as _;
+use fedimint_core::db::IReadDatabaseTransactionOpsTyped as _;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::table;
-use fedimint_redb::v2::Database;
+use fedimint_redb::Database;
 use serde::Serialize;
 
 table!(

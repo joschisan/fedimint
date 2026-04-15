@@ -20,7 +20,7 @@ use fedimint_core::module::{
 };
 use fedimint_core::task::TaskGroup;
 use fedimint_core::{NumPeers, PeerId, apply, async_trait_maybe_send, dyn_newtype_define};
-use fedimint_redb::v2::Database as V2Database;
+use fedimint_redb::Database as V2Database;
 
 use crate::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use crate::config::PeerHandleOps;

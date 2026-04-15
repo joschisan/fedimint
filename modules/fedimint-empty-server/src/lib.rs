@@ -23,12 +23,11 @@ use fedimint_empty_common::{
     EmptyCommonInit, EmptyConsensusItem, EmptyInput, EmptyInputError, EmptyModuleTypes,
     EmptyOutput, EmptyOutputError, MODULE_CONSENSUS_VERSION,
 };
-use fedimint_redb::v2::{ReadTxRef, WriteTxRef};
+use fedimint_redb::{ReadTxRef, WriteTxRef};
 use fedimint_server_core::config::PeerHandleOps;
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
-pub mod db;
 
 /// Generates the module
 #[derive(Debug, Clone)]

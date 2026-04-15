@@ -26,7 +26,7 @@ use fedimint_core::module::{
     TransactionItemAmounts,
 };
 use fedimint_core::{InPoint, OutPoint, PeerId, apply, async_trait_maybe_send, dyn_newtype_define};
-use fedimint_redb::v2::{ReadTxRef, WriteTxRef};
+use fedimint_redb::{ReadTxRef, WriteTxRef};
 pub use init::*;
 
 #[apply(async_trait_maybe_send!)]

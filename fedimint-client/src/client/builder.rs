@@ -15,7 +15,7 @@ use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default
 use fedimint_client_module::transaction::TxSubmissionSmContext;
 use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::v2::{
+use fedimint_core::db::{
     IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
 };
 use fedimint_core::invite_code::InviteCode;
@@ -26,7 +26,7 @@ use fedimint_core::{NumPeers, PeerId, fedimint_build_code_version_env, maybe_add
 use fedimint_derive_secret::DerivableSecret;
 use fedimint_eventlog::{EventLogEntry, run_event_log_ordering_task};
 use fedimint_logging::LOG_CLIENT;
-use fedimint_redb::v2::Database;
+use fedimint_redb::Database;
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, trace, warn};
 

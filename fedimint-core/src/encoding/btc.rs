@@ -444,7 +444,6 @@ mod tests {
     use hex::FromHex;
 
     use crate::ModuleDecoderRegistry;
-    use crate::db::DatabaseValue;
     use crate::encoding::btc::NetworkLegacyEncodingWrapper;
     use crate::encoding::tests::{test_roundtrip, test_roundtrip_expected};
     use crate::encoding::{Decodable, Encodable};
@@ -469,9 +468,11 @@ mod tests {
         let transaction: Vec<u8> = FromHex::from_hex(
             "02000000000101d35b66c54cf6c09b81a8d94cd5d179719cd7595c258449452a9305ab9b12df250200000000fdffffff020cd50a0000000000160014ae5d450b71c04218e6e81c86fcc225882d7b7caae695b22100000000160014f60834ef165253c571b11ce9fa74e46692fc5ec10248304502210092062c609f4c8dc74cd7d4596ecedc1093140d90b3fd94b4bdd9ad3e102ce3bc02206bb5a6afc68d583d77d5d9bcfb6252a364d11a307f3418be1af9f47f7b1b3d780121026e5628506ecd33242e5ceb5fdafe4d3066b5c0f159b3c05a621ef65f177ea28600000000"
         ).unwrap();
-        let transaction =
-            bitcoin::Transaction::from_bytes(&transaction, &ModuleDecoderRegistry::default())
-                .unwrap();
+        let transaction = bitcoin::Transaction::consensus_decode_whole(
+            &transaction,
+            &ModuleDecoderRegistry::default(),
+        )
+        .unwrap();
         test_roundtrip_expected(
             &transaction,
             &[

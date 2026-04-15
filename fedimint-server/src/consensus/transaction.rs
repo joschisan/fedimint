@@ -1,7 +1,7 @@
 use fedimint_core::module::TransactionItemAmounts;
 use fedimint_core::transaction::{TRANSACTION_OVERFLOW_ERROR, Transaction, TransactionError};
 use fedimint_core::{Amount, InPoint, OutPoint};
-use fedimint_redb::v2::WriteTransaction;
+use fedimint_redb::WriteTransaction;
 use fedimint_server_core::ServerModuleRegistry;
 
 pub async fn process_transaction_with_dbtx(

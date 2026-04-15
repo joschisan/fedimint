@@ -35,7 +35,7 @@ use fedimint_core::module::ApiAuth;
 use fedimint_core::net::peers::DynP2PConnections;
 use fedimint_core::task::TaskGroup;
 use fedimint_logging::LOG_CONSENSUS;
-use fedimint_redb::v2::Database;
+use fedimint_redb::Database;
 pub use fedimint_server_core as core;
 use fedimint_server_core::ServerModuleInitRegistry;
 use fedimint_server_core::bitcoin_rpc::DynServerBitcoinRpc;

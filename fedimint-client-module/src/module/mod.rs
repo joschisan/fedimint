@@ -25,7 +25,7 @@ use fedimint_eventlog::{
     Event, EventKind, EventLogEntry, EventLogId, EventPersistence, PersistedLogEntry,
 };
 use fedimint_logging::LOG_CLIENT;
-use fedimint_redb::v2::{Database, WriteTxRef};
+use fedimint_redb::{Database, WriteTxRef};
 use tokio::sync::{broadcast, watch};
 use tracing::warn;
 

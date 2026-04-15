@@ -29,14 +29,14 @@ use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_core::core::OperationId;
-use fedimint_core::db::v2::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
+use fedimint_core::db::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::task::{TaskGroup, block_in_place, sleep};
 use fedimint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_logging::LOG_CLIENT_MODULE_WALLETV2;
-use fedimint_redb::v2::Database;
+use fedimint_redb::Database;
 use fedimint_walletv2_common::config::WalletClientConfig;
 use fedimint_walletv2_common::{
     StandardScript, WalletCommonInit, WalletInput, WalletInputV0, WalletModuleTypes, WalletOutput,

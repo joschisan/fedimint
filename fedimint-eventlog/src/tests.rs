@@ -2,10 +2,10 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 
 use anyhow::bail;
-use fedimint_core::db::v2::{IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _};
+use fedimint_core::db::{IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _};
 use fedimint_core::task::TaskGroup;
 use fedimint_core::{apply, async_trait_maybe_send, table};
-use fedimint_redb::v2::{Database, WriteTxRef};
+use fedimint_redb::{Database, WriteTxRef};
 use tokio::sync::{broadcast, watch};
 use tokio::try_join;
 use tracing::info;

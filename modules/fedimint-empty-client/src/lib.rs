@@ -8,7 +8,7 @@ use fedimint_core::{Amount, apply, async_trait_maybe_send};
 pub use fedimint_empty_common as common;
 use fedimint_empty_common::config::EmptyClientConfig;
 use fedimint_empty_common::{EmptyCommonInit, EmptyModuleTypes};
-use fedimint_redb::v2::{Database, WriteTxRef};
+use fedimint_redb::{Database, WriteTxRef};
 
 pub mod api;
 

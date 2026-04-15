@@ -14,7 +14,7 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::v2::{
+use fedimint_core::db::{
     IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
     IWriteDatabaseTransactionOpsTyped as _,
 };
@@ -36,7 +36,7 @@ use fedimint_mintv2_common::{
     Denomination, MODULE_CONSENSUS_VERSION, MintCommonInit, MintConsensusItem, MintInput,
     MintInputError, MintModuleTypes, MintOutput, MintOutputError, RecoveryItem, verify_note,
 };
-use fedimint_redb::v2::{Database, ReadTxRef, WriteTxRef};
+use fedimint_redb::{Database, ReadTxRef, WriteTxRef};
 use fedimint_server_core::config::{PeerHandleOps, eval_poly_g2};
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
@@ -351,7 +351,7 @@ impl ServerModule for Mint {
 }
 
 fn get_signature_shares(
-    tx: &fedimint_redb::v2::ReadTransaction,
+    tx: &fedimint_redb::ReadTransaction,
     range: fedimint_core::OutPointRange,
 ) -> Vec<BlindedSignatureShare> {
     tx.range(
@@ -364,7 +364,7 @@ fn get_signature_shares(
 }
 
 fn get_signature_shares_recovery(
-    tx: &fedimint_redb::v2::ReadTransaction,
+    tx: &fedimint_redb::ReadTransaction,
     messages: Vec<tbs::BlindedMessage>,
 ) -> Result<Vec<BlindedSignatureShare>, ApiError> {
     let mut shares = Vec::new();
@@ -390,7 +390,7 @@ fn get_recovery_count(dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
 }
 
 fn get_recovery_slice(
-    tx: &fedimint_redb::v2::ReadTransaction,
+    tx: &fedimint_redb::ReadTransaction,
     range: (u64, u64),
 ) -> Vec<RecoveryItem> {
     tx.range(&RECOVERY_ITEM, range.0..range.1)

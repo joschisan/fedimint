@@ -137,7 +137,7 @@ fn main() -> anyhow::Result<()> {
     runtime.block_on(install_crypto_provider());
 
     let gateway_db =
-        runtime.block_on(fedimint_redb::v2::Database::open(opts.data_dir.join(DB_FILE)))?;
+        runtime.block_on(fedimint_redb::Database::open(opts.data_dir.join(DB_FILE)))?;
 
     // 3. Load or init client factory (mnemonic)
     let mut registry = ClientModuleInitRegistry::new();

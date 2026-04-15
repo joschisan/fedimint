@@ -8,7 +8,7 @@ use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_redb::v2::WriteTxRef;
+use fedimint_redb::WriteTxRef;
 use fedimint_core::module::ApiRequestErased;
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::{NumPeersExt, OutPoint, PeerId};

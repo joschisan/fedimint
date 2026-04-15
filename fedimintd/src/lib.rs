@@ -366,7 +366,7 @@ pub async fn run(
         default_modules: module_init_registry.default_modules(),
     };
 
-    let db = fedimint_redb::v2::Database::open(server_opts.data_dir.join(DB_FILE))
+    let db = fedimint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
         .await
         .expect("Failed to open fedimintd database");
 

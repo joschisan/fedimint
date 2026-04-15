@@ -240,7 +240,7 @@ async fn build_client(
     let db_dir = data_dir.join(format!("client-{n}"));
     tokio::fs::create_dir_all(&db_dir).await?;
 
-    let db = fedimint_redb::v2::Database::open(db_dir.join("database.redb")).await?;
+    let db = fedimint_redb::Database::open(db_dir.join("database.redb")).await?;
 
     let mut builder = Client::builder().await?;
     builder.with_module(fedimint_mintv2_client::MintClientInit);

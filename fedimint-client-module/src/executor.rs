@@ -16,14 +16,14 @@ use std::hash::Hash;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use fedimint_core::db::v2::{
+use fedimint_core::db::{
     IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _, TableDef,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::util::BoxFuture;
 use fedimint_core::{maybe_add_send, maybe_add_send_sync};
-use fedimint_redb::v2::{Database, WriteTxRef};
+use fedimint_redb::{Database, WriteTxRef};
 use futures::future::select_all;
 
 /// A persistent state machine driven by a [`ModuleExecutor`].

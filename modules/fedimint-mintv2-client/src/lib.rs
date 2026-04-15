@@ -40,7 +40,7 @@ use fedimint_client_module::module::{ClientContext, IdxRange, OutPointRange};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::v2::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
+use fedimint_core::db::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::rand::{Rng, thread_rng};
@@ -48,7 +48,7 @@ use fedimint_core::secp256k1::{Keypair, PublicKey};
 use fedimint_core::util::BoxStream;
 use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send};
 use fedimint_derive_secret::DerivableSecret;
-use fedimint_redb::v2::WriteTxRef;
+use fedimint_redb::WriteTxRef;
 use fedimint_mintv2_common::config::{MintClientConfig, client_denominations};
 use fedimint_mintv2_common::{
     Denomination, MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, RecoveryItem,
