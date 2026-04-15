@@ -306,7 +306,7 @@ dependencies = [
  "libc",
  "once_cell",
  "postage",
- "rand 0.9.1",
+ "rand 0.9.4",
  "safelog",
  "serde",
  "thiserror 2.0.18",
@@ -945,7 +945,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease 0.2.35",
  "proc-macro2",
@@ -5546,7 +5546,7 @@ dependencies = [
  "idna",
  "ipnet",
  "once_cell",
- "rand 0.9.1",
+ "rand 0.9.4",
  "ring",
  "thiserror 2.0.18",
  "tinyvec",
@@ -5568,7 +5568,7 @@ dependencies = [
  "moka",
  "once_cell",
  "parking_lot",
- "rand 0.9.1",
+ "rand 0.9.4",
  "resolv-conf",
  "smallvec",
  "thiserror 2.0.18",
@@ -5991,7 +5991,7 @@ dependencies = [
  "hyper 1.6.0",
  "hyper-util",
  "log",
- "rand 0.9.1",
+ "rand 0.9.4",
  "tokio",
  "url",
  "xmltree",
@@ -6291,7 +6291,7 @@ dependencies = [
  "ring",
  "rustls 0.23.28",
  "rustls-pki-types",
- "rustls-webpki 0.103.10",
+ "rustls-webpki 0.103.12",
  "serde",
  "smallvec",
  "snafu",
@@ -6537,7 +6537,7 @@ dependencies = [
  "reqwest 0.12.22",
  "rustls 0.23.28",
  "rustls-pki-types",
- "rustls-webpki 0.103.10",
+ "rustls-webpki 0.103.12",
  "serde",
  "sha1",
  "snafu",
@@ -6827,7 +6827,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.2",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -8897,7 +8897,7 @@ dependencies = [
  "bytes",
  "getrandom 0.3.3",
  "lru-slab",
- "rand 0.9.1",
+ "rand 0.9.4",
  "ring",
  "rustc-hash",
  "rustls 0.23.28",
@@ -8973,9 +8973,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.1"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fbfd9d094a40bf3ae768db9361049ace4c0e04a4fd6b359518bd7b73a73dd97"
+checksum = "44c5af06bb1b7d3216d91932aed5265164bf384dc89cd6ba05cf59a35f5f76ea"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.3",
@@ -9431,7 +9431,7 @@ dependencies = [
  "once_cell",
  "ring",
  "rustls-pki-types",
- "rustls-webpki 0.103.10",
+ "rustls-webpki 0.103.12",
  "subtle",
  "zeroize",
 ]
@@ -9478,9 +9478,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.10"
+version = "0.103.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
+checksum = "8279bb85272c9f10811ae6a6c547ff594d6a7f3c6c6b02ee9726d1d0dcfcdd06"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -10179,7 +10179,7 @@ dependencies = [
  "precis-core",
  "precis-profiles",
  "quoted-string-parser",
- "rand 0.9.1",
+ "rand 0.9.4",
 ]
 
 [[package]]
@@ -10206,7 +10206,7 @@ dependencies = [
  "hex",
  "parking_lot",
  "pnet_packet",
- "rand 0.9.1",
+ "rand 0.9.4",
  "socket2 0.5.10",
  "thiserror 1.0.69",
  "tokio",
@@ -10650,7 +10650,7 @@ dependencies = [
  "getrandom 0.3.3",
  "http 1.3.1",
  "httparse",
- "rand 0.9.1",
+ "rand 0.9.4",
  "ring",
  "rustls-pki-types",
  "simdutf8",
@@ -10869,7 +10869,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "paste",
- "rand 0.9.1",
+ "rand 0.9.4",
  "rand_chacha 0.9.0",
  "serde",
  "slab",
@@ -10911,7 +10911,7 @@ dependencies = [
  "educe",
  "itertools 0.14.0",
  "paste",
- "rand 0.9.1",
+ "rand 0.9.4",
  "smallvec",
  "thiserror 2.0.18",
  "tor-basic-utils",
@@ -10958,7 +10958,7 @@ dependencies = [
  "futures",
  "oneshot-fused-workaround",
  "postage",
- "rand 0.9.1",
+ "rand 0.9.4",
  "safelog",
  "serde",
  "thiserror 2.0.18",
@@ -11013,7 +11013,7 @@ dependencies = [
  "once_cell",
  "oneshot-fused-workaround",
  "pin-project",
- "rand 0.9.1",
+ "rand 0.9.4",
  "retry-error",
  "safelog",
  "serde",
@@ -11174,7 +11174,7 @@ dependencies = [
  "oneshot-fused-workaround",
  "paste",
  "postage",
- "rand 0.9.1",
+ "rand 0.9.4",
  "rusqlite",
  "safelog",
  "scopeguard",
@@ -11254,7 +11254,7 @@ dependencies = [
  "oneshot-fused-workaround",
  "pin-project",
  "postage",
- "rand 0.9.1",
+ "rand 0.9.4",
  "safelog",
  "serde",
  "strum 0.27.1",
@@ -11291,7 +11291,7 @@ dependencies = [
  "itertools 0.14.0",
  "oneshot-fused-workaround",
  "postage",
- "rand 0.9.1",
+ "rand 0.9.4",
  "retry-error",
  "safelog",
  "slotmap-careful",
@@ -11334,7 +11334,7 @@ dependencies = [
  "humantime",
  "itertools 0.14.0",
  "paste",
- "rand 0.9.1",
+ "rand 0.9.4",
  "safelog",
  "serde",
  "signature",
@@ -11360,7 +11360,7 @@ dependencies = [
  "derive_more 2.0.1",
  "downcast-rs",
  "paste",
- "rand 0.9.1",
+ "rand 0.9.4",
  "rsa",
  "signature",
  "ssh-key",
@@ -11391,7 +11391,7 @@ dependencies = [
  "humantime",
  "inventory",
  "itertools 0.14.0",
- "rand 0.9.1",
+ "rand 0.9.4",
  "safelog",
  "serde",
  "signature",
@@ -11457,7 +11457,7 @@ dependencies = [
  "educe",
  "getrandom 0.3.3",
  "hex",
- "rand 0.9.1",
+ "rand 0.9.4",
  "rand_chacha 0.9.0",
  "rand_core 0.6.4",
  "rand_core 0.9.3",
@@ -11539,7 +11539,7 @@ dependencies = [
  "humantime",
  "itertools 0.14.0",
  "num_enum",
- "rand 0.9.1",
+ "rand 0.9.4",
  "serde",
  "strum 0.27.1",
  "thiserror 2.0.18",
@@ -11577,7 +11577,7 @@ dependencies = [
  "memchr",
  "paste",
  "phf",
- "rand 0.9.1",
+ "rand 0.9.4",
  "saturating-time",
  "serde",
  "serde_with",
@@ -11660,7 +11660,7 @@ dependencies = [
  "oneshot-fused-workaround",
  "pin-project",
  "postage",
- "rand 0.9.1",
+ "rand 0.9.4",
  "rand_core 0.9.3",
  "safelog",
  "slotmap-careful",
@@ -11734,7 +11734,7 @@ version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "813a2234ddea983906c73c945a41dc0a054f4da771f8f6c12919a6423c88de13"
 dependencies = [
- "rand 0.9.1",
+ "rand 0.9.4",
  "serde",
  "tor-basic-utils",
  "tor-linkspec",
@@ -11762,7 +11762,7 @@ dependencies = [
  "paste",
  "pin-project",
  "rustls-pki-types",
- "rustls-webpki 0.103.10",
+ "rustls-webpki 0.103.12",
  "socket2 0.6.1",
  "thiserror 2.0.18",
  "tokio",
