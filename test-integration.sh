@@ -5,8 +5,8 @@ CONTAINER_NAME="fm-integration-bitcoind"
 
 cleanup() {
     echo "Cleaning up..."
-    pkill -9 -f "fedimintd" 2>/dev/null || true
-    pkill -9 -f "gatewayd" 2>/dev/null || true
+    pkill -9 -f "fedimint-server-daemon" 2>/dev/null || true
+    pkill -9 -f "fedimint-gateway-daemon" 2>/dev/null || true
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 }
