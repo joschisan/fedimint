@@ -40,7 +40,7 @@ use serde_json::Value;
 use tracing::{debug, trace, warn};
 
 use super::{DynGuaridianConnection, IGuardianConnection, ServerError, ServerResult};
-use crate::{DynGatewayConnection, IConnection, IGatewayConnection};
+use crate::{Connectivity, DynGatewayConnection, IConnection, IGatewayConnection};
 
 #[derive(Clone)]
 pub(crate) struct IrohConnector {
@@ -324,6 +324,21 @@ impl crate::Connector for IrohConnector {
         } else {
             let conn = self.stable.connect(node_id, FEDIMINT_GATEWAY_ALPN).await?;
             Ok(IGatewayConnection::into_dyn(conn))
+        }
+    }
+
+    fn connectivity(&self, url: &SafeUrl) -> Connectivity {
+        let Ok(node_id) = Self::node_id_from_url(url) else {
+            return Connectivity::Unknown;
+        };
+        let Ok(watcher) = self.stable.conn_type(node_id) else {
+            return Connectivity::Unknown;
+        };
+        match watcher.get() {
+            Ok(iroh::endpoint::ConnectionType::Direct(_)) => Connectivity::Direct,
+            Ok(iroh::endpoint::ConnectionType::Relay(_)) => Connectivity::Relay,
+            Ok(iroh::endpoint::ConnectionType::Mixed(..)) => Connectivity::Mixed,
+            Ok(iroh::endpoint::ConnectionType::None) | Err(_) => Connectivity::Unknown,
         }
     }
 }

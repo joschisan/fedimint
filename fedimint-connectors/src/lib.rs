@@ -473,6 +473,27 @@ impl ConnectorRegistry {
 
         result
     }
+
+    /// Report how a connection to `url` is currently reaching its peer.
+    ///
+    /// Returns [`Connectivity::Unknown`] if no connector for the url's scheme
+    /// is registered, or if the matching connector has not been initialized
+    /// yet (i.e. no connection attempt has been made).
+    pub fn connectivity(&self, url: &SafeUrl) -> Connectivity {
+        let url = match self.inner.connection_overrides.get(url) {
+            Some(replacement) => replacement,
+            None => url,
+        };
+
+        let Some((_, connector_cell)) = self.inner.connectors_lazy.get(url.scheme()) else {
+            return Connectivity::Unknown;
+        };
+
+        match connector_cell.get() {
+            Some(connector) => connector.connectivity(url),
+            None => Connectivity::Unknown,
+        }
+    }
 }
 pub type DynConnector = Arc<dyn Connector>;
 
@@ -485,6 +506,44 @@ pub trait Connector: Send + Sync + 'static + Debug {
     ) -> ServerResult<DynGuaridianConnection>;
 
     async fn connect_gateway(&self, url: &SafeUrl) -> anyhow::Result<DynGatewayConnection>;
+
+    /// Report how a connection to `url` is currently reaching its peer.
+    ///
+    /// Defaults to [`Connectivity::Direct`] for transports without a relay
+    /// or anonymization concept. Iroh and Tor impls override this.
+    fn connectivity(&self, url: &SafeUrl) -> Connectivity {
+        let _ = url;
+        Connectivity::Direct
+    }
+}
+
+/// How a connection is currently reaching its peer.
+///
+/// Transports without a relay concept (WS, HTTP) are always
+/// [`Connectivity::Direct`]. Tor-routed connections report
+/// [`Connectivity::Tor`]. Iroh connections may be [`Connectivity::Direct`]
+/// (peer-to-peer), [`Connectivity::Relay`] (routed through a relay
+/// server), or [`Connectivity::Mixed`] (both paths active); for Iroh this
+/// can change at runtime as hole-punching succeeds or falls back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Connectivity {
+    Direct,
+    Relay,
+    Mixed,
+    Tor,
+    Unknown,
+}
+
+/// Per-peer connection state reported by the federation API.
+///
+/// [`PeerStatus::Connected`] carries the current [`Connectivity`] of the
+/// active connection; for Iroh this reflects the path at the moment of the
+/// emission and may be stale until the next pool-level change (relay→direct
+/// upgrades on an existing connection are not yet streamed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PeerStatus {
+    Disconnected,
+    Connected(Connectivity),
 }
 
 /// Generic connection trait shared between [`IGuardianConnection`] and
@@ -698,6 +757,11 @@ impl<T: IConnection + ?Sized> ConnectionPool<T> {
 
     pub async fn wait_for_initialized_connections(&self) {
         self.connectors.wait_for_initialized_connections().await
+    }
+
+    /// Report how a connection to `url` is currently reaching its peer.
+    pub fn connectivity(&self, url: &SafeUrl) -> Connectivity {
+        self.connectors.connectivity(url)
     }
 }
 

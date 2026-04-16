@@ -14,7 +14,7 @@ pub use error::{FederationError, OutputOutcomeError};
 pub use fedimint_connectors::ServerResult;
 pub use fedimint_connectors::error::ServerError;
 use fedimint_connectors::{
-    ConnectionPool, ConnectorRegistry, DynGuaridianConnection, IGuardianConnection,
+    ConnectionPool, ConnectorRegistry, DynGuaridianConnection, IGuardianConnection, PeerStatus,
 };
 use fedimint_core::admin_client::{GuardianConfigBackup, ServerStatusLegacy, SetupStatus};
 use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
@@ -103,8 +103,17 @@ pub trait IRawFederationApi: Debug + MaybeSend + MaybeSync {
 
     /// Returns a stream of connection status for each peer
     ///
-    /// The stream emits a new value whenever the connection status changes.
-    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>>;
+    /// The stream emits a new value whenever the set of active connections in
+    /// the pool changes. Each peer's entry is [`PeerStatus::Disconnected`] if
+    /// there is no active pooled connection, or
+    /// [`PeerStatus::Connected`] carrying the current
+    /// [`fedimint_connectors::Connectivity`] otherwise.
+    ///
+    /// Note: the stream does not tick on transport-level path changes (for
+    /// example iroh hole-punching from relay to direct) on an existing
+    /// connection — the carried [`fedimint_connectors::Connectivity`] only
+    /// refreshes when the pool membership itself changes.
+    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, PeerStatus>>;
     /// Wait for some connections being initialized
     ///
     /// This is useful to avoid initializing networking by
@@ -770,14 +779,22 @@ impl IRawFederationApi for FederationApi {
         self.request(peer_id, method, params.clone()).await
     }
 
-    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>> {
+    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, PeerStatus>> {
         let peers = self.peers.clone();
+        let pool = self.connection_pool.clone();
 
         WatchStream::new(self.connection_pool.get_active_connection_receiver())
             .map(move |active_urls| {
                 peers
                     .iter()
-                    .map(|(peer_id, url)| (*peer_id, active_urls.contains(url)))
+                    .map(|(peer_id, url)| {
+                        let status = if active_urls.contains(url) {
+                            PeerStatus::Connected(pool.connectivity(url))
+                        } else {
+                            PeerStatus::Disconnected
+                        };
+                        (*peer_id, status)
+                    })
                     .collect()
             })
             .boxed()

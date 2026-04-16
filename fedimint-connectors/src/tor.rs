@@ -13,7 +13,7 @@ use tokio_rustls::rustls::{ClientConfig as TlsClientConfig, RootCertStore};
 use tracing::debug;
 
 use super::{Connector, DynGuaridianConnection};
-use crate::{DynGatewayConnection, IGuardianConnection as _, ServerError};
+use crate::{Connectivity, DynGatewayConnection, IGuardianConnection as _, ServerError};
 
 #[derive(Clone)]
 pub struct TorConnector {
@@ -182,5 +182,9 @@ impl Connector for TorConnector {
 
     async fn connect_gateway(&self, _url: &SafeUrl) -> anyhow::Result<DynGatewayConnection> {
         Err(anyhow!("Unsupported transport method"))
+    }
+
+    fn connectivity(&self, _url: &SafeUrl) -> Connectivity {
+        Connectivity::Tor
     }
 }
