@@ -99,7 +99,7 @@ impl TxInfo {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct OutputInfo {
     pub index: u64,
     pub script: ScriptBuf,

@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::Result;
 use fedimint_api_client::session_outcome::SessionStatusV2;
 use fedimint_api_client::transaction::{
-    ConsensusItem, SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
+    ConsensusItem, Transaction, TransactionError, TransactionSubmissionOutcome,
 };
 use fedimint_core::config::ClientConfig;
 use fedimint_core::core::ModuleInstanceId;
@@ -16,9 +16,7 @@ use fedimint_core::endpoint_constants::{
     SUBMIT_TRANSACTION_ENDPOINT,
 };
 use fedimint_core::module::audit::{Audit, AuditSummary};
-use fedimint_core::module::{
-    ApiAuth, ApiEndpoint, ApiError, ApiVersion, SerdeModuleEncoding, api_endpoint,
-};
+use fedimint_core::module::{ApiAuth, ApiEndpoint, ApiVersion, api_endpoint};
 use fedimint_core::task::TaskGroup;
 use fedimint_core::util::FmtCompact;
 use fedimint_core::{PeerId, TransactionId};
@@ -153,14 +151,10 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
         api_endpoint! {
             SUBMIT_TRANSACTION_ENDPOINT,
             ApiVersion::new(0, 0),
-            async |fedimint: &ConsensusApi, transaction: SerdeTransaction| -> SerdeModuleEncoding<TransactionSubmissionOutcome> {
-                let transaction = transaction
-                    .try_into_inner()
-                    .map_err(|e| ApiError::bad_request(e.to_string()))?;
-
+            async |fedimint: &ConsensusApi, transaction: Transaction| -> TransactionSubmissionOutcome {
                 // we return an inner error if and only if the submitted transaction is
                 // invalid and will be rejected if we were to submit it to consensus
-                Ok((&TransactionSubmissionOutcome(fedimint.submit_transaction(transaction).await)).into())
+                Ok(TransactionSubmissionOutcome(fedimint.submit_transaction(transaction).await))
             }
         },
         api_endpoint! {

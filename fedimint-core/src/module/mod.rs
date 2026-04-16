@@ -21,13 +21,11 @@ pub mod registry;
 
 use std::error::Error;
 use std::fmt::{self, Debug, Formatter};
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use fedimint_logging::LOG_NET_API;
 use futures::Future;
-use jsonrpsee_core::JsonValue;
 use serde::{Deserialize, Serialize};
 use tracing::Instrument;
 
@@ -36,7 +34,6 @@ mod version;
 pub use self::version::*;
 use crate::core::ModuleInstanceId;
 use crate::encoding::{Decodable, Encodable};
-use crate::fmt_utils::AbbreviateHexBytes;
 use crate::task::MaybeSend;
 use crate::util::FmtCompact;
 use crate::{Amount, apply, async_trait_maybe_send, maybe_add_send, maybe_add_send_sync};
@@ -65,57 +62,32 @@ impl TransactionItemAmounts {
     };
 }
 
-/// All requests from client to server contain these fields
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ApiRequest<T> {
-    /// Authentication secret for this API request, if required
-    pub auth: Option<ApiAuth>,
-    /// Parameters required by the API
-    pub params: T,
+/// Type-erased API request: `params` carries the consensus-encoded parameter
+/// bytes, which the endpoint decodes into its concrete `Param` type.
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct ApiRequestErased {
+    pub params: Vec<u8>,
 }
-
-pub type ApiRequestErased = ApiRequest<JsonValue>;
 
 impl Default for ApiRequestErased {
     fn default() -> Self {
-        Self {
-            auth: None,
-            params: JsonValue::Null,
-        }
+        Self::new(())
     }
 }
 
 impl ApiRequestErased {
-    pub fn new<T: Serialize>(params: T) -> Self {
+    pub fn new<T: Encodable>(params: T) -> Self {
         Self {
-            auth: None,
-            params: serde_json::to_value(params)
-                .expect("parameter serialization error - this should not happen"),
+            params: params.consensus_encode_to_vec(),
         }
     }
 
-    pub fn to_json(&self) -> JsonValue {
-        serde_json::to_value(self).expect("parameter serialization error - this should not happen")
-    }
-
-    pub fn with_auth(self, auth: ApiAuth) -> Self {
-        Self {
-            auth: Some(auth),
-            params: self.params,
-        }
-    }
-
-    pub fn to_typed<T: serde::de::DeserializeOwned>(
-        self,
-    ) -> Result<ApiRequest<T>, serde_json::Error> {
-        Ok(ApiRequest {
-            auth: self.auth,
-            params: serde_json::from_value::<T>(self.params)?,
-        })
+    pub fn to_typed<T: Decodable>(&self) -> std::io::Result<T> {
+        T::consensus_decode_exact(&self.params)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encodable, Decodable)]
 pub enum ApiMethod {
     Core(String),
     Module(ModuleInstanceId, String),
@@ -130,7 +102,7 @@ impl fmt::Display for ApiMethod {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encodable, Decodable)]
 pub struct IrohApiRequest {
     pub method: ApiMethod,
     pub request: ApiRequestErased,
@@ -163,7 +135,7 @@ pub const FEDIMINT_GATEWAY_ALPN: &[u8] = b"FEDIMINT_GATEWAY_ALPN";
 /// Use [`Self::verify`] for authentication checks. [`Self::as_str`] is a
 /// temporary escape hatch for I/O that still needs the plaintext value and
 /// should be removed once passwords are hashed at rest.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ApiAuth(String);
 
 impl ApiAuth {
@@ -187,9 +159,9 @@ impl Debug for ApiAuth {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ApiError {
-    pub code: i32,
+    pub code: u32,
     pub message: String,
 }
 
@@ -204,7 +176,7 @@ impl fmt::Display for ApiError {
 pub type ApiResult<T> = Result<T, ApiError>;
 
 impl ApiError {
-    pub fn new(code: i32, message: String) -> Self {
+    pub fn new(code: u32, message: String) -> Self {
         Self { code, message }
     }
 
@@ -232,16 +204,14 @@ pub trait TypedApiEndpoint {
     /// example: /transaction
     const PATH: &'static str;
 
-    type Param: serde::de::DeserializeOwned + Send;
-    type Response: serde::Serialize;
+    type Param: Decodable + Send;
+    type Response: Encodable;
 
     async fn handle<'state>(
         state: &'state Self::State,
         request: Self::Param,
     ) -> Result<Self::Response, ApiError>;
 }
-
-pub use serde_json;
 
 /// # Example
 ///
@@ -296,7 +266,7 @@ macro_rules! __api_endpoint {
 pub use __api_endpoint as api_endpoint;
 
 type HandlerFnReturn<'a> =
-    Pin<Box<maybe_add_send!(dyn Future<Output = Result<serde_json::Value, ApiError>> + 'a)>>;
+    Pin<Box<maybe_add_send!(dyn Future<Output = Result<Vec<u8>, ApiError>> + 'a)>>;
 type HandlerFn<M> =
     Box<maybe_add_send_sync!(dyn for<'a> Fn(&'a M, ApiRequestErased) -> HandlerFnReturn<'a>)>;
 
@@ -309,7 +279,7 @@ pub struct ApiEndpoint<M> {
     pub path: &'static str,
     /// Handler for the API call that takes the following arguments:
     ///   * Reference to the module which defined it
-    ///   * Request parameters parsed into JSON `[Value](serde_json::Value)`
+    ///   * Request parameters as consensus-encoded bytes
     pub handler: HandlerFn<M>,
 }
 
@@ -326,15 +296,15 @@ impl ApiEndpoint<()> {
     {
         async fn handle_request<'state, E>(
             state: &'state E::State,
-            request: ApiRequest<E::Param>,
+            params: E::Param,
         ) -> Result<E::Response, ApiError>
         where
             E: TypedApiEndpoint,
             E::Param: Debug,
             E::Response: Debug,
         {
-            tracing::debug!(target: LOG_NET_API, path = E::PATH, ?request, "received api request");
-            let result = E::handle(state, request.params).await;
+            tracing::debug!(target: LOG_NET_API, path = E::PATH, ?params, "received api request");
+            let result = E::handle(state, params).await;
             match &result {
                 Err(err) => {
                     tracing::warn!(target: LOG_NET_API, path = E::PATH, err = %err.fmt_compact(), "api request error");
@@ -350,8 +320,8 @@ impl ApiEndpoint<()> {
             path: E::PATH,
             handler: Box::new(|m, request| {
                 Box::pin(async move {
-                    let request = request
-                        .to_typed()
+                    let params = request
+                        .to_typed::<E::Param>()
                         .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
                     let span = tracing::info_span!(
@@ -360,9 +330,9 @@ impl ApiEndpoint<()> {
                         id = REQ_ID.fetch_add(1, Ordering::SeqCst),
                         method = E::PATH,
                     );
-                    let ret = handle_request::<E>(m, request).instrument(span).await?;
+                    let ret = handle_request::<E>(m, params).instrument(span).await?;
 
-                    Ok(serde_json::to_value(ret).expect("encoding error"))
+                    Ok(ret.consensus_encode_to_vec())
                 })
             }),
         }
@@ -394,85 +364,3 @@ pub trait ModuleCommon {
     type OutputError: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
 }
 
-/// Creates a struct that can be used to make our module-decodable structs
-/// interact with `serde`-based APIs (AlephBFT, jsonrpsee). It creates a wrapper
-/// that holds the data as serialized
-// bytes internally.
-#[derive(Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct SerdeModuleEncoding<T: Encodable + Decodable>(
-    #[serde(with = "::fedimint_core::encoding::as_hex")] Vec<u8>,
-    #[serde(skip)] PhantomData<T>,
-);
-
-/// Same as [`SerdeModuleEncoding`] but uses base64 instead of hex encoding.
-#[derive(Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct SerdeModuleEncodingBase64<T: Encodable + Decodable>(
-    #[serde(with = "::fedimint_core::encoding::as_base64")] Vec<u8>,
-    #[serde(skip)] PhantomData<T>,
-);
-
-impl<T> fmt::Debug for SerdeModuleEncoding<T>
-where
-    T: Encodable + Decodable,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str("SerdeModuleEncoding(")?;
-        fmt::Debug::fmt(&AbbreviateHexBytes(&self.0), f)?;
-        f.write_str(")")?;
-        Ok(())
-    }
-}
-
-impl<T: Encodable + Decodable> From<&T> for SerdeModuleEncoding<T> {
-    fn from(value: &T) -> Self {
-        let mut bytes = vec![];
-        fedimint_core::encoding::Encodable::consensus_encode(value, &mut bytes)
-            .expect("Writing to buffer can never fail");
-        Self(bytes, PhantomData)
-    }
-}
-
-impl<T: Encodable + Decodable + 'static> SerdeModuleEncoding<T> {
-    pub fn try_into_inner(&self) -> std::io::Result<T> {
-        Decodable::consensus_decode_exact(&self.0)
-    }
-}
-
-impl<T: Encodable + Decodable> Encodable for SerdeModuleEncoding<T> {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        self.0.consensus_encode(writer)
-    }
-}
-
-impl<T: Encodable + Decodable> Decodable for SerdeModuleEncoding<T> {
-    fn consensus_decode<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        Ok(Self(Vec::<u8>::consensus_decode(reader)?, PhantomData))
-    }
-}
-
-impl<T> fmt::Debug for SerdeModuleEncodingBase64<T>
-where
-    T: Encodable + Decodable,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str("SerdeModuleEncoding2(")?;
-        fmt::Debug::fmt(&AbbreviateHexBytes(&self.0), f)?;
-        f.write_str(")")?;
-        Ok(())
-    }
-}
-
-impl<T: Encodable + Decodable> From<&T> for SerdeModuleEncodingBase64<T> {
-    fn from(value: &T) -> Self {
-        let mut bytes = vec![];
-        fedimint_core::encoding::Encodable::consensus_encode(value, &mut bytes)
-            .expect("Writing to buffer can never fail");
-        Self(bytes, PhantomData)
-    }
-}
-
-impl<T: Encodable + Decodable + 'static> SerdeModuleEncodingBase64<T> {
-    pub fn try_into_inner(&self) -> std::io::Result<T> {
-        Decodable::consensus_decode_exact(&self.0)
-    }
-}

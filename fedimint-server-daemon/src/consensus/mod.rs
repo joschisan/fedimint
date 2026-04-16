@@ -15,6 +15,7 @@ use async_channel::Sender;
 use fedimint_api_client::transaction::ConsensusItem;
 use fedimint_api_client::wire;
 use fedimint_core::NumPeers;
+use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::module::{
     ApiAuth, ApiEndpoint, ApiError, ApiMethod, FEDIMINT_API_ALPN, IrohApiRequest,
@@ -30,7 +31,6 @@ use fedimint_server_core::bitcoin_rpc::{DynServerBitcoinRpc, ServerBitcoinRpcMon
 use futures::FutureExt;
 use iroh::Endpoint;
 use iroh::endpoint::{Incoming, RecvStream, SendStream};
-use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
 use tracing::{info, warn};
@@ -471,7 +471,7 @@ async fn handle_request(
 ) -> anyhow::Result<()> {
     let request = recv_stream.read_to_end(100_000).await?;
 
-    let request = serde_json::from_slice::<IrohApiRequest>(&request)?;
+    let request = IrohApiRequest::consensus_decode_exact(&request)?;
 
     let response = await_response(
         consensus_api,
@@ -483,7 +483,7 @@ async fn handle_request(
     )
     .await;
 
-    let response = serde_json::to_vec(&response)?;
+    let response = response.consensus_encode_to_vec();
 
     send_stream.write_all(&response).await?;
 
@@ -499,7 +499,7 @@ async fn await_response(
     ln_api: Arc<LnApi>,
     wallet_api: Arc<WalletApi>,
     request: IrohApiRequest,
-) -> Result<Value, ApiError> {
+) -> Result<Vec<u8>, ApiError> {
     use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
 
     match request.method {

@@ -8,7 +8,6 @@ use std::fmt;
 
 use bitcoin::hashes::Hash;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::SerdeModuleEncoding;
 use fedimint_core::{Amount, TransactionId};
 use thiserror::Error;
 
@@ -37,8 +36,6 @@ impl fmt::Debug for Transaction {
             .finish()
     }
 }
-
-pub type SerdeTransaction = SerdeModuleEncoding<Transaction>;
 
 impl Transaction {
     pub const MAX_TX_SIZE: usize = fedimint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT - 32;

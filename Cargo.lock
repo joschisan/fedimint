@@ -2659,6 +2659,7 @@ dependencies = [
  "fedimint-core",
  "fedimint-tbs",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tracing",
 ]

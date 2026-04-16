@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::serde_json;
 use fedimint_core::{Amount, PeerId};
 use serde::{Deserialize, Serialize};
 use tbs::{AggregatePublicKey, PublicKeyShare};

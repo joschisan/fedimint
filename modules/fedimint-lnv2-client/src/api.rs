@@ -28,7 +28,7 @@ pub trait LightningFederationApi {
 
     async fn await_preimage(&self, contract_id: OutPoint, expiration: u64) -> Option<[u8; 32]>;
 
-    async fn await_incoming_contracts(&self, start: u64, n: usize) -> (Vec<IncomingContract>, u64);
+    async fn await_incoming_contracts(&self, start: u64, n: u64) -> (Vec<IncomingContract>, u64);
 
     async fn gateways(&self) -> FederationResult<Vec<SafeUrl>>;
 
@@ -68,7 +68,7 @@ where
         .await
     }
 
-    async fn await_incoming_contracts(&self, start: u64, n: usize) -> (Vec<IncomingContract>, u64) {
+    async fn await_incoming_contracts(&self, start: u64, n: u64) -> (Vec<IncomingContract>, u64) {
         self.request_current_consensus_retry(
             AWAIT_INCOMING_CONTRACTS_ENDPOINT.to_string(),
             ApiRequestErased::new((start, n)),

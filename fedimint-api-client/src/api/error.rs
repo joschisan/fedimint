@@ -3,22 +3,21 @@ use std::fmt::{self, Debug, Display};
 use std::time::Duration;
 
 use fedimint_core::PeerId;
-use fedimint_core::fmt_utils::AbbreviateJson;
+use fedimint_core::module::ApiRequestErased;
 use fedimint_core::util::FmtCompactAnyhow as _;
 use fedimint_logging::LOG_CLIENT_NET_API;
-use serde::Serialize;
 use thiserror::Error;
 use tracing::{trace, warn};
 
 use super::ServerError;
 
-/// An API request error when calling an entire federation
+/// An API request error when calling an entire federation.
 ///
 /// Generally all Federation errors are retryable.
 #[derive(Debug, Error)]
 pub struct FederationError {
     pub method: String,
-    pub params: serde_json::Value,
+    pub params: ApiRequestErased,
     /// Higher-level general error
     ///
     /// The `general` error should be Some, when the error is not simply peers
@@ -32,10 +31,6 @@ impl Display for FederationError {
         f.write_str("Federation rpc error { ")?;
         f.write_fmt(format_args!("method => {}, ", self.method))?;
         if let Some(general) = self.general.as_ref() {
-            f.write_fmt(format_args!(
-                "params => {:?}, ",
-                AbbreviateJson(&self.params)
-            ))?;
             f.write_fmt(format_args!("general => {general}, "))?;
             if !self.peer_errors.is_empty() {
                 f.write_str(", ")?;
@@ -55,12 +50,12 @@ impl Display for FederationError {
 impl FederationError {
     pub fn general(
         method: impl Into<String>,
-        params: impl Serialize,
+        params: ApiRequestErased,
         e: impl Into<anyhow::Error>,
     ) -> FederationError {
         FederationError {
             method: method.into(),
-            params: serde_json::to_value(params).unwrap_or_default(),
+            params,
             general: Some(e.into()),
             peer_errors: BTreeMap::default(),
         }
@@ -68,12 +63,12 @@ impl FederationError {
 
     pub(crate) fn peer_errors(
         method: impl Into<String>,
-        params: impl Serialize,
+        params: ApiRequestErased,
         peer_errors: BTreeMap<PeerId, ServerError>,
     ) -> Self {
         Self {
             method: method.into(),
-            params: serde_json::to_value(params).unwrap_or_default(),
+            params,
             general: None,
             peer_errors,
         }
@@ -82,12 +77,12 @@ impl FederationError {
     pub fn new_one_peer(
         peer_id: PeerId,
         method: impl Into<String>,
-        params: impl Serialize,
+        params: ApiRequestErased,
         error: ServerError,
     ) -> Self {
         Self {
             method: method.into(),
-            params: serde_json::to_value(params).expect("Serialization of valid params won't fail"),
+            params,
             general: None,
             peer_errors: [(peer_id, error)].into_iter().collect(),
         }

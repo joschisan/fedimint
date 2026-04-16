@@ -166,10 +166,8 @@ async fn tx_submission_trigger_rejected(
         "tx-submit-sm",
         custom_backoff(Duration::from_secs(2), Duration::from_mins(10), None),
         || async {
-            if let TransactionSubmissionOutcome(Err(transaction_error)) = api
-                .submit_transaction(transaction.clone())
-                .await
-                .try_into_inner()?
+            if let TransactionSubmissionOutcome(Err(transaction_error)) =
+                api.submit_transaction(transaction.clone()).await
             {
                 Ok(transaction_error.to_string())
             } else {

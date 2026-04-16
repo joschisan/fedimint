@@ -377,7 +377,7 @@ impl ServerModule for Lightning {
             api_endpoint! {
                 AWAIT_INCOMING_CONTRACTS_ENDPOINT,
                 ApiVersion::new(0, 0),
-                async |module: &Lightning, params: (u64, usize)| -> (Vec<IncomingContract>, u64) {
+                async |module: &Lightning, params: (u64, u64)| -> (Vec<IncomingContract>, u64) {
                     let db = module.db.clone();
 
                     if params.1 == 0 {
@@ -521,7 +521,7 @@ impl Lightning {
         &self,
         db: Database,
         start: u64,
-        n: usize,
+        n: u64,
     ) -> (Vec<IncomingContract>, u64) {
         let filter = |next_index: Option<u64>| next_index.filter(|i| *i > start);
 
@@ -529,12 +529,12 @@ impl Lightning {
             .wait_key_check(&INCOMING_CONTRACT_STREAM_INDEX, &(), filter)
             .await;
 
-        let mut contracts = Vec::with_capacity(n);
+        let mut contracts = Vec::new();
 
         for (key, contract) in tx
             .range(&INCOMING_CONTRACT_STREAM, start..u64::MAX)
             .into_iter()
-            .take(n)
+            .take(n as usize)
         {
             contracts.push(contract);
             next_index = key + 1;

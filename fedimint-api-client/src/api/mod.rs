@@ -14,8 +14,9 @@ use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };
+use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{
-    ApiError, ApiMethod, ApiRequestErased, FEDIMINT_API_ALPN, IrohApiRequest, SerdeModuleEncoding,
+    ApiError, ApiMethod, ApiRequestErased, FEDIMINT_API_ALPN, IrohApiRequest,
 };
 use fedimint_core::runtime::sleep;
 use fedimint_core::task::{MaybeSend, MaybeSync};
@@ -27,15 +28,13 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{Future, StreamExt};
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, PublicKey};
-use jsonrpsee_core::DeserializeOwned;
-use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, instrument, trace, warn};
 
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
-use crate::transaction::{SerdeTransaction, Transaction, TransactionSubmissionOutcome};
+use crate::transaction::{Transaction, TransactionSubmissionOutcome};
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
@@ -127,13 +126,14 @@ pub trait IRawFederationApi: Debug + MaybeSend + MaybeSync {
 
     fn with_module(&self, id: ModuleInstanceId) -> DynModuleApi;
 
-    /// Make request to a specific federation peer by `peer_id`
+    /// Make request to a specific federation peer by `peer_id`, returning the
+    /// raw consensus-encoded response bytes.
     async fn request_raw(
         &self,
         peer_id: PeerId,
         method: &str,
         params: &ApiRequestErased,
-    ) -> ServerResult<Value>;
+    ) -> ServerResult<Vec<u8>>;
 
     /// Returns a stream of connection status for each peer
     ///
@@ -152,12 +152,12 @@ pub trait FederationApiExt: IRawFederationApi {
         peer: PeerId,
     ) -> ServerResult<Ret>
     where
-        Ret: DeserializeOwned,
+        Ret: Decodable,
     {
         self.request_raw(peer, &method, &params)
             .await
-            .and_then(|v| {
-                serde_json::from_value(v)
+            .and_then(|bytes| {
+                Ret::consensus_decode_exact(&bytes)
                     .map_err(|e| ServerError::ResponseDeserialization(e.into()))
             })
     }
@@ -169,12 +169,12 @@ pub trait FederationApiExt: IRawFederationApi {
         peer_id: PeerId,
     ) -> FederationResult<FedRet>
     where
-        FedRet: serde::de::DeserializeOwned + Eq + Debug + Clone + MaybeSend,
+        FedRet: Decodable + Eq + Debug + Clone + MaybeSend,
     {
         self.request_raw(peer_id, &method, &params)
             .await
-            .and_then(|v| {
-                serde_json::from_value(v)
+            .and_then(|bytes| {
+                FedRet::consensus_decode_exact(&bytes)
                     .map_err(|e| ServerError::ResponseDeserialization(e.into()))
             })
             .map_err(|e| error::FederationError::new_one_peer(peer_id, method, params, e))
@@ -183,7 +183,7 @@ pub trait FederationApiExt: IRawFederationApi {
     /// Make an aggregate request to federation, using `strategy` to logically
     /// merge the responses.
     #[instrument(target = LOG_CLIENT_NET_API, skip_all, fields(method=method))]
-    async fn request_with_strategy<PR: DeserializeOwned, FR: Debug>(
+    async fn request_with_strategy<PR: Decodable, FR: Debug>(
         &self,
         mut strategy: impl QueryStrategy<PR, FR> + MaybeSend,
         method: String,
@@ -252,7 +252,7 @@ pub trait FederationApiExt: IRawFederationApi {
             if peer_errors.len() == peer_error_threshold {
                 return Err(FederationError::peer_errors(
                     method.clone(),
-                    params.params.clone(),
+                    params.clone(),
                     peer_errors,
                 ));
             }
@@ -260,7 +260,7 @@ pub trait FederationApiExt: IRawFederationApi {
     }
 
     #[instrument(target = LOG_CLIENT_NET_API, level = "debug", skip(self, strategy))]
-    async fn request_with_strategy_retry<PR: DeserializeOwned + MaybeSend, FR: Debug>(
+    async fn request_with_strategy_retry<PR: Decodable + MaybeSend, FR: Debug>(
         &self,
         mut strategy: impl QueryStrategy<PR, FR> + MaybeSend,
         method: String,
@@ -353,7 +353,7 @@ pub trait FederationApiExt: IRawFederationApi {
         params: ApiRequestErased,
     ) -> FederationResult<Ret>
     where
-        Ret: DeserializeOwned + Eq + Debug + Clone + MaybeSend,
+        Ret: Decodable + Eq + Debug + Clone + MaybeSend,
     {
         self.request_with_strategy(
             ThresholdConsensus::new(self.all_peers().to_num_peers()),
@@ -369,7 +369,7 @@ pub trait FederationApiExt: IRawFederationApi {
         params: ApiRequestErased,
     ) -> Ret
     where
-        Ret: DeserializeOwned + Eq + Debug + Clone + MaybeSend,
+        Ret: Decodable + Eq + Debug + Clone + MaybeSend,
     {
         self.request_with_strategy_retry(
             ThresholdConsensus::new(self.all_peers().to_num_peers()),
@@ -379,13 +379,10 @@ pub trait FederationApiExt: IRawFederationApi {
         .await
     }
 
-    async fn submit_transaction(
-        &self,
-        tx: Transaction,
-    ) -> SerdeModuleEncoding<TransactionSubmissionOutcome> {
+    async fn submit_transaction(&self, tx: Transaction) -> TransactionSubmissionOutcome {
         self.request_current_consensus_retry(
             SUBMIT_TRANSACTION_ENDPOINT.to_owned(),
-            ApiRequestErased::new(SerdeTransaction::from(&tx)),
+            ApiRequestErased::new(tx),
         )
         .await
     }
@@ -512,7 +509,7 @@ impl FederationApi {
         peer: PeerId,
         method: ApiMethod,
         request: ApiRequestErased,
-    ) -> ServerResult<Value> {
+    ) -> ServerResult<Vec<u8>> {
         trace!(target: LOG_CLIENT_NET_API, %peer, %method, "Api request");
 
         let mut rx = self
@@ -532,7 +529,7 @@ impl FederationApi {
             return Err(ServerError::Connection(anyhow!("peer not connected")));
         };
 
-        let res = conn.request(method.clone(), request).await;
+        let res = request_over_connection(&conn, method.clone(), request).await;
 
         trace!(target: LOG_CLIENT_NET_API, ?method, res_ok = res.is_ok(), "Api response");
 
@@ -569,39 +566,34 @@ async fn connection_task(
 
 const IROH_MAX_RESPONSE_BYTES: usize = ALEPH_BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
 
-#[async_trait::async_trait]
-pub trait IGuardianConnection: Debug + Send + Sync + 'static {
-    async fn request(&self, method: ApiMethod, request: ApiRequestErased) -> ServerResult<Value>;
-}
+async fn request_over_connection(
+    connection: &Connection,
+    method: ApiMethod,
+    request: ApiRequestErased,
+) -> ServerResult<Vec<u8>> {
+    let request_bytes = IrohApiRequest { method, request }.consensus_encode_to_vec();
 
-#[async_trait::async_trait]
-impl IGuardianConnection for Connection {
-    async fn request(&self, method: ApiMethod, request: ApiRequestErased) -> ServerResult<Value> {
-        let json = serde_json::to_vec(&IrohApiRequest { method, request })
-            .expect("Serialization to vec can't fail");
+    let (mut sink, mut stream) = connection
+        .open_bi()
+        .await
+        .map_err(|e| ServerError::Transport(e.into()))?;
 
-        let (mut sink, mut stream) = self
-            .open_bi()
-            .await
-            .map_err(|e| ServerError::Transport(e.into()))?;
+    sink.write_all(&request_bytes)
+        .await
+        .map_err(|e| ServerError::Transport(e.into()))?;
 
-        sink.write_all(&json)
-            .await
-            .map_err(|e| ServerError::Transport(e.into()))?;
+    sink.finish()
+        .map_err(|e| ServerError::Transport(e.into()))?;
 
-        sink.finish()
-            .map_err(|e| ServerError::Transport(e.into()))?;
+    let response = stream
+        .read_to_end(IROH_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| ServerError::Transport(e.into()))?;
 
-        let response = stream
-            .read_to_end(IROH_MAX_RESPONSE_BYTES)
-            .await
-            .map_err(|e| ServerError::Transport(e.into()))?;
+    let response = <Result<Vec<u8>, ApiError>>::consensus_decode_exact(&response)
+        .map_err(|e| ServerError::InvalidResponse(e.into()))?;
 
-        let response = serde_json::from_slice::<Result<Value, ApiError>>(&response)
-            .map_err(|e| ServerError::InvalidResponse(e.into()))?;
-
-        response.map_err(|e| ServerError::InvalidResponse(anyhow::anyhow!("Api Error: {:?}", e)))
-    }
+    response.map_err(|e| ServerError::InvalidResponse(anyhow::anyhow!("Api Error: {:?}", e)))
 }
 
 #[apply(async_trait_maybe_send!)]
@@ -626,7 +618,6 @@ impl IRawFederationApi for FederationApi {
         fields(
             peer_id = %peer_id,
             method = %method,
-            params = %params.params,
         )
     )]
     async fn request_raw(
@@ -634,7 +625,7 @@ impl IRawFederationApi for FederationApi {
         peer_id: PeerId,
         method: &str,
         params: &ApiRequestErased,
-    ) -> ServerResult<Value> {
+    ) -> ServerResult<Vec<u8>> {
         let method = match self.module_id {
             Some(module_id) => ApiMethod::Module(module_id, method.to_string()),
             None => ApiMethod::Core(method.to_string()),
