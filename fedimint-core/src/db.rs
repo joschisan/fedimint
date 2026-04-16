@@ -332,9 +332,10 @@ macro_rules! redb_sha256_key {
                 Self: 'a,
             {
                 use $crate::bitcoin::hashes::Hash as _;
-                let bytes: [u8; 32] =
-                    data.try_into().expect("sha256 hash is always 32 bytes");
-                Self($crate::bitcoin::hashes::sha256::Hash::from_byte_array(bytes))
+                let bytes: [u8; 32] = data.try_into().expect("sha256 hash is always 32 bytes");
+                Self($crate::bitcoin::hashes::sha256::Hash::from_byte_array(
+                    bytes,
+                ))
             }
 
             fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>

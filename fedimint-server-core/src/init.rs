@@ -181,6 +181,21 @@ pub trait ServerModuleInit: ModuleInit + Sized {
 impl<T> IServerModuleInit for T
 where
     T: ServerModuleInit + 'static + Sync,
+    fedimint_api_client::wire::Input: From<
+        <<<T as ServerModuleInit>::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::Input,
+    >,
+    fedimint_api_client::wire::Output: From<
+        <<<T as ServerModuleInit>::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::Output,
+    >,
+    fedimint_api_client::wire::ModuleConsensusItem: From<
+        <<<T as ServerModuleInit>::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::ConsensusItem,
+    >,
+    fedimint_api_client::wire::InputError: From<
+        <<<T as ServerModuleInit>::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::InputError,
+    >,
+    fedimint_api_client::wire::OutputError: From<
+        <<<T as ServerModuleInit>::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::OutputError,
+    >,
 {
     fn as_common(&self) -> &(dyn IDynCommonModuleInit + Send + Sync + 'static) {
         self

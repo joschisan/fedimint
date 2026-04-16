@@ -15,10 +15,8 @@ use std::any::Any;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use fedimint_core::core::{
-    Decoder, DynInput, DynInputError, DynModuleConsensusItem, DynOutput, DynOutputError,
-    ModuleInstanceId, ModuleKind,
-};
+use fedimint_api_client::wire;
+use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{
@@ -148,7 +146,7 @@ pub trait IServerModule: Debug {
         &self,
         dbtx: &ReadTxRef<'_>,
         module_instance_id: ModuleInstanceId,
-    ) -> Vec<DynModuleConsensusItem>;
+    ) -> Vec<wire::ModuleConsensusItem>;
 
     /// This function is called once for every consensus item. The function
     /// returns an error if any only if the consensus item does not change
@@ -156,7 +154,7 @@ pub trait IServerModule: Debug {
     async fn process_consensus_item(
         &self,
         dbtx: &WriteTxRef<'_>,
-        consensus_item: &DynModuleConsensusItem,
+        consensus_item: &wire::ModuleConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()>;
 
@@ -167,9 +165,9 @@ pub trait IServerModule: Debug {
     async fn process_input(
         &self,
         dbtx: &WriteTxRef<'_>,
-        input: &DynInput,
+        input: &wire::Input,
         in_point: InPoint,
-    ) -> Result<InputMeta, DynInputError>;
+    ) -> Result<InputMeta, wire::InputError>;
 
     /// Try to create an output (e.g. issue notes, peg-out BTC, …). On success
     /// all necessary updates to the database will be part of the database
@@ -182,9 +180,9 @@ pub trait IServerModule: Debug {
     async fn process_output(
         &self,
         dbtx: &WriteTxRef<'_>,
-        output: &DynOutput,
+        output: &wire::Output,
         out_point: OutPoint,
-    ) -> Result<TransactionItemAmounts, DynOutputError>;
+    ) -> Result<TransactionItemAmounts, wire::OutputError>;
 
     /// Queries the database and returns all assets and liabilities of the
     /// module.
@@ -214,6 +212,11 @@ dyn_newtype_define!(
 impl<T> IServerModule for T
 where
     T: ServerModule + 'static + Sync,
+    wire::Input: From<<<T as ServerModule>::Common as ModuleCommon>::Input>,
+    wire::Output: From<<<T as ServerModule>::Common as ModuleCommon>::Output>,
+    wire::ModuleConsensusItem: From<<<T as ServerModule>::Common as ModuleCommon>::ConsensusItem>,
+    wire::InputError: From<<<T as ServerModule>::Common as ModuleCommon>::InputError>,
+    wire::OutputError: From<<<T as ServerModule>::Common as ModuleCommon>::OutputError>,
 {
     fn decoder(&self) -> Decoder {
         <T::Common as ModuleCommon>::decoder_builder().build()
@@ -231,12 +234,12 @@ where
     async fn consensus_proposal(
         &self,
         dbtx: &ReadTxRef<'_>,
-        module_instance_id: ModuleInstanceId,
-    ) -> Vec<DynModuleConsensusItem> {
+        _module_instance_id: ModuleInstanceId,
+    ) -> Vec<wire::ModuleConsensusItem> {
         <Self as ServerModule>::consensus_proposal(self, dbtx)
             .await
             .into_iter()
-            .map(|v| DynModuleConsensusItem::from_typed(module_instance_id, v))
+            .map(Into::into)
             .collect()
     }
 
@@ -246,18 +249,19 @@ where
     async fn process_consensus_item(
         &self,
         dbtx: &WriteTxRef<'_>,
-        consensus_item: &DynModuleConsensusItem,
+        consensus_item: &wire::ModuleConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()> {
         <Self as ServerModule>::process_consensus_item(
             self,
             dbtx,
             Clone::clone(
-                consensus_item.as_any()
+                consensus_item
+                    .as_any_inner()
                     .downcast_ref::<<<Self as ServerModule>::Common as ModuleCommon>::ConsensusItem>()
                     .expect("incorrect consensus item type passed to module plugin"),
             ),
-            peer_id
+            peer_id,
         )
         .await
     }
@@ -269,20 +273,20 @@ where
     async fn process_input(
         &self,
         dbtx: &WriteTxRef<'_>,
-        input: &DynInput,
+        input: &wire::Input,
         in_point: InPoint,
-    ) -> Result<InputMeta, DynInputError> {
+    ) -> Result<InputMeta, wire::InputError> {
         <Self as ServerModule>::process_input(
             self,
             dbtx,
             input
-                .as_any()
+                .as_any_inner()
                 .downcast_ref::<<<Self as ServerModule>::Common as ModuleCommon>::Input>()
                 .expect("incorrect input type passed to module plugin"),
             in_point,
         )
         .await
-        .map_err(|v| DynInputError::from_typed(input.module_instance_id(), v))
+        .map_err(Into::into)
     }
 
     /// Try to create an output (e.g. issue notes, peg-out BTC, …). On success
@@ -296,20 +300,20 @@ where
     async fn process_output(
         &self,
         dbtx: &WriteTxRef<'_>,
-        output: &DynOutput,
+        output: &wire::Output,
         out_point: OutPoint,
-    ) -> Result<TransactionItemAmounts, DynOutputError> {
+    ) -> Result<TransactionItemAmounts, wire::OutputError> {
         <Self as ServerModule>::process_output(
             self,
             dbtx,
             output
-                .as_any()
+                .as_any_inner()
                 .downcast_ref::<<<Self as ServerModule>::Common as ModuleCommon>::Output>()
                 .expect("incorrect output type passed to module plugin"),
             out_point,
         )
         .await
-        .map_err(|v| DynOutputError::from_typed(output.module_instance_id(), v))
+        .map_err(Into::into)
     }
 
     /// Queries the database and returns all assets and liabilities of the

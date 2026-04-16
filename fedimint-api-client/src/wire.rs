@@ -1,11 +1,9 @@
 //! Static wire enums for the fixed module set: mintv2 + lnv2 + walletv2.
-//!
-//! Subsequent commits rewire `Transaction`, the consensus engine, API routing,
-//! and DKG to dispatch on these enums instead of dynamic `DynInput`/`DynOutput`/
-//! `DynModuleConsensusItem`.
 
-#![allow(dead_code)]
+use std::any::Any;
+use std::fmt;
 
+use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_lnv2_common::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
@@ -19,11 +17,49 @@ use fedimint_walletv2_common::{
 };
 use thiserror::Error;
 
+/// Fixed instance ids assigned to the three canonical modules. These retain
+/// compatibility with dashboards/debug tooling that still surface an instance
+/// id even after the dynamic registry is ripped.
+pub const MINT_INSTANCE_ID: ModuleInstanceId = 0;
+pub const LN_INSTANCE_ID: ModuleInstanceId = 1;
+pub const WALLET_INSTANCE_ID: ModuleInstanceId = 2;
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Input {
     Mint(MintInput),
     Ln(LightningInput),
     Wallet(WalletInput),
+}
+
+impl Input {
+    pub fn module_instance_id(&self) -> ModuleInstanceId {
+        match self {
+            Self::Mint(_) => MINT_INSTANCE_ID,
+            Self::Ln(_) => LN_INSTANCE_ID,
+            Self::Wallet(_) => WALLET_INSTANCE_ID,
+        }
+    }
+
+    /// Returns the inner variant payload as `&dyn Any`, for downcasting in
+    /// generic dispatch code (e.g. `IServerModule`/`IClientModule` blanket
+    /// impls).
+    pub fn as_any_inner(&self) -> &dyn Any {
+        match self {
+            Self::Mint(v) => v,
+            Self::Ln(v) => v,
+            Self::Wallet(v) => v,
+        }
+    }
+}
+
+impl fmt::Display for Input {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Mint(v) => v.fmt(f),
+            Self::Ln(v) => v.fmt(f),
+            Self::Wallet(v) => v.fmt(f),
+        }
+    }
 }
 
 impl From<MintInput> for Input {
@@ -51,6 +87,36 @@ pub enum Output {
     Wallet(WalletOutput),
 }
 
+impl Output {
+    pub fn module_instance_id(&self) -> ModuleInstanceId {
+        match self {
+            Self::Mint(_) => MINT_INSTANCE_ID,
+            Self::Ln(_) => LN_INSTANCE_ID,
+            Self::Wallet(_) => WALLET_INSTANCE_ID,
+        }
+    }
+
+    /// Returns the inner variant payload as `&dyn Any`, for downcasting in
+    /// generic dispatch code.
+    pub fn as_any_inner(&self) -> &dyn Any {
+        match self {
+            Self::Mint(v) => v,
+            Self::Ln(v) => v,
+            Self::Wallet(v) => v,
+        }
+    }
+}
+
+impl fmt::Display for Output {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Mint(v) => v.fmt(f),
+            Self::Ln(v) => v.fmt(f),
+            Self::Wallet(v) => v.fmt(f),
+        }
+    }
+}
+
 impl From<MintOutput> for Output {
     fn from(v: MintOutput) -> Self {
         Self::Mint(v)
@@ -74,6 +140,44 @@ pub enum ModuleConsensusItem {
     Mint(MintConsensusItem),
     Ln(LightningConsensusItem),
     Wallet(WalletConsensusItem),
+}
+
+impl ModuleConsensusItem {
+    pub fn module_instance_id(&self) -> ModuleInstanceId {
+        match self {
+            Self::Mint(_) => MINT_INSTANCE_ID,
+            Self::Ln(_) => LN_INSTANCE_ID,
+            Self::Wallet(_) => WALLET_INSTANCE_ID,
+        }
+    }
+
+    pub fn module_kind(&self) -> &'static str {
+        match self {
+            Self::Mint(_) => "mintv2",
+            Self::Ln(_) => "lnv2",
+            Self::Wallet(_) => "walletv2",
+        }
+    }
+
+    /// Returns the inner variant payload as `&dyn Any`, for downcasting in
+    /// generic dispatch code.
+    pub fn as_any_inner(&self) -> &dyn Any {
+        match self {
+            Self::Mint(v) => v,
+            Self::Ln(v) => v,
+            Self::Wallet(v) => v,
+        }
+    }
+}
+
+impl fmt::Display for ModuleConsensusItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Mint(v) => v.fmt(f),
+            Self::Ln(v) => v.fmt(f),
+            Self::Wallet(v) => v.fmt(f),
+        }
+    }
 }
 
 impl From<MintConsensusItem> for ModuleConsensusItem {

@@ -6,14 +6,12 @@ use anyhow::{anyhow, bail};
 use async_channel::Receiver;
 use fedimint_api_client::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use fedimint_api_client::transaction::ConsensusItem;
-use fedimint_core::core::DynOutput;
 use fedimint_core::encoding::Decodable;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::net::peers::{DynP2PConnections, Recipient};
 use fedimint_core::runtime::spawn;
 use fedimint_core::secp256k1::schnorr;
-use crate::p2p::P2PMessage;
 use fedimint_core::task::{TaskGroup, TaskHandle, sleep};
 use fedimint_core::timing::TimeReporter;
 use fedimint_core::util::{FmtCompact as _, FmtCompactAnyhow as _};
@@ -23,7 +21,7 @@ use fedimint_server_core::{ServerModuleRegistry, ServerModuleRegistryExt};
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use tokio::sync::watch;
-use tracing::{Level, debug, error, info, instrument, trace, warn};
+use tracing::{Level, debug, error, info, instrument, trace};
 
 use crate::LOG_CONSENSUS;
 use crate::config::ServerConfig;
@@ -38,6 +36,7 @@ use crate::consensus::db::{
 };
 use crate::consensus::debug::DebugConsensusItem;
 use crate::consensus::transaction::process_transaction_with_dbtx;
+use crate::p2p::P2PMessage;
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
@@ -678,7 +677,7 @@ impl ConsensusEngine {
                 let modules_ids = transaction
                     .outputs
                     .iter()
-                    .map(DynOutput::module_instance_id)
+                    .map(|o| o.module_instance_id())
                     .collect::<Vec<_>>();
 
                 process_transaction_with_dbtx(self.modules.clone(), tx, &transaction)
@@ -689,14 +688,6 @@ impl ConsensusEngine {
                 tx.insert(&ACCEPTED_TRANSACTION, &txid, &modules_ids);
 
                 Ok(())
-            }
-            ConsensusItem::Default { variant, .. } => {
-                warn!(
-                    target: LOG_CONSENSUS,
-                    "Minor consensus version mismatch: unexpected consensus item type: {variant}"
-                );
-
-                panic!("Unexpected consensus item type: {variant}")
             }
         }
     }

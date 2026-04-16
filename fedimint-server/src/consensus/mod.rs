@@ -12,11 +12,10 @@ use std::time::Duration;
 
 use anyhow::bail;
 use async_channel::Sender;
-use fedimint_core::NumPeers;
 use fedimint_api_client::transaction::ConsensusItem;
+use fedimint_core::NumPeers;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::envs::is_running_in_test_env;
-use crate::p2p::P2PMessage;
 use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::module::{
     ApiAuth, ApiEndpoint, ApiError, ApiMethod, FEDIMINT_API_ALPN, IrohApiRequest,
@@ -44,6 +43,7 @@ use crate::consensus::api::{ConsensusApi, server_endpoints};
 use crate::consensus::engine::ConsensusEngine;
 use crate::net::HasApiContext;
 use crate::net::p2p::P2PStatusReceivers;
+use crate::p2p::P2PMessage;
 
 /// How many txs can be stored in memory before blocking the API
 const TRANSACTION_BUFFER: usize = 1000;

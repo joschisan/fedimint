@@ -8,10 +8,7 @@ use anyhow::bail;
 use bitcoin::secp256k1::PublicKey;
 use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_core::config::ClientConfig;
-use fedimint_core::core::{
-    Decoder, DynInput, DynOutput, IInput, IntoDynInstance, ModuleInstanceId, ModuleKind,
-    OperationId,
-};
+use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
@@ -28,8 +25,9 @@ use tokio::sync::watch;
 use tracing::warn;
 
 use self::init::ClientModuleInit;
-use crate::InstancelessDynClientInputBundle;
-use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
+use crate::transaction::{
+    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
+};
 
 /// Return type of [`ClientModule::create_final_inputs_and_outputs`]. The
 /// primary module contributes inputs/outputs to balance a partial
@@ -263,40 +261,20 @@ where
         Clone::clone(self.client.get().decoders())
     }
 
-    pub fn map_dyn<'s, 'i, 'o, I>(
-        &'s self,
-        typed: impl IntoIterator<Item = I> + 'i,
-    ) -> impl Iterator<Item = <I as IntoDynInstance>::DynType> + 'o
-    where
-        I: IntoDynInstance,
-        'i: 'o,
-        's: 'o,
-    {
-        typed.into_iter().map(|i| self.make_dyn(i))
-    }
-
-    /// Turn a `typed` into a dyn version
-    pub fn make_dyn<I>(&self, typed: I) -> <I as IntoDynInstance>::DynType
-    where
-        I: IntoDynInstance,
-    {
-        typed.into_dyn(self.module_instance_id)
-    }
-
-    /// Turn a typed [`ClientOutputBundle`] into a dyn version
+    /// Lift a typed [`ClientOutputBundle`] into a wire-level one.
     pub fn make_client_outputs<O>(&self, output: ClientOutputBundle<O>) -> ClientOutputBundle
     where
-        O: fedimint_core::core::IOutput + MaybeSend + MaybeSync + 'static,
+        fedimint_api_client::wire::Output: From<O>,
     {
-        output.into_instanceless().into_dyn(self.module_instance_id)
+        output.into_wire()
     }
 
-    /// Turn a typed [`ClientInputBundle`] into a dyn version
+    /// Lift a typed [`ClientInputBundle`] into a wire-level one.
     pub fn make_client_inputs<I>(&self, inputs: ClientInputBundle<I>) -> ClientInputBundle
     where
-        I: IInput + MaybeSend + MaybeSync + 'static,
+        fedimint_api_client::wire::Input: From<I>,
     {
-        inputs.into_instanceless().into_dyn(self.module_instance_id)
+        inputs.into_wire()
     }
 
     pub async fn finalize_and_submit_transaction(
@@ -368,20 +346,9 @@ where
         operation_id: OperationId,
     ) -> anyhow::Result<OutPointRange>
     where
-        I: IInput + MaybeSend + MaybeSync + 'static,
+        fedimint_api_client::wire::Input: From<I>,
     {
-        self.claim_inputs_dyn(dbtx, inputs.into_instanceless(), operation_id)
-            .await
-    }
-
-    async fn claim_inputs_dyn(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        inputs: InstancelessDynClientInputBundle,
-        operation_id: OperationId,
-    ) -> anyhow::Result<OutPointRange> {
-        let tx_builder =
-            TransactionBuilder::new().with_inputs(inputs.into_dyn(self.module_instance_id));
+        let tx_builder = TransactionBuilder::new().with_inputs(inputs.into_wire());
 
         self.client
             .get()
@@ -626,9 +593,14 @@ pub trait IClientModule: Debug {
 
     async fn start(&self);
 
-    fn input_fee(&self, amount: Amount, input: &DynInput) -> Option<Amount>;
+    fn input_fee(&self, amount: Amount, input: &fedimint_api_client::wire::Input)
+    -> Option<Amount>;
 
-    fn output_fee(&self, amount: Amount, output: &DynOutput) -> Option<Amount>;
+    fn output_fee(
+        &self,
+        amount: Amount,
+        output: &fedimint_api_client::wire::Output,
+    ) -> Option<Amount>;
 
     fn supports_being_primary(&self) -> bool;
 
@@ -651,6 +623,8 @@ pub trait IClientModule: Debug {
 impl<T> IClientModule for T
 where
     T: ClientModule,
+    fedimint_api_client::wire::Input: From<<<T as ClientModule>::Common as ModuleCommon>::Input>,
+    fedimint_api_client::wire::Output: From<<<T as ClientModule>::Common as ModuleCommon>::Output>,
 {
     fn as_any(&self) -> &(maybe_add_send_sync!(dyn Any)) {
         self
@@ -664,23 +638,31 @@ where
         <T as ClientModule>::start(self).await;
     }
 
-    fn input_fee(&self, amount: Amount, input: &DynInput) -> Option<Amount> {
+    fn input_fee(
+        &self,
+        amount: Amount,
+        input: &fedimint_api_client::wire::Input,
+    ) -> Option<Amount> {
         <T as ClientModule>::input_fee(
             self,
             amount,
             input
-                .as_any()
+                .as_any_inner()
                 .downcast_ref()
                 .expect("Dispatched to correct module"),
         )
     }
 
-    fn output_fee(&self, amount: Amount, output: &DynOutput) -> Option<Amount> {
+    fn output_fee(
+        &self,
+        amount: Amount,
+        output: &fedimint_api_client::wire::Output,
+    ) -> Option<Amount> {
         <T as ClientModule>::output_fee(
             self,
             amount,
             output
-                .as_any()
+                .as_any_inner()
                 .downcast_ref()
                 .expect("Dispatched to correct module"),
         )
@@ -711,14 +693,8 @@ where
         )
         .await?;
 
-        let inputs = inputs
-            .into_iter()
-            .map(|i| i.into_dyn(module_instance))
-            .collect();
-        let outputs = outputs
-            .into_iter()
-            .map(|o| o.into_dyn(module_instance))
-            .collect();
+        let inputs = inputs.into_iter().map(ClientInput::into_wire).collect();
+        let outputs = outputs.into_iter().map(ClientOutput::into_wire).collect();
 
         Ok(DynFinalContribution {
             inputs,

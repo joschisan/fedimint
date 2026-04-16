@@ -10,6 +10,7 @@ use bitcoin::key::rand::thread_rng;
 use bitcoin::secp256k1::{self, PublicKey};
 use fedimint_api_client::Endpoint;
 use fedimint_api_client::api::{DynGlobalApi, IRawFederationApi};
+use fedimint_api_client::transaction::Transaction;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{
@@ -23,12 +24,11 @@ use fedimint_client_module::{
     ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
 };
 use fedimint_core::config::{ClientConfig, FederationId, JsonClientConfig, ModuleInitRegistry};
-use fedimint_core::core::{DynInput, DynOutput, ModuleInstanceId, ModuleKind, OperationId};
+use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::encoding::Encodable as _;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::TaskGroup;
-use fedimint_api_client::transaction::Transaction;
 use fedimint_core::util::{BoxStream, FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{
     Amount, PeerId, TransactionId, apply, async_trait_maybe_send, maybe_add_send,
@@ -318,12 +318,12 @@ impl Client {
             let inputs = transaction
                 .inputs
                 .iter()
-                .map(DynInput::module_instance_id)
+                .map(|i| i.module_instance_id())
                 .collect::<Vec<_>>();
             let outputs = transaction
                 .outputs
                 .iter()
-                .map(DynOutput::module_instance_id)
+                .map(|o| o.module_instance_id())
                 .collect::<Vec<_>>();
             warn!(
                 target: LOG_CLIENT_NET_API,

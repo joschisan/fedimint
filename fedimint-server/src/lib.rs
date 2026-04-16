@@ -32,7 +32,6 @@ use anyhow::Context;
 use config::ServerConfig;
 use config::io::read_server_config;
 use fedimint_api_client::transaction::ConsensusItem;
-use crate::p2p::P2PMessage;
 use fedimint_core::module::ApiAuth;
 use fedimint_core::net::peers::DynP2PConnections;
 use fedimint_core::task::TaskGroup;
@@ -56,6 +55,7 @@ use crate::config::setup::SetupApi;
 use crate::fedimint_core::net::peers::IP2PConnections;
 use crate::net::p2p::{ReconnectP2PConnections, p2p_status_channels};
 use crate::net::p2p_connector::IP2PConnector;
+use crate::p2p::P2PMessage;
 
 /// The actual implementation of consensus
 pub mod consensus;

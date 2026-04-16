@@ -4,7 +4,6 @@ use std::iter::once;
 use anyhow::{Context, bail, ensure};
 use bls12_381::{G2Projective, Scalar};
 use fedimint_core::bitcoin::hashes::sha256;
-use crate::p2p::{DkgMessageG2, P2PMessage};
 use fedimint_core::encoding::Encodable as _;
 use fedimint_core::net::peers::{DynP2PConnections, Recipient};
 use fedimint_core::{NumPeers, PeerId};
@@ -12,6 +11,8 @@ use fedimint_server_core::config::{g2, scalar};
 use group::ff::Field;
 use rand::rngs::OsRng;
 use tracing::trace;
+
+use crate::p2p::{DkgMessageG2, P2PMessage};
 
 // Implementation of the classic Pedersen DKG for G2.
 

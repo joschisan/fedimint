@@ -1,37 +1,37 @@
 use bitcoin::key::Keypair;
 use bitcoin::secp256k1;
+use fedimint_api_client::transaction::Transaction;
+use fedimint_api_client::wire;
 use fedimint_core::Amount;
-use fedimint_core::core::{
-    DynInput, DynOutput, IInput, IOutput, IntoDynInstance, ModuleInstanceId,
-};
-use fedimint_core::task::{MaybeSend, MaybeSync};
-use fedimint_api_client::transaction::{Transaction, TransactionSignature};
 use fedimint_logging::LOG_CLIENT;
 use itertools::multiunzip;
 use rand::{CryptoRng, Rng, RngCore};
 use secp256k1::Secp256k1;
 use tracing::warn;
 
-use crate::{
-    InstancelessDynClientInput, InstancelessDynClientInputBundle, InstancelessDynClientOutput,
-    InstancelessDynClientOutputBundle,
-};
-
 #[derive(Clone, Debug)]
-pub struct ClientInput<I = DynInput> {
+pub struct ClientInput<I = wire::Input> {
     pub input: I,
     pub keys: Vec<Keypair>,
     pub amount: Amount,
 }
 
+impl<I> ClientInput<I>
+where
+    wire::Input: From<I>,
+{
+    pub fn into_wire(self) -> ClientInput<wire::Input> {
+        ClientInput {
+            input: self.input.into(),
+            keys: self.keys,
+            amount: self.amount,
+        }
+    }
+}
+
 /// A group of inputs contributed to a transaction.
-///
-/// State machines that track these inputs (e.g. to handle refunds) are
-/// spawned by the module directly — either in its entry-point methods
-/// (after `finalize_and_submit_transaction_dbtx` returns the txid) or via
-/// the primary-module `FinalContribution::spawn_sms` callback.
 #[derive(Clone, Debug)]
-pub struct ClientInputBundle<I = DynInput> {
+pub struct ClientInputBundle<I = wire::Input> {
     pub(crate) inputs: Vec<ClientInput<I>>,
 }
 
@@ -51,67 +51,40 @@ impl<I> ClientInputBundle<I> {
 
 impl<I> ClientInputBundle<I>
 where
-    I: IInput + MaybeSend + MaybeSync + 'static,
+    wire::Input: From<I>,
 {
-    pub fn into_instanceless(self) -> InstancelessDynClientInputBundle {
-        InstancelessDynClientInputBundle {
+    pub fn into_wire(self) -> ClientInputBundle<wire::Input> {
+        ClientInputBundle {
             inputs: self
                 .inputs
                 .into_iter()
-                .map(|input| InstancelessDynClientInput {
-                    input: Box::new(input.input),
-                    keys: input.keys,
-                    amount: input.amount,
-                })
+                .map(ClientInput::into_wire)
                 .collect(),
         }
     }
 }
 
-impl<I> IntoDynInstance for ClientInput<I>
-where
-    I: IntoDynInstance<DynType = DynInput> + 'static,
-{
-    type DynType = ClientInput;
+#[derive(Clone, Debug)]
+pub struct ClientOutput<O = wire::Output> {
+    pub output: O,
+    pub amount: Amount,
+}
 
-    fn into_dyn(self, module_instance_id: ModuleInstanceId) -> ClientInput {
-        ClientInput {
-            input: self.input.into_dyn(module_instance_id),
-            keys: self.keys,
+impl<O> ClientOutput<O>
+where
+    wire::Output: From<O>,
+{
+    pub fn into_wire(self) -> ClientOutput<wire::Output> {
+        ClientOutput {
+            output: self.output.into(),
             amount: self.amount,
         }
     }
 }
 
-impl IntoDynInstance for InstancelessDynClientInputBundle {
-    type DynType = ClientInputBundle;
-
-    fn into_dyn(self, module_instance_id: ModuleInstanceId) -> ClientInputBundle {
-        ClientInputBundle {
-            inputs: self
-                .inputs
-                .into_iter()
-                .map(|input| ClientInput {
-                    input: DynInput::from_parts(module_instance_id, input.input),
-                    keys: input.keys,
-                    amount: input.amount,
-                })
-                .collect::<Vec<ClientInput>>(),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ClientOutput<O = DynOutput> {
-    pub output: O,
-    pub amount: Amount,
-}
-
 /// A group of outputs contributed to a transaction.
-///
-/// See [`ClientInputBundle`] for the SM spawning story.
 #[derive(Clone, Debug)]
-pub struct ClientOutputBundle<O = DynOutput> {
+pub struct ClientOutputBundle<O = wire::Output> {
     pub(crate) outputs: Vec<ClientOutput<O>>,
 }
 
@@ -139,49 +112,15 @@ impl<O> ClientOutputBundle<O> {
 
 impl<O> ClientOutputBundle<O>
 where
-    O: IOutput + MaybeSend + MaybeSync + 'static,
+    wire::Output: From<O>,
 {
-    pub fn into_instanceless(self) -> InstancelessDynClientOutputBundle {
-        InstancelessDynClientOutputBundle {
-            outputs: self
-                .outputs
-                .into_iter()
-                .map(|output| InstancelessDynClientOutput {
-                    output: Box::new(output.output),
-                    amount: output.amount,
-                })
-                .collect(),
-        }
-    }
-}
-
-impl<O> IntoDynInstance for ClientOutput<O>
-where
-    O: IntoDynInstance<DynType = DynOutput> + 'static,
-{
-    type DynType = ClientOutput;
-
-    fn into_dyn(self, module_instance_id: ModuleInstanceId) -> ClientOutput {
-        ClientOutput {
-            output: self.output.into_dyn(module_instance_id),
-            amount: self.amount,
-        }
-    }
-}
-
-impl IntoDynInstance for InstancelessDynClientOutputBundle {
-    type DynType = ClientOutputBundle;
-
-    fn into_dyn(self, module_instance_id: ModuleInstanceId) -> ClientOutputBundle {
+    pub fn into_wire(self) -> ClientOutputBundle<wire::Output> {
         ClientOutputBundle {
             outputs: self
                 .outputs
                 .into_iter()
-                .map(|output| ClientOutput {
-                    output: DynOutput::from_parts(module_instance_id, output.output),
-                    amount: output.amount,
-                })
-                .collect::<Vec<ClientOutput>>(),
+                .map(ClientOutput::into_wire)
+                .collect(),
         }
     }
 }
@@ -246,7 +185,7 @@ impl TransactionBuilder {
             inputs,
             outputs,
             nonce,
-            signatures: TransactionSignature::NaiveMultisig(signatures),
+            signatures,
         }
     }
 

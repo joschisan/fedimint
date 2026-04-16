@@ -36,9 +36,6 @@ impl fmt::Debug for DebugConsensusItem<'_> {
                     f.write_fmt(format_args!("\n    Output: {output}")).unwrap();
                 }
             }
-            ConsensusItem::Default { variant, .. } => {
-                f.write_fmt(format_args!("Unknown CI variant: {variant}"))?;
-            }
         }
         Ok(())
     }
@@ -89,9 +86,6 @@ impl fmt::Display for DebugConsensusItemCompact<'_> {
                     "citem={}; ",
                     module_citem.module_instance_id()
                 ))?;
-            }
-            ConsensusItem::Default { variant, .. } => {
-                f.write_fmt(format_args!("unknown variant={variant}"))?;
             }
         }
 

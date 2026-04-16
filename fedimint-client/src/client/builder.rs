@@ -106,7 +106,15 @@ impl ClientBuilder {
     }
 
     /// Make module generator available when reading the config
-    pub fn with_module<M: ClientModuleInit>(&mut self, module_init: M) {
+    pub fn with_module<M: ClientModuleInit>(&mut self, module_init: M)
+    where
+        fedimint_api_client::wire::Input: From<
+            <<<M as ClientModuleInit>::Module as fedimint_client_module::ClientModule>::Common as fedimint_core::module::ModuleCommon>::Input,
+        >,
+        fedimint_api_client::wire::Output: From<
+            <<<M as ClientModuleInit>::Module as fedimint_client_module::ClientModule>::Common as fedimint_core::module::ModuleCommon>::Output,
+        >,
+    {
         self.module_inits.attach(module_init);
     }
 

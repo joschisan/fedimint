@@ -7,12 +7,12 @@
 use std::fmt;
 
 use bitcoin::hashes::Hash;
-use bitcoin::hex::DisplayHex as _;
-use fedimint_core::core::{DynInput, DynInputError, DynOutput, DynOutputError};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::SerdeModuleEncoding;
 use fedimint_core::{Amount, TransactionId};
 use thiserror::Error;
+
+use crate::wire;
 
 /// An atomic value transfer operation within the Fedimint system and consensus.
 ///
@@ -22,10 +22,10 @@ use thiserror::Error;
 /// a Lightning Gateway.
 #[derive(Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct Transaction {
-    pub inputs: Vec<DynInput>,
-    pub outputs: Vec<DynOutput>,
+    pub inputs: Vec<wire::Input>,
+    pub outputs: Vec<wire::Output>,
     pub nonce: [u8; 8],
-    pub signatures: TransactionSignature,
+    pub signatures: Vec<fedimint_core::secp256k1::schnorr::Signature>,
 }
 
 impl fmt::Debug for Transaction {
@@ -50,8 +50,8 @@ impl Transaction {
     }
 
     pub fn tx_hash_from_parts(
-        inputs: &[DynInput],
-        outputs: &[DynOutput],
+        inputs: &[wire::Input],
+        outputs: &[wire::Output],
         nonce: [u8; 8],
     ) -> TransactionId {
         let mut engine = TransactionId::engine();
@@ -73,21 +73,14 @@ impl Transaction {
     ) -> Result<(), TransactionError> {
         use fedimint_core::secp256k1;
 
-        let signatures = match &self.signatures {
-            TransactionSignature::NaiveMultisig(sigs) => sigs,
-            TransactionSignature::Default { variant, .. } => {
-                return Err(TransactionError::UnsupportedSignatureScheme { variant: *variant });
-            }
-        };
-
-        if pub_keys.len() != signatures.len() {
+        if pub_keys.len() != self.signatures.len() {
             return Err(TransactionError::InvalidWitnessLength);
         }
 
         let txid = self.tx_hash();
         let msg = secp256k1::Message::from_digest_slice(&txid[..]).expect("txid has right length");
 
-        for (pk, signature) in pub_keys.iter().zip(signatures) {
+        for (pk, signature) in pub_keys.iter().zip(&self.signatures) {
             if secp256k1::global::SECP256K1
                 .verify_schnorr(signature, &msg, &pk.x_only_public_key().0)
                 .is_err()
@@ -101,32 +94,6 @@ impl Transaction {
             }
         }
 
-        Ok(())
-    }
-}
-
-#[derive(Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
-pub enum TransactionSignature {
-    NaiveMultisig(Vec<fedimint_core::secp256k1::schnorr::Signature>),
-    #[encodable_default]
-    Default { variant: u64, bytes: Vec<u8> },
-}
-
-impl fmt::Debug for TransactionSignature {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NaiveMultisig(multi) => {
-                f.debug_struct("NaiveMultisig")
-                    .field("len", &multi.len())
-                    .finish()?;
-            }
-            Self::Default { variant, bytes } => {
-                f.debug_struct("TransactionSignature::Default")
-                    .field("variant", variant)
-                    .field("bytes", &bytes.as_hex())
-                    .finish()?;
-            }
-        }
         Ok(())
     }
 }
@@ -146,14 +113,12 @@ pub enum TransactionError {
         sig: String,
         key: String,
     },
-    #[error("The transaction's signature scheme is not supported: variant={variant}")]
-    UnsupportedSignatureScheme { variant: u64 },
     #[error("The transaction did not have the correct number of signatures")]
     InvalidWitnessLength,
     #[error("The transaction had an invalid input: {}", .0)]
-    Input(DynInputError),
+    Input(wire::InputError),
     #[error("The transaction had an invalid output: {}", .0)]
-    Output(DynOutputError),
+    Output(wire::OutputError),
 }
 
 pub const TRANSACTION_OVERFLOW_ERROR: TransactionError = TransactionError::UnbalancedTransaction {
@@ -171,9 +136,5 @@ pub enum ConsensusItem {
     /// Threshold sign the epoch history for verification via the API
     Transaction(Transaction),
     /// Any data that modules require consensus on
-    Module(fedimint_core::core::DynModuleConsensusItem),
-    /// Allows us to add new items in the future without crashing old clients
-    /// that try to interpret the session log.
-    #[encodable_default]
-    Default { variant: u64, bytes: Vec<u8> },
+    Module(wire::ModuleConsensusItem),
 }

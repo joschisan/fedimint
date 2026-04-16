@@ -6,15 +6,15 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use fedimint_api_client::session_outcome::SessionStatusV2;
+use fedimint_api_client::transaction::{
+    ConsensusItem, SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
+};
 use fedimint_core::config::{ClientConfig, META_FEDERATION_NAME_KEY};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT,
-};
-use fedimint_api_client::session_outcome::SessionStatusV2;
-use fedimint_api_client::transaction::{
-    ConsensusItem, SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
 };
 use fedimint_core::module::audit::{Audit, AuditSummary};
 use fedimint_core::module::{

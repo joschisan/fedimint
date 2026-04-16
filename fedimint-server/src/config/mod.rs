@@ -4,11 +4,9 @@ use std::time::Duration;
 
 use anyhow::{Context, bail, format_err};
 pub use fedimint_core::config::{
-    ClientConfig, FederationId, GlobalClientConfig, JsonWithKind, ModuleInitRegistry,
-    PeerUrl, ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
+    ClientConfig, FederationId, GlobalClientConfig, JsonWithKind, ModuleInitRegistry, PeerUrl,
+    ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
 };
-
-use crate::p2p::P2PMessage;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
@@ -31,6 +29,7 @@ use tracing::{error, info, warn};
 
 use crate::fedimint_core::encoding::Encodable;
 use crate::net::p2p::P2PStatusReceivers;
+use crate::p2p::P2PMessage;
 
 pub mod dkg;
 pub mod dkg_g1;

@@ -3,12 +3,10 @@
 //! the module-system rip since they are server-side only.
 
 use bitcoin::hashes::sha256;
-use bls12_381::Scalar;
+use bls12_381::{G1Projective, G2Projective, Scalar};
+use fedimint_api_client::session_outcome::SignedSessionOutcome;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::secp256k1;
-use bls12_381::{G1Projective, G2Projective};
-
-use fedimint_api_client::session_outcome::SignedSessionOutcome;
 
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub enum P2PMessage {

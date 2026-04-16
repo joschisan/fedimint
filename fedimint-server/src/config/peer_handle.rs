@@ -1,6 +1,7 @@
-use crate::p2p::P2PMessage;
 use fedimint_core::net::peers::DynP2PConnections;
 use fedimint_core::{NumPeers, PeerId};
+
+use crate::p2p::P2PMessage;
 
 /// A handle passed to `ServerModuleInit::distributed_gen`
 ///

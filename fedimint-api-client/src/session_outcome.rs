@@ -2,10 +2,9 @@ use std::collections::BTreeMap;
 use std::io::Write as _;
 
 use bitcoin::hashes::{Hash, sha256};
-use secp256k1::{Message, PublicKey, SECP256K1};
-
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::{NumPeersExt as _, PeerId, secp256k1};
+use secp256k1::{Message, PublicKey, SECP256K1};
 
 use crate::transaction::ConsensusItem;
 

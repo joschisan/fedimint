@@ -63,6 +63,12 @@ pub trait IClientModuleInit: IDynCommonModuleInit + fmt::Debug + MaybeSend + May
 impl<T> IClientModuleInit for T
 where
     T: ClientModuleInit + 'static + MaybeSend + Sync,
+    fedimint_api_client::wire::Input: From<
+        <<<T as ClientModuleInit>::Module as ClientModule>::Common as fedimint_core::module::ModuleCommon>::Input,
+    >,
+    fedimint_api_client::wire::Output: From<
+        <<<T as ClientModuleInit>::Module as ClientModule>::Common as fedimint_core::module::ModuleCommon>::Output,
+    >,
 {
     fn decoder(&self) -> Decoder {
         <<T as ClientModuleInit>::Module as ClientModule>::decoder()

@@ -1,7 +1,7 @@
 use axum::extract::{Path, State};
 use axum::response::{Html, IntoResponse};
 use fedimint_api_client::session_outcome::{AcceptedItem, SessionStatusV2};
-use fedimint_api_client::transaction::{ConsensusItem, TransactionSignature};
+use fedimint_api_client::transaction::ConsensusItem;
 use fedimint_core::hex;
 use fedimint_server_core::dashboard_ui::DynDashboardApi;
 use fedimint_ui_common::UiState;
@@ -144,7 +144,6 @@ fn format_item_type(item: &ConsensusItem) -> String {
     match item {
         ConsensusItem::Transaction(_) => "Transaction".to_string(),
         ConsensusItem::Module(_) => "Module".to_string(),
-        ConsensusItem::Default { variant, .. } => format!("Unknown ({variant})"),
     }
 }
 
@@ -223,16 +222,8 @@ fn format_item_details(item: &AcceptedItem) -> Markup {
                     details class="mb-2" {
                         summary { "Signature Info" }
                         div class="mt-2" {
-                            @match &tx.signatures {
-                                TransactionSignature::NaiveMultisig(sigs) => {
-                                    div { "Type: NaiveMultisig" }
-                                    div { "Signatures: " (sigs.len()) }
-                                }
-                                TransactionSignature::Default { variant, bytes } => {
-                                    div { "Type: Unknown (variant " (variant) ")" }
-                                    div { "Size: " (bytes.len()) " bytes" }
-                                }
-                            }
+                            div { "Type: NaiveMultisig" }
+                            div { "Signatures: " (tx.signatures.len()) }
                         }
                     }
                 }
@@ -245,40 +236,12 @@ fn format_item_details(item: &AcceptedItem) -> Markup {
                         "Module Instance ID: " code { (module_item.module_instance_id()) }
                     }
 
-                    @if let Some(kind) = module_item.module_kind() {
-                        div class="mb-2" {
-                            "Module Kind: " strong { (kind.to_string()) }
-                        }
-                    } @else {
-                        div class="alert alert-warning mb-2" {
-                            "Unknown Module Kind"
-                        }
+                    div class="mb-2" {
+                        "Module Kind: " strong { (module_item.module_kind()) }
                     }
 
                     div class="mb-2" {
                         "Module Item: " code { (module_item.to_string()) }
-                    }
-                }
-            }
-        }
-        ConsensusItem::Default { variant, bytes } => {
-            html! {
-                div class="consensus-item-details" {
-                    div class="alert alert-warning mb-2" {
-                        "Unknown Consensus Item Type (variant " (variant) ")"
-                    }
-                    div class="mb-2" {
-                        "Size: " (bytes.len()) " bytes"
-                    }
-                    @if !bytes.is_empty() {
-                        details {
-                            summary { "Raw Data (Hex)" }
-                            div class="mt-2" {
-                                code class="user-select-all" style="word-break: break-all;" {
-                                    (hex::encode(bytes))
-                                }
-                            }
-                        }
                     }
                 }
             }

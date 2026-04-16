@@ -31,7 +31,6 @@ use fedimint_server_bitcoin_rpc::bitcoind::BitcoindClient;
 use fedimint_server_bitcoin_rpc::esplora::EsploraClient;
 use fedimint_server_core::ServerModuleInitRegistryExt;
 use fedimint_server_core::bitcoin_rpc::IServerBitcoinRpc;
-use fedimint_unknown_server::UnknownInit;
 use fedimintd_envs::{
     FM_BIND_P2P_ENV, FM_BIND_TOKIO_CONSOLE_ENV, FM_BIND_UI_ENV, FM_BITCOIN_NETWORK_ENV,
     FM_BITCOIND_PASSWORD_ENV, FM_BITCOIND_URL_ENV, FM_BITCOIND_URL_PASSWORD_FILE_ENV,
@@ -468,8 +467,15 @@ pub fn default_modules() -> ServerModuleInitRegistry {
     server_gens.attach(fedimint_walletv2_server::WalletInit);
     server_gens.attach(fedimint_lnv2_server::LightningInit);
 
+    // NOTE: The unknown module is incompatible with the static wire enum
+    // (`fedimint_api_client::wire::Input`/`Output`/...) that only supports
+    // the canonical mint/ln/wallet triple on the `minimint-design` branch.
+    // Keep the env var check as a no-op warning so tests that rely on the
+    // flag don't silently change behaviour.
     if is_env_var_set(FM_USE_UNKNOWN_MODULE_ENV) {
-        server_gens.attach(UnknownInit);
+        tracing::warn!(
+            "FM_USE_UNKNOWN_MODULE is set but the unknown module is disabled on this branch"
+        );
     }
 
     server_gens

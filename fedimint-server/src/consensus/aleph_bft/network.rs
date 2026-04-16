@@ -5,7 +5,6 @@ use fedimint_core::PeerId;
 use fedimint_core::encoding::Encodable;
 use fedimint_core::net::peers::{DynP2PConnections, Recipient};
 use fedimint_core::secp256k1::schnorr;
-use crate::p2p::P2PMessage;
 use fedimint_core::util::FmtCompact as _;
 use fedimint_logging::LOG_CONSENSUS;
 use fedimint_redb::Database;
@@ -15,6 +14,7 @@ use tracing::error;
 use super::super::db::SIGNED_SESSION_OUTCOME;
 use super::data_provider::UnitData;
 use super::keychain::Keychain;
+use crate::p2p::P2PMessage;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Hasher;
