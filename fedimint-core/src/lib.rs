@@ -54,7 +54,7 @@ pub use macro_rules_attribute::apply;
 pub use peer_id::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
-pub use {bitcoin, borsh, hex, redb, secp256k1};
+pub use {bitcoin, hex, redb, secp256k1};
 
 use crate::encoding::{Decodable, Encodable};
 
@@ -121,22 +121,6 @@ mod txid {
     );
 }
 pub use txid::TransactionId;
-
-impl borsh::BorshSerialize for TransactionId {
-    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
-        use bitcoin::hashes::Hash as _;
-        writer.write_all(&self.to_byte_array())
-    }
-}
-
-impl borsh::BorshDeserialize for TransactionId {
-    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
-        use bitcoin::hashes::Hash as _;
-        let mut bytes = [0u8; 32];
-        reader.read_exact(&mut bytes)?;
-        Ok(Self::from_byte_array(bytes))
-    }
-}
 
 impl redb::Value for TransactionId {
     type SelfType<'a>

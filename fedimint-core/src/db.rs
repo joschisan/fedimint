@@ -2,76 +2,23 @@
 //!
 //! A [`NativeTableDef<K, V>`] is a typed table reference backed by redb's
 //! native `TableDefinition<K, V>`. Keys implement `redb::Key + redb::Value`
-//! directly; values implement `redb::Value` directly. Two per-type helper
-//! macros are provided for types that already carry `Encodable`/`Decodable`
-//! derives:
+//! directly; values implement `redb::Value` directly. Four per-type helper
+//! macros:
 //!
 //! - [`consensus_value!`] — implements `redb::Value` via consensus encoding.
 //! - [`consensus_key!`] — implements `redb::Key` + `redb::Value` via consensus
-//!   encoding (byte-lex compare).
-//!
-//! For new types that use borsh, use [`Borsh<T>`] (as `redb::Value`),
-//! [`borsh_key!`] (for borsh-serializable keys), [`redb_newtype_key!`] (for
-//! primitive-newtype keys), or [`redb_sha256_key!`] (for `sha256::Hash`
-//! newtypes).
+//!   encoding with byte-lex compare.
+//! - [`redb_newtype_key!`] — primitive-newtype keys (delegates to the
+//!   inner primitive's redb impl for integer-correct compare).
+//! - [`redb_sha256_key!`] — sha256-hash newtype keys (32 raw bytes, byte-lex
+//!   compare == numeric compare).
 //!
 //! The concrete redb-backed tx types (`Database`, `ReadTransaction`,
 //! `WriteTransaction`, `ReadTxRef`, `WriteTxRef`) live in `fedimint-redb` and
 //! expose `insert`/`get`/`remove`/`iter`/`range`/`delete_table` as inherent
 //! methods over `NativeTableDef`.
 
-use std::fmt::Debug;
 use std::marker::PhantomData;
-
-use borsh::{BorshDeserialize, BorshSerialize};
-
-// ─── Borsh<T>: redb::Value adapter ───────────────────────────────────────
-//
-// Any `BorshSerialize + BorshDeserialize` type becomes a redb `Value` by
-// wrapping it in `Borsh<T>` **in the table definition only** —
-// `SelfType<'a> = T` keeps the wrapper invisible at call sites. Variable
-// width; not a `Key` (borsh integers are LE, which don't sort lexicographically
-// — use `redb_newtype_key!` for ordered primitive-newtype keys instead).
-
-#[derive(Debug)]
-pub struct Borsh<T>(PhantomData<T>);
-
-impl<T> redb::Value for Borsh<T>
-where
-    T: BorshSerialize + BorshDeserialize + Debug + 'static,
-{
-    type SelfType<'a>
-        = T
-    where
-        Self: 'a;
-
-    type AsBytes<'a>
-        = Vec<u8>
-    where
-        Self: 'a;
-
-    fn fixed_width() -> Option<usize> {
-        None
-    }
-
-    fn from_bytes<'a>(data: &'a [u8]) -> T
-    where
-        Self: 'a,
-    {
-        borsh::from_slice(data).expect("borsh decode failed")
-    }
-
-    fn as_bytes<'a, 'b: 'a>(value: &'a T) -> Vec<u8>
-    where
-        Self: 'b,
-    {
-        borsh::to_vec(value).expect("borsh encode can't fail")
-    }
-
-    fn type_name() -> redb::TypeName {
-        redb::TypeName::new(&format!("fedimint::Borsh<{}>", std::any::type_name::<T>()))
-    }
-}
 
 /// Implement `redb::Value` for a type that already derives
 /// `Encodable + Decodable`, serializing via consensus encoding.
@@ -152,8 +99,8 @@ macro_rules! consensus_key {
 /// ```
 ///
 /// The newtype must be `struct Foo(pub $inner)`. Encoding delegates to the
-/// inner primitive's redb impl, which is LE fixed-width with integer-correct
-/// `compare`.
+/// inner primitive's redb impl, which is big-endian fixed-width with
+/// integer-correct `compare`.
 #[macro_export]
 macro_rules! redb_newtype_key {
     ($ty:ty, $inner:ty) => {
@@ -199,39 +146,35 @@ macro_rules! redb_newtype_key {
     };
 }
 
-/// Implement borsh + `redb::Key` + `redb::Value` for a 32-byte sha256 newtype.
+/// Implement `Encodable` + `Decodable` + `redb::Key` + `redb::Value` for a
+/// 32-byte sha256 newtype. Encodes as 32 raw bytes (no length prefix); redb
+/// compare is byte-lex (== numeric for fixed-width BE bytes).
 ///
 /// ```ignore
 /// pub struct FederationId(pub bitcoin::hashes::sha256::Hash);
 /// redb_sha256_key!(FederationId);
 /// ```
-///
-/// The newtype must be `struct Foo(pub sha256::Hash)` — expands to manual
-/// borsh impls (32 raw bytes, no length prefix) plus redb Key/Value with
-/// byte-lex compare.
 #[macro_export]
 macro_rules! redb_sha256_key {
     ($ty:ty) => {
-        impl $crate::borsh::BorshSerialize for $ty {
-            fn serialize<W: $crate::borsh::io::Write>(
+        impl $crate::encoding::Encodable for $ty {
+            fn consensus_encode<W: ::std::io::Write>(
                 &self,
                 writer: &mut W,
-            ) -> $crate::borsh::io::Result<()> {
+            ) -> ::std::io::Result<()> {
                 use $crate::bitcoin::hashes::Hash as _;
                 writer.write_all(&self.0.to_byte_array())
             }
         }
 
-        impl $crate::borsh::BorshDeserialize for $ty {
-            fn deserialize_reader<R: $crate::borsh::io::Read>(
-                reader: &mut R,
-            ) -> $crate::borsh::io::Result<Self> {
+        impl $crate::encoding::Decodable for $ty {
+            fn consensus_decode<R: ::std::io::Read>(reader: &mut R) -> ::std::io::Result<Self> {
                 use $crate::bitcoin::hashes::Hash as _;
                 let mut bytes = [0u8; 32];
                 reader.read_exact(&mut bytes)?;
-                Ok(Self(
-                    $crate::bitcoin::hashes::sha256::Hash::from_byte_array(bytes),
-                ))
+                Ok(Self($crate::bitcoin::hashes::sha256::Hash::from_byte_array(
+                    bytes,
+                )))
             }
         }
 
@@ -267,63 +210,6 @@ macro_rules! redb_sha256_key {
             {
                 use $crate::bitcoin::hashes::Hash as _;
                 value.0.to_byte_array()
-            }
-
-            fn type_name() -> $crate::redb::TypeName {
-                $crate::redb::TypeName::new(concat!("fedimint::", stringify!($ty)))
-            }
-        }
-
-        impl $crate::redb::Key for $ty {
-            fn compare(data1: &[u8], data2: &[u8]) -> ::std::cmp::Ordering {
-                data1.cmp(data2)
-            }
-        }
-    };
-}
-
-/// Implement `redb::Key` + `redb::Value` for any borsh-serializable type.
-///
-/// ```ignore
-/// #[derive(borsh::BorshSerialize, borsh::BorshDeserialize, Debug)]
-/// pub struct MyKey(pub u64, pub u64);
-/// borsh_key!(MyKey);
-/// ```
-///
-/// The type must already implement `borsh::BorshSerialize` +
-/// `borsh::BorshDeserialize` + `Debug`. Serialization goes through borsh;
-/// `compare` is byte-lex (fine for set-style lookup tables where we never
-/// range over a semantic ordering of K).
-#[macro_export]
-macro_rules! borsh_key {
-    ($ty:ty) => {
-        impl $crate::redb::Value for $ty {
-            type SelfType<'a>
-                = $ty
-            where
-                Self: 'a;
-
-            type AsBytes<'a>
-                = ::std::vec::Vec<u8>
-            where
-                Self: 'a;
-
-            fn fixed_width() -> Option<usize> {
-                None
-            }
-
-            fn from_bytes<'a>(data: &'a [u8]) -> Self
-            where
-                Self: 'a,
-            {
-                $crate::borsh::from_slice(data).expect("borsh decode failed")
-            }
-
-            fn as_bytes<'a, 'b: 'a>(value: &'a Self) -> ::std::vec::Vec<u8>
-            where
-                Self: 'b,
-            {
-                $crate::borsh::to_vec(value).expect("borsh encode can't fail")
             }
 
             fn type_name() -> $crate::redb::TypeName {
@@ -377,9 +263,8 @@ where
 /// Declare a typed [`NativeTableDef`] constant.
 ///
 /// Both `$k` and `$v` must already implement the relevant redb traits
-/// directly — see the per-type helper macros (`consensus_value!`,
-/// `consensus_key!`, `redb_newtype_key!`, `redb_sha256_key!`, `borsh_key!`)
-/// and the `Borsh<T>` wrapper.
+/// directly — see `consensus_value!`, `consensus_key!`, `redb_newtype_key!`,
+/// and `redb_sha256_key!`.
 ///
 /// ```ignore
 /// table!(

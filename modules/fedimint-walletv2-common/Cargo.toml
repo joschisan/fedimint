@@ -18,7 +18,6 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 bitcoin = { workspace = true }
-borsh = { workspace = true }
 fedimint-core = { workspace = true }
 miniscript = { workspace = true, features = ["serde"] }
 secp256k1 = { workspace = true }

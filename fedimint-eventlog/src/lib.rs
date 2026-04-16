@@ -11,9 +11,10 @@ use std::fmt;
 use std::str::FromStr;
 
 use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
-use fedimint_core::db::{Borsh, NativeTableDef};
+use fedimint_core::db::NativeTableDef;
+use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::redb::ReadableTable as _;
-use fedimint_core::redb_newtype_key;
+use fedimint_core::{consensus_value, redb_newtype_key};
 use fedimint_redb::{Database, WriteTxRef};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -36,8 +37,8 @@ pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
     Ord,
     Serialize,
     Deserialize,
-    borsh::BorshSerialize,
-    borsh::BorshDeserialize,
+    Encodable,
+    Decodable,
 )]
 pub struct EventLogId(pub u64);
 
@@ -76,25 +77,12 @@ impl fmt::Display for EventLogId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct EventKind(Cow<'static, str>);
 
 impl EventKind {
     pub const fn from_static(value: &'static str) -> Self {
         Self(Cow::Borrowed(value))
-    }
-}
-
-impl borsh::BorshSerialize for EventKind {
-    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
-        borsh::BorshSerialize::serialize(self.0.as_ref(), writer)
-    }
-}
-
-impl borsh::BorshDeserialize for EventKind {
-    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
-        let s = String::deserialize_reader(reader)?;
-        Ok(Self(Cow::Owned(s)))
     }
 }
 
@@ -116,7 +104,7 @@ impl fmt::Display for EventKind {
     }
 }
 
-#[derive(Debug, Clone, borsh::BorshSerialize, borsh::BorshDeserialize)]
+#[derive(Debug, Clone, Encodable, Decodable)]
 pub struct EventLogEntry {
     pub kind: EventKind,
 
@@ -202,10 +190,12 @@ impl std::ops::Deref for PersistedLogEntry {
     }
 }
 
-pub const EVENT_LOG: NativeTableDef<EventLogId, Borsh<EventLogEntry>> =
+consensus_value!(EventLogEntry);
+
+pub const EVENT_LOG: NativeTableDef<EventLogId, EventLogEntry> =
     NativeTableDef::new("event-log");
 
-pub const EVENT_LOG_BY_OPERATION: NativeTableDef<(OperationId, EventLogId), Borsh<EventLogEntry>> =
+pub const EVENT_LOG_BY_OPERATION: NativeTableDef<(OperationId, EventLogId), EventLogEntry> =
     NativeTableDef::new("event-log-by-operation");
 
 /// Append an event to [`EVENT_LOG`] and — if `operation_id` is set — to

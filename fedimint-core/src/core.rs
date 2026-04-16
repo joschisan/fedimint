@@ -47,8 +47,6 @@ use serde::{Deserialize, Deserializer, Serialize};
     Decodable,
     PartialOrd,
     Ord,
-    borsh::BorshSerialize,
-    borsh::BorshDeserialize,
 )]
 pub struct OperationId(pub [u8; 32]);
 
@@ -184,19 +182,6 @@ impl fmt::Display for ModuleKind {
 impl fmt::Debug for ModuleKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         std::fmt::Display::fmt(&self.0, f)
-    }
-}
-
-impl borsh::BorshSerialize for ModuleKind {
-    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
-        borsh::BorshSerialize::serialize(self.0.as_ref(), writer)
-    }
-}
-
-impl borsh::BorshDeserialize for ModuleKind {
-    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
-        let s = String::deserialize_reader(reader)?;
-        Ok(Self(Cow::Owned(s)))
     }
 }
 

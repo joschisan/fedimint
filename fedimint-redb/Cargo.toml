@@ -15,7 +15,6 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-borsh = { workspace = true }
 fedimint-core = { workspace = true }
 futures = { workspace = true }
 redb = { workspace = true }

@@ -21,8 +21,6 @@ use crate::redb_newtype_key;
     Deserialize,
     Encodable,
     Decodable,
-    borsh::BorshSerialize,
-    borsh::BorshDeserialize,
 )]
 pub struct PeerId(u8);
 

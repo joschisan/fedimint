@@ -281,8 +281,6 @@ impl ClientConfig {
     Eq,
     Hash,
     PartialEq,
-    Encodable,
-    Decodable,
     Ord,
     PartialOrd,
 )]

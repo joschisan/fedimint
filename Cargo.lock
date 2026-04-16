@@ -919,30 +919,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "borsh"
-version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfd1e3f8955a5d7de9fab72fc8373fade9fb8a703968cb200ae3dc6cf08e185a"
-dependencies = [
- "borsh-derive",
- "bytes",
- "cfg_aliases",
-]
-
-[[package]]
-name = "borsh-derive"
-version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfcfdc083699101d5a7965e49925975f2f55060f94f9a05e7187be95d530ca59"
-dependencies = [
- "once_cell",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.104",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2160,7 +2136,6 @@ dependencies = [
  "async-stream",
  "async-trait",
  "bitcoin",
- "borsh",
  "fedimint-api-client",
  "fedimint-build",
  "fedimint-client-module",
@@ -2195,7 +2170,6 @@ dependencies = [
  "async-stream",
  "async-trait",
  "bitcoin",
- "borsh",
  "fedimint-api-client",
  "fedimint-build",
  "fedimint-core",
@@ -2237,7 +2211,6 @@ dependencies = [
  "bitcoin-units",
  "bitvec",
  "bls12_381",
- "borsh",
  "erased-serde",
  "fedimint-derive",
  "fedimint-logging",
@@ -2317,7 +2290,6 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "borsh",
  "fedimint-core",
  "fedimint-logging",
  "fedimint-redb",
@@ -2380,7 +2352,6 @@ dependencies = [
  "axum 0.8.8",
  "bitcoin",
  "bon",
- "borsh",
  "clap",
  "erased-serde",
  "esplora-client 0.12.3",
@@ -2437,7 +2408,6 @@ dependencies = [
  "async-stream",
  "async-trait",
  "bitcoin",
- "borsh",
  "erased-serde",
  "fedimint-api-client",
  "fedimint-client-module",
@@ -2561,7 +2531,6 @@ dependencies = [
  "async-stream",
  "async-trait",
  "bitcoin",
- "borsh",
  "erased-serde",
  "fedimint-api-client",
  "fedimint-client-module",
@@ -2592,7 +2561,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bitcoin",
- "borsh",
  "fedimint-core",
  "fedimint-tpe",
  "group",
@@ -2612,7 +2580,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bls12_381",
- "borsh",
  "erased-serde",
  "fedimint-core",
  "fedimint-lnv2-common",
@@ -2655,7 +2622,6 @@ dependencies = [
  "async-trait",
  "bitcoin_hashes",
  "bls12_381",
- "borsh",
  "divan",
  "erased-serde",
  "fedimint-api-client",
@@ -2689,7 +2655,6 @@ version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
  "bitcoin_hashes",
- "borsh",
  "fedimint-core",
  "fedimint-tbs",
  "serde",
@@ -2704,7 +2669,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bitcoin",
- "borsh",
  "erased-serde",
  "fedimint-core",
  "fedimint-logging",
@@ -2764,7 +2728,6 @@ version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
- "borsh",
  "fedimint-core",
  "futures",
  "redb",
@@ -2964,7 +2927,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bitcoin",
- "borsh",
  "erased-serde",
  "fedimint-api-client",
  "fedimint-client-module",
@@ -2990,7 +2952,6 @@ version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
  "bitcoin",
- "borsh",
  "fedimint-core",
  "miniscript",
  "secp256k1",
@@ -3005,7 +2966,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bitcoin",
- "borsh",
  "erased-serde",
  "fedimint-core",
  "fedimint-logging",
