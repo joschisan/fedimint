@@ -3,7 +3,7 @@ use bitcoin::hashes::{Hash, sha256};
 use fedimint_api_client::session_outcome::SignedSessionOutcome;
 use fedimint_core::PeerId;
 use fedimint_core::encoding::Encodable;
-use fedimint_core::net::peers::{DynP2PConnections, Recipient};
+use crate::p2p::{ReconnectP2PConnections, Recipient};
 use fedimint_core::secp256k1::schnorr;
 use fedimint_core::util::FmtCompact as _;
 use fedimint_logging::LOG_CONSENSUS;
@@ -35,7 +35,7 @@ pub type NetworkData = aleph_bft::NetworkData<
 >;
 
 pub struct Network {
-    connections: DynP2PConnections<P2PMessage>,
+    connections: ReconnectP2PConnections<P2PMessage>,
     signed_outcomes_sender: Sender<(PeerId, SignedSessionOutcome)>,
     signatures_sender: Sender<(PeerId, schnorr::Signature)>,
     db: Database,
@@ -43,7 +43,7 @@ pub struct Network {
 
 impl Network {
     pub fn new(
-        connections: DynP2PConnections<P2PMessage>,
+        connections: ReconnectP2PConnections<P2PMessage>,
         signed_outcomes_sender: Sender<(PeerId, SignedSessionOutcome)>,
         signatures_sender: Sender<(PeerId, schnorr::Signature)>,
         db: Database,

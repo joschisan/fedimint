@@ -29,7 +29,6 @@ extern crate fedimint_core;
 pub mod cli;
 pub mod config;
 pub mod consensus;
-pub mod net;
 pub mod p2p;
 pub mod ui;
 
@@ -41,7 +40,6 @@ use anyhow::Context;
 use config::ServerConfig;
 use config::io::read_server_config;
 use fedimint_core::module::ApiAuth;
-use fedimint_core::net::peers::DynP2PConnections;
 use fedimint_core::task::TaskGroup;
 use fedimint_logging::LOG_CONSENSUS;
 use fedimint_redb::Database;
@@ -49,18 +47,13 @@ pub use fedimint_server_core as core;
 use fedimint_server_core::bitcoin_rpc::DynServerBitcoinRpc;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
-use net::p2p::P2PStatusReceivers;
-use net::p2p_connector::IrohConnector;
 use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::config::ConfigGenSettings;
 use crate::config::io::write_server_config;
 use crate::config::setup::SetupApi;
-use crate::fedimint_core::net::peers::IP2PConnections;
-use crate::net::p2p::{ReconnectP2PConnections, p2p_status_channels};
-use crate::net::p2p_connector::IP2PConnector;
-use crate::p2p::P2PMessage;
+use crate::p2p::{P2PConnector, P2PMessage, P2PStatusReceivers, ReconnectP2PConnections, p2p_status_channels};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_server(
@@ -77,7 +70,7 @@ pub async fn run_server(
 ) -> anyhow::Result<()> {
     let (cfg, connections, p2p_status_receivers) = match get_config(&data_dir)? {
         Some(cfg) => {
-            let connector = IrohConnector::new(
+            let connector = P2PConnector::new(
                 cfg.private.iroh_p2p_sk.clone(),
                 settings.p2p_bind,
                 cfg.consensus
@@ -86,18 +79,16 @@ pub async fn run_server(
                     .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
                     .collect(),
             )
-            .await?
-            .into_dyn();
+            .await?;
 
             let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
 
-            let connections = ReconnectP2PConnections::new(
+            let connections = ReconnectP2PConnections::<P2PMessage>::new(
                 cfg.local.identity,
                 connector,
                 &task_group,
                 p2p_status_senders,
-            )
-            .into_dyn();
+            );
 
             (cfg, connections, p2p_status_receivers)
         }
@@ -159,7 +150,7 @@ pub async fn run_config_gen(
     cli_bind: SocketAddr,
 ) -> anyhow::Result<(
     ServerConfig,
-    DynP2PConnections<P2PMessage>,
+    ReconnectP2PConnections<P2PMessage>,
     P2PStatusReceivers,
 )> {
     info!(target: LOG_CONSENSUS, "Starting config gen");
@@ -208,7 +199,7 @@ pub async fn run_config_gen(
         .await
         .context("Failed to shutdown CLI server after config gen")?;
 
-    let connector = IrohConnector::new(
+    let connector = P2PConnector::new(
         cg_params.iroh_p2p_sk.clone(),
         settings.p2p_bind,
         cg_params
@@ -217,18 +208,16 @@ pub async fn run_config_gen(
             .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
             .collect(),
     )
-    .await?
-    .into_dyn();
+    .await?;
 
     let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
 
-    let connections = ReconnectP2PConnections::new(
+    let connections = ReconnectP2PConnections::<P2PMessage>::new(
         cg_params.identity,
         connector,
         task_group,
         p2p_status_senders,
-    )
-    .into_dyn();
+    );
 
     let cfg = ServerConfig::distributed_gen(
         &cg_params,

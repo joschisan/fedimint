@@ -30,7 +30,7 @@ use crate::config::ServerConfig;
 use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION, SIGNED_SESSION_OUTCOME};
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::server::{Server, process_transaction_with_server};
-use crate::net::p2p::P2PStatusReceivers;
+use crate::p2p::P2PStatusReceivers;
 
 #[derive(Clone)]
 pub struct ConsensusApi {

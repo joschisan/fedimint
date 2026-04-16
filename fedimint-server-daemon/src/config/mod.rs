@@ -11,7 +11,7 @@ use fedimint_core::core::ModuleKind;
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::{CORE_CONSENSUS_VERSION, CoreConsensusVersion};
-use fedimint_core::net::peers::{DynP2PConnections, Recipient};
+use crate::p2p::{ReconnectP2PConnections, Recipient};
 use fedimint_core::setup_code::PeerSetupCode;
 use fedimint_core::task::sleep;
 use fedimint_core::util::SafeUrl;
@@ -29,7 +29,7 @@ use tokio::select;
 use tracing::{error, info, warn};
 
 use crate::fedimint_core::encoding::Encodable;
-use crate::net::p2p::P2PStatusReceivers;
+use crate::p2p::P2PStatusReceivers;
 use crate::p2p::P2PMessage;
 
 pub mod dkg;
@@ -346,7 +346,7 @@ impl ServerConfig {
     pub async fn distributed_gen(
         params: &ConfigGenParams,
         code_version_str: String,
-        connections: DynP2PConnections<P2PMessage>,
+        connections: ReconnectP2PConnections<P2PMessage>,
         mut p2p_status_receivers: P2PStatusReceivers,
     ) -> anyhow::Result<Self> {
         let _timing /* logs on drop */ = timing::TimeReporter::new("distributed-gen").info();

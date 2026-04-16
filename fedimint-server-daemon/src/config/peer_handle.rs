@@ -1,4 +1,4 @@
-use fedimint_core::net::peers::DynP2PConnections;
+use crate::p2p::ReconnectP2PConnections;
 use fedimint_core::{NumPeers, PeerId};
 
 use crate::p2p::P2PMessage;
@@ -17,14 +17,14 @@ pub struct PeerHandle<'a> {
     #[doc(hidden)]
     pub identity: PeerId,
     #[doc(hidden)]
-    pub connections: &'a DynP2PConnections<P2PMessage>,
+    pub connections: &'a ReconnectP2PConnections<P2PMessage>,
 }
 
 impl<'a> PeerHandle<'a> {
     pub fn new(
         num_peers: NumPeers,
         identity: PeerId,
-        connections: &'a DynP2PConnections<P2PMessage>,
+        connections: &'a ReconnectP2PConnections<P2PMessage>,
     ) -> Self {
         Self {
             num_peers,

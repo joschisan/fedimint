@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::Context;
 use async_trait::async_trait;
 use bls12_381::{G1Projective, G2Projective, Scalar};
-use fedimint_core::net::peers::Recipient;
+use crate::p2p::Recipient;
 use fedimint_core::{NumPeers, PeerId};
 use fedimint_logging::LOG_NET_PEER_DKG;
 use fedimint_server_core::config::PeerHandleOps;

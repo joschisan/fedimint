@@ -8,7 +8,7 @@ use fedimint_api_client::session_outcome::{AcceptedItem, SessionOutcome, SignedS
 use fedimint_api_client::transaction::ConsensusItem;
 use fedimint_core::encoding::Decodable;
 use fedimint_core::module::audit::Audit;
-use fedimint_core::net::peers::{DynP2PConnections, Recipient};
+use crate::p2p::{ReconnectP2PConnections, Recipient};
 use fedimint_core::runtime::spawn;
 use fedimint_core::secp256k1::schnorr;
 use fedimint_core::task::{TaskGroup, TaskHandle, sleep};
@@ -43,7 +43,7 @@ pub struct ConsensusEngine {
     pub cfg: ServerConfig,
     pub submission_receiver: Receiver<ConsensusItem>,
     pub shutdown_receiver: watch::Receiver<Option<u64>>,
-    pub connections: DynP2PConnections<P2PMessage>,
+    pub connections: ReconnectP2PConnections<P2PMessage>,
     pub ci_status_senders: BTreeMap<PeerId, watch::Sender<Option<u64>>>,
     pub ord_latency_sender: watch::Sender<Option<Duration>>,
     pub task_group: TaskGroup,
@@ -105,7 +105,7 @@ impl ConsensusEngine {
 
     pub async fn run_session(
         &self,
-        connections: DynP2PConnections<P2PMessage>,
+        connections: ReconnectP2PConnections<P2PMessage>,
         session_index: u64,
     ) -> Option<()> {
         // In order to bound a sessions RAM consumption we need to bound its number of
@@ -240,7 +240,7 @@ impl ConsensusEngine {
         timestamp_receiver: Receiver<Instant>,
         signed_outcomes_receiver: Receiver<(PeerId, SignedSessionOutcome)>,
         signatures_receiver: Receiver<(PeerId, schnorr::Signature)>,
-        connections: DynP2PConnections<P2PMessage>,
+        connections: ReconnectP2PConnections<P2PMessage>,
     ) -> Option<SignedSessionOutcome> {
         // It is guaranteed that aleph bft will always replay all previously processed
         // items from the current session from index zero

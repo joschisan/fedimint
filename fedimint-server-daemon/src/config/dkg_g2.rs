@@ -5,7 +5,7 @@ use anyhow::{Context, bail, ensure};
 use bls12_381::{G2Projective, Scalar};
 use fedimint_core::bitcoin::hashes::sha256;
 use fedimint_core::encoding::Encodable as _;
-use fedimint_core::net::peers::{DynP2PConnections, Recipient};
+use crate::p2p::{ReconnectP2PConnections, Recipient};
 use fedimint_core::{NumPeers, PeerId};
 use fedimint_server_core::config::{g2, scalar};
 use group::ff::Field;
@@ -149,7 +149,7 @@ impl DkgG2 {
 pub async fn run_dkg_g2(
     num_peers: NumPeers,
     identity: PeerId,
-    connections: &DynP2PConnections<P2PMessage>,
+    connections: &ReconnectP2PConnections<P2PMessage>,
 ) -> anyhow::Result<(Vec<G2Projective>, Scalar)> {
     let mut dkg = DkgG2::new(num_peers, identity);
 
