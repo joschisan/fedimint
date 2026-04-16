@@ -1,6 +1,6 @@
 use fedimint_client_module::module::OutPointRange;
-use fedimint_core::core::ModuleKind;
 use fedimint_core::Amount;
+use fedimint_core::core::ModuleKind;
 use fedimint_eventlog::{Event, EventKind};
 use fedimint_mintv2_common::KIND;
 use serde::{Deserialize, Serialize};

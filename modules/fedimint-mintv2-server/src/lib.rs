@@ -13,29 +13,29 @@ use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
-    api_endpoint, ApiEndpoint, ApiError, ApiVersion, InputMeta, TransactionItemAmounts,
+    ApiEndpoint, ApiError, ApiVersion, InputMeta, TransactionItemAmounts, api_endpoint,
 };
-use fedimint_core::{apply, async_trait_maybe_send, Amount, InPoint, OutPoint, PeerId};
+use fedimint_core::{Amount, InPoint, OutPoint, PeerId, apply, async_trait_maybe_send};
 use fedimint_mintv2_common::config::{
-    consensus_denominations, MintConfig, MintConfigConsensus, MintConfigPrivate,
+    MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
 };
 use fedimint_mintv2_common::endpoint_constants::{
     RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
     SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
 };
 use fedimint_mintv2_common::{
-    verify_note, Denomination, MintConsensusItem, MintInput, MintInputError, MintModuleTypes,
-    MintOutput, MintOutputError, RecoveryItem,
+    Denomination, MintConsensusItem, MintInput, MintInputError, MintModuleTypes, MintOutput,
+    MintOutputError, RecoveryItem, verify_note,
 };
 use fedimint_redb::{Database, ReadTxRef, WriteTxRef};
-use fedimint_server_core::config::{eval_poly_g2, PeerHandleOps};
 use fedimint_server_core::ServerModule;
-use tbs::{derive_pk_share, AggregatePublicKey, BlindedSignatureShare, PublicKeyShare};
+use fedimint_server_core::config::{PeerHandleOps, eval_poly_g2};
+use tbs::{AggregatePublicKey, BlindedSignatureShare, PublicKeyShare, derive_pk_share};
 use threshold_crypto::group::Curve;
 
 use crate::db::{
-    NoteNonceKey, BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER,
-    NOTE_NONCE, RECOVERY_ITEM,
+    BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER, NOTE_NONCE,
+    NoteNonceKey, RECOVERY_ITEM,
 };
 
 /// Run DKG for the mint module, producing a fresh `MintConfig` for this peer.

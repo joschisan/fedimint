@@ -5,8 +5,8 @@ use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::table;
 
-use crate::issuance::NoteIssuanceRequest;
 use crate::SpendableNote;
+use crate::issuance::NoteIssuanceRequest;
 
 // Tracks that a `receive(ecash)` has been started for this deterministic
 // [`OperationId`]. Used to make `receive` idempotent.
