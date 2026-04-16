@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::iter::once;
 use std::sync::Arc;
 
@@ -6,26 +6,34 @@ use anyhow::{Context, ensure};
 use async_trait::async_trait;
 use fedimint_core::base32::FEDIMINT_PREFIX;
 use fedimint_core::config::META_FEDERATION_NAME_KEY;
-use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::module::{ApiAuth, ApiEndpoint, ApiRequestErased};
+use fedimint_core::module::ApiAuth;
 use fedimint_core::setup_code::PeerEndpoints;
 use fedimint_core::{PeerId, base32};
-use fedimint_server_core::dashboard_ui::SetupStatus;
-use fedimint_server_core::setup_ui::ISetupApi;
+use fedimint_server_ui::ISetupApi;
 use iroh::SecretKey;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
 use crate::config::{ConfigGenParams, ConfigGenSettings, PeerSetupCode};
-use crate::net::HasApiContext;
 
-/// State held by the API after receiving a `ConfigGenConnectionsRequest`
+/// The state of the server while config gen is running.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SetupStatus {
+    /// Waiting for guardian to set the local parameters
+    AwaitingLocalParams,
+    /// Sharing the connection codes with our peers
+    SharingConnectionCodes,
+    /// Consensus is running
+    ConsensusIsRunning,
+}
+
+/// State held by the setup API after receiving a set of local parameters.
 #[derive(Debug, Clone, Default)]
 pub struct SetupState {
     /// Our local connection
     local_params: Option<LocalParams>,
     /// Connection info received from other guardians
-    setup_codes: BTreeSet<PeerSetupCode>,
+    setup_codes: std::collections::BTreeSet<PeerSetupCode>,
 }
 
 #[derive(Clone, Debug)]
@@ -41,9 +49,6 @@ pub struct LocalParams {
     name: String,
     /// Federation name set by the leader
     federation_name: Option<String>,
-    /// Modules enabled by the leader (if None, all available modules are
-    /// enabled)
-    enabled_modules: Option<BTreeSet<ModuleKind>>,
     /// Total number of guardians (including the one who sets this), set by the
     /// leader
     federation_size: Option<u32>,
@@ -55,7 +60,6 @@ impl LocalParams {
             name: self.name.clone(),
             endpoints: self.endpoints.clone(),
             federation_name: self.federation_name.clone(),
-            enabled_modules: self.enabled_modules.clone(),
             federation_size: self.federation_size,
         }
     }
@@ -88,17 +92,7 @@ impl SetupApi {
         }
     }
 
-    pub async fn setup_status(&self) -> SetupStatus {
-        match self.state.lock().await.local_params {
-            Some(..) => SetupStatus::SharingConnectionCodes,
-            None => SetupStatus::AwaitingLocalParams,
-        }
-    }
-}
-
-#[async_trait]
-impl ISetupApi for SetupApi {
-    async fn setup_code(&self) -> Option<String> {
+    pub async fn setup_code(&self) -> Option<String> {
         self.state
             .lock()
             .await
@@ -107,7 +101,7 @@ impl ISetupApi for SetupApi {
             .map(|lp| base32::encode_prefixed(FEDIMINT_PREFIX, &lp.setup_code()))
     }
 
-    async fn guardian_name(&self) -> Option<String> {
+    pub async fn guardian_name(&self) -> Option<String> {
         self.state
             .lock()
             .await
@@ -116,11 +110,11 @@ impl ISetupApi for SetupApi {
             .map(|lp| lp.name.clone())
     }
 
-    async fn auth(&self) -> ApiAuth {
+    pub async fn auth(&self) -> ApiAuth {
         self.auth.clone()
     }
 
-    async fn connected_peers(&self) -> Vec<String> {
+    pub async fn connected_peers(&self) -> Vec<String> {
         self.state
             .lock()
             .await
@@ -131,29 +125,26 @@ impl ISetupApi for SetupApi {
             .collect()
     }
 
-    fn available_modules(&self) -> BTreeSet<ModuleKind> {
-        self.settings.available_modules.clone()
-    }
-
-    fn default_modules(&self) -> BTreeSet<ModuleKind> {
-        self.settings.default_modules.clone()
-    }
-
-    async fn reset_setup_codes(&self) {
+    pub async fn reset_setup_codes(&self) {
         self.state.lock().await.setup_codes.clear();
     }
 
-    async fn set_local_parameters(
+    pub async fn setup_status(&self) -> SetupStatus {
+        match self.state.lock().await.local_params {
+            Some(..) => SetupStatus::SharingConnectionCodes,
+            None => SetupStatus::AwaitingLocalParams,
+        }
+    }
+
+    pub async fn set_local_parameters(
         &self,
         name: String,
         federation_name: Option<String>,
-        enabled_modules: Option<BTreeSet<ModuleKind>>,
         federation_size: Option<u32>,
     ) -> anyhow::Result<String> {
         if let Some(existing_local_parameters) = self.state.lock().await.local_params.clone()
             && existing_local_parameters.name == name
             && existing_local_parameters.federation_name == federation_name
-            && existing_local_parameters.enabled_modules == enabled_modules
             && existing_local_parameters.federation_size == federation_size
         {
             return Ok(base32::encode_prefixed(
@@ -198,7 +189,6 @@ impl ISetupApi for SetupApi {
             },
             name,
             federation_name,
-            enabled_modules,
             federation_size,
         };
 
@@ -207,7 +197,7 @@ impl ISetupApi for SetupApi {
         Ok(base32::encode_prefixed(FEDIMINT_PREFIX, &lp.setup_code()))
     }
 
-    async fn add_peer_setup_code(&self, info: String) -> anyhow::Result<String> {
+    pub async fn add_peer_setup_code(&self, info: String) -> anyhow::Result<String> {
         let info = base32::decode_prefixed(FEDIMINT_PREFIX, &info)?;
 
         let mut state = self.state.lock().await;
@@ -238,18 +228,6 @@ impl ISetupApi for SetupApi {
             );
         }
 
-        if state
-            .setup_codes
-            .iter()
-            .chain(once(&local_params.setup_code()))
-            .any(|info| info.enabled_modules.is_some())
-        {
-            ensure!(
-                info.enabled_modules.is_none(),
-                "Enabled modules have already been configured by another guardian"
-            );
-        }
-
         if let Some(federation_size) = state
             .setup_codes
             .iter()
@@ -267,7 +245,7 @@ impl ISetupApi for SetupApi {
         Ok(info.name)
     }
 
-    async fn start_dkg(&self) -> anyhow::Result<()> {
+    pub async fn start_dkg(&self) -> anyhow::Result<()> {
         let mut state = self.state.lock().await.clone();
 
         let local_params = state
@@ -302,12 +280,6 @@ impl ISetupApi for SetupApi {
             .find_map(|info| info.federation_name.clone())
             .context("We need one guardian to configure the federations name")?;
 
-        let enabled_modules = state
-            .setup_codes
-            .iter()
-            .find_map(|info| info.enabled_modules.clone())
-            .unwrap_or_else(|| self.settings.default_modules.clone());
-
         let our_id = state
             .setup_codes
             .iter()
@@ -326,7 +298,6 @@ impl ISetupApi for SetupApi {
                 META_FEDERATION_NAME_KEY.to_string(),
                 federation_name,
             )]),
-            enabled_modules,
             network: self.settings.network,
         };
 
@@ -338,7 +309,7 @@ impl ISetupApi for SetupApi {
         Ok(())
     }
 
-    async fn federation_size(&self) -> Option<u32> {
+    pub async fn federation_size(&self) -> Option<u32> {
         let state = self.state.lock().await;
         let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
         state
@@ -348,7 +319,7 @@ impl ISetupApi for SetupApi {
             .find_map(|info| info.federation_size)
     }
 
-    async fn cfg_federation_name(&self) -> Option<String> {
+    pub async fn cfg_federation_name(&self) -> Option<String> {
         let state = self.state.lock().await;
         let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
         state
@@ -357,31 +328,52 @@ impl ISetupApi for SetupApi {
             .chain(local_setup_code.iter())
             .find_map(|info| info.federation_name.clone())
     }
-
-    async fn cfg_enabled_modules(&self) -> Option<BTreeSet<ModuleKind>> {
-        let state = self.state.lock().await;
-        let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
-        state
-            .setup_codes
-            .iter()
-            .chain(local_setup_code.iter())
-            .find_map(|info| info.enabled_modules.clone())
-    }
 }
 
 #[async_trait]
-impl HasApiContext<SetupApi> for SetupApi {
-    async fn context(
-        &self,
-        _request: &ApiRequestErased,
-        id: Option<ModuleInstanceId>,
-    ) -> &SetupApi {
-        assert!(id.is_none());
-
-        self
+impl ISetupApi for SetupApi {
+    async fn setup_code(&self) -> Option<String> {
+        Self::setup_code(self).await
     }
-}
 
-pub fn server_endpoints() -> Vec<ApiEndpoint<SetupApi>> {
-    vec![]
+    async fn guardian_name(&self) -> Option<String> {
+        Self::guardian_name(self).await
+    }
+
+    async fn auth(&self) -> ApiAuth {
+        Self::auth(self).await
+    }
+
+    async fn connected_peers(&self) -> Vec<String> {
+        Self::connected_peers(self).await
+    }
+
+    async fn reset_setup_codes(&self) {
+        Self::reset_setup_codes(self).await;
+    }
+
+    async fn set_local_parameters(
+        &self,
+        name: String,
+        federation_name: Option<String>,
+        federation_size: Option<u32>,
+    ) -> anyhow::Result<String> {
+        Self::set_local_parameters(self, name, federation_name, federation_size).await
+    }
+
+    async fn add_peer_setup_code(&self, info: String) -> anyhow::Result<String> {
+        Self::add_peer_setup_code(self, info).await
+    }
+
+    async fn start_dkg(&self) -> anyhow::Result<()> {
+        Self::start_dkg(self).await
+    }
+
+    async fn federation_size(&self) -> Option<u32> {
+        Self::federation_size(self).await
+    }
+
+    async fn cfg_federation_name(&self) -> Option<String> {
+        Self::cfg_federation_name(self).await
+    }
 }

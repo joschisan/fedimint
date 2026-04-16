@@ -1,6 +1,6 @@
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::secp256k1::PublicKey;
-use fedimint_core::{OutPoint, table};
+use fedimint_core::{table, OutPoint};
 use fedimint_mintv2_common::{Denomination, RecoveryItem};
 use tbs::{BlindedMessage, BlindedSignatureShare};
 

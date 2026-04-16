@@ -1,15 +1,13 @@
-#![deny(clippy::pedantic)]
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::return_self_not_must_use)]
-#![allow(clippy::large_futures)]
+//! `fedimintd` process entry point.
+//!
+//! Parses CLI arguments, opens the database, wires up the bitcoin RPC, and
+//! hands off to [`crate::run_server`]. The actual daemon main is at
+//! `src/bin/fedimintd.rs` and just calls [`run`].
 
 use std::convert::Infallible;
-use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -21,13 +19,9 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::timing;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl, handle_version_hash_command};
 use fedimint_logging::{LOG_CORE, TracingSetup};
-use fedimint_server::config::ConfigGenSettings;
-use fedimint_server::config::io::DB_FILE;
-use fedimint_server::core::ServerModuleInitRegistry;
 use fedimint_server_bitcoin_rpc::BitcoindClientWithFallback;
 use fedimint_server_bitcoin_rpc::bitcoind::BitcoindClient;
 use fedimint_server_bitcoin_rpc::esplora::EsploraClient;
-use fedimint_server_core::ServerModuleInitRegistryExt;
 use fedimint_server_core::bitcoin_rpc::IServerBitcoinRpc;
 use fedimintd_envs::{
     FM_BIND_P2P_ENV, FM_BIND_TOKIO_CONSOLE_ENV, FM_BIND_UI_ENV, FM_BITCOIN_NETWORK_ENV,
@@ -38,8 +32,15 @@ use fedimintd_envs::{
 use futures::FutureExt as _;
 use tracing::{debug, error, info};
 
+use crate::config::ConfigGenSettings;
+use crate::config::io::DB_FILE;
+
 /// Time we will wait before forcefully shutting down tasks
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub fn default_network() -> Network {
+    Network::Regtest
+}
 
 #[derive(Parser)]
 #[command(version)]
@@ -76,8 +77,6 @@ struct ServerOpts {
     esplora_url: Option<SafeUrl>,
 
     /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
-    /// This should not include authentication parameters, they should be
-    /// included in `FM_BITCOIND_USERNAME` and `FM_BITCOIND_PASSWORD`
     #[arg(long, env = FM_BITCOIND_URL_ENV)]
     bitcoind_url: Option<SafeUrl>,
 
@@ -91,26 +90,14 @@ struct ServerOpts {
 
     /// If set, the password part of `--bitcoind-url` will be set/replaced with
     /// the content of this file.
-    ///
-    /// This is useful for setups that provide secret material via ramdisk
-    /// e.g. SOPS, age, etc.
-    ///
-    /// Note this is not meant to handle bitcoind's cookie file.
     #[arg(long, env = FM_BITCOIND_URL_PASSWORD_FILE_ENV)]
     bitcoind_url_password_file: Option<PathBuf>,
 
     /// Address we bind to for p2p consensus communication
-    ///
-    /// Should be `0.0.0.0:8173` most of the time, as p2p connectivity is public
-    /// and direct, and the port should be open it in the firewall.
     #[arg(long, env = FM_BIND_P2P_ENV, default_value = "0.0.0.0:8173")]
     bind_p2p: SocketAddr,
 
     /// Address we bind to for exposing the Web UI
-    ///
-    /// Built-in web UI is exposed as an HTTP port, and typically should
-    /// have TLS terminated by Nginx/Traefik/etc. and forwarded to the locally
-    /// bind port.
     #[arg(long, env = FM_BIND_UI_ENV, default_value = "127.0.0.1:8174")]
     bind_ui: SocketAddr,
 
@@ -144,7 +131,7 @@ struct ServerOpts {
 }
 
 impl ServerOpts {
-    pub async fn get_bitcoind_url_and_password(&self) -> anyhow::Result<(SafeUrl, String)> {
+    async fn get_bitcoind_url_and_password(&self) -> anyhow::Result<(SafeUrl, String)> {
         let url = self
             .bitcoind_url
             .clone()
@@ -166,161 +153,15 @@ impl ServerOpts {
     }
 }
 
-/// Block the thread and run a Fedimintd server
+/// Block the thread and run a Fedimintd server.
 ///
-/// # Arguments
-///
-/// * `module_init_registry` - The registry of available modules.
-///
-/// * `code_version_hash` - The git hash of the code that the `fedimintd` binary
-///   is being built from. This is used mostly for information purposes
-///   (`fedimintd version-hash`). See `fedimint-build` crate for easy way to
-///   obtain it.
-fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi) -> axum::Router {
-    use axum::Json;
-    use axum::extract::State;
-    use axum::routing::post;
-    use fedimint_lnv2_server::Lightning;
-    use fedimint_server::cli::CliError;
-    use fedimint_server_cli_core::{
-        AuditResponse, InviteResponse, Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_INVITE,
-        ROUTE_MODULE_LNV2_GATEWAY_ADD, ROUTE_MODULE_LNV2_GATEWAY_LIST,
-        ROUTE_MODULE_LNV2_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT,
-        ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
-        ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TX_CHAIN, WalletBlockCountResponse,
-        WalletFeerateResponse, WalletTotalValueResponse,
-    };
-    use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi};
-    use fedimint_walletv2_server::Wallet;
-
-    async fn invite(State(api): State<DynDashboardApi>) -> Result<Json<InviteResponse>, CliError> {
-        Ok(Json(InviteResponse {
-            invite_code: api.federation_invite_code().await,
-        }))
-    }
-
-    async fn audit(State(api): State<DynDashboardApi>) -> Result<Json<AuditResponse>, CliError> {
-        Ok(Json(AuditResponse {
-            audit: api.federation_audit().await,
-        }))
-    }
-
-    async fn wallet_total_value(
-        State(api): State<DynDashboardApi>,
-    ) -> Result<Json<WalletTotalValueResponse>, CliError> {
-        let wallet = api
-            .get_module::<Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2"))
-            .ok_or_else(|| CliError::internal("Wallet module not found"))?;
-        Ok(Json(WalletTotalValueResponse {
-            total_value_sats: wallet
-                .federation_wallet_ui()
-                .await
-                .map(|w| w.value.to_sat()),
-        }))
-    }
-
-    async fn wallet_block_count(
-        State(api): State<DynDashboardApi>,
-    ) -> Result<Json<WalletBlockCountResponse>, CliError> {
-        let wallet = api
-            .get_module::<Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2"))
-            .ok_or_else(|| CliError::internal("Wallet module not found"))?;
-        Ok(Json(WalletBlockCountResponse {
-            block_count: wallet.consensus_block_count_ui().await,
-        }))
-    }
-
-    async fn wallet_feerate(
-        State(api): State<DynDashboardApi>,
-    ) -> Result<Json<WalletFeerateResponse>, CliError> {
-        let wallet = api
-            .get_module::<Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2"))
-            .ok_or_else(|| CliError::internal("Wallet module not found"))?;
-        Ok(Json(WalletFeerateResponse {
-            sats_per_vbyte: wallet.consensus_feerate_ui().await,
-        }))
-    }
-
-    async fn wallet_pending_tx_chain(
-        State(api): State<DynDashboardApi>,
-    ) -> Result<Json<Vec<fedimint_walletv2_common::TxInfo>>, CliError> {
-        let wallet = api
-            .get_module::<Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2"))
-            .ok_or_else(|| CliError::internal("Wallet module not found"))?;
-        Ok(Json(wallet.pending_tx_chain_ui().await))
-    }
-
-    async fn wallet_tx_chain(
-        State(api): State<DynDashboardApi>,
-    ) -> Result<Json<Vec<fedimint_walletv2_common::TxInfo>>, CliError> {
-        let wallet = api
-            .get_module::<Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2"))
-            .ok_or_else(|| CliError::internal("Wallet module not found"))?;
-        Ok(Json(wallet.tx_chain_ui().await))
-    }
-
-    async fn lnv2_gateway_add(
-        State(api): State<DynDashboardApi>,
-        Json(payload): Json<Lnv2GatewayRequest>,
-    ) -> Result<Json<bool>, CliError> {
-        let lnv2 = api
-            .get_module::<Lightning>(fedimint_core::core::ModuleKind::from_static_str("lnv2"))
-            .ok_or_else(|| CliError::internal("LNv2 module not found"))?;
-        let url: fedimint_core::util::SafeUrl = payload
-            .url
-            .parse()
-            .map_err(|e| CliError::internal(format!("Invalid URL: {e}")))?;
-        Ok(Json(lnv2.add_gateway_ui(url).await))
-    }
-
-    async fn lnv2_gateway_remove(
-        State(api): State<DynDashboardApi>,
-        Json(payload): Json<Lnv2GatewayRequest>,
-    ) -> Result<Json<bool>, CliError> {
-        let lnv2 = api
-            .get_module::<Lightning>(fedimint_core::core::ModuleKind::from_static_str("lnv2"))
-            .ok_or_else(|| CliError::internal("LNv2 module not found"))?;
-        let url: fedimint_core::util::SafeUrl = payload
-            .url
-            .parse()
-            .map_err(|e| CliError::internal(format!("Invalid URL: {e}")))?;
-        Ok(Json(lnv2.remove_gateway_ui(url).await))
-    }
-
-    async fn lnv2_gateway_list(
-        State(api): State<DynDashboardApi>,
-    ) -> Result<Json<Vec<fedimint_core::util::SafeUrl>>, CliError> {
-        let lnv2 = api
-            .get_module::<Lightning>(fedimint_core::core::ModuleKind::from_static_str("lnv2"))
-            .ok_or_else(|| CliError::internal("LNv2 module not found"))?;
-        Ok(Json(lnv2.gateways_ui().await))
-    }
-
-    axum::Router::new()
-        .route(ROUTE_INVITE, post(invite))
-        .route(ROUTE_AUDIT, post(audit))
-        .route(ROUTE_MODULE_WALLET_TOTAL_VALUE, post(wallet_total_value))
-        .route(ROUTE_MODULE_WALLET_BLOCK_COUNT, post(wallet_block_count))
-        .route(ROUTE_MODULE_WALLET_FEERATE, post(wallet_feerate))
-        .route(
-            ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
-            post(wallet_pending_tx_chain),
-        )
-        .route(ROUTE_MODULE_WALLET_TX_CHAIN, post(wallet_tx_chain))
-        .route(ROUTE_MODULE_LNV2_GATEWAY_ADD, post(lnv2_gateway_add))
-        .route(ROUTE_MODULE_LNV2_GATEWAY_REMOVE, post(lnv2_gateway_remove))
-        .route(ROUTE_MODULE_LNV2_GATEWAY_LIST, post(lnv2_gateway_list))
-        .with_state(api)
-}
-
-/// * `code_version_vendor_suffix` - An optional suffix that will be appended to
-///   the internal fedimint release version, to distinguish binaries built by
-///   different vendors, usually with a different set of modules. Currently DKG
-///   will enforce that the combined `code_version` is the same between all
-///   peers.
-#[allow(clippy::too_many_lines)]
+/// `code_version_hash` is the git hash of the binary being built (see the
+/// `fedimint-build` crate). It is surfaced via `fedimintd version-hash`.
+/// `code_version_vendor_suffix` is an optional suffix appended to the internal
+/// fedimint release version to distinguish binaries built by different vendors
+/// with different module sets. DKG enforces that the combined `code_version` is
+/// the same across all peers.
 pub async fn run(
-    module_init_registry: ServerModuleInitRegistry,
     code_version_hash: &str,
     code_version_vendor_suffix: Option<&str>,
 ) -> anyhow::Result<Infallible> {
@@ -337,9 +178,7 @@ pub async fn run(
     let server_opts = ServerOpts::parse();
 
     let mut tracing_builder = TracingSetup::default();
-
     tracing_builder.tokio_console_bind(server_opts.bind_tokio_console);
-
     tracing_builder.init().unwrap();
 
     info!("Starting fedimintd (version: {fedimint_version} version_hash: {code_version_hash})");
@@ -359,8 +198,6 @@ pub async fn run(
         iroh_dns: server_opts.iroh_dns.clone(),
         iroh_relays: server_opts.iroh_relays.clone(),
         network: server_opts.bitcoin_network,
-        available_modules: module_init_registry.kinds(),
-        default_modules: module_init_registry.default_modules(),
     };
 
     let db = fedimint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
@@ -413,22 +250,26 @@ pub async fn run(
     let ui_password = fedimint_core::module::ApiAuth::new(server_opts.ui_password);
 
     let task_group = root_task_group.clone();
+    let data_dir = server_opts.data_dir.clone();
+    let max_connections = server_opts.max_connections;
+    let max_requests_per_connection = server_opts.max_requests_per_connection;
+    let cli_bind = server_opts.bind_cli;
+
     root_task_group.spawn_cancellable("main", async move {
-        fedimint_server::run(
-            server_opts.data_dir,
+        crate::run_server(
+            data_dir,
             ui_password,
             settings,
             db,
             code_version_str,
-            module_init_registry,
             task_group,
             dyn_server_bitcoin_rpc,
-            Box::new(fedimint_server_ui::setup::router),
-            Box::new(fedimint_server_ui::dashboard::router),
-            Box::new(dashboard_cli_router),
-            server_opts.max_connections,
-            server_opts.max_requests_per_connection,
-            server_opts.bind_cli,
+            Box::new(|api| fedimint_server_ui::setup::router(api)),
+            Box::new(|api| fedimint_server_ui::dashboard::router(api)),
+            Box::new(|api| crate::cli::dashboard_cli_router(api)),
+            max_connections,
+            max_requests_per_connection,
+            cli_bind,
         )
         .await
         .unwrap_or_else(|err| panic!("Main task returned error: {}", err.fmt_compact_anyhow()));
@@ -455,15 +296,8 @@ pub async fn run(
 
     drop(timing_total_runtime);
 
+    // Silence the `Arc` warning — `Arc` keeps `dyn_server_bitcoin_rpc` alive.
+    let _ = Arc::<u32>::new(0);
+
     std::process::exit(-1);
-}
-
-pub fn default_modules() -> ServerModuleInitRegistry {
-    let mut server_gens = ServerModuleInitRegistry::new();
-
-    server_gens.attach(fedimint_mintv2_server::MintInit);
-    server_gens.attach(fedimint_walletv2_server::WalletInit);
-    server_gens.attach(fedimint_lnv2_server::LightningInit);
-
-    server_gens
 }

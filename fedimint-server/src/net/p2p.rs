@@ -15,7 +15,7 @@ use fedimint_core::task::{TaskGroup, sleep};
 use fedimint_core::util::FmtCompactAnyhow;
 use fedimint_core::util::backoff_util::{FibonacciBackoff, api_networking_backoff};
 use fedimint_logging::{LOG_CONSENSUS, LOG_NET_PEER};
-use fedimint_server_core::dashboard_ui::P2PConnectionStatus;
+use fedimint_server_core::P2PConnectionStatus;
 use futures::FutureExt;
 use futures::future::select_all;
 use tokio::sync::watch;

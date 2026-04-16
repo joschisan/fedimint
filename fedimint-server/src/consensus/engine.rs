@@ -8,7 +8,6 @@ use fedimint_api_client::session_outcome::{AcceptedItem, SessionOutcome, SignedS
 use fedimint_api_client::transaction::ConsensusItem;
 use fedimint_core::encoding::Decodable;
 use fedimint_core::module::audit::Audit;
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::net::peers::{DynP2PConnections, Recipient};
 use fedimint_core::runtime::spawn;
 use fedimint_core::secp256k1::schnorr;
@@ -284,7 +283,7 @@ impl ConsensusEngine {
                             }
                         }
 
-                        match Vec::<ConsensusItem>::consensus_decode_whole(&bytes, &self.decoders()) {
+                        match Vec::<ConsensusItem>::consensus_decode_whole(&bytes, &Default::default()) {
                             Ok(items) => {
                                 for item in items {
                                     if let Ok(()) = self.process_consensus_item(
@@ -513,13 +512,6 @@ impl ConsensusEngine {
             .all(|(signer_id, sig)| keychain.verify_schnorr(&header, sig, *signer_id))
     }
 
-    fn decoders(&self) -> ModuleDecoderRegistry {
-        // With static wire enums the ConsensusItem / Transaction decoders are
-        // self-contained; the registry is only kept for any residual Dyn
-        // types (e.g. DynOutputOutcome) and can be empty here.
-        ModuleDecoderRegistry::default()
-    }
-
     pub async fn pending_accepted_items(&self) -> Vec<AcceptedItem> {
         self.db
             .begin_read()
@@ -646,12 +638,8 @@ impl ConsensusEngine {
     ) -> anyhow::Result<()> {
         match consensus_item {
             ConsensusItem::Module(module_item) => {
-                let instance_id = module_item.module_instance_id();
-
-                let view = tx.isolate(format!("module-{instance_id}"));
-
                 self.server
-                    .process_consensus_item(&view, &module_item, peer_id)
+                    .process_consensus_item(&tx.as_ref(), &module_item, peer_id)
                     .await
             }
             ConsensusItem::Transaction(transaction) => {

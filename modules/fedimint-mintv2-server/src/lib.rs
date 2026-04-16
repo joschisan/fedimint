@@ -9,130 +9,83 @@ mod db;
 use std::collections::BTreeMap;
 
 use anyhow::ensure;
-use fedimint_core::config::{
-    ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
-    TypedServerModuleConsensusConfig,
-};
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
-    ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta, ModuleConsensusVersion,
-    ModuleInit, TransactionItemAmounts, api_endpoint,
+    api_endpoint, ApiEndpoint, ApiError, ApiVersion, InputMeta, TransactionItemAmounts,
 };
-use fedimint_core::{Amount, InPoint, OutPoint, PeerId, apply, async_trait_maybe_send};
+use fedimint_core::{apply, async_trait_maybe_send, Amount, InPoint, OutPoint, PeerId};
 use fedimint_mintv2_common::config::{
-    MintClientConfig, MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
+    consensus_denominations, MintConfig, MintConfigConsensus, MintConfigPrivate,
 };
 use fedimint_mintv2_common::endpoint_constants::{
     RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
     SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
 };
 use fedimint_mintv2_common::{
-    Denomination, MODULE_CONSENSUS_VERSION, MintCommonInit, MintConsensusItem, MintInput,
-    MintInputError, MintModuleTypes, MintOutput, MintOutputError, RecoveryItem, verify_note,
+    verify_note, Denomination, MintConsensusItem, MintInput, MintInputError, MintModuleTypes,
+    MintOutput, MintOutputError, RecoveryItem,
 };
 use fedimint_redb::{Database, ReadTxRef, WriteTxRef};
-use fedimint_server_core::config::{PeerHandleOps, eval_poly_g2};
-use fedimint_server_core::{
-    ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
-};
-use tbs::{AggregatePublicKey, BlindedSignatureShare, PublicKeyShare, derive_pk_share};
+use fedimint_server_core::config::{eval_poly_g2, PeerHandleOps};
+use fedimint_server_core::ServerModule;
+use tbs::{derive_pk_share, AggregatePublicKey, BlindedSignatureShare, PublicKeyShare};
 use threshold_crypto::group::Curve;
 
 use crate::db::{
-    BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER, NOTE_NONCE,
-    NoteNonceKey, RECOVERY_ITEM,
+    NoteNonceKey, BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER,
+    NOTE_NONCE, RECOVERY_ITEM,
 };
 
-#[derive(Debug, Clone)]
-pub struct MintInit;
+/// Run DKG for the mint module, producing a fresh `MintConfig` for this peer.
+pub async fn distributed_gen(
+    peers: &(dyn PeerHandleOps + Send + Sync),
+) -> anyhow::Result<MintConfig> {
+    let mut tbs_sks = BTreeMap::new();
+    let mut tbs_agg_pks = BTreeMap::new();
+    let mut tbs_pks = BTreeMap::new();
 
-impl ModuleInit for MintInit {
-    type Common = MintCommonInit;
+    for denomination in consensus_denominations() {
+        let (poly, sk) = peers.run_dkg_g2().await?;
+
+        tbs_sks.insert(denomination, tbs::SecretKeyShare(sk));
+
+        tbs_agg_pks.insert(denomination, AggregatePublicKey(poly[0].to_affine()));
+
+        let pks = peers
+            .num_peers()
+            .peer_ids()
+            .map(|peer| (peer, PublicKeyShare(eval_poly_g2(&poly, &peer))))
+            .collect();
+
+        tbs_pks.insert(denomination, pks);
+    }
+
+    Ok(MintConfig {
+        private: MintConfigPrivate { tbs_sks },
+        consensus: MintConfigConsensus {
+            tbs_agg_pks,
+            tbs_pks,
+            input_fee: Amount::from_msats(100),
+            output_fee: Amount::from_msats(100),
+        },
+    })
 }
 
-#[apply(async_trait_maybe_send!)]
-impl ServerModuleInit for MintInit {
-    type Module = Mint;
+/// Verify our private tbs shares match the public shares in the consensus
+/// config.
+pub fn validate_config(identity: &PeerId, cfg: &MintConfig) -> anyhow::Result<()> {
+    for denomination in consensus_denominations() {
+        let pk = derive_pk_share(&cfg.private.tbs_sks[&denomination]);
 
-    fn versions(&self, _core: CoreConsensusVersion) -> &[ModuleConsensusVersion] {
-        &[MODULE_CONSENSUS_VERSION]
+        ensure!(
+            pk == cfg.consensus.tbs_pks[&denomination][identity],
+            "Mint private key doesn't match pubkey share"
+        );
     }
 
-    async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
-        args.cfg().to_typed().map(|cfg| Mint {
-            cfg,
-            db: args.db().clone(),
-        })
-    }
-
-    async fn distributed_gen(
-        &self,
-        peers: &(dyn PeerHandleOps + Send + Sync),
-        _args: &ConfigGenModuleArgs,
-    ) -> anyhow::Result<ServerModuleConfig> {
-        let mut tbs_sks = BTreeMap::new();
-        let mut tbs_agg_pks = BTreeMap::new();
-        let mut tbs_pks = BTreeMap::new();
-
-        for denomination in consensus_denominations() {
-            let (poly, sk) = peers.run_dkg_g2().await?;
-
-            tbs_sks.insert(denomination, tbs::SecretKeyShare(sk));
-
-            tbs_agg_pks.insert(denomination, AggregatePublicKey(poly[0].to_affine()));
-
-            let pks = peers
-                .num_peers()
-                .peer_ids()
-                .map(|peer| (peer, PublicKeyShare(eval_poly_g2(&poly, &peer))))
-                .collect();
-
-            tbs_pks.insert(denomination, pks);
-        }
-
-        let cfg = MintConfig {
-            private: MintConfigPrivate { tbs_sks },
-            consensus: MintConfigConsensus {
-                tbs_agg_pks,
-                tbs_pks,
-                input_fee: Amount::from_msats(100),
-                output_fee: Amount::from_msats(100),
-            },
-        };
-
-        Ok(cfg.to_erased())
-    }
-
-    fn validate_config(&self, identity: &PeerId, config: ServerModuleConfig) -> anyhow::Result<()> {
-        let config = config.to_typed::<MintConfig>()?;
-
-        for denomination in consensus_denominations() {
-            let pk = derive_pk_share(&config.private.tbs_sks[&denomination]);
-
-            ensure!(
-                pk == config.consensus.tbs_pks[&denomination][identity],
-                "Mint private key doesn't match pubkey share"
-            );
-        }
-
-        Ok(())
-    }
-
-    fn get_client_config(
-        &self,
-        config: &ServerModuleConsensusConfig,
-    ) -> anyhow::Result<MintClientConfig> {
-        let config = MintConfigConsensus::from_erased(config)?;
-
-        Ok(MintClientConfig {
-            tbs_agg_pks: config.tbs_agg_pks,
-            tbs_pks: config.tbs_pks.clone(),
-            input_fee: config.input_fee,
-            output_fee: config.output_fee,
-        })
-    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -142,6 +95,10 @@ pub struct Mint {
 }
 
 impl Mint {
+    pub fn new(cfg: MintConfig, db: Database) -> Self {
+        Self { cfg, db }
+    }
+
     pub async fn note_distribution_ui(&self) -> BTreeMap<Denomination, u64> {
         self.db
             .begin_read()
@@ -156,7 +113,6 @@ impl Mint {
 #[apply(async_trait_maybe_send!)]
 impl ServerModule for Mint {
     type Common = MintModuleTypes;
-    type Init = MintInit;
 
     async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<MintConsensusItem> {
         Vec::new()

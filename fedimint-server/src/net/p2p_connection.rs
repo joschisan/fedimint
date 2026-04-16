@@ -1,9 +1,7 @@
-use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use iroh::Watcher as _;
 use iroh::endpoint::{Connection, RecvStream};
 
@@ -52,12 +50,11 @@ pub trait IP2PConnection<M>: Send + 'static {
 
 pub struct IrohRecvFrame {
     stream: RecvStream,
-    decoders: Arc<OnceLock<ModuleDecoderRegistry>>,
 }
 
 impl IrohRecvFrame {
-    pub fn new(stream: RecvStream, decoders: Arc<OnceLock<ModuleDecoderRegistry>>) -> Self {
-        Self { stream, decoders }
+    pub fn new(stream: RecvStream) -> Self {
+        Self { stream }
     }
 }
 
@@ -69,23 +66,17 @@ where
     async fn read_to_end(&mut self) -> anyhow::Result<M> {
         let bytes = self.stream.read_to_end(MAX_P2P_MESSAGE_SIZE).await?;
 
-        let decoders = self.decoders.get().cloned().unwrap_or_default();
-
-        Ok(M::consensus_decode_whole(&bytes, &decoders)?)
+        Ok(M::consensus_decode_whole(&bytes, &Default::default())?)
     }
 }
 
 pub struct IrohP2PConnection {
     connection: Connection,
-    decoders: Arc<OnceLock<ModuleDecoderRegistry>>,
 }
 
 impl IrohP2PConnection {
-    pub fn new(connection: Connection, decoders: Arc<OnceLock<ModuleDecoderRegistry>>) -> Self {
-        Self {
-            connection,
-            decoders,
-        }
+    pub fn new(connection: Connection) -> Self {
+        Self { connection }
     }
 }
 
@@ -107,7 +98,7 @@ where
     async fn receive(&mut self) -> anyhow::Result<DynIP2PFrame<M>> {
         let stream = self.connection.accept_uni().await?;
 
-        let frame = IrohRecvFrame::new(stream, self.decoders.clone());
+        let frame = IrohRecvFrame::new(stream);
 
         Ok(frame.into_dyn())
     }

@@ -2,21 +2,12 @@ use std::collections::BTreeMap;
 
 use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
-use fedimint_core::core::ModuleKind;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::{Amount, PeerId, plugin_types_trait_impl_config, weight_to_vbytes};
+use fedimint_core::{Amount, PeerId, weight_to_vbytes};
 use secp256k1::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 
-use crate::{WalletCommonInit, descriptor};
-
-plugin_types_trait_impl_config!(
-    WalletCommonInit,
-    WalletConfig,
-    WalletConfigPrivate,
-    WalletConfigConsensus,
-    WalletClientConfig
-);
+use crate::descriptor;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WalletConfig {
@@ -152,5 +143,20 @@ pub struct WalletClientConfig {
 impl std::fmt::Display for WalletClientConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "WalletClientConfig {self:?}")
+    }
+}
+
+impl WalletConfigConsensus {
+    pub fn to_client(&self) -> WalletClientConfig {
+        WalletClientConfig {
+            bitcoin_pks: self.bitcoin_pks.clone(),
+            send_tx_vbytes: self.send_tx_vbytes,
+            receive_tx_vbytes: self.receive_tx_vbytes,
+            feerate_base: self.feerate_base,
+            dust_limit: self.dust_limit,
+            input_fee: self.input_fee,
+            output_fee: self.output_fee,
+            network: self.network,
+        }
     }
 }

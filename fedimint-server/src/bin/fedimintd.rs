@@ -10,10 +10,5 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<Infallible> {
-    fedimintd::run(
-        fedimintd::default_modules(),
-        fedimint_build_code_version_env!(),
-        None,
-    )
-    .await
+    fedimint_server::run(fedimint_build_code_version_env!(), None).await
 }

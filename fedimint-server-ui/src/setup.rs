@@ -1,13 +1,9 @@
-use std::collections::BTreeSet;
-
 use axum::Router;
 use axum::extract::State;
 use axum::response::{Html, IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum_extra::extract::Form;
 use axum_extra::extract::cookie::CookieJar;
-use fedimint_core::core::ModuleKind;
-use fedimint_server_core::setup_ui::DynSetupApi;
 use fedimint_ui_common::assets::WithStaticRoutesExt;
 use fedimint_ui_common::auth::UserAuth;
 use fedimint_ui_common::{
@@ -18,6 +14,8 @@ use fedimint_ui_common::{
 use maud::{Markup, PreEscaped, html};
 use qrcode::QrCode;
 use serde::Deserialize;
+
+use crate::DynSetupApi;
 
 // Setup route constants
 pub const FEDERATION_SETUP_ROUTE: &str = "/federation_setup";
@@ -33,8 +31,6 @@ pub(crate) struct SetupInput {
     pub federation_name: String,
     #[serde(default)]
     pub federation_size: String,
-    #[serde(default)] // list of enabled module kinds
-    pub enabled_modules: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,7 +42,6 @@ fn peer_list_section(
     connected_peers: &[String],
     federation_size: Option<u32>,
     cfg_federation_name: &Option<String>,
-    cfg_enabled_modules: &Option<BTreeSet<ModuleKind>>,
     error: Option<&str>,
 ) -> Markup {
     let total_guardians = connected_peers.len() + 1;
@@ -78,10 +73,7 @@ fn peer_list_section(
             }
 
             @if can_start_dkg {
-                // All guardians connected — show confirm form
-                @let has_settings = cfg_federation_name.is_some()
-                    || federation_size.is_some()
-                    || cfg_enabled_modules.is_some();
+                @let has_settings = cfg_federation_name.is_some() || federation_size.is_some();
 
                 form id="start-dkg-form" hx-post=(START_DKG_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
                     @if let Some(error) = error {
@@ -97,15 +89,10 @@ fn peer_list_section(
                         } @else {
                             "The federation has been configured"
                         }
-                        @if let Some(modules) = cfg_enabled_modules {
-                            " and modules "
-                            (modules.iter().map(|m| m.as_str().to_owned()).collect::<Vec<_>>().join(", "))
-                        }
                         "."
                     }
                 }
             } @else {
-                // Still collecting — show add guardian form
                 form id="add-setup-code-form" hx-post=(ADD_SETUP_CODE_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
                     div class="mb-3" {
                         div class="input-group" {
@@ -127,11 +114,7 @@ fn peer_list_section(
     }
 }
 
-fn setup_form_content(
-    available_modules: &BTreeSet<ModuleKind>,
-    default_modules: &BTreeSet<ModuleKind>,
-    error: Option<&str>,
-) -> Markup {
+fn setup_form_content(error: Option<&str>) -> Markup {
     html! {
         form id="setup-form" hx-post=(ROOT_ROUTE) hx-target="#setup-form" hx-swap="outerHTML" {
             style {
@@ -141,27 +124,6 @@ fn setup_form_content(
                 }
 
                 .toggle-control:checked ~ .toggle-content {
-                    display: block;
-                }
-
-                .accordion-button {
-                    background-color: #f8f9fa;
-                }
-
-                .accordion-button:not(.collapsed) {
-                    background-color: #f8f9fa;
-                    box-shadow: none;
-                }
-
-                .accordion-button:focus {
-                    box-shadow: none;
-                }
-
-                #modules-warning {
-                    display: none;
-                }
-
-                #modules-list:has(.form-check-input:not(:checked)) ~ #modules-warning {
                     display: block;
                 }
                 "#
@@ -202,44 +164,6 @@ fn setup_form_content(
                             }
                         }
                     }
-
-                    div class="accordion mt-3" id="modulesAccordion" {
-                        div class="accordion-item" {
-                            h2 class="accordion-header" {
-                                button class="accordion-button collapsed" type="button"
-                                    data-bs-toggle="collapse" data-bs-target="#modulesConfig"
-                                    aria-expanded="false" aria-controls="modulesConfig" {
-                                    "Advanced: Configure Enabled Modules"
-                                }
-                            }
-                            div id="modulesConfig" class="accordion-collapse collapse" data-bs-parent="#modulesAccordion" {
-                                div class="accordion-body" {
-                                    div id="modules-list" {
-                                        @for kind in available_modules {
-                                            div class="form-check" {
-                                                input type="checkbox" class="form-check-input"
-                                                    id=(format!("module_{}", kind.as_str()))
-                                                    name="enabled_modules"
-                                                    value=(kind.as_str())
-                                                    checked[default_modules.contains(kind)];
-
-                                                label class="form-check-label" for=(format!("module_{}", kind.as_str())) {
-                                                    (kind.as_str())
-                                                    @if !default_modules.contains(kind) {
-                                                        span class="badge bg-warning text-dark ms-2" { "experimental" }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    div id="modules-warning" class="alert alert-warning mt-2 mb-0" style="font-size: 0.875rem;" {
-                                        "Only modify this if you know what you are doing. Disabled modules cannot be enabled later."
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
             }
 
@@ -257,11 +181,8 @@ async fn setup_form(State(state): State<UiState<DynSetupApi>>) -> impl IntoRespo
         return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
     }
 
-    let available_modules = state.api.available_modules();
-    let default_modules = state.api.default_modules();
-    let content = setup_form_content(&available_modules, &default_modules, None);
-
-    Html(single_card_layout("Guardian Setup", content).into_string()).into_response()
+    Html(single_card_layout("Guardian Setup", setup_form_content(None)).into_string())
+        .into_response()
 }
 
 // POST handler for the /setup route (process the setup form)
@@ -269,24 +190,9 @@ async fn setup_submit(
     State(state): State<UiState<DynSetupApi>>,
     Form(input): Form<SetupInput>,
 ) -> impl IntoResponse {
-    let available_modules = state.api.available_modules();
-    let default_modules = state.api.default_modules();
-
     // Only use these settings if is_lead is true
     let federation_name = if input.is_lead {
         Some(input.federation_name)
-    } else {
-        None
-    };
-
-    let enabled_modules = if input.is_lead {
-        let enabled: BTreeSet<ModuleKind> = input
-            .enabled_modules
-            .into_iter()
-            .map(|s| ModuleKind::clone_from_str(&s))
-            .collect();
-
-        Some(enabled)
     } else {
         None
     };
@@ -299,15 +205,8 @@ async fn setup_submit(
             match s.parse::<u32>() {
                 Ok(size) => Some(size),
                 Err(_) => {
-                    return Html(
-                        setup_form_content(
-                            &available_modules,
-                            &default_modules,
-                            Some("Invalid federation size"),
-                        )
-                        .into_string(),
-                    )
-                    .into_response();
+                    return Html(setup_form_content(Some("Invalid federation size")).into_string())
+                        .into_response();
                 }
             }
         }
@@ -317,12 +216,7 @@ async fn setup_submit(
 
     match state
         .api
-        .set_local_parameters(
-            input.name,
-            federation_name,
-            enabled_modules,
-            federation_size,
-        )
+        .set_local_parameters(input.name, federation_name, federation_size)
         .await
     {
         Ok(_) => (
@@ -330,11 +224,7 @@ async fn setup_submit(
             Html(String::new()),
         )
             .into_response(),
-        Err(e) => Html(
-            setup_form_content(&available_modules, &default_modules, Some(&e.to_string()))
-                .into_string(),
-        )
-        .into_response(),
+        Err(e) => Html(setup_form_content(Some(&e.to_string())).into_string()).into_response(),
     }
 }
 
@@ -377,7 +267,6 @@ async fn federation_setup(
     let connected_peers = state.api.connected_peers().await;
     let federation_size = state.api.federation_size().await;
     let cfg_federation_name = state.api.cfg_federation_name().await;
-    let cfg_enabled_modules = state.api.cfg_enabled_modules().await;
 
     let content = html! {
         p { "Share this with your fellow guardians." }
@@ -402,7 +291,7 @@ async fn federation_setup(
             (copiable_text(&our_connection_info))
         }
 
-        (peer_list_section(&connected_peers, federation_size, &cfg_federation_name, &cfg_enabled_modules, None))
+        (peer_list_section(&connected_peers, federation_size, &cfg_federation_name, None))
 
         // QR Scanner Modal
         div class="modal fade" id="qrScannerModal" tabindex="-1" aria-labelledby="qrScannerModalLabel" aria-hidden="true" {
@@ -425,14 +314,12 @@ async fn federation_setup(
 
         script src="/assets/html5-qrcode.min.js" {}
 
-        // QR Scanner JavaScript
         script {
             (PreEscaped(r#"
             var html5QrCode = null;
             var qrScannerModal = null;
 
             function startQrScanner() {
-                // Check for Flutter override hook
                 if (typeof window.fedimintQrScannerOverride === 'function') {
                     window.fedimintQrScannerOverride(function(result) {
                         if (result) {
@@ -445,20 +332,17 @@ async fn federation_setup(
                 var modalEl = document.getElementById('qrScannerModal');
                 qrScannerModal = new bootstrap.Modal(modalEl);
 
-                // Reset error message
                 var errorEl = document.getElementById('qr-reader-error');
                 errorEl.classList.add('d-none');
                 errorEl.textContent = '';
 
                 qrScannerModal.show();
 
-                // Wait for modal to be shown before starting camera
                 modalEl.addEventListener('shown.bs.modal', function onShown() {
                     modalEl.removeEventListener('shown.bs.modal', onShown);
                     initializeScanner();
                 });
 
-                // Clean up when modal is hidden
                 modalEl.addEventListener('hidden.bs.modal', function onHidden() {
                     modalEl.removeEventListener('hidden.bs.modal', onHidden);
                     stopQrScanner();
@@ -478,12 +362,10 @@ async fn federation_setup(
                     { facingMode: "environment" },
                     config,
                     function(decodedText, decodedResult) {
-                        // Success - populate input and close modal
                         document.getElementById('peer_info').value = decodedText;
                         qrScannerModal.hide();
                     },
                     function(errorMessage) {
-                        // Ignore scan errors (happens constantly while searching)
                     }
                 ).catch(function(err) {
                     var errorEl = document.getElementById('qr-reader-error');
@@ -506,7 +388,6 @@ async fn federation_setup(
     Html(single_card_layout("Federation Setup", content).into_string()).into_response()
 }
 
-// POST handler for adding peer connection info
 async fn post_add_setup_code(
     State(state): State<UiState<DynSetupApi>>,
     _auth: UserAuth,
@@ -517,14 +398,12 @@ async fn post_add_setup_code(
     let connected_peers = state.api.connected_peers().await;
     let federation_size = state.api.federation_size().await;
     let cfg_federation_name = state.api.cfg_federation_name().await;
-    let cfg_enabled_modules = state.api.cfg_enabled_modules().await;
 
     Html(
         peer_list_section(
             &connected_peers,
             federation_size,
             &cfg_federation_name,
-            &cfg_enabled_modules,
             error.as_ref().map(|e| e.to_string()).as_deref(),
         )
         .into_string(),
@@ -532,7 +411,6 @@ async fn post_add_setup_code(
     .into_response()
 }
 
-// POST handler for starting the DKG process
 async fn post_start_dkg(
     State(state): State<UiState<DynSetupApi>>,
     _auth: UserAuth,
@@ -553,7 +431,6 @@ async fn post_start_dkg(
                     "All guardians need to confirm their settings. Once completed you will be redirected to the Dashboard."
                 }
 
-                // Poll until the dashboard is ready, then redirect
                 div
                     hx-get=(ROOT_ROUTE)
                     hx-trigger="every 2s"
@@ -582,14 +459,12 @@ async fn post_start_dkg(
             let connected_peers = state.api.connected_peers().await;
             let federation_size = state.api.federation_size().await;
             let cfg_federation_name = state.api.cfg_federation_name().await;
-            let cfg_enabled_modules = state.api.cfg_enabled_modules().await;
 
             Html(
                 peer_list_section(
                     &connected_peers,
                     federation_size,
                     &cfg_federation_name,
-                    &cfg_enabled_modules,
                     Some(&e.to_string()),
                 )
                 .into_string(),
@@ -599,7 +474,6 @@ async fn post_start_dkg(
     }
 }
 
-// POST handler for resetting peer connection info
 async fn post_reset_setup_codes(
     State(state): State<UiState<DynSetupApi>>,
     _auth: UserAuth,

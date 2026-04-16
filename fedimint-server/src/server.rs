@@ -18,6 +18,13 @@ use fedimint_redb::{ReadTxRef, WriteTransaction, WriteTxRef};
 use fedimint_server_core::ServerModule;
 use fedimint_walletv2_server::Wallet;
 
+/// Per-module database isolation namespaces. Each `Server` method scopes its
+/// view through [`fedimint_redb::ReadTxRef::isolate`] / [`WriteTxRef::isolate`]
+/// so modules never see anything outside their own keyspace.
+pub const MINT_NS: &str = "mint";
+pub const LN_NS: &str = "ln";
+pub const WALLET_NS: &str = "wallet";
+
 #[derive(Clone)]
 pub struct Server {
     pub mint: Arc<Mint>,
@@ -30,21 +37,21 @@ impl Server {
         let mut items = Vec::new();
         items.extend(
             self.mint
-                .consensus_proposal(&dbtx.isolate(format!("module-{MINT_INSTANCE_ID}")))
+                .consensus_proposal(&dbtx.isolate(MINT_NS.to_string()))
                 .await
                 .into_iter()
                 .map(wire::ModuleConsensusItem::Mint),
         );
         items.extend(
             self.ln
-                .consensus_proposal(&dbtx.isolate(format!("module-{LN_INSTANCE_ID}")))
+                .consensus_proposal(&dbtx.isolate(LN_NS.to_string()))
                 .await
                 .into_iter()
                 .map(wire::ModuleConsensusItem::Ln),
         );
         items.extend(
             self.wallet
-                .consensus_proposal(&dbtx.isolate(format!("module-{WALLET_INSTANCE_ID}")))
+                .consensus_proposal(&dbtx.isolate(WALLET_NS.to_string()))
                 .await
                 .into_iter()
                 .map(wire::ModuleConsensusItem::Wallet),
@@ -62,12 +69,16 @@ impl Server {
             wire::ModuleConsensusItem::Mint(ci) => match *ci {},
             wire::ModuleConsensusItem::Ln(ci) => {
                 self.ln
-                    .process_consensus_item(dbtx, ci.clone(), peer_id)
+                    .process_consensus_item(&dbtx.isolate(LN_NS.to_string()), ci.clone(), peer_id)
                     .await
             }
             wire::ModuleConsensusItem::Wallet(ci) => {
                 self.wallet
-                    .process_consensus_item(dbtx, ci.clone(), peer_id)
+                    .process_consensus_item(
+                        &dbtx.isolate(WALLET_NS.to_string()),
+                        ci.clone(),
+                        peer_id,
+                    )
                     .await
             }
         }
@@ -82,17 +93,17 @@ impl Server {
         match input {
             wire::Input::Mint(i) => self
                 .mint
-                .process_input(dbtx, i, in_point)
+                .process_input(&dbtx.isolate(MINT_NS.to_string()), i, in_point)
                 .await
                 .map_err(wire::InputError::Mint),
             wire::Input::Ln(i) => self
                 .ln
-                .process_input(dbtx, i, in_point)
+                .process_input(&dbtx.isolate(LN_NS.to_string()), i, in_point)
                 .await
                 .map_err(wire::InputError::Ln),
             wire::Input::Wallet(i) => self
                 .wallet
-                .process_input(dbtx, i, in_point)
+                .process_input(&dbtx.isolate(WALLET_NS.to_string()), i, in_point)
                 .await
                 .map_err(wire::InputError::Wallet),
         }
@@ -107,17 +118,17 @@ impl Server {
         match output {
             wire::Output::Mint(o) => self
                 .mint
-                .process_output(dbtx, o, out_point)
+                .process_output(&dbtx.isolate(MINT_NS.to_string()), o, out_point)
                 .await
                 .map_err(wire::OutputError::Mint),
             wire::Output::Ln(o) => self
                 .ln
-                .process_output(dbtx, o, out_point)
+                .process_output(&dbtx.isolate(LN_NS.to_string()), o, out_point)
                 .await
                 .map_err(wire::OutputError::Ln),
             wire::Output::Wallet(o) => self
                 .wallet
-                .process_output(dbtx, o, out_point)
+                .process_output(&dbtx.isolate(WALLET_NS.to_string()), o, out_point)
                 .await
                 .map_err(wire::OutputError::Wallet),
         }
@@ -125,22 +136,14 @@ impl Server {
 
     pub async fn audit(&self, dbtx: &WriteTransaction, audit: &mut Audit) {
         self.mint
-            .audit(
-                &dbtx.isolate(format!("module-{MINT_INSTANCE_ID}")),
-                audit,
-                MINT_INSTANCE_ID,
-            )
+            .audit(&dbtx.isolate(MINT_NS.to_string()), audit, MINT_INSTANCE_ID)
             .await;
         self.ln
-            .audit(
-                &dbtx.isolate(format!("module-{LN_INSTANCE_ID}")),
-                audit,
-                LN_INSTANCE_ID,
-            )
+            .audit(&dbtx.isolate(LN_NS.to_string()), audit, LN_INSTANCE_ID)
             .await;
         self.wallet
             .audit(
-                &dbtx.isolate(format!("module-{WALLET_INSTANCE_ID}")),
+                &dbtx.isolate(WALLET_NS.to_string()),
                 audit,
                 WALLET_INSTANCE_ID,
             )
@@ -164,11 +167,8 @@ pub async fn process_transaction_with_server(
     let txid = transaction.tx_hash();
 
     for (input, in_idx) in transaction.inputs.iter().zip(0u64..) {
-        let instance_id = input.module_instance_id();
-        let view = tx.isolate(format!("module-{instance_id}"));
-
         let meta = server
-            .process_input(&view, input, InPoint { txid, in_idx })
+            .process_input(&tx.as_ref(), input, InPoint { txid, in_idx })
             .await
             .map_err(TransactionError::Input)?;
 
@@ -179,11 +179,8 @@ pub async fn process_transaction_with_server(
     transaction.validate_signatures(&public_keys)?;
 
     for (output, out_idx) in transaction.outputs.iter().zip(0u64..) {
-        let instance_id = output.module_instance_id();
-        let view = tx.isolate(format!("module-{instance_id}"));
-
         let amount = server
-            .process_output(&view, output, OutPoint { txid, out_idx })
+            .process_output(&tx.as_ref(), output, OutPoint { txid, out_idx })
             .await
             .map_err(TransactionError::Output)?;
 

@@ -1,24 +1,15 @@
 use std::collections::BTreeMap;
 
 pub use bitcoin::Network;
-use fedimint_core::core::ModuleKind;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::envs::BitcoinRpcConfig;
-use fedimint_core::{Amount, PeerId, plugin_types_trait_impl_config};
+use fedimint_core::{Amount, PeerId};
 use serde::{Deserialize, Serialize};
 use tpe::{AggregatePublicKey, PublicKeyShare, SecretKeyShare};
-
-use crate::LightningCommonInit;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LightningConfig {
     pub private: LightningConfigPrivate,
     pub consensus: LightningConfigConsensus,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Decodable, Encodable)]
-pub struct LightningConfigLocal {
-    pub bitcoin_rpc: BitcoinRpcConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
@@ -28,6 +19,18 @@ pub struct LightningConfigConsensus {
     pub input_fee: Amount,
     pub output_fee: Amount,
     pub network: Network,
+}
+
+impl LightningConfigConsensus {
+    pub fn to_client(&self) -> LightningClientConfig {
+        LightningClientConfig {
+            tpe_agg_pk: self.tpe_agg_pk,
+            tpe_pks: self.tpe_pks.clone(),
+            input_fee: self.input_fee,
+            output_fee: self.output_fee,
+            network: self.network,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,12 +52,3 @@ impl std::fmt::Display for LightningClientConfig {
         write!(f, "LightningClientConfig {self:?}")
     }
 }
-
-// Wire together the configs for this module
-plugin_types_trait_impl_config!(
-    LightningCommonInit,
-    LightningConfig,
-    LightningConfigPrivate,
-    LightningConfigConsensus,
-    LightningClientConfig
-);

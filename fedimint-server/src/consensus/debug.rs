@@ -2,9 +2,8 @@ use std::fmt;
 
 use bitcoin::hashes::{Hash as _, sha256};
 use fedimint_api_client::session_outcome::AcceptedItem;
+use fedimint_api_client::transaction::ConsensusItem;
 use fedimint_core::encoding::{CountWrite, Encodable as _};
-
-use crate::ConsensusItem;
 
 /// A newtype for a nice [`fmt::Debug`] of a [`ConsensusItem`]
 pub struct DebugConsensusItem<'ci>(pub &'ci ConsensusItem);

@@ -1,13 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use anyhow::{Context, bail, format_err};
+use anyhow::{Context, bail};
+use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
 pub use fedimint_core::config::{
-    ClientConfig, FederationId, GlobalClientConfig, JsonWithKind, ModuleInitRegistry, PeerUrl,
-    ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
+    ClientConfig, ClientModuleConfig, FederationId, GlobalClientConfig, PeerUrl,
 };
-use fedimint_core::core::{ModuleInstanceId, ModuleKind};
+use fedimint_core::core::ModuleKind;
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::{CORE_CONSENSUS_VERSION, CoreConsensusVersion};
@@ -16,9 +16,10 @@ use fedimint_core::setup_code::PeerSetupCode;
 use fedimint_core::task::sleep;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{NumPeersExt, PeerId, secp256k1, timing};
+use fedimint_lnv2_common::config::{LightningConfigConsensus, LightningConfigPrivate};
 use fedimint_logging::LOG_NET_PEER_DKG;
-use fedimint_server_core::config::PeerHandleOpsExt as _;
-use fedimint_server_core::{ConfigGenModuleArgs, DynServerModuleInit, ServerModuleInitRegistry};
+use fedimint_mintv2_common::config::{MintConfig, MintConfigConsensus, MintConfigPrivate};
+use fedimint_walletv2_common::config::{WalletConfig, WalletConfigConsensus, WalletConfigPrivate};
 use futures::future::select_all;
 use peer_handle::PeerHandle;
 use rand::rngs::OsRng;
@@ -66,14 +67,6 @@ pub struct ServerConfig {
     pub private: ServerConfigPrivate,
 }
 
-impl ServerConfig {
-    pub fn iter_module_instances(
-        &self,
-    ) -> impl Iterator<Item = (ModuleInstanceId, &ModuleKind)> + '_ {
-        self.consensus.iter_module_instances()
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfigPrivate {
     /// Secret key for our iroh api endpoint
@@ -82,8 +75,12 @@ pub struct ServerConfigPrivate {
     pub iroh_p2p_sk: iroh::SecretKey,
     /// Secret key for the atomic broadcast to sign messages
     pub broadcast_secret_key: SecretKey,
-    /// Secret material from modules
-    pub modules: BTreeMap<ModuleInstanceId, JsonWithKind>,
+    /// Private key material for the mint module
+    pub mint: MintConfigPrivate,
+    /// Private key material for the lightning module
+    pub ln: LightningConfigPrivate,
+    /// Private key material for the wallet module
+    pub wallet: WalletConfigPrivate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable)]
@@ -99,10 +96,14 @@ pub struct ServerConfigConsensus {
     pub broadcast_rounds_per_session: u16,
     /// Public keys for all iroh api and p2p endpoints
     pub iroh_endpoints: BTreeMap<PeerId, PeerIrohEndpoints>,
-    /// All configuration that needs to be the same for modules
-    pub modules: BTreeMap<ModuleInstanceId, ServerModuleConsensusConfig>,
     /// Additional config the federation wants to transmit to the clients
     pub meta: BTreeMap<String, String>,
+    /// Consensus config for the mint module
+    pub mint: MintConfigConsensus,
+    /// Consensus config for the lightning module
+    pub ln: LightningConfigConsensus,
+    /// Consensus config for the wallet module
+    pub wallet: WalletConfigConsensus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable)]
@@ -143,10 +144,6 @@ pub struct ConfigGenSettings {
     pub iroh_relays: Vec<SafeUrl>,
     /// Bitcoin network for the federation
     pub network: bitcoin::Network,
-    /// Available modules that can be enabled during setup
-    pub available_modules: BTreeSet<ModuleKind>,
-    /// Modules that should be enabled by default in the setup UI
-    pub default_modules: BTreeSet<ModuleKind>,
 }
 
 #[derive(Debug, Clone)]
@@ -165,8 +162,6 @@ pub struct ConfigGenParams {
     pub peers: BTreeMap<PeerId, PeerSetupCode>,
     /// Guardian-defined key-value pairs that will be passed to the client
     pub meta: BTreeMap<String, String>,
-    /// Modules enabled by the leader during setup
-    pub enabled_modules: BTreeSet<ModuleKind>,
     /// Bitcoin network for this federation
     pub network: bitcoin::Network,
 }
@@ -187,47 +182,64 @@ impl ServerConfigConsensus {
             .collect()
     }
 
-    pub fn iter_module_instances(
-        &self,
-    ) -> impl Iterator<Item = (ModuleInstanceId, &ModuleKind)> + '_ {
-        self.modules.iter().map(|(k, v)| (*k, &v.kind))
-    }
+    pub fn to_client_config(&self) -> ClientConfig {
+        let modules = BTreeMap::from([
+            (
+                MINT_INSTANCE_ID,
+                ClientModuleConfig::from_typed(
+                    MINT_INSTANCE_ID,
+                    ModuleKind::from_static_str("mintv2"),
+                    fedimint_mintv2_common::MODULE_CONSENSUS_VERSION,
+                    self.mint.to_client(),
+                )
+                .expect("Encoding mint client config must succeed"),
+            ),
+            (
+                LN_INSTANCE_ID,
+                ClientModuleConfig::from_typed(
+                    LN_INSTANCE_ID,
+                    ModuleKind::from_static_str("lnv2"),
+                    fedimint_lnv2_common::MODULE_CONSENSUS_VERSION,
+                    self.ln.to_client(),
+                )
+                .expect("Encoding ln client config must succeed"),
+            ),
+            (
+                WALLET_INSTANCE_ID,
+                ClientModuleConfig::from_typed(
+                    WALLET_INSTANCE_ID,
+                    ModuleKind::from_static_str("walletv2"),
+                    fedimint_walletv2_common::MODULE_CONSENSUS_VERSION,
+                    self.wallet.to_client(),
+                )
+                .expect("Encoding wallet client config must succeed"),
+            ),
+        ]);
 
-    pub fn to_client_config(
-        &self,
-        module_config_gens: &ModuleInitRegistry<DynServerModuleInit>,
-    ) -> Result<ClientConfig, anyhow::Error> {
-        let client = ClientConfig {
+        ClientConfig {
             global: GlobalClientConfig {
                 api_endpoints: self.api_endpoints(),
                 broadcast_public_keys: Some(self.broadcast_public_keys.clone()),
                 consensus_version: self.version,
                 meta: self.meta.clone(),
             },
-            modules: self
-                .modules
-                .iter()
-                .map(|(k, v)| {
-                    let r#gen = module_config_gens
-                        .get(&v.kind)
-                        .ok_or_else(|| format_err!("Module gen kind={} not found", v.kind))?;
-                    Ok((*k, r#gen.get_client_config(*k, v)?))
-                })
-                .collect::<anyhow::Result<BTreeMap<_, _>>>()?,
-        };
-        Ok(client)
+            modules,
+        }
     }
 }
 
 impl ServerConfig {
-    /// Creates a new config from the results of a trusted or distributed key
-    /// setup
+    /// Assemble a fresh `ServerConfig` from config-gen parameters, the
+    /// threshold-signing key pair we generated locally, and the per-module
+    /// DKG outputs.
     pub fn from(
         params: ConfigGenParams,
         identity: PeerId,
         broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
         broadcast_secret_key: SecretKey,
-        modules: BTreeMap<ModuleInstanceId, ServerModuleConfig>,
+        mint: MintConfig,
+        ln: fedimint_lnv2_common::config::LightningConfig,
+        wallet: WalletConfig,
         code_version: String,
     ) -> Self {
         let consensus = ServerConfigConsensus {
@@ -240,10 +252,9 @@ impl ServerConfig {
                 DEFAULT_BROADCAST_ROUNDS_PER_SESSION
             },
             iroh_endpoints: params.iroh_endpoints(),
-            modules: modules
-                .iter()
-                .map(|(peer, cfg)| (*peer, cfg.consensus.clone()))
-                .collect(),
+            mint: mint.consensus,
+            ln: ln.consensus,
+            wallet: wallet.consensus,
             meta: params.meta.clone(),
         };
 
@@ -261,10 +272,9 @@ impl ServerConfig {
             iroh_api_sk: params.iroh_api_sk,
             iroh_p2p_sk: params.iroh_p2p_sk,
             broadcast_secret_key,
-            modules: modules
-                .iter()
-                .map(|(peer, cfg)| (*peer, cfg.private.clone()))
-                .collect(),
+            mint: mint.private,
+            ln: ln.private,
+            wallet: wallet.private,
         };
 
         Self {
@@ -288,71 +298,37 @@ impl ServerConfig {
         FederationId(self.consensus.api_endpoints().consensus_hash())
     }
 
-    /// Constructs a module config by name
-    pub fn get_module_config_typed<T: TypedServerModuleConfig>(
-        &self,
-        id: ModuleInstanceId,
-    ) -> anyhow::Result<T> {
-        let private = Self::get_module_cfg_by_instance_id(&self.private.modules, id)?;
-        let consensus = self
-            .consensus
-            .modules
-            .get(&id)
-            .ok_or_else(|| format_err!("Typed module {id} not found"))?
-            .clone();
-        let module = ServerModuleConfig::from(private, consensus);
-
-        module.to_typed()
-    }
-    pub fn get_module_id_by_kind(
-        &self,
-        kind: impl Into<ModuleKind>,
-    ) -> anyhow::Result<ModuleInstanceId> {
-        let kind = kind.into();
-        Ok(*self
-            .consensus
-            .modules
-            .iter()
-            .find(|(_, v)| v.kind == kind)
-            .ok_or_else(|| format_err!("Module {kind} not found"))?
-            .0)
+    /// Bundle the current peer's typed configs back into per-module
+    /// `*Config` values for passing into the module constructors.
+    pub fn mint_config(&self) -> MintConfig {
+        MintConfig {
+            private: self.private.mint.clone(),
+            consensus: self.consensus.mint.clone(),
+        }
     }
 
-    /// Constructs a module config by id
-    pub fn get_module_config(&self, id: ModuleInstanceId) -> anyhow::Result<ServerModuleConfig> {
-        let private = Self::get_module_cfg_by_instance_id(&self.private.modules, id)?;
-        let consensus = self
-            .consensus
-            .modules
-            .get(&id)
-            .ok_or_else(|| format_err!("Module config {id} not found"))?
-            .clone();
-        Ok(ServerModuleConfig::from(private, consensus))
+    pub fn ln_config(&self) -> fedimint_lnv2_common::config::LightningConfig {
+        fedimint_lnv2_common::config::LightningConfig {
+            private: self.private.ln.clone(),
+            consensus: self.consensus.ln.clone(),
+        }
     }
 
-    fn get_module_cfg_by_instance_id(
-        json: &BTreeMap<ModuleInstanceId, JsonWithKind>,
-        id: ModuleInstanceId,
-    ) -> anyhow::Result<JsonWithKind> {
-        Ok(json
-            .get(&id)
-            .ok_or_else(|| format_err!("Module cfg {id} not found"))
-            .cloned()?
-            .with_fixed_empty_value())
+    pub fn wallet_config(&self) -> WalletConfig {
+        WalletConfig {
+            private: self.private.wallet.clone(),
+            consensus: self.consensus.wallet.clone(),
+        }
     }
 
-    pub fn validate_config(
-        &self,
-        identity: &PeerId,
-        module_config_gens: &ServerModuleInitRegistry,
-    ) -> anyhow::Result<()> {
+    pub fn validate_config(&self, identity: &PeerId) -> anyhow::Result<()> {
         let endpoints = self.consensus.api_endpoints().clone();
-        let consensus = self.consensus.clone();
-        let private = self.private.clone();
+        let my_public_key = self
+            .private
+            .broadcast_secret_key
+            .public_key(&Secp256k1::new());
 
-        let my_public_key = private.broadcast_secret_key.public_key(&Secp256k1::new());
-
-        if Some(&my_public_key) != consensus.broadcast_public_keys.get(identity) {
+        if Some(&my_public_key) != self.consensus.broadcast_public_keys.get(identity) {
             bail!("Broadcast secret key doesn't match corresponding public key");
         }
         if endpoints.keys().max().copied().map(PeerId::to_usize) != Some(endpoints.len() - 1) {
@@ -362,18 +338,9 @@ impl ServerConfig {
             bail!("Peer ids are not indexed from 0");
         }
 
-        for (module_id, module_kind) in &self
-            .consensus
-            .modules
-            .iter()
-            .map(|(id, config)| Ok((*id, config.kind.clone())))
-            .collect::<anyhow::Result<BTreeSet<_>>>()?
-        {
-            module_config_gens
-                .get(module_kind)
-                .ok_or_else(|| format_err!("module config gen not found {module_kind}"))?
-                .validate_config(identity, self.get_module_config(*module_id)?)?;
-        }
+        fedimint_mintv2_server::validate_config(identity, &self.mint_config())?;
+        fedimint_lnv2_server::validate_config(identity, &self.ln_config())?;
+        fedimint_walletv2_server::validate_config(identity, &self.wallet_config())?;
 
         Ok(())
     }
@@ -381,7 +348,6 @@ impl ServerConfig {
     /// Runs the distributed key gen algorithm
     pub async fn distributed_gen(
         params: &ConfigGenParams,
-        registry: ServerModuleInitRegistry,
         code_version_str: String,
         connections: DynP2PConnections<P2PMessage>,
         mut p2p_status_receivers: P2PStatusReceivers,
@@ -472,41 +438,35 @@ impl ServerConfig {
 
         let (broadcast_sk, broadcast_pk) = secp256k1::generate_keypair(&mut OsRng);
 
+        use fedimint_server_core::config::PeerHandleOpsExt as _;
         let broadcast_public_keys = handle.exchange_encodable(broadcast_pk).await?;
 
-        let args = ConfigGenModuleArgs {
-            network: params.network,
-        };
+        info!(
+            target: LOG_NET_PEER_DKG,
+            "Running config generation for module of kind mintv2..."
+        );
+        let mint = fedimint_mintv2_server::distributed_gen(&handle).await?;
 
-        let mut module_cfgs = BTreeMap::new();
+        info!(
+            target: LOG_NET_PEER_DKG,
+            "Running config generation for module of kind lnv2..."
+        );
+        let ln = fedimint_lnv2_server::distributed_gen(&handle, params.network).await?;
 
-        for (kind, module_init) in registry
-            .iter()
-            .filter(|(kind, _)| params.enabled_modules.contains(kind))
-        {
-            info!(
-                target: LOG_NET_PEER_DKG,
-                "Running config generation for module of kind {kind}..."
-            );
-
-            let module_id = match kind.as_str() {
-                "mintv2" => fedimint_api_client::wire::MINT_INSTANCE_ID,
-                "lnv2" => fedimint_api_client::wire::LN_INSTANCE_ID,
-                "walletv2" => fedimint_api_client::wire::WALLET_INSTANCE_ID,
-                other => bail!("Unknown module kind during DKG: {other}"),
-            };
-
-            let cfg = module_init.distributed_gen(&handle, &args).await?;
-
-            module_cfgs.insert(module_id, cfg);
-        }
+        info!(
+            target: LOG_NET_PEER_DKG,
+            "Running config generation for module of kind walletv2..."
+        );
+        let wallet = fedimint_walletv2_server::distributed_gen(&handle, params.network).await?;
 
         let cfg = ServerConfig::from(
             params.clone(),
             params.identity,
             broadcast_public_keys,
             broadcast_sk,
-            module_cfgs,
+            mint,
+            ln,
+            wallet,
             code_version_str,
         );
 

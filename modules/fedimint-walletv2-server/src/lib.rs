@@ -22,23 +22,16 @@ use bitcoin::sighash::{EcdsaSighashType, SighashCache};
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, Sequence, Transaction, TxIn, TxOut, Txid};
 use common::config::WalletConfigConsensus;
-use common::{
-    OutputInfo, WalletCommonInit, WalletConsensusItem, WalletInput, WalletModuleTypes, WalletOutput,
-};
+use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletModuleTypes, WalletOutput};
 use db::{
     BLOCK_COUNT_VOTE, FEDERATION_WALLET, FEE_RATE_VOTE, OUTPUT, Output, SIGNATURES, SPENT_OUTPUT,
     Signatures, TX_INFO, TX_INFO_INDEX, TxidKey, UNCONFIRMED_TX, UNSIGNED_TX,
-};
-use fedimint_core::config::{
-    ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
-    TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
-    ApiEndpoint, ApiVersion, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
-    TransactionItemAmounts, api_endpoint,
+    ApiEndpoint, ApiVersion, InputMeta, TransactionItemAmounts, api_endpoint,
 };
 #[cfg(not(target_family = "wasm"))]
 use fedimint_core::task::TaskGroup;
@@ -46,21 +39,19 @@ use fedimint_core::task::sleep;
 use fedimint_core::{InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send, util};
 use fedimint_logging::LOG_MODULE_WALLETV2;
 use fedimint_redb::{Database, ReadTxRef, WriteTxRef};
+use fedimint_server_core::ServerModule;
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
-use fedimint_server_core::{
-    ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
-};
 pub use fedimint_walletv2_common as common;
-use fedimint_walletv2_common::config::{WalletClientConfig, WalletConfig, WalletConfigPrivate};
+use fedimint_walletv2_common::config::{WalletConfig, WalletConfigPrivate};
 use fedimint_walletv2_common::endpoint_constants::{
     CONSENSUS_BLOCK_COUNT_ENDPOINT, CONSENSUS_FEERATE_ENDPOINT, FEDERATION_WALLET_ENDPOINT,
     OUTPUT_INFO_SLICE_ENDPOINT, PENDING_TRANSACTION_CHAIN_ENDPOINT, RECEIVE_FEE_ENDPOINT,
     SEND_FEE_ENDPOINT, TRANSACTION_CHAIN_ENDPOINT, TRANSACTION_ID_ENDPOINT,
 };
 use fedimint_walletv2_common::{
-    FederationWallet, MODULE_CONSENSUS_VERSION, TxInfo, WalletInputError, WalletOutputError,
-    descriptor, is_potential_receive, tweak_public_key,
+    FederationWallet, TxInfo, WalletInputError, WalletOutputError, descriptor,
+    is_potential_receive, tweak_public_key,
 };
 use miniscript::descriptor::Wsh;
 use rand::rngs::OsRng;
@@ -114,90 +105,44 @@ fn pending_txs_unordered(dbtx: &WriteTxRef<'_>) -> Vec<FederationTx> {
     unsigned.into_iter().chain(unconfirmed).collect()
 }
 
-#[derive(Debug, Clone)]
-pub struct WalletInit;
+/// Run DKG for the wallet module, producing a fresh `WalletConfig` for this
+/// peer.
+pub async fn distributed_gen(
+    peers: &(dyn PeerHandleOps + Send + Sync),
+    network: Network,
+) -> anyhow::Result<WalletConfig> {
+    let (bitcoin_sk, bitcoin_pk) = secp256k1::generate_keypair(&mut OsRng);
 
-impl ModuleInit for WalletInit {
-    type Common = WalletCommonInit;
+    let bitcoin_pks: BTreeMap<PeerId, PublicKey> = peers
+        .exchange_encodable(bitcoin_pk)
+        .await?
+        .into_iter()
+        .collect();
+
+    Ok(WalletConfig {
+        private: WalletConfigPrivate { bitcoin_sk },
+        consensus: WalletConfigConsensus::new(bitcoin_pks, network),
+    })
 }
 
-#[apply(async_trait_maybe_send!)]
-impl ServerModuleInit for WalletInit {
-    type Module = Wallet;
+/// Verify our private bitcoin secret key matches the corresponding public key
+/// in the multisig set.
+pub fn validate_config(identity: &PeerId, cfg: &WalletConfig) -> anyhow::Result<()> {
+    ensure!(
+        cfg.consensus
+            .bitcoin_pks
+            .get(identity)
+            .ok_or(anyhow::anyhow!("No public key for our identity"))?
+            == &cfg.private.bitcoin_sk.public_key(secp256k1::SECP256K1),
+        "Bitcoin wallet private key doesn't match multisig pubkey"
+    );
 
-    fn versions(&self, _core: CoreConsensusVersion) -> &[ModuleConsensusVersion] {
-        &[MODULE_CONSENSUS_VERSION]
-    }
-
-    async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
-        Ok(Wallet::new(
-            args.cfg().to_typed()?,
-            args.db(),
-            args.task_group(),
-            args.server_bitcoin_rpc_monitor(),
-        ))
-    }
-
-    async fn distributed_gen(
-        &self,
-        peers: &(dyn PeerHandleOps + Send + Sync),
-        args: &ConfigGenModuleArgs,
-    ) -> anyhow::Result<ServerModuleConfig> {
-        let (bitcoin_sk, bitcoin_pk) = secp256k1::generate_keypair(&mut OsRng);
-
-        let bitcoin_pks: BTreeMap<PeerId, PublicKey> = peers
-            .exchange_encodable(bitcoin_pk)
-            .await?
-            .into_iter()
-            .collect();
-
-        let config = WalletConfig {
-            private: WalletConfigPrivate { bitcoin_sk },
-            consensus: WalletConfigConsensus::new(bitcoin_pks, args.network),
-        };
-
-        Ok(config.to_erased())
-    }
-
-    fn validate_config(&self, identity: &PeerId, config: ServerModuleConfig) -> anyhow::Result<()> {
-        let config = config.to_typed::<WalletConfig>()?;
-
-        ensure!(
-            config
-                .consensus
-                .bitcoin_pks
-                .get(identity)
-                .ok_or(anyhow::anyhow!("No public key for our identity"))?
-                == &config.private.bitcoin_sk.public_key(secp256k1::SECP256K1),
-            "Bitcoin wallet private key doesn't match multisig pubkey"
-        );
-
-        Ok(())
-    }
-
-    fn get_client_config(
-        &self,
-        config: &ServerModuleConsensusConfig,
-    ) -> anyhow::Result<WalletClientConfig> {
-        let config = WalletConfigConsensus::from_erased(config)?;
-
-        Ok(WalletClientConfig {
-            bitcoin_pks: config.bitcoin_pks,
-            send_tx_vbytes: config.send_tx_vbytes,
-            receive_tx_vbytes: config.receive_tx_vbytes,
-            feerate_base: config.feerate_base,
-            dust_limit: config.dust_limit,
-            input_fee: config.input_fee,
-            output_fee: config.output_fee,
-            network: config.network,
-        })
-    }
+    Ok(())
 }
 
 #[apply(async_trait_maybe_send!)]
 impl ServerModule for Wallet {
     type Common = WalletModuleTypes;
-    type Init = WalletInit;
 
     async fn consensus_proposal(&self, dbtx: &ReadTxRef<'_>) -> Vec<WalletConsensusItem> {
         let mut items: Vec<WalletConsensusItem> = dbtx
@@ -677,19 +622,15 @@ pub struct Wallet {
 }
 
 impl Wallet {
-    fn new(
+    pub fn new(
         cfg: WalletConfig,
-        db: &Database,
+        db: Database,
         task_group: &TaskGroup,
         btc_rpc: ServerBitcoinRpcMonitor,
     ) -> Wallet {
         Self::spawn_broadcast_unconfirmed_txs_task(btc_rpc.clone(), db.clone(), task_group);
 
-        Wallet {
-            cfg,
-            btc_rpc,
-            db: db.clone(),
-        }
+        Wallet { cfg, btc_rpc, db }
     }
 
     fn spawn_broadcast_unconfirmed_txs_task(

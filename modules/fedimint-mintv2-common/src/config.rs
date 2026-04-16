@@ -1,18 +1,17 @@
 use std::collections::BTreeMap;
 
-use fedimint_core::core::ModuleKind;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::serde_json;
-use fedimint_core::{Amount, PeerId, plugin_types_trait_impl_config};
+use fedimint_core::{Amount, PeerId};
 use serde::{Deserialize, Serialize};
 use tbs::{AggregatePublicKey, PublicKeyShare};
 
-use crate::{Denomination, MintCommonInit};
+use crate::Denomination;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MintGenParams {
-    pub input_fee: Amount,
-    pub output_fee: Amount,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MintConfig {
+    pub private: MintConfigPrivate,
+    pub consensus: MintConfigConsensus,
 }
 
 pub fn consensus_denominations() -> impl DoubleEndedIterator<Item = Denomination> {
@@ -23,18 +22,23 @@ pub fn client_denominations() -> impl DoubleEndedIterator<Item = Denomination> {
     (9..42).map(Denomination)
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MintConfig {
-    pub private: MintConfigPrivate,
-    pub consensus: MintConfigConsensus,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, Encodable, Decodable)]
 pub struct MintConfigConsensus {
     pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
     pub tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
     pub input_fee: Amount,
     pub output_fee: Amount,
+}
+
+impl MintConfigConsensus {
+    pub fn to_client(&self) -> MintClientConfig {
+        MintClientConfig {
+            tbs_agg_pks: self.tbs_agg_pks.clone(),
+            tbs_pks: self.tbs_pks.clone(),
+            input_fee: self.input_fee,
+            output_fee: self.output_fee,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -59,12 +63,3 @@ impl std::fmt::Display for MintClientConfig {
         )
     }
 }
-
-// Wire together the configs for this module
-plugin_types_trait_impl_config!(
-    MintCommonInit,
-    MintConfig,
-    MintConfigPrivate,
-    MintConfigConsensus,
-    MintClientConfig
-);

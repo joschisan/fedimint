@@ -1,6 +1,15 @@
 use fedimint_core::module::audit::AuditSummary;
-pub use fedimint_server_core::dashboard_ui::SetupStatus;
 use serde::{Deserialize, Serialize};
+
+/// Status of the setup flow — mirrors `fedimint_server_ui::SetupStatus`
+/// as a CLI-consumed copy so `fedimint-server-cli` doesn't need to pull in the
+/// server-ui crate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SetupStatus {
+    AwaitingLocalParams,
+    SharingConnectionCodes,
+    ConsensusIsRunning,
+}
 
 // Setup routes
 pub const ROUTE_SETUP_STATUS: &str = "/setup/status";

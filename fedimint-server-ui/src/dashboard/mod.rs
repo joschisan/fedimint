@@ -1,6 +1,5 @@
 pub mod audit;
 pub mod bitcoin;
-pub(crate) mod consensus_explorer;
 pub mod general;
 pub mod invite;
 pub mod latency;
@@ -13,8 +12,6 @@ use axum::http::header;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum_extra::extract::cookie::CookieJar;
-use consensus_explorer::consensus_explorer_view;
-use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi};
 use fedimint_ui_common::assets::WithStaticRoutesExt;
 use fedimint_ui_common::auth::UserAuth;
 use fedimint_ui_common::{
@@ -23,17 +20,14 @@ use fedimint_ui_common::{
     single_card_layout,
 };
 use maud::html;
-use {fedimint_lnv2_server, fedimint_mintv2_server, fedimint_walletv2_server};
 
 use crate::dashboard::modules::{lnv2, mintv2, walletv2};
-use crate::{DOWNLOAD_BACKUP_ROUTE, EXPLORER_IDX_ROUTE, EXPLORER_ROUTE};
+use crate::{DOWNLOAD_BACKUP_ROUTE, DynDashboardApi};
 
-// Dashboard login form handler
 async fn login_form_handler() -> impl IntoResponse {
     Html(single_card_layout("Enter Password", login_form(None)).into_string())
 }
 
-// Dashboard login submit handler
 async fn login_submit(
     State(state): State<UiState<DynDashboardApi>>,
     jar: CookieJar,
@@ -48,7 +42,6 @@ async fn login_submit(
     )
 }
 
-// Download backup handler
 async fn download_backup(
     State(state): State<UiState<DynDashboardApi>>,
     user_auth: UserAuth,
@@ -69,7 +62,6 @@ async fn download_backup(
         .expect("Failed to build response")
 }
 
-// Main dashboard view
 async fn dashboard_view(
     State(state): State<UiState<DynDashboardApi>>,
     _auth: UserAuth,
@@ -112,30 +104,20 @@ async fn dashboard_view(
             }
         }
 
-        // Conditionally add Lightning V2 UI if the module is available
-        @if let Some(lightning) = state.api.get_module::<fedimint_lnv2_server::Lightning>(fedimint_core::core::ModuleKind::from_static_str("lnv2")) {
-            div class="row gy-4 mt-2" {
-                div class="col-12" {
-                    (lnv2::render(lightning).await)
-                }
+        div class="row gy-4 mt-2" {
+            div class="col-12" {
+                (lnv2::render(state.api.lightning()).await)
             }
         }
 
-        // Conditionally add Wallet V2 UI if the module is available
-        @if let Some(walletv2_module) = state.api.get_module::<fedimint_walletv2_server::Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2")) {
-            (walletv2::render(walletv2_module).await)
-        }
+        (walletv2::render(state.api.wallet()).await)
 
-        // Conditionally add Mint V2 UI if the module is available
-        @if let Some(mint_module) = state.api.get_module::<fedimint_mintv2_server::Mint>(fedimint_core::core::ModuleKind::from_static_str("mintv2")) {
-            div class="row gy-4 mt-2" {
-                div class="col-12" {
-                    (mintv2::render(mint_module).await)
-                }
+        div class="row gy-4 mt-2" {
+            div class="col-12" {
+                (mintv2::render(state.api.mint()).await)
             }
         }
 
-        // Guardian Backup
         div class="row gy-4 mt-2" {
             div class="col-lg-6" {
                 div class="card h-100" {
@@ -157,30 +139,16 @@ async fn dashboard_view(
 }
 
 pub fn router(api: DynDashboardApi) -> Router {
-    let mut app = Router::new()
+    Router::new()
         .route(ROOT_ROUTE, get(dashboard_view))
         .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
-        .route(EXPLORER_ROUTE, get(consensus_explorer_view))
-        .route(EXPLORER_IDX_ROUTE, get(consensus_explorer_view))
         .route(DOWNLOAD_BACKUP_ROUTE, get(download_backup))
         .route(
             CONNECTIVITY_CHECK_ROUTE,
             get(connectivity_check_handler::<DynDashboardApi>),
         )
-        .with_static_routes();
-
-    // routeradd LNv2 gateway routes if the module exists
-    if api
-        .get_module::<fedimint_lnv2_server::Lightning>(
-            fedimint_core::core::ModuleKind::from_static_str("lnv2"),
-        )
-        .is_some()
-    {
-        app = app
-            .route(lnv2::LNV2_ADD_ROUTE, post(lnv2::post_add))
-            .route(lnv2::LNV2_REMOVE_ROUTE, post(lnv2::post_remove));
-    }
-
-    // Finalize the router with state
-    app.with_state(UiState::new(api))
+        .route(lnv2::LNV2_ADD_ROUTE, post(lnv2::post_add))
+        .route(lnv2::LNV2_REMOVE_ROUTE, post(lnv2::post_remove))
+        .with_static_routes()
+        .with_state(UiState::new(api))
 }

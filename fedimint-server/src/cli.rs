@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{Json, State};
@@ -11,7 +12,9 @@ use fedimint_server_cli_core::{
     SetupAddPeerRequest, SetupAddPeerResponse, SetupSetLocalParamsRequest,
     SetupSetLocalParamsResponse, SetupStatus,
 };
-use fedimint_server_core::setup_ui::DynSetupApi;
+
+use crate::config::setup::SetupApi;
+pub type DynSetupApi = Arc<SetupApi>;
 use tokio::net::TcpListener;
 
 #[derive(Clone)]
@@ -74,6 +77,123 @@ pub async fn run_cli(addr: SocketAddr, state: CliState, handle: TaskHandle) {
         .expect("CLI admin server failed");
 }
 
+/// Build the Dashboard-phase CLI router that exposes read-only federation
+/// endpoints (audit, invite) plus the LNv2/wallet module-admin routes.
+pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
+    use axum::Json;
+    use axum::routing::post;
+    use fedimint_server_cli_core::{
+        AuditResponse, InviteResponse, Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_INVITE,
+        ROUTE_MODULE_LNV2_GATEWAY_ADD, ROUTE_MODULE_LNV2_GATEWAY_LIST,
+        ROUTE_MODULE_LNV2_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT,
+        ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
+        ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TX_CHAIN, WalletBlockCountResponse,
+        WalletFeerateResponse, WalletTotalValueResponse,
+    };
+
+    async fn invite(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<InviteResponse>, CliError> {
+        Ok(Json(InviteResponse {
+            invite_code: api.cfg.get_invite_code().to_string(),
+        }))
+    }
+
+    async fn audit(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<AuditResponse>, CliError> {
+        use fedimint_server_ui::IDashboardApi as _;
+        Ok(Json(AuditResponse {
+            audit: api.federation_audit().await,
+        }))
+    }
+
+    async fn wallet_total_value(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<WalletTotalValueResponse>, CliError> {
+        Ok(Json(WalletTotalValueResponse {
+            total_value_sats: api
+                .server
+                .wallet
+                .federation_wallet_ui()
+                .await
+                .map(|w| w.value.to_sat()),
+        }))
+    }
+
+    async fn wallet_block_count(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<WalletBlockCountResponse>, CliError> {
+        Ok(Json(WalletBlockCountResponse {
+            block_count: api.server.wallet.consensus_block_count_ui().await,
+        }))
+    }
+
+    async fn wallet_feerate(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<WalletFeerateResponse>, CliError> {
+        Ok(Json(WalletFeerateResponse {
+            sats_per_vbyte: api.server.wallet.consensus_feerate_ui().await,
+        }))
+    }
+
+    async fn wallet_pending_tx_chain(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<Vec<fedimint_walletv2_common::TxInfo>>, CliError> {
+        Ok(Json(api.server.wallet.pending_tx_chain_ui().await))
+    }
+
+    async fn wallet_tx_chain(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<Vec<fedimint_walletv2_common::TxInfo>>, CliError> {
+        Ok(Json(api.server.wallet.tx_chain_ui().await))
+    }
+
+    async fn lnv2_gateway_add(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+        Json(payload): Json<Lnv2GatewayRequest>,
+    ) -> Result<Json<bool>, CliError> {
+        let url: fedimint_core::util::SafeUrl = payload
+            .url
+            .parse()
+            .map_err(|e| CliError::internal(format!("Invalid URL: {e}")))?;
+        Ok(Json(api.server.ln.add_gateway_ui(url).await))
+    }
+
+    async fn lnv2_gateway_remove(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+        Json(payload): Json<Lnv2GatewayRequest>,
+    ) -> Result<Json<bool>, CliError> {
+        let url: fedimint_core::util::SafeUrl = payload
+            .url
+            .parse()
+            .map_err(|e| CliError::internal(format!("Invalid URL: {e}")))?;
+        Ok(Json(api.server.ln.remove_gateway_ui(url).await))
+    }
+
+    async fn lnv2_gateway_list(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<Vec<fedimint_core::util::SafeUrl>>, CliError> {
+        Ok(Json(api.server.ln.gateways_ui().await))
+    }
+
+    Router::new()
+        .route(ROUTE_INVITE, post(invite))
+        .route(ROUTE_AUDIT, post(audit))
+        .route(ROUTE_MODULE_WALLET_TOTAL_VALUE, post(wallet_total_value))
+        .route(ROUTE_MODULE_WALLET_BLOCK_COUNT, post(wallet_block_count))
+        .route(ROUTE_MODULE_WALLET_FEERATE, post(wallet_feerate))
+        .route(
+            ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
+            post(wallet_pending_tx_chain),
+        )
+        .route(ROUTE_MODULE_WALLET_TX_CHAIN, post(wallet_tx_chain))
+        .route(ROUTE_MODULE_LNV2_GATEWAY_ADD, post(lnv2_gateway_add))
+        .route(ROUTE_MODULE_LNV2_GATEWAY_REMOVE, post(lnv2_gateway_remove))
+        .route(ROUTE_MODULE_LNV2_GATEWAY_LIST, post(lnv2_gateway_list))
+        .with_state(api)
+}
+
 /// Dashboard CLI server — runs during consensus phase.
 pub async fn run_dashboard_cli(addr: SocketAddr, router: Router, handle: TaskHandle) {
     let listener = TcpListener::bind(addr)
@@ -106,7 +226,6 @@ async fn setup_set_local_params(
         .set_local_parameters(
             payload.name,
             payload.federation_name,
-            None,
             payload.federation_size,
         )
         .await

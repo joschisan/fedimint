@@ -12,7 +12,7 @@ use fedimint_logging::LOG_SERVER;
 use tokio::sync::watch;
 use tracing::{debug, warn};
 
-use crate::dashboard_ui::ServerBitcoinRpcStatus;
+use crate::ServerBitcoinRpcStatus;
 
 // Well-known genesis block hashes for different Bitcoin networks
 // <https://blockstream.info/api/block-height/1>

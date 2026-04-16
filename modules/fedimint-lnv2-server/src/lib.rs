@@ -9,15 +9,11 @@ mod db;
 use std::time::Duration;
 
 use anyhow::{Context, ensure};
-use fedimint_core::config::{
-    ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
-    TypedServerModuleConsensusConfig,
-};
+use fedimint_core::bitcoin::Network;
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
-    ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta, ModuleConsensusVersion,
-    ModuleInit, TransactionItemAmounts, api_endpoint,
+    ApiEndpoint, ApiError, ApiVersion, InputMeta, TransactionItemAmounts, api_endpoint,
 };
 use fedimint_core::task::timeout;
 use fedimint_core::time::duration_since_epoch;
@@ -26,7 +22,7 @@ use fedimint_core::{
     Amount, InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send,
 };
 use fedimint_lnv2_common::config::{
-    LightningClientConfig, LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
+    LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
 use fedimint_lnv2_common::contracts::IncomingContract;
 use fedimint_lnv2_common::endpoint_constants::{
@@ -35,17 +31,15 @@ use fedimint_lnv2_common::endpoint_constants::{
     OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
 };
 use fedimint_lnv2_common::{
-    ContractId, LightningCommonInit, LightningConsensusItem, LightningInput, LightningInputError,
-    LightningInputV0, LightningModuleTypes, LightningOutput, LightningOutputError,
-    LightningOutputV0, MODULE_CONSENSUS_VERSION, OutgoingWitness,
+    ContractId, LightningConsensusItem, LightningInput, LightningInputError, LightningInputV0,
+    LightningModuleTypes, LightningOutput, LightningOutputError, LightningOutputV0,
+    OutgoingWitness,
 };
 use fedimint_logging::LOG_MODULE_LNV2;
 use fedimint_redb::{Database, ReadTxRef, WriteTxRef};
+use fedimint_server_core::ServerModule;
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::config::{PeerHandleOps, eval_poly_g1};
-use fedimint_server_core::{
-    ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
-};
 use group::Curve;
 use tpe::{DecryptionKeyShare, PublicKeyShare, SecretKeyShare};
 use tracing::trace;
@@ -56,85 +50,46 @@ use crate::db::{
     OUTGOING_CONTRACT, PREIMAGE, UNIX_TIME_VOTE,
 };
 
-#[derive(Debug, Clone)]
-pub struct LightningInit;
+/// Run DKG for the lightning module, producing a fresh `LightningConfig` for
+/// this peer.
+pub async fn distributed_gen(
+    peers: &(dyn PeerHandleOps + Send + Sync),
+    network: Network,
+) -> anyhow::Result<LightningConfig> {
+    let (polynomial, sks) = peers.run_dkg_g1().await?;
 
-impl ModuleInit for LightningInit {
-    type Common = LightningCommonInit;
+    Ok(LightningConfig {
+        consensus: LightningConfigConsensus {
+            tpe_agg_pk: tpe::AggregatePublicKey(polynomial[0].to_affine()),
+            tpe_pks: peers
+                .num_peers()
+                .peer_ids()
+                .map(|peer| (peer, PublicKeyShare(eval_poly_g1(&polynomial, &peer))))
+                .collect(),
+            input_fee: Amount::from_sats(1),
+            output_fee: Amount::from_sats(1),
+            network,
+        },
+        private: LightningConfigPrivate {
+            sk: SecretKeyShare(sks),
+        },
+    })
 }
 
-#[apply(async_trait_maybe_send!)]
-impl ServerModuleInit for LightningInit {
-    type Module = Lightning;
+/// Verify our private tpe share matches the public share in the consensus
+/// config.
+pub fn validate_config(identity: &PeerId, cfg: &LightningConfig) -> anyhow::Result<()> {
+    ensure!(
+        tpe::derive_pk_share(&cfg.private.sk)
+            == *cfg
+                .consensus
+                .tpe_pks
+                .get(identity)
+                .context("Public key set has no key for our identity")?,
+        "Preimge encryption secret key share does not match our public key share"
+    );
 
-    fn versions(&self, _core: CoreConsensusVersion) -> &[ModuleConsensusVersion] {
-        &[MODULE_CONSENSUS_VERSION]
-    }
-
-    async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
-        Ok(Lightning {
-            cfg: args.cfg().to_typed()?,
-            db: args.db().clone(),
-            server_bitcoin_rpc_monitor: args.server_bitcoin_rpc_monitor(),
-        })
-    }
-
-    async fn distributed_gen(
-        &self,
-        peers: &(dyn PeerHandleOps + Send + Sync),
-        args: &ConfigGenModuleArgs,
-    ) -> anyhow::Result<ServerModuleConfig> {
-        let (polynomial, sks) = peers.run_dkg_g1().await?;
-
-        let server = LightningConfig {
-            consensus: LightningConfigConsensus {
-                tpe_agg_pk: tpe::AggregatePublicKey(polynomial[0].to_affine()),
-                tpe_pks: peers
-                    .num_peers()
-                    .peer_ids()
-                    .map(|peer| (peer, PublicKeyShare(eval_poly_g1(&polynomial, &peer))))
-                    .collect(),
-                input_fee: Amount::from_sats(1),
-                output_fee: Amount::from_sats(1),
-                network: args.network,
-            },
-            private: LightningConfigPrivate {
-                sk: SecretKeyShare(sks),
-            },
-        };
-
-        Ok(server.to_erased())
-    }
-
-    fn validate_config(&self, identity: &PeerId, config: ServerModuleConfig) -> anyhow::Result<()> {
-        let config = config.to_typed::<LightningConfig>()?;
-
-        ensure!(
-            tpe::derive_pk_share(&config.private.sk)
-                == *config
-                    .consensus
-                    .tpe_pks
-                    .get(identity)
-                    .context("Public key set has no key for our identity")?,
-            "Preimge encryption secret key share does not match our public key share"
-        );
-
-        Ok(())
-    }
-
-    fn get_client_config(
-        &self,
-        config: &ServerModuleConsensusConfig,
-    ) -> anyhow::Result<LightningClientConfig> {
-        let config = LightningConfigConsensus::from_erased(config)?;
-        Ok(LightningClientConfig {
-            tpe_agg_pk: config.tpe_agg_pk,
-            tpe_pks: config.tpe_pks,
-            input_fee: config.input_fee,
-            output_fee: config.output_fee,
-            network: config.network,
-        })
-    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -144,10 +99,23 @@ pub struct Lightning {
     server_bitcoin_rpc_monitor: ServerBitcoinRpcMonitor,
 }
 
+impl Lightning {
+    pub fn new(
+        cfg: LightningConfig,
+        db: Database,
+        server_bitcoin_rpc_monitor: ServerBitcoinRpcMonitor,
+    ) -> Self {
+        Self {
+            cfg,
+            db,
+            server_bitcoin_rpc_monitor,
+        }
+    }
+}
+
 #[apply(async_trait_maybe_send!)]
 impl ServerModule for Lightning {
     type Common = LightningModuleTypes;
-    type Init = LightningInit;
 
     async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<LightningConsensusItem> {
         // We reduce the time granularity to deduplicate votes more often and not save

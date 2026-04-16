@@ -18,30 +18,35 @@
 #![allow(clippy::match_wildcard_for_single_variants)]
 #![allow(clippy::trivially_copy_pass_by_ref)]
 
-//! Server side fedimint module traits
+//! Federation server daemon.
+//!
+//! This crate hosts both the daemon library (`fedimint_server::run`) and the
+//! `fedimintd` binary. It drives config generation, consensus, and the UI/CLI
+//! servers for the fixed module set (mint + lightning + wallet).
 
 extern crate fedimint_core;
+
 pub mod cli;
+pub mod config;
+pub mod consensus;
+pub mod entry;
+pub mod net;
 pub mod p2p;
 pub mod server;
 
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
 
 use anyhow::Context;
 use config::ServerConfig;
 use config::io::read_server_config;
-use fedimint_api_client::transaction::ConsensusItem;
 use fedimint_core::module::ApiAuth;
 use fedimint_core::net::peers::DynP2PConnections;
 use fedimint_core::task::TaskGroup;
 use fedimint_logging::LOG_CONSENSUS;
 use fedimint_redb::Database;
 pub use fedimint_server_core as core;
-use fedimint_server_core::ServerModuleInitRegistry;
 use fedimint_server_core::bitcoin_rpc::DynServerBitcoinRpc;
-use fedimint_server_core::dashboard_ui::DynDashboardApi;
-use fedimint_server_core::setup_ui::{DynSetupApi, ISetupApi};
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use net::p2p::P2PStatusReceivers;
@@ -52,35 +57,28 @@ use tracing::info;
 use crate::config::ConfigGenSettings;
 use crate::config::io::write_server_config;
 use crate::config::setup::SetupApi;
+pub use crate::entry::{default_network, run};
 use crate::fedimint_core::net::peers::IP2PConnections;
 use crate::net::p2p::{ReconnectP2PConnections, p2p_status_channels};
 use crate::net::p2p_connector::IP2PConnector;
 use crate::p2p::P2PMessage;
 
-/// The actual implementation of consensus
-pub mod consensus;
-
-/// Networking for mint-to-mint and client-to-mint communiccation
-pub mod net;
-
-/// Fedimint toplevel config
-pub mod config;
-
 /// A function/closure type for handling dashboard UI
-pub type DashboardUiRouter = Box<dyn Fn(DynDashboardApi) -> axum::Router + Send>;
-pub type DashboardCliRouter = Box<dyn Fn(DynDashboardApi) -> axum::Router + Send>;
+pub type DashboardUiRouter =
+    Box<dyn Fn(std::sync::Arc<crate::consensus::api::ConsensusApi>) -> axum::Router + Send>;
+pub type DashboardCliRouter =
+    Box<dyn Fn(std::sync::Arc<crate::consensus::api::ConsensusApi>) -> axum::Router + Send>;
 
 /// A function/closure type for handling setup UI
-pub type SetupUiRouter = Box<dyn Fn(DynSetupApi) -> axum::Router + Send>;
+pub type SetupUiRouter = Box<dyn Fn(std::sync::Arc<SetupApi>) -> axum::Router + Send>;
 
 #[allow(clippy::too_many_arguments)]
-pub async fn run(
+pub async fn run_server(
     data_dir: PathBuf,
     auth: ApiAuth,
     settings: ConfigGenSettings,
     db: Database,
     code_version_str: String,
-    module_init_registry: ServerModuleInitRegistry,
     task_group: TaskGroup,
     bitcoin_rpc: DynServerBitcoinRpc,
     setup_ui_router: SetupUiRouter,
@@ -90,8 +88,6 @@ pub async fn run(
     max_requests_per_connection: usize,
     cli_bind: std::net::SocketAddr,
 ) -> anyhow::Result<()> {
-    let p2p_decoders: Arc<OnceLock<_>> = Arc::new(OnceLock::new());
-
     let (cfg, connections, p2p_status_receivers) = match get_config(&data_dir)? {
         Some(cfg) => {
             let connector = IrohConnector::new(
@@ -102,7 +98,6 @@ pub async fn run(
                     .iter()
                     .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
                     .collect(),
-                p2p_decoders.clone(),
             )
             .await?
             .into_dyn();
@@ -126,22 +121,12 @@ pub async fn run(
                 &task_group,
                 code_version_str.clone(),
                 setup_ui_router,
-                module_init_registry.clone(),
                 auth.clone(),
                 cli_bind,
-                p2p_decoders.clone(),
             ))
             .await?
         }
     };
-
-    // Make an (empty) module decoder registry available to the P2P layer.
-    // With the static wire-type migration the registry carries no module
-    // dispatch state, but we still plumb it through to preserve the shape of
-    // `Decodable`/`Encodable`.
-    p2p_decoders
-        .set(fedimint_core::module::registry::ModuleDecoderRegistry::default())
-        .expect("p2p decoders were already set");
 
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 
@@ -154,7 +139,6 @@ pub async fn run(
         p2p_status_receivers,
         cfg,
         db,
-        module_init_registry.clone(),
         &task_group,
         code_version_str,
         bitcoin_rpc,
@@ -189,10 +173,8 @@ pub async fn run_config_gen(
     task_group: &TaskGroup,
     code_version_str: String,
     setup_ui_handler: SetupUiRouter,
-    module_init_registry: ServerModuleInitRegistry,
     auth: ApiAuth,
-    cli_bind: std::net::SocketAddr,
-    p2p_decoders: Arc<OnceLock<fedimint_core::module::registry::ModuleDecoderRegistry>>,
+    cli_bind: SocketAddr,
 ) -> anyhow::Result<(
     ServerConfig,
     DynP2PConnections<P2PMessage>,
@@ -202,11 +184,11 @@ pub async fn run_config_gen(
 
     let (cgp_sender, mut cgp_receiver) = tokio::sync::mpsc::channel(1);
 
-    let setup_api = SetupApi::new(settings.clone(), cgp_sender, auth);
+    let setup_api = std::sync::Arc::new(SetupApi::new(settings.clone(), cgp_sender, auth));
 
     let ui_task_group = TaskGroup::new();
 
-    let ui_service = setup_ui_handler(setup_api.clone().into_dyn()).into_make_service();
+    let ui_service = setup_ui_handler(setup_api.clone()).into_make_service();
 
     let ui_listener = TcpListener::bind(settings.ui_bind)
         .await
@@ -223,7 +205,7 @@ pub async fn run_config_gen(
 
     let cli_task_group = TaskGroup::new();
     let cli_state = cli::CliState {
-        setup_api: setup_api.clone().into_dyn(),
+        setup_api: setup_api.clone(),
     };
     cli_task_group.spawn("setup-cli", move |handle| async move {
         cli::run_cli(cli_bind, cli_state, handle).await;
@@ -252,7 +234,6 @@ pub async fn run_config_gen(
             .iter()
             .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
             .collect(),
-        p2p_decoders,
     )
     .await?
     .into_dyn();
@@ -269,7 +250,6 @@ pub async fn run_config_gen(
 
     let cfg = ServerConfig::distributed_gen(
         &cg_params,
-        module_init_registry.clone(),
         code_version_str.clone(),
         connections.clone(),
         p2p_status_receivers.clone(),

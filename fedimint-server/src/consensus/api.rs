@@ -11,15 +11,14 @@ use fedimint_api_client::transaction::{
     ConsensusItem, SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
 };
 use fedimint_core::config::{ClientConfig, META_FEDERATION_NAME_KEY};
-use fedimint_core::core::{ModuleInstanceId, ModuleKind};
+use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT,
 };
 use fedimint_core::module::audit::{Audit, AuditSummary};
 use fedimint_core::module::{
-    ApiAuth, ApiEndpoint, ApiError, ApiRequestErased, ApiResult, ApiVersion, SerdeModuleEncoding,
-    api_endpoint,
+    ApiAuth, ApiEndpoint, ApiError, ApiResult, ApiVersion, SerdeModuleEncoding, api_endpoint,
 };
 use fedimint_core::net::auth::GuardianAuthToken;
 use fedimint_core::task::TaskGroup;
@@ -28,7 +27,7 @@ use fedimint_core::{PeerId, TransactionId};
 use fedimint_logging::LOG_NET_API;
 use fedimint_redb::{Database, ReadTransaction};
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
-use fedimint_server_core::dashboard_ui::{
+use fedimint_server_ui::{
     GuardianConfigBackup, IDashboardApi, P2PConnectionStatus, ServerBitcoinRpcStatus,
 };
 use tokio::sync::watch::{self, Receiver, Sender};
@@ -38,7 +37,6 @@ use crate::config::ServerConfig;
 use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG};
 use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION, SIGNED_SESSION_OUTCOME};
 use crate::consensus::engine::get_finished_session_count_static;
-use crate::net::HasApiContext;
 use crate::net::p2p::P2PStatusReceivers;
 use crate::server::{Server, process_transaction_with_server};
 
@@ -137,19 +135,18 @@ impl ConsensusApi {
 
     async fn get_federation_audit(&self) -> ApiResult<AuditSummary> {
         // Modules read their own tables during `audit`; we open a write tx and
-        // drop it without commit after building the audit view. Matches the
-        // reference `migrate_to_redb_2` branch.
-        let tx = self.db.begin_write().await;
-
+        // drop it without commit after building the audit view.
         use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
+
+        let tx = self.db.begin_write().await;
 
         let mut audit = Audit::default();
         self.server.audit(&tx, &mut audit).await;
 
         let module_instance_id_to_kind: HashMap<ModuleInstanceId, String> = [
-            (MINT_INSTANCE_ID, "mintv2".to_string()),
-            (LN_INSTANCE_ID, "lnv2".to_string()),
-            (WALLET_INSTANCE_ID, "walletv2".to_string()),
+            (MINT_INSTANCE_ID, "mint".to_string()),
+            (LN_INSTANCE_ID, "ln".to_string()),
+            (WALLET_INSTANCE_ID, "wallet".to_string()),
         ]
         .into();
 
@@ -196,50 +193,6 @@ impl ConsensusApi {
             .expect("Error building tar archive");
 
         GuardianConfigBackup { tar_archive_bytes }
-    }
-}
-
-#[async_trait]
-impl HasApiContext<ConsensusApi> for ConsensusApi {
-    async fn context(
-        &self,
-        _request: &ApiRequestErased,
-        _id: Option<ModuleInstanceId>,
-    ) -> &ConsensusApi {
-        self
-    }
-}
-
-#[async_trait]
-impl HasApiContext<fedimint_mintv2_server::Mint> for ConsensusApi {
-    async fn context(
-        &self,
-        _request: &ApiRequestErased,
-        _id: Option<ModuleInstanceId>,
-    ) -> &fedimint_mintv2_server::Mint {
-        &self.server.mint
-    }
-}
-
-#[async_trait]
-impl HasApiContext<fedimint_lnv2_server::Lightning> for ConsensusApi {
-    async fn context(
-        &self,
-        _request: &ApiRequestErased,
-        _id: Option<ModuleInstanceId>,
-    ) -> &fedimint_lnv2_server::Lightning {
-        &self.server.ln
-    }
-}
-
-#[async_trait]
-impl HasApiContext<fedimint_walletv2_server::Wallet> for ConsensusApi {
-    async fn context(
-        &self,
-        _request: &ApiRequestErased,
-        _id: Option<ModuleInstanceId>,
-    ) -> &fedimint_walletv2_server::Wallet {
-        &self.server.wallet
     }
 }
 
@@ -315,13 +268,16 @@ impl IDashboardApi for ConsensusApi {
         self.get_guardian_config_backup(guardian_auth)
     }
 
-    fn get_module_by_kind(&self, kind: ModuleKind) -> Option<&(dyn std::any::Any + Send + Sync)> {
-        match kind.as_str() {
-            "mintv2" => Some(self.server.mint.as_ref()),
-            "lnv2" => Some(self.server.ln.as_ref()),
-            "walletv2" => Some(self.server.wallet.as_ref()),
-            _ => None,
-        }
+    fn mint(&self) -> &fedimint_mintv2_server::Mint {
+        &self.server.mint
+    }
+
+    fn lightning(&self) -> &fedimint_lnv2_server::Lightning {
+        &self.server.ln
+    }
+
+    fn wallet(&self) -> &fedimint_walletv2_server::Wallet {
+        &self.server.wallet
     }
 
     async fn fedimintd_version(&self) -> String {
@@ -336,7 +292,7 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
             ApiVersion::new(0, 0),
             async |fedimint: &ConsensusApi, transaction: SerdeTransaction| -> SerdeModuleEncoding<TransactionSubmissionOutcome> {
                 let transaction = transaction
-                    .try_into_inner(&fedimint_core::module::registry::ModuleDecoderRegistry::default())
+                    .try_into_inner(&Default::default())
                     .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
                 // we return an inner error if and only if the submitted transaction is

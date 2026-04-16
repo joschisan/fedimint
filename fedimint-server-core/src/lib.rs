@@ -1,38 +1,49 @@
-//! Fedimint Core Server module interface
+//! Shared server-side traits and helpers
 //!
-//! Fedimint supports externally implemented modules.
+//! This crate is the narrow shared layer between `fedimint-server` and the
+//! three concrete server-side module implementations (`fedimint-mintv2-server`,
+//! `fedimint-lnv2-server`, `fedimint-walletv2-server`). It defines the
+//! `ServerModule` trait (which each module implements), the Bitcoin RPC
+//! abstraction consumed by modules, and the DKG-time `PeerHandleOps` trait.
 //!
-//! This (Rust) module defines common interoperability types
-//! and functionality that are only used on the server side.
+//! It intentionally does not know anything about the dashboard / setup UI or
+//! the dynamic module registry — after the minimint rip both of those live in
+//! `fedimint-server`/`fedimint-server-ui` alongside the single known module
+//! set.
 
 pub mod bitcoin_rpc;
 pub mod config;
-pub mod dashboard_ui;
-mod init;
-pub mod setup_ui;
 
 use std::fmt::Debug;
 
-use fedimint_core::core::{ModuleInstanceId, ModuleKind};
+use fedimint_core::bitcoin::Network;
+use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::module::audit::Audit;
-use fedimint_core::module::{
-    ApiEndpoint, CommonModuleInit, InputMeta, ModuleCommon, ModuleInit, TransactionItemAmounts,
-};
-use fedimint_core::{InPoint, OutPoint, PeerId, apply, async_trait_maybe_send};
+use fedimint_core::module::{ApiEndpoint, InputMeta, ModuleCommon, TransactionItemAmounts};
+use fedimint_core::{Feerate, InPoint, OutPoint, PeerId, apply, async_trait_maybe_send};
 use fedimint_redb::{ReadTxRef, WriteTxRef};
-pub use init::*;
+use serde::{Deserialize, Serialize};
+
+/// Status of the Bitcoin RPC backend as reported by the monitor.
+#[derive(Debug, Clone)]
+pub struct ServerBitcoinRpcStatus {
+    pub network: Network,
+    pub block_count: u64,
+    pub fee_rate: Feerate,
+    pub sync_progress: Option<f64>,
+}
+
+/// P2P connection status for a peer. `None` in a status channel means the peer
+/// is currently disconnected.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct P2PConnectionStatus {
+    /// Round-trip time (only available for iroh connections)
+    pub rtt: Option<std::time::Duration>,
+}
 
 #[apply(async_trait_maybe_send!)]
 pub trait ServerModule: Debug + Sized {
     type Common: ModuleCommon;
-
-    type Init: ServerModuleInit;
-
-    fn module_kind() -> ModuleKind {
-        // Note: All modules should define kinds as &'static str, so this doesn't
-        // allocate
-        <Self::Init as ModuleInit>::Common::KIND
-    }
 
     /// This module's contribution to the next consensus proposal. This method
     /// is only guaranteed to be called once every few seconds. Consensus items

@@ -1,10 +1,11 @@
 use axum::extract::{Form, State};
 use axum::response::{IntoResponse, Redirect};
 use fedimint_core::util::SafeUrl;
-use fedimint_server_core::dashboard_ui::{DashboardApiModuleExt, DynDashboardApi};
 use fedimint_ui_common::auth::UserAuth;
 use fedimint_ui_common::{ROOT_ROUTE, UiState};
 use maud::{Markup, html};
+
+use crate::DynDashboardApi;
 
 // LNv2 route constants
 pub const LNV2_ADD_ROUTE: &str = "/lnv2/add";
@@ -119,14 +120,7 @@ pub async fn post_add(
     _auth: UserAuth,
     Form(form): Form<GatewayForm>,
 ) -> impl IntoResponse {
-    state
-        .api
-        .get_module::<fedimint_lnv2_server::Lightning>(
-            fedimint_core::core::ModuleKind::from_static_str("lnv2"),
-        )
-        .expect("Route only mounted when Lightning V2 module exists")
-        .add_gateway_ui(form.gateway_url)
-        .await;
+    state.api.lightning().add_gateway_ui(form.gateway_url).await;
 
     Redirect::to(ROOT_ROUTE).into_response()
 }
@@ -139,10 +133,7 @@ pub async fn post_remove(
 ) -> impl IntoResponse {
     state
         .api
-        .get_module::<fedimint_lnv2_server::Lightning>(
-            fedimint_core::core::ModuleKind::from_static_str("lnv2"),
-        )
-        .expect("Route only mounted when Lightning V2 module exists")
+        .lightning()
         .remove_gateway_ui(form.gateway_url)
         .await;
 
