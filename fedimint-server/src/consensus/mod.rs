@@ -136,7 +136,6 @@ pub async fn run(
     let consensus_api = ConsensusApi {
         cfg: cfg.clone(),
         db: db.clone(),
-        modules: module_registry.clone(),
         server: server.clone(),
         client_cfg: client_cfg.clone(),
         submission_sender: submission_sender.clone(),
@@ -237,6 +236,8 @@ pub async fn run(
 
     info!(target: LOG_CONSENSUS, "Starting Consensus Engine...");
 
+    drop(module_registry);
+
     ConsensusEngine {
         db,
         cfg: cfg.clone(),
@@ -245,7 +246,6 @@ pub async fn run(
         ci_status_senders,
         submission_receiver,
         shutdown_receiver,
-        modules: module_registry,
         server,
         task_group: task_group.clone(),
     }

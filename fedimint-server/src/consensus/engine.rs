@@ -17,7 +17,6 @@ use fedimint_core::timing::TimeReporter;
 use fedimint_core::util::{FmtCompact as _, FmtCompactAnyhow as _};
 use fedimint_core::{NumPeers, NumPeersExt, PeerId, timing};
 use fedimint_redb::{Database, ReadTransaction, WriteTransaction};
-use fedimint_server_core::{ServerModuleRegistry, ServerModuleRegistryExt};
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use tokio::sync::watch;
@@ -40,7 +39,6 @@ use crate::p2p::P2PMessage;
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
-    pub modules: ServerModuleRegistry,
     pub server: crate::server::Server,
     pub db: Database,
     pub cfg: ServerConfig,
@@ -516,7 +514,10 @@ impl ConsensusEngine {
     }
 
     fn decoders(&self) -> ModuleDecoderRegistry {
-        self.modules.decoder_registry()
+        // With static wire enums the ConsensusItem / Transaction decoders are
+        // self-contained; the registry is only kept for any residual Dyn
+        // types (e.g. DynOutputOutcome) and can be empty here.
+        ModuleDecoderRegistry::default()
     }
 
     pub async fn pending_accepted_items(&self) -> Vec<AcceptedItem> {

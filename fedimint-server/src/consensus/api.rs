@@ -31,7 +31,7 @@ use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::dashboard_ui::{
     GuardianConfigBackup, IDashboardApi, P2PConnectionStatus, ServerBitcoinRpcStatus,
 };
-use fedimint_server_core::{DynServerModule, ServerModuleRegistry, ServerModuleRegistryExt};
+use fedimint_server_core::DynServerModule;
 use tokio::sync::watch::{self, Receiver, Sender};
 use tracing::{debug, warn};
 
@@ -49,8 +49,6 @@ pub struct ConsensusApi {
     pub cfg: ServerConfig,
     /// Database for serving the API
     pub db: Database,
-    /// Modules registered with the federation
-    pub modules: ServerModuleRegistry,
     /// Static wire-dispatch handle to the fixed module set
     pub server: Server,
     /// Cached client config
@@ -324,7 +322,7 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
             ApiVersion::new(0, 0),
             async |fedimint: &ConsensusApi, transaction: SerdeTransaction| -> SerdeModuleEncoding<TransactionSubmissionOutcome> {
                 let transaction = transaction
-                    .try_into_inner(&fedimint.modules.decoder_registry())
+                    .try_into_inner(&fedimint_core::module::registry::ModuleDecoderRegistry::default())
                     .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
                 // we return an inner error if and only if the submitted transaction is
