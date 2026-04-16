@@ -2,7 +2,7 @@
 //!
 //! Two traits, one method each: [`Encodable::consensus_encode`] and
 //! [`Decodable::consensus_decode`]. Fixed-width big-endian for integers,
-//! length-prefixed (u64 BE) for `Vec` / `String` / maps. No varints, no
+//! length-prefixed (u32 BE) for `Vec` / `String` / maps. No varints, no
 //! module decoder registry, no partial / whole / from-finite-reader tree,
 //! no `DecodeError` — just `io::Error`.
 //!
@@ -312,7 +312,9 @@ where
     T: Encodable + 'static,
 {
     fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        (self.len() as u64).consensus_encode(w)?;
+        u32::try_from(self.len())
+            .expect("collection length exceeds u32")
+            .consensus_encode(w)?;
         if TypeId::of::<T>() == TypeId::of::<u8>() {
             // SAFETY: T is u8, so this transmute is a no-op
             let bytes = unsafe { std::mem::transmute::<&[T], &[u8]>(self) };
@@ -340,7 +342,7 @@ where
     T: Decodable + 'static,
 {
     fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        let len = u64::consensus_decode(r)? as usize;
+        let len = u32::consensus_decode(r)? as usize;
         if TypeId::of::<T>() == TypeId::of::<u8>() {
             let mut bytes = vec![0u8; len];
             r.read_exact(&mut bytes)?;
@@ -404,7 +406,9 @@ where
     V: Encodable,
 {
     fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        (self.len() as u64).consensus_encode(w)?;
+        u32::try_from(self.len())
+            .expect("collection length exceeds u32")
+            .consensus_encode(w)?;
         for (k, v) in self {
             k.consensus_encode(w)?;
             v.consensus_encode(w)?;
@@ -419,7 +423,7 @@ where
     V: Decodable,
 {
     fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        let len = u64::consensus_decode(r)? as usize;
+        let len = u32::consensus_decode(r)? as usize;
         let mut map = Self::new();
         for _ in 0..len {
             let k = K::consensus_decode(r)?;
@@ -440,7 +444,9 @@ where
     K: Encodable,
 {
     fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        (self.len() as u64).consensus_encode(w)?;
+        u32::try_from(self.len())
+            .expect("collection length exceeds u32")
+            .consensus_encode(w)?;
         for k in self {
             k.consensus_encode(w)?;
         }
@@ -453,7 +459,7 @@ where
     K: Decodable + Ord,
 {
     fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        let len = u64::consensus_decode(r)? as usize;
+        let len = u32::consensus_decode(r)? as usize;
         let mut set = Self::new();
         for _ in 0..len {
             let k = K::consensus_decode(r)?;
@@ -511,17 +517,14 @@ pub(crate) mod tests {
 
     #[test]
     fn vec_u8_roundtrip() {
-        // u64 len (8 bytes BE) + bytes
-        test_roundtrip_expected(&vec![1u8, 2, 3], &[0, 0, 0, 0, 0, 0, 0, 3, 1, 2, 3]);
-        test_roundtrip_expected::<Vec<u8>>(&vec![], &[0, 0, 0, 0, 0, 0, 0, 0]);
+        // u32 len (4 bytes BE) + bytes
+        test_roundtrip_expected(&vec![1u8, 2, 3], &[0, 0, 0, 3, 1, 2, 3]);
+        test_roundtrip_expected::<Vec<u8>>(&vec![], &[0, 0, 0, 0]);
     }
 
     #[test]
     fn vec_u16_roundtrip() {
-        test_roundtrip_expected(
-            &vec![1u16, 2, 3],
-            &[0, 0, 0, 0, 0, 0, 0, 3, 0, 1, 0, 2, 0, 3],
-        );
+        test_roundtrip_expected(&vec![1u16, 2, 3], &[0, 0, 0, 3, 0, 1, 0, 2, 0, 3]);
     }
 
     #[test]
@@ -552,7 +555,7 @@ pub(crate) mod tests {
     fn btreemap_non_canonical_rejected() {
         // Manually craft bytes with keys out of order.
         let mut bad = Vec::new();
-        2u64.consensus_encode(&mut bad).unwrap();
+        2u32.consensus_encode(&mut bad).unwrap();
         "b".to_string().consensus_encode(&mut bad).unwrap();
         1u32.consensus_encode(&mut bad).unwrap();
         "a".to_string().consensus_encode(&mut bad).unwrap();
