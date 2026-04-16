@@ -25,7 +25,6 @@ use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_client_module::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::IWriteDatabaseTransactionOpsTyped;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::hex::ToHex;
 use fedimint_core::module::{ModuleCommon, ModuleInit};

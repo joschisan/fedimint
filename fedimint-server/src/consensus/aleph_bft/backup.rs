@@ -1,7 +1,4 @@
 use async_trait::async_trait;
-use fedimint_core::db::{
-    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
-};
 use fedimint_redb::Database;
 use tracing::info;
 

@@ -16,9 +16,6 @@ use std::hash::Hash;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use fedimint_core::db::{
-    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _, TableDef,
-};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::util::BoxFuture;
@@ -49,8 +46,11 @@ pub trait StateMachine:
     fn transitions(&self, ctx: &Self::Context) -> Vec<StateTransition<Self>>;
 }
 
-fn table<S: StateMachine>() -> TableDef<S, ()> {
-    TableDef::new(S::TABLE_NAME)
+fn table<S: StateMachine>() -> fedimint_core::db::NativeTableDef<
+    fedimint_core::db::ConsensusKey<S>,
+    fedimint_core::db::Consensus<()>,
+> {
+    fedimint_core::db::NativeTableDef::new(S::TABLE_NAME)
 }
 
 /// Type-erased trigger value. The concrete type is captured inside the

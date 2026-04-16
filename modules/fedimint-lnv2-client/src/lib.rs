@@ -24,7 +24,6 @@ use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_client_module::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::SECP256K1;

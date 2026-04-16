@@ -34,10 +34,6 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{
-    IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
-    IWriteDatabaseTransactionOpsTyped as _,
-};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
@@ -883,7 +879,7 @@ impl Wallet {
         }
     }
 
-    pub fn consensus_block_count(&self, dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
+    pub fn consensus_block_count(&self, dbtx: &impl fedimint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
 
         let mut counts: Vec<u64> = dbtx
@@ -907,7 +903,7 @@ impl Wallet {
         counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    pub fn consensus_feerate(&self, dbtx: &impl IReadDatabaseTransactionOps) -> Option<u64> {
+    pub fn consensus_feerate(&self, dbtx: &impl fedimint_redb::DbRead) -> Option<u64> {
         let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
 
         let mut rates: Vec<u64> = dbtx

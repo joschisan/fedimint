@@ -1,22 +1,19 @@
-//! redb-backed concrete implementation of the v2 database traits.
+//! redb-backed concrete implementation of the v2 database contract.
 //!
-//! The abstract contract — `TableDef`, the four `I*DatabaseTransactionOps*`
-//! traits, the `table!` macro — lives in `fedimint-core::db::v2`. This file
-//! owns the concrete tx and database types that back the server and modules.
+//! The abstract contract — [`NativeTableDef`], the [`table!`] macro —
+//! lives in `fedimint-core::db`. This file owns the concrete tx and database
+//! types (`Database`, `ReadTransaction`, `WriteTransaction`, `ReadTxRef`,
+//! `WriteTxRef`) that back the server and modules, exposing `insert`/`get`/
+//! `remove`/`iter`/`range`/`delete_table` as inherent methods.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::ops::Bound;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use fedimint_core::db::{
-    IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
-    IWriteDatabaseTransactionOps, NativeTableDef, TableDef,
-};
-use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::db::NativeTableDef;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
-use redb::{ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{ReadableDatabase, ReadableTable as _, TableDefinition};
 use tokio::sync::Notify;
 
 // ─── Database ────────────────────────────────────────────────────────────
@@ -143,10 +140,16 @@ impl Database {
     /// Wait until `key` exists in `table`. Returns the value together with the
     /// [`ReadTransaction`] that observed it, so the caller can continue reading
     /// without opening a second tx.
-    pub async fn wait_key<K, V>(&self, def: &TableDef<K, V>, key: &K) -> (V, ReadTransaction)
+    pub async fn wait_key<WK, K, WV, V>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        key: &K,
+    ) -> (V, ReadTransaction)
     where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
     {
         self.wait_key_check(def, key, |v| v).await
     }
@@ -155,15 +158,17 @@ impl Database {
     /// `(T, ReadTransaction)`. The returned tx is the one that observed the
     /// matched state. `check` is called once on entry and again after every
     /// commit that touches `(table, key)`.
-    pub async fn wait_key_check<K, V, T>(
+    pub async fn wait_key_check<WK, K, WV, V, T>(
         &self,
-        def: &TableDef<K, V>,
+        def: &NativeTableDef<WK, WV>,
         key: &K,
         mut check: impl FnMut(Option<V>) -> Option<T>,
     ) -> (T, ReadTransaction)
     where
-        K: Encodable + Decodable,
-        V: Encodable + Decodable,
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
     {
         let resolved = def.resolved_name(&self.prefix);
 
@@ -422,28 +427,31 @@ impl ReadTxRef<'_> {
     }
 }
 
-// ─── Ergonomic typed ops over NativeTableDef<K, Borsh<V>> ────────────────
+// ─── Ergonomic typed ops over NativeTableDef<K, W> ───────────────────────
 //
-// These mirror the shape of the old bytes-level typed ops but use redb's
-// native typed tables under the hood. The `K: for<'a> redb::Key<SelfType<'a> = K>`
-// HRTB is the "owned key" contract: true for primitive newtypes made via
-// `redb_newtype_key!` and tuples thereof.
+// Mirror the shape of the old bytes-level typed ops but ride redb's native
+// typed tables. Generic over the value wrapper `W` (e.g. `Borsh<V>` or
+// `Consensus<V>`) via HRTB `W: for<'a> redb::Value<SelfType<'a> = V>`, so
+// call sites see `V` (not the wrapper).
+//
+// The `K: for<'a> redb::Key<SelfType<'a> = K>` HRTB is the "owned key"
+// contract: satisfied by primitive newtypes built with `redb_newtype_key!`
+// and tuples thereof.
 
 use std::ops::RangeBounds;
 
-use borsh::{BorshDeserialize, BorshSerialize};
-use fedimint_core::db::Borsh;
-
 impl<'tx> WriteTxRef<'tx> {
-    pub fn native_insert<K, V>(
+    pub fn insert<WK, K, WV, V>(
         &self,
-        def: &NativeTableDef<K, Borsh<V>>,
+        def: &NativeTableDef<WK, WV>,
         key: &K,
         value: &V,
     ) -> Option<V>
     where
-        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
     {
         self.with_native_table(def, |t| {
             t.insert(key, value)
@@ -452,10 +460,12 @@ impl<'tx> WriteTxRef<'tx> {
         })
     }
 
-    pub fn native_remove<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>, key: &K) -> Option<V>
+    pub fn remove<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
     where
-        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
     {
         self.with_native_table(def, |t| {
             t.remove(key)
@@ -464,13 +474,13 @@ impl<'tx> WriteTxRef<'tx> {
         })
     }
 
-    pub fn native_delete_table<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>)
+    pub fn delete_table<WK, WV>(&self, def: &NativeTableDef<WK, WV>)
     where
-        K: redb::Key + 'static,
-        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        WK: redb::Key + 'static,
+        WV: redb::Value + 'static,
     {
         let resolved = def.resolved_name(&self.prefix);
-        let td: TableDefinition<K, Borsh<V>> = TableDefinition::new(&resolved);
+        let td: TableDefinition<WK, WV> = TableDefinition::new(&resolved);
         match self.tx.delete_table(td) {
             Ok(_) => {}
             Err(redb::TableError::TableDoesNotExist(_)) => {}
@@ -482,20 +492,24 @@ impl<'tx> WriteTxRef<'tx> {
             .insert(resolved);
     }
 
-    pub fn native_get<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>, key: &K) -> Option<V>
+    pub fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
     where
-        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
     {
         self.with_native_table(def, |t| {
             t.get(key).expect("redb get failed").map(|g| g.value())
         })
     }
 
-    pub fn native_iter<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>) -> Vec<(K, V)>
+    pub fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
     where
-        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
     {
         use redb::ReadableTable as _;
         self.with_native_table(def, |t| {
@@ -509,14 +523,16 @@ impl<'tx> WriteTxRef<'tx> {
         })
     }
 
-    pub fn native_range<K, V, R>(
+    pub fn range<WK, K, WV, V, R>(
         &self,
-        def: &NativeTableDef<K, Borsh<V>>,
+        def: &NativeTableDef<WK, WV>,
         range: R,
     ) -> Vec<(K, V)>
     where
-        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
         R: RangeBounds<K>,
     {
         self.with_native_table(def, |t| {
@@ -532,10 +548,12 @@ impl<'tx> WriteTxRef<'tx> {
 }
 
 impl ReadTxRef<'_> {
-    pub fn native_get<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>, key: &K) -> Option<V>
+    pub fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
     where
-        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
     {
         self.with_native_table(def, |t| {
             t.get(key).expect("redb get failed").map(|g| g.value())
@@ -543,10 +561,12 @@ impl ReadTxRef<'_> {
         .flatten()
     }
 
-    pub fn native_iter<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>) -> Vec<(K, V)>
+    pub fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
     where
-        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
     {
         use redb::ReadableTable as _;
         self.with_native_table(def, |t| {
@@ -561,14 +581,16 @@ impl ReadTxRef<'_> {
         .unwrap_or_default()
     }
 
-    pub fn native_range<K, V, R>(
+    pub fn range<WK, K, WV, V, R>(
         &self,
-        def: &NativeTableDef<K, Borsh<V>>,
+        def: &NativeTableDef<WK, WV>,
         range: R,
     ) -> Vec<(K, V)>
     where
-        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
         R: RangeBounds<K>,
     {
         self.with_native_table(def, |t| {
@@ -584,273 +606,260 @@ impl ReadTxRef<'_> {
     }
 }
 
-// ─── Bytes-level implementations ─────────────────────────────────────────
+// ─── DbRead / DbWrite trait abstraction ──────────────────────────────────
+//
+// Successor to the old `IReadDatabaseTransactionOps` trait tower. Typed
+// methods are defined directly over `NativeTableDef<WK, WV>` and implemented
+// on each concrete tx type. Server modules take `&impl DbRead` /
+// `&impl DbWrite` to stay generic over owned-vs-borrowed and read-vs-write.
 
-fn read_raw_get_bytes(
-    tx: &redb::ReadTransaction,
-    resolved_table: &str,
-    key: &[u8],
-) -> Option<Vec<u8>> {
-    let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(resolved_table);
+pub trait DbRead {
+    fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static;
 
-    let table = match tx.open_table(td) {
-        Ok(t) => t,
-        Err(redb::TableError::TableDoesNotExist(_)) => return None,
-        Err(e) => panic!("redb open_table (read) failed: {e}"),
-    };
+    fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static;
 
-    Some(table.get(key).expect("redb get failed")?.value().to_vec())
+    fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
+        R: RangeBounds<K>;
 }
 
-fn read_raw_iter_bytes(
-    tx: &redb::ReadTransaction,
-    resolved_table: &str,
-) -> Vec<(Vec<u8>, Vec<u8>)> {
-    let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(resolved_table);
+pub trait DbWrite: DbRead {
+    fn insert<WK, K, WV, V>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        key: &K,
+        value: &V,
+    ) -> Option<V>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static;
 
-    match tx.open_table(td) {
-        Ok(t) => collect_iter(&t),
-        Err(redb::TableError::TableDoesNotExist(_)) => Vec::new(),
-        Err(e) => panic!("redb open_table (read) failed: {e}"),
-    }
+    fn remove<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static;
+
+    fn delete_table<WK, WV>(&self, def: &NativeTableDef<WK, WV>)
+    where
+        WK: redb::Key + 'static,
+        WV: redb::Value + 'static;
 }
 
-fn read_raw_range_bytes(
-    tx: &redb::ReadTransaction,
-    resolved_table: &str,
-    lo: Bound<Vec<u8>>,
-    hi: Bound<Vec<u8>>,
-) -> Vec<(Vec<u8>, Vec<u8>)> {
-    let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(resolved_table);
+// Macro to cut the 3 read + 3 write method-body duplication per type.
+// Each impl delegates to inherent methods that carry the actual logic.
+macro_rules! impl_db_read_via_inherent {
+    ($ty:ty) => {
+        impl DbRead for $ty {
+            fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+            where
+                WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+                WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+                K: Debug + 'static,
+                V: Debug + 'static,
+            {
+                <$ty>::get(self, def, key)
+            }
 
-    match tx.open_table(td) {
-        Ok(t) => collect_range(&t, lo, hi),
-        Err(redb::TableError::TableDoesNotExist(_)) => Vec::new(),
-        Err(e) => panic!("redb open_table (read) failed: {e}"),
-    }
-}
+            fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
+            where
+                WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+                WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+                K: Debug + 'static,
+                V: Debug + 'static,
+            {
+                <$ty>::iter(self, def)
+            }
 
-fn write_open_table<'tx>(
-    tx: &'tx redb::WriteTransaction,
-    touched: &Mutex<BTreeSet<String>>,
-    resolved_table: &str,
-) -> redb::Table<'tx, &'static [u8], &'static [u8]> {
-    let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(resolved_table);
-
-    let table = tx.open_table(td).expect("redb open_table (write) failed");
-
-    touched
-        .lock()
-        .expect("touched poisoned")
-        .insert(resolved_table.to_owned());
-
-    table
-}
-
-fn collect_iter<T>(table: &T) -> Vec<(Vec<u8>, Vec<u8>)>
-where
-    T: ReadableTable<&'static [u8], &'static [u8]>,
-{
-    table
-        .iter()
-        .expect("redb iter failed")
-        .map(|r| {
-            let (k, v) = r.expect("redb iter item failed");
-
-            (k.value().to_vec(), v.value().to_vec())
-        })
-        .collect()
-}
-
-fn collect_range<T>(table: &T, lo: Bound<Vec<u8>>, hi: Bound<Vec<u8>>) -> Vec<(Vec<u8>, Vec<u8>)>
-where
-    T: ReadableTable<&'static [u8], &'static [u8]>,
-{
-    fn as_slice(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
-        match b {
-            Bound::Included(v) => Bound::Included(v.as_slice()),
-            Bound::Excluded(v) => Bound::Excluded(v.as_slice()),
-            Bound::Unbounded => Bound::Unbounded,
+            fn range<WK, K, WV, V, R>(
+                &self,
+                def: &NativeTableDef<WK, WV>,
+                range: R,
+            ) -> Vec<(K, V)>
+            where
+                WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+                WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+                K: Debug + 'static,
+                V: Debug + 'static,
+                R: RangeBounds<K>,
+            {
+                <$ty>::range(self, def, range)
+            }
         }
-    }
-
-    table
-        .range::<&[u8]>((as_slice(&lo), as_slice(&hi)))
-        .expect("redb range failed")
-        .map(|r| {
-            let (k, v) = r.expect("redb range item failed");
-
-            (k.value().to_vec(), v.value().to_vec())
-        })
-        .collect()
+    };
 }
 
-// — ReadTxRef —
+macro_rules! impl_db_write_via_inherent {
+    ($ty:ty) => {
+        impl DbWrite for $ty {
+            fn insert<WK, K, WV, V>(
+                &self,
+                def: &NativeTableDef<WK, WV>,
+                key: &K,
+                value: &V,
+            ) -> Option<V>
+            where
+                WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+                WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+                K: Debug + 'static,
+                V: Debug + 'static,
+            {
+                <$ty>::insert(self, def, key, value)
+            }
 
-impl IReadDatabaseTransactionOps for ReadTxRef<'_> {
-    fn prefix(&self) -> &[String] {
-        &self.prefix
+            fn remove<WK, K, WV, V>(
+                &self,
+                def: &NativeTableDef<WK, WV>,
+                key: &K,
+            ) -> Option<V>
+            where
+                WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+                WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+                K: Debug + 'static,
+                V: Debug + 'static,
+            {
+                <$ty>::remove(self, def, key)
+            }
+
+            fn delete_table<WK, WV>(&self, def: &NativeTableDef<WK, WV>)
+            where
+                WK: redb::Key + 'static,
+                WV: redb::Value + 'static,
+            {
+                <$ty>::delete_table(self, def)
+            }
+        }
+    };
+}
+
+// ─── Owned-tx delegation ─────────────────────────────────────────────────
+//
+// Users commonly call `.insert/.get/...` directly on the owned
+// `WriteTransaction`/`ReadTransaction` (not just on the borrowed
+// `WriteTxRef`/`ReadTxRef`). These inherent impls delegate via `.as_ref()`.
+
+impl ReadTransaction {
+    pub fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
+    {
+        self.as_ref().get(def, key)
     }
 
-    fn decoders(&self) -> &OnceLock<ModuleDecoderRegistry> {
-        &self.db.decoders
+    pub fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
+    {
+        self.as_ref().iter(def)
     }
 
-    fn raw_get_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
-        read_raw_get_bytes(self.tx, resolved_table, key)
+    pub fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
+        R: RangeBounds<K>,
+    {
+        self.as_ref().range(def, range)
     }
+}
 
-    fn raw_iter_bytes(&self, resolved_table: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
-        read_raw_iter_bytes(self.tx, resolved_table)
-    }
-
-    fn raw_range_bytes(
+impl WriteTransaction {
+    pub fn insert<WK, K, WV, V>(
         &self,
-        resolved_table: &str,
-        lo: Bound<Vec<u8>>,
-        hi: Bound<Vec<u8>>,
-    ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        read_raw_range_bytes(self.tx, resolved_table, lo, hi)
+        def: &NativeTableDef<WK, WV>,
+        key: &K,
+        value: &V,
+    ) -> Option<V>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
+    {
+        self.as_ref().insert(def, key, value)
+    }
+
+    pub fn remove<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
+    {
+        self.as_ref().remove(def, key)
+    }
+
+    pub fn delete_table<WK, WV>(&self, def: &NativeTableDef<WK, WV>)
+    where
+        WK: redb::Key + 'static,
+        WV: redb::Value + 'static,
+    {
+        self.as_ref().delete_table(def)
+    }
+
+    pub fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
+    {
+        self.as_ref().get(def, key)
+    }
+
+    pub fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
+    {
+        self.as_ref().iter(def)
+    }
+
+    pub fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
+    where
+        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        K: Debug + 'static,
+        V: Debug + 'static,
+        R: RangeBounds<K>,
+    {
+        self.as_ref().range(def, range)
     }
 }
 
-// — ReadTransaction — owned type, delegates to the ref via the same helpers.
-
-impl IReadDatabaseTransactionOps for ReadTransaction {
-    fn prefix(&self) -> &[String] {
-        &self.prefix
-    }
-
-    fn decoders(&self) -> &OnceLock<ModuleDecoderRegistry> {
-        &self.db.decoders
-    }
-
-    fn raw_get_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
-        read_raw_get_bytes(&self.tx, resolved_table, key)
-    }
-
-    fn raw_iter_bytes(&self, resolved_table: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
-        read_raw_iter_bytes(&self.tx, resolved_table)
-    }
-
-    fn raw_range_bytes(
-        &self,
-        resolved_table: &str,
-        lo: Bound<Vec<u8>>,
-        hi: Bound<Vec<u8>>,
-    ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        read_raw_range_bytes(&self.tx, resolved_table, lo, hi)
-    }
-}
-
-// — WriteTxRef —
-
-impl IReadDatabaseTransactionOps for WriteTxRef<'_> {
-    fn prefix(&self) -> &[String] {
-        &self.prefix
-    }
-
-    fn decoders(&self) -> &OnceLock<ModuleDecoderRegistry> {
-        &self.db.decoders
-    }
-
-    fn raw_get_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
-        let table = write_open_table(self.tx, self.touched, resolved_table);
-
-        Some(table.get(key).expect("redb get failed")?.value().to_vec())
-    }
-
-    fn raw_iter_bytes(&self, resolved_table: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
-        let table = write_open_table(self.tx, self.touched, resolved_table);
-
-        collect_iter(&table)
-    }
-
-    fn raw_range_bytes(
-        &self,
-        resolved_table: &str,
-        lo: Bound<Vec<u8>>,
-        hi: Bound<Vec<u8>>,
-    ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        let table = write_open_table(self.tx, self.touched, resolved_table);
-
-        collect_range(&table, lo, hi)
-    }
-}
-
-impl IWriteDatabaseTransactionOps for WriteTxRef<'_> {
-    fn raw_insert_bytes(&self, resolved_table: &str, key: &[u8], value: &[u8]) -> Option<Vec<u8>> {
-        let mut table = write_open_table(self.tx, self.touched, resolved_table);
-
-        table
-            .insert(key, value)
-            .expect("redb insert failed")
-            .map(|g| g.value().to_vec())
-    }
-
-    fn raw_remove_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
-        let mut table = write_open_table(self.tx, self.touched, resolved_table);
-
-        table
-            .remove(key)
-            .expect("redb remove failed")
-            .map(|g| g.value().to_vec())
-    }
-
-    fn raw_delete_table(&self, resolved_table: &str) {
-        let td: TableDefinition<&[u8], &[u8]> = TableDefinition::new(resolved_table);
-
-        self.tx.delete_table(td).expect("redb delete_table failed");
-
-        self.touched
-            .lock()
-            .expect("touched poisoned")
-            .insert(resolved_table.to_owned());
-    }
-}
-
-// — WriteTransaction — reuses the WriteTxRef bytes impls via `as_ref()`.
-
-impl IReadDatabaseTransactionOps for WriteTransaction {
-    fn prefix(&self) -> &[String] {
-        &self.prefix
-    }
-
-    fn decoders(&self) -> &OnceLock<ModuleDecoderRegistry> {
-        &self.db.decoders
-    }
-
-    fn raw_get_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
-        self.as_ref().raw_get_bytes(resolved_table, key)
-    }
-
-    fn raw_iter_bytes(&self, resolved_table: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
-        self.as_ref().raw_iter_bytes(resolved_table)
-    }
-
-    fn raw_range_bytes(
-        &self,
-        resolved_table: &str,
-        lo: Bound<Vec<u8>>,
-        hi: Bound<Vec<u8>>,
-    ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        self.as_ref().raw_range_bytes(resolved_table, lo, hi)
-    }
-}
-
-impl IWriteDatabaseTransactionOps for WriteTransaction {
-    fn raw_insert_bytes(&self, resolved_table: &str, key: &[u8], value: &[u8]) -> Option<Vec<u8>> {
-        self.as_ref().raw_insert_bytes(resolved_table, key, value)
-    }
-
-    fn raw_remove_bytes(&self, resolved_table: &str, key: &[u8]) -> Option<Vec<u8>> {
-        self.as_ref().raw_remove_bytes(resolved_table, key)
-    }
-
-    fn raw_delete_table(&self, resolved_table: &str) {
-        self.as_ref().raw_delete_table(resolved_table);
-    }
-}
+impl_db_read_via_inherent!(ReadTxRef<'_>);
+impl_db_read_via_inherent!(WriteTxRef<'_>);
+impl_db_read_via_inherent!(ReadTransaction);
+impl_db_read_via_inherent!(WriteTransaction);
+impl_db_write_via_inherent!(WriteTxRef<'_>);
+impl_db_write_via_inherent!(WriteTransaction);
 
 // ─── Playground tests ────────────────────────────────────────────────────
 
@@ -859,14 +868,12 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use fedimint_core::db::{
-        IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _, TableDef,
-    };
+    use fedimint_core::table;
 
     use super::*;
 
-    const USERS: TableDef<u64, String> = TableDef::new("users");
-    const BALANCES: TableDef<u64, u64> = TableDef::new("balances");
+    table!(USERS, u64 => String, "users");
+    table!(BALANCES, u64 => u64, "balances");
 
     #[tokio::test]
     async fn basic_read_write() {

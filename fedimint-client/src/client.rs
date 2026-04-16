@@ -24,9 +24,6 @@ use fedimint_client_module::{
 };
 use fedimint_core::config::{ClientConfig, FederationId, JsonClientConfig, ModuleInitRegistry};
 use fedimint_core::core::{DynInput, DynOutput, ModuleInstanceId, ModuleKind, OperationId};
-use fedimint_core::db::{
-    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
-};
 use fedimint_core::encoding::Encodable as _;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;

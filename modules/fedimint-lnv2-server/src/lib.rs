@@ -14,10 +14,6 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{
-    IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
-    IWriteDatabaseTransactionOpsTyped as _,
-};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta, ModuleConsensusVersion,
@@ -447,7 +443,7 @@ impl Lightning {
             .context("Block count not available yet")
     }
 
-    fn consensus_block_count(&self, dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
+    fn consensus_block_count(&self, dbtx: &impl fedimint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut counts = dbtx
@@ -469,7 +465,7 @@ impl Lightning {
         counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    fn consensus_unix_time(&self, dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
+    fn consensus_unix_time(&self, dbtx: &impl fedimint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut times = dbtx

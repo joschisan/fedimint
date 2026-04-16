@@ -6,9 +6,6 @@ use anyhow::{anyhow, bail};
 use async_channel::Receiver;
 use fedimint_core::config::P2PMessage;
 use fedimint_core::core::DynOutput;
-use fedimint_core::db::{
-    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
-};
 use fedimint_core::encoding::Decodable;
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::Audit;

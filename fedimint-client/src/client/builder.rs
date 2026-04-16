@@ -15,9 +15,6 @@ use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default
 use fedimint_client_module::transaction::TxSubmissionSmContext;
 use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{
-    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
-};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::TaskGroup;

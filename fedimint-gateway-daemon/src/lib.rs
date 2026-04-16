@@ -33,9 +33,6 @@ use client::GatewayClientFactory;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{
-    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
-};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::CommonModuleInit;
 use fedimint_core::secp256k1::PublicKey;

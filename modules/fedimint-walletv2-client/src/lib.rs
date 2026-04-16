@@ -29,7 +29,6 @@ use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::task::{TaskGroup, block_in_place, sleep};

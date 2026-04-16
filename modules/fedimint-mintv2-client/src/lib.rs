@@ -40,7 +40,6 @@ use fedimint_client_module::module::{ClientContext, IdxRange, OutPointRange};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::rand::{Rng, thread_rng};

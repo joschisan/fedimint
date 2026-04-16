@@ -5,9 +5,6 @@ use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::{Client, ClientBuilder, RootSecret};
 use fedimint_client_module::secret::RootSecretStrategy;
 use fedimint_core::config::{ClientConfig, FederationId};
-use fedimint_core::db::{
-    IReadDatabaseTransactionOpsTyped as _, IWriteDatabaseTransactionOpsTyped as _,
-};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_gwv2_client::GatewayClientInitV2;
 use fedimint_redb::Database;

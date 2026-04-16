@@ -14,10 +14,6 @@ use fedimint_core::config::{
     TypedServerModuleConsensusConfig,
 };
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{
-    IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
-    IWriteDatabaseTransactionOpsTyped as _,
-};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
@@ -381,7 +377,7 @@ fn get_signature_shares_recovery(
     Ok(shares)
 }
 
-fn get_recovery_count(dbtx: &impl IReadDatabaseTransactionOps) -> u64 {
+fn get_recovery_count(dbtx: &impl fedimint_redb::DbRead) -> u64 {
     dbtx.iter(&RECOVERY_ITEM)
         .into_iter()
         .next_back()
