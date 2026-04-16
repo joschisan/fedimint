@@ -164,13 +164,30 @@ pub async fn run(
 
     info!(target: LOG_CONSENSUS, "Starting Submission of Module CI proposals...");
 
-    for (module_id, kind, module) in module_registry.iter_modules() {
+    {
+        use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
         submit_module_ci_proposals(
             task_group,
             db.clone(),
-            module_id,
-            kind.clone(),
-            module.clone(),
+            MINT_INSTANCE_ID,
+            ModuleKind::from_static_str("mintv2"),
+            server.mint.clone(),
+            submission_sender.clone(),
+        );
+        submit_module_ci_proposals(
+            task_group,
+            db.clone(),
+            LN_INSTANCE_ID,
+            ModuleKind::from_static_str("lnv2"),
+            server.ln.clone(),
+            submission_sender.clone(),
+        );
+        submit_module_ci_proposals(
+            task_group,
+            db.clone(),
+            WALLET_INSTANCE_ID,
+            ModuleKind::from_static_str("walletv2"),
+            server.wallet.clone(),
             submission_sender.clone(),
         );
     }
@@ -339,19 +356,23 @@ async fn run_iroh_api(
         .map(|endpoint| (endpoint.path.to_string(), endpoint))
         .collect::<BTreeMap<String, ApiEndpoint<ConsensusApi>>>();
 
-    let module_api = consensus_api
-        .modules
-        .iter_modules()
-        .map(|(id, _, module)| {
-            let api_endpoints = module
+    let module_api = {
+        use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
+
+        let build = |module: &DynServerModule| {
+            module
                 .api_endpoints()
                 .into_iter()
                 .map(|endpoint| (endpoint.path.to_string(), endpoint))
-                .collect::<BTreeMap<String, ApiEndpoint<DynServerModule>>>();
+                .collect::<BTreeMap<String, ApiEndpoint<DynServerModule>>>()
+        };
 
-            (id, api_endpoints)
-        })
-        .collect::<BTreeMap<ModuleInstanceId, BTreeMap<String, ApiEndpoint<DynServerModule>>>>();
+        BTreeMap::from([
+            (MINT_INSTANCE_ID, build(&consensus_api.server.mint)),
+            (LN_INSTANCE_ID, build(&consensus_api.server.ln)),
+            (WALLET_INSTANCE_ID, build(&consensus_api.server.wallet)),
+        ])
+    };
 
     let consensus_api = Arc::new(consensus_api);
     let core_api = Arc::new(core_api);
