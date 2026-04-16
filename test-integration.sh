@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER_NAME="fm-integration-bitcoind"
+CONTAINER_NAME="pm-integration-bitcoind"
 
 cleanup() {
     echo "Cleaning up..."
-    pkill -9 -f "fedimint-server-daemon" 2>/dev/null || true
-    pkill -9 -f "fedimint-gateway-daemon" 2>/dev/null || true
+    pkill -9 -f "picomint-server-daemon" 2>/dev/null || true
+    pkill -9 -f "picomint-gateway-daemon" 2>/dev/null || true
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 }
@@ -14,7 +14,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Building workspace..."
-just build
+cargo build --workspace
 
 # Clean up any leftover container from previous run
 docker stop "$CONTAINER_NAME" 2>/dev/null || true
@@ -43,4 +43,4 @@ docker exec "$CONTAINER_NAME" bitcoin-cli \
     createwallet "" > /dev/null || true
 
 echo "Running integration tests..."
-RUST_LOG="${RUST_LOG:-info}" ./target/debug/fedimint-integration-tests
+RUST_LOG="${RUST_LOG:-info}" ./target/debug/picomint-integration-tests
