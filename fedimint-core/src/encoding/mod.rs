@@ -975,9 +975,8 @@ mod tests {
 
         for value in [IndexedEnum::Foo, IndexedEnum::Baz] {
             let bytes = value.consensus_encode_to_vec();
-            let decoded =
-                IndexedEnum::consensus_decode_whole(&bytes, &ModuleRegistry::default())
-                    .expect("Decoding failed");
+            let decoded = IndexedEnum::consensus_decode_whole(&bytes, &ModuleRegistry::default())
+                .expect("Decoding failed");
             assert_eq!(decoded, value);
         }
     }

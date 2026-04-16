@@ -27,3 +27,5 @@ pub struct RegisteredIncomingContract {
     pub incoming_amount_msats: u64,
     pub contract: IncomingContract,
 }
+
+fedimint_core::consensus_value!(RegisteredIncomingContract);

@@ -10,10 +10,9 @@ use anyhow::{Context as _, bail};
 use bitcoin::key::Secp256k1;
 use bitcoin::key::rand::thread_rng;
 use bitcoin::secp256k1::{self, PublicKey};
-use fedimint_api_client::Endpoint;
 use fedimint_api_client::api::{DynGlobalApi, IRawFederationApi};
 use fedimint_api_client::transaction::Transaction;
-use fedimint_api_client::wire;
+use fedimint_api_client::{Endpoint, wire};
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{ClientContextIface, ClientModule, IdxRange, OutPointRange};
@@ -518,7 +517,11 @@ impl Client {
         let dbtx = self.db().begin_write().await;
         Ok(self
             .mint
-            .get_balance(&dbtx.as_ref().isolate(format!("module-{}", wire::MINT_INSTANCE_ID)))
+            .get_balance(
+                &dbtx
+                    .as_ref()
+                    .isolate(format!("module-{}", wire::MINT_INSTANCE_ID)),
+            )
             .await)
     }
 

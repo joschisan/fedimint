@@ -16,10 +16,9 @@ use std::hash::Hash;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::task::{MaybeSend, MaybeSync, TaskGroup};
 use fedimint_core::util::BoxFuture;
-use fedimint_core::{maybe_add_send, maybe_add_send_sync};
+use fedimint_core::{maybe_add_send, maybe_add_send_sync, redb};
 use fedimint_redb::{Database, WriteTxRef};
 use futures::future::select_all;
 
@@ -32,7 +31,7 @@ use futures::future::select_all;
 /// Returning an empty `Vec` from `transitions` marks the state terminal:
 /// the executor removes it from the DB and stops polling.
 pub trait StateMachine:
-    Debug + Clone + Eq + Hash + Encodable + Decodable + MaybeSend + MaybeSync + 'static
+    Debug + Clone + Eq + Hash + for<'a> redb::Key<SelfType<'a> = Self> + MaybeSend + MaybeSync + 'static
 {
     /// Logical table name under which this state machine's active states are
     /// persisted in the owning [`ModuleExecutor`]'s database. Must be unique
@@ -46,10 +45,7 @@ pub trait StateMachine:
     fn transitions(&self, ctx: &Self::Context) -> Vec<StateTransition<Self>>;
 }
 
-fn table<S: StateMachine>() -> fedimint_core::db::NativeTableDef<
-    fedimint_core::db::ConsensusKey<S>,
-    fedimint_core::db::Consensus<()>,
-> {
+fn table<S: StateMachine>() -> fedimint_core::db::NativeTableDef<S, ()> {
     fedimint_core::db::NativeTableDef::new(S::TABLE_NAME)
 }
 

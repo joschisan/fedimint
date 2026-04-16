@@ -10,6 +10,21 @@ use crate::{FederationTx, FederationWallet};
 #[derive(Clone, Debug, Encodable, Decodable, Serialize)]
 pub struct Output(pub bitcoin::OutPoint, pub TxOut);
 
+fedimint_core::consensus_value!(Output);
+
+/// Newtype wrapper for `bitcoin::Txid` — lets us impl `redb::Key` locally
+/// (orphan rules forbid impling it on the foreign `Txid`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encodable, Decodable)]
+pub struct TxidKey(pub Txid);
+
+fedimint_core::consensus_key!(TxidKey);
+
+/// Vec of ecdsa signatures — wrapped so we can impl `redb::Value` locally.
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct Signatures(pub Vec<Signature>);
+
+fedimint_core::consensus_value!(Signatures);
+
 table!(
     OUTPUT,
     u64 => Output,
@@ -42,19 +57,19 @@ table!(
 
 table!(
     UNSIGNED_TX,
-    Txid => FederationTx,
+    TxidKey => FederationTx,
     "unsigned-tx",
 );
 
 table!(
     SIGNATURES,
-    (Txid, PeerId) => Vec<Signature>,
+    (TxidKey, PeerId) => Signatures,
     "signatures",
 );
 
 table!(
     UNCONFIRMED_TX,
-    Txid => FederationTx,
+    TxidKey => FederationTx,
     "unconfirmed-tx",
 );
 

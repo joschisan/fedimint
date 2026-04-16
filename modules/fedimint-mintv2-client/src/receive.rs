@@ -1,17 +1,19 @@
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
-use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::TransactionId;
 use fedimint_redb::WriteTxRef;
 
-use crate::MintSmContext;
 use crate::events::{ReceivePaymentStatus, ReceivePaymentUpdateEvent};
+use crate::MintSmContext;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
     pub common: ReceiveSMCommon,
     pub state: ReceiveSMState,
 }
+
+fedimint_core::consensus_key!(ReceiveStateMachine);
 
 impl ReceiveStateMachine {
     pub fn update(&self, state: ReceiveSMState) -> Self {

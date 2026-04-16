@@ -78,6 +78,8 @@ pub struct FederationWallet {
     pub tweak: sha256::Hash,
 }
 
+fedimint_core::consensus_value!(FederationWallet);
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct TxInfo {
     pub index: u64,
@@ -88,6 +90,8 @@ pub struct TxInfo {
     pub vbytes: u64,
     pub created: u64,
 }
+
+fedimint_core::consensus_value!(TxInfo);
 
 impl TxInfo {
     pub fn feerate(&self) -> u64 {

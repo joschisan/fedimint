@@ -85,6 +85,8 @@ where
 // nosemgrep: ban-raw-url
 pub struct SafeUrl(Url);
 
+crate::consensus_key!(SafeUrl);
+
 impl SafeUrl {
     pub fn parse(url_str: &str) -> Result<Self, ParseError> {
         Url::parse(url_str).map(SafeUrl)

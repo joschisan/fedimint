@@ -54,6 +54,8 @@ pub enum InitState {
     Complete(InitModeComplete),
 }
 
+fedimint_core::consensus_value!(InitState);
+
 impl InitState {
     pub fn into_complete(self) -> Self {
         match self {
@@ -82,10 +84,14 @@ pub struct ClientModuleRecovery {
     pub module_instance_id: ModuleInstanceId,
 }
 
+fedimint_core::consensus_key!(ClientModuleRecovery);
+
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct ClientModuleRecoveryState {
     pub progress: RecoveryProgress,
 }
+
+fedimint_core::consensus_value!(ClientModuleRecoveryState);
 
 impl ClientModuleRecoveryState {
     pub fn is_done(&self) -> bool {

@@ -19,11 +19,15 @@ pub enum PaymentImage {
     Point(PublicKey),
 }
 
+fedimint_core::consensus_key!(PaymentImage);
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct IncomingContract {
     pub commitment: Commitment,
     pub ciphertext: CipherText,
 }
+
+fedimint_core::consensus_value!(IncomingContract);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct Commitment {
@@ -135,6 +139,8 @@ pub struct OutgoingContract {
     pub refund_pk: PublicKey,
     pub ephemeral_pk: PublicKey,
 }
+
+fedimint_core::consensus_value!(OutgoingContract);
 
 impl OutgoingContract {
     pub fn contract_id(&self) -> ContractId {

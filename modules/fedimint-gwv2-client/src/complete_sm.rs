@@ -30,6 +30,8 @@ pub struct CompleteStateMachine {
     pub state: CompleteSMState,
 }
 
+fedimint_core::consensus_key!(CompleteStateMachine);
+
 impl CompleteStateMachine {
     pub fn update(&self, state: CompleteSMState) -> Self {
         Self {

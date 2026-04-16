@@ -7,6 +7,8 @@ use fedimint_core::util::SafeUrl;
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct GatewayKey(pub PublicKey);
 
+fedimint_core::consensus_key!(GatewayKey);
+
 table!(
     GATEWAY,
     GatewayKey => SafeUrl,

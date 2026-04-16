@@ -14,7 +14,7 @@ use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use fedimint_core::secp256k1::PublicKey;
-use fedimint_core::{Amount, extensible_associated_module_type, plugin_types_trait_impl_common};
+use fedimint_core::{extensible_associated_module_type, plugin_types_trait_impl_common, Amount};
 use serde::{Deserialize, Serialize};
 use tbs::{BlindedMessage, Message};
 use thiserror::Error;
@@ -169,6 +169,8 @@ pub enum RecoveryItem {
         nonce_hash: hash160::Hash,
     },
 }
+
+fedimint_core::consensus_value!(RecoveryItem);
 
 #[derive(Debug, Clone, PartialEq, Hash, Encodable, Decodable)]
 pub struct MintOutputOutcome;

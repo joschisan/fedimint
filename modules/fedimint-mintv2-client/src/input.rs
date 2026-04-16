@@ -1,9 +1,9 @@
-use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_client_module::module::OutPointRange;
-use fedimint_core::TransactionId;
+use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::TransactionId;
 use fedimint_mintv2_common::MintInput;
 use fedimint_redb::WriteTxRef;
 
@@ -14,6 +14,8 @@ pub struct InputStateMachine {
     pub common: InputSMCommon,
     pub state: InputSMState,
 }
+
+fedimint_core::consensus_key!(InputStateMachine);
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq, Decodable, Encodable)]
 pub struct InputSMCommon {

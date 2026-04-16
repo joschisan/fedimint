@@ -145,10 +145,8 @@ pub async fn run(
     // Make module decoders available to the P2P layer so that frames carrying
     // DynModuleConsensusItem (e.g. SignedSessionOutcome) can be decoded.
     p2p_decoders
-        .set(decoders.clone())
+        .set(decoders)
         .expect("p2p decoders were already set");
-
-    db.set_decoders(decoders);
 
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 

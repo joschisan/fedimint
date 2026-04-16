@@ -124,6 +124,8 @@ pub struct ClientConfig {
     pub modules: BTreeMap<ModuleInstanceId, ClientModuleConfig>,
 }
 
+crate::consensus_value!(ClientConfig);
+
 // FIXME: workaround for https://github.com/serde-rs/json/issues/989
 fn de_int_key<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
 where

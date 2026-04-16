@@ -20,6 +20,8 @@ pub struct AcceptedItem {
     pub peer: PeerId,
 }
 
+fedimint_core::consensus_value!(AcceptedItem);
+
 /// Items ordered in a single session that have been accepted by Fedimint
 /// consensus.
 ///
@@ -72,6 +74,8 @@ pub struct SignedSessionOutcome {
     pub session_outcome: SessionOutcome,
     pub signatures: std::collections::BTreeMap<PeerId, secp256k1::schnorr::Signature>,
 }
+
+fedimint_core::consensus_value!(SignedSessionOutcome);
 
 impl SignedSessionOutcome {
     pub fn verify(

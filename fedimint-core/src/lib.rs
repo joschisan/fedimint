@@ -403,6 +403,8 @@ impl std::fmt::Display for OutPoint {
     }
 }
 
+crate::consensus_key!(OutPoint);
+
 /// A contiguous range of input/output indexes
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct IdxRange {

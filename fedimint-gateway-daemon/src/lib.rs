@@ -651,5 +651,4 @@ impl IGatewayClientV2 for AppState {
             .send_fee_minimum
             .add_to(amount))
     }
-
 }

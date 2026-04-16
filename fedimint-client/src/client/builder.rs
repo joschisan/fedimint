@@ -4,15 +4,13 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use bitcoin::key::Secp256k1;
-use fedimint_api_client::Endpoint;
 use fedimint_api_client::api::{DynGlobalApi, FederationApi};
-use fedimint_api_client::{download_from_invite_code, wire};
+use fedimint_api_client::{Endpoint, download_from_invite_code, wire};
 use fedimint_client_module::ModuleRecoveryStarted;
 use fedimint_client_module::executor::ModuleExecutor;
-use fedimint_client_module::module::ClientModule;
-use fedimint_client_module::module::FinalClientIface;
 use fedimint_client_module::module::init::ClientModuleInit;
 use fedimint_client_module::module::recovery::RecoveryProgress;
+use fedimint_client_module::module::{ClientModule, FinalClientIface};
 use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use fedimint_client_module::transaction::TxSubmissionSmContext;
 use fedimint_core::config::{ClientConfig, FederationId};
@@ -262,7 +260,6 @@ impl ClientBuilder {
         let decoders = static_decoders();
         let config = Self::config_decoded(config, &decoders)?;
         let fed_id = config.calculate_federation_id();
-        db_no_decoders.set_decoders(decoders.clone());
         let db = db_no_decoders;
         let peer_urls: BTreeMap<PeerId, SafeUrl> = config
             .global
@@ -512,7 +509,9 @@ async fn init_or_recover<I: ClientModuleInit>(
         .modules
         .get(&module_instance_id)
         .cloned()
-        .unwrap_or_else(|| panic!("Module config for {kind_str} missing at instance {module_instance_id}"));
+        .unwrap_or_else(|| {
+            panic!("Module config for {kind_str} missing at instance {module_instance_id}")
+        });
 
     let typed_cfg: &<<I as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig =
         module_config.cast()?;

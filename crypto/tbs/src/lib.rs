@@ -51,8 +51,12 @@ pub struct BlindingKey(#[serde(with = "bls12_381_serde::scalar")] pub Scalar);
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct BlindedMessage(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
 
+fedimint_core::consensus_key!(BlindedMessage);
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct BlindedSignatureShare(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+
+fedimint_core::consensus_value!(BlindedSignatureShare);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct BlindedSignature(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);

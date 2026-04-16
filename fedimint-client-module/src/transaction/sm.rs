@@ -37,6 +37,8 @@ pub struct TxSubmissionStatesSM {
     pub state: TxSubmissionStates,
 }
 
+fedimint_core::consensus_key!(TxSubmissionStatesSM);
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum TxSubmissionStates {
     /// The transaction has been created and potentially already been submitted,

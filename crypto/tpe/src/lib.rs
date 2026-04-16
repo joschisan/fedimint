@@ -25,6 +25,8 @@ pub struct AggregatePublicKey(#[serde(with = "bls12_381_serde::g1")] pub G1Affin
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct DecryptionKeyShare(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
 
+fedimint_core::consensus_value!(DecryptionKeyShare);
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct AggregateDecryptionKey(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
 

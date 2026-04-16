@@ -17,32 +17,32 @@ use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
-    ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta, ModuleConsensusVersion,
-    ModuleInit, TransactionItemAmounts, api_endpoint,
+    api_endpoint, ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta,
+    ModuleConsensusVersion, ModuleInit, TransactionItemAmounts,
 };
-use fedimint_core::{Amount, InPoint, OutPoint, PeerId, apply, async_trait_maybe_send};
+use fedimint_core::{apply, async_trait_maybe_send, Amount, InPoint, OutPoint, PeerId};
 use fedimint_mintv2_common::config::{
-    MintClientConfig, MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
+    consensus_denominations, MintClientConfig, MintConfig, MintConfigConsensus, MintConfigPrivate,
 };
 use fedimint_mintv2_common::endpoint_constants::{
     RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
     SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
 };
 use fedimint_mintv2_common::{
-    Denomination, MODULE_CONSENSUS_VERSION, MintCommonInit, MintConsensusItem, MintInput,
-    MintInputError, MintModuleTypes, MintOutput, MintOutputError, RecoveryItem, verify_note,
+    verify_note, Denomination, MintCommonInit, MintConsensusItem, MintInput, MintInputError,
+    MintModuleTypes, MintOutput, MintOutputError, RecoveryItem, MODULE_CONSENSUS_VERSION,
 };
 use fedimint_redb::{Database, ReadTxRef, WriteTxRef};
-use fedimint_server_core::config::{PeerHandleOps, eval_poly_g2};
+use fedimint_server_core::config::{eval_poly_g2, PeerHandleOps};
 use fedimint_server_core::{
     ConfigGenModuleArgs, ServerModule, ServerModuleInit, ServerModuleInitArgs,
 };
-use tbs::{AggregatePublicKey, BlindedSignatureShare, PublicKeyShare, derive_pk_share};
+use tbs::{derive_pk_share, AggregatePublicKey, BlindedSignatureShare, PublicKeyShare};
 use threshold_crypto::group::Curve;
 
 use crate::db::{
-    BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER, NOTE_NONCE,
-    RECOVERY_ITEM,
+    NoteNonceKey, BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER,
+    NOTE_NONCE, RECOVERY_ITEM,
 };
 
 #[derive(Debug, Clone)]
@@ -190,7 +190,10 @@ impl ServerModule for Mint {
             return Err(MintInputError::InvalidSignature);
         }
 
-        if dbtx.insert(&NOTE_NONCE, &input.note.nonce, &()).is_some() {
+        if dbtx
+            .insert(&NOTE_NONCE, &NoteNonceKey(input.note.nonce), &())
+            .is_some()
+        {
             return Err(MintInputError::SpentCoin);
         }
 

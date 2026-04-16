@@ -27,7 +27,7 @@ use common::{
 };
 use db::{
     BLOCK_COUNT_VOTE, FEDERATION_WALLET, FEE_RATE_VOTE, OUTPUT, Output, SIGNATURES, SPENT_OUTPUT,
-    TX_INFO, TX_INFO_INDEX, UNCONFIRMED_TX, UNSIGNED_TX,
+    Signatures, TX_INFO, TX_INFO_INDEX, TxidKey, UNCONFIRMED_TX, UNSIGNED_TX,
 };
 use fedimint_core::config::{
     ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
@@ -89,6 +89,8 @@ pub struct FederationTx {
     pub vbytes: u64,
     pub fee: Amount,
 }
+
+fedimint_core::consensus_value!(FederationTx);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct SpentTxOut {
@@ -211,7 +213,7 @@ impl ServerModule for Wallet {
                 )
                 .expect("Our signatures failed verification against our private key");
 
-                WalletConsensusItem::Signatures(txid, signatures)
+                WalletConsensusItem::Signatures(txid.0, signatures)
             })
             .collect();
 
@@ -377,7 +379,7 @@ impl ServerModule for Wallet {
 
             dbtx.insert(
                 &UNSIGNED_TX,
-                &tx.compute_txid(),
+                &TxidKey(tx.compute_txid()),
                 &FederationTx {
                     tx: tx.clone(),
                     spent_tx_outs: vec![
@@ -521,7 +523,7 @@ impl ServerModule for Wallet {
 
         dbtx.insert(
             &UNSIGNED_TX,
-            &tx.compute_txid(),
+            &TxidKey(tx.compute_txid()),
             &FederationTx {
                 tx: tx.clone(),
                 spent_tx_outs: vec![SpentTxOut {
@@ -774,7 +776,7 @@ impl Wallet {
             let pks_hash = self.cfg.consensus.bitcoin_pks.consensus_hash();
 
             for tx in block.txdata {
-                dbtx.remove(&UNCONFIRMED_TX, &tx.compute_txid());
+                dbtx.remove(&UNCONFIRMED_TX, &TxidKey(tx.compute_txid()));
 
                 // We maintain an append-only log of transaction outputs that pass
                 // the probabilistic receive filter created since the federation was
@@ -812,7 +814,7 @@ impl Wallet {
         peer: PeerId,
     ) -> anyhow::Result<()> {
         let mut unsigned = dbtx
-            .get(&UNSIGNED_TX, &txid)
+            .get(&UNSIGNED_TX, &TxidKey(txid))
             .context("Unsigned transaction does not exist")?;
 
         let pk = self
@@ -825,7 +827,11 @@ impl Wallet {
         self.verify_signatures(&unsigned, &signatures, *pk)?;
 
         if dbtx
-            .insert(&SIGNATURES, &(txid, peer), &signatures)
+            .insert(
+                &SIGNATURES,
+                &(TxidKey(txid), peer),
+                &Signatures(signatures.clone()),
+            )
             .is_some()
         {
             bail!("Already received valid signatures from this peer")
@@ -834,22 +840,22 @@ impl Wallet {
         let signatures_by_peer: BTreeMap<PeerId, Vec<Signature>> = dbtx
             .range(
                 &SIGNATURES,
-                (txid, PeerId::from(u8::MIN))..=(txid, PeerId::from(u8::MAX)),
+                (TxidKey(txid), PeerId::from(u8::MIN))..=(TxidKey(txid), PeerId::from(u8::MAX)),
             )
             .into_iter()
-            .map(|((_, peer), sigs)| (peer, sigs))
+            .map(|((_, peer), sigs)| (peer, sigs.0))
             .collect();
 
         if signatures_by_peer.len() == self.cfg.consensus.bitcoin_pks.to_num_peers().threshold() {
-            dbtx.remove(&UNSIGNED_TX, &txid);
+            dbtx.remove(&UNSIGNED_TX, &TxidKey(txid));
 
             for peer in signatures_by_peer.keys() {
-                dbtx.remove(&SIGNATURES, &(txid, *peer));
+                dbtx.remove(&SIGNATURES, &(TxidKey(txid), *peer));
             }
 
             self.finalize_tx(&mut unsigned, &signatures_by_peer);
 
-            dbtx.insert(&UNCONFIRMED_TX, &txid, &unsigned);
+            dbtx.insert(&UNCONFIRMED_TX, &TxidKey(txid), &unsigned);
 
             self.btc_rpc.submit_transaction(unsigned.tx).await;
         }

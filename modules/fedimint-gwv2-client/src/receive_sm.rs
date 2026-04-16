@@ -28,6 +28,8 @@ pub struct ReceiveStateMachine {
     pub state: ReceiveSMState,
 }
 
+fedimint_core::consensus_key!(ReceiveStateMachine);
+
 impl ReceiveStateMachine {
     pub fn update(&self, state: ReceiveSMState) -> Self {
         Self {

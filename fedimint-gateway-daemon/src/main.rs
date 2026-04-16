@@ -137,14 +137,14 @@ fn main() -> anyhow::Result<()> {
         runtime.block_on(fedimint_redb::Database::open(opts.data_dir.join(DB_FILE)))?;
 
     // 3. Load or init client factory (mnemonic)
-    let client_factory = match runtime.block_on(GatewayClientFactory::try_load(gateway_db.clone()))?
-    {
-        Some(factory) => factory,
-        None => runtime.block_on(GatewayClientFactory::init(
-            gateway_db.clone(),
-            Bip39RootSecretStrategy::<12>::random(&mut OsRng),
-        ))?,
-    };
+    let client_factory =
+        match runtime.block_on(GatewayClientFactory::try_load(gateway_db.clone()))? {
+            Some(factory) => factory,
+            None => runtime.block_on(GatewayClientFactory::init(
+                gateway_db.clone(),
+                Bip39RootSecretStrategy::<12>::random(&mut OsRng),
+            ))?,
+        };
 
     let mnemonic = client_factory.mnemonic().clone();
 

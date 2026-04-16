@@ -14,6 +14,8 @@ pub struct SendStateMachine {
     pub state: SendSMState,
 }
 
+fedimint_core::consensus_key!(SendStateMachine);
+
 impl SendStateMachine {
     pub fn update(&self, state: SendSMState) -> Self {
         Self {
