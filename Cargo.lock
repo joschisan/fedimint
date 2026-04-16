@@ -919,6 +919,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "borsh"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfd1e3f8955a5d7de9fab72fc8373fade9fb8a703968cb200ae3dc6cf08e185a"
+dependencies = [
+ "borsh-derive",
+ "bytes",
+ "cfg_aliases",
+]
+
+[[package]]
+name = "borsh-derive"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfcfdc083699101d5a7965e49925975f2f55060f94f9a05e7187be95d530ca59"
+dependencies = [
+ "once_cell",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2203,6 +2227,7 @@ dependencies = [
  "bitcoin-units",
  "bitvec",
  "bls12_381",
+ "borsh",
  "erased-serde",
  "fedimint-derive",
  "fedimint-logging",
@@ -2283,6 +2308,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
+ "borsh",
  "fedimint-core",
  "fedimint-logging",
  "fedimint-redb",
@@ -2725,6 +2751,7 @@ version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
+ "borsh",
  "fedimint-core",
  "futures",
  "redb",

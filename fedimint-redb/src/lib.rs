@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use fedimint_core::db::{
     IReadDatabaseTransactionOps, IReadDatabaseTransactionOpsTyped as _,
-    IWriteDatabaseTransactionOps, TableDef,
+    IWriteDatabaseTransactionOps, NativeTableDef, TableDef,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -365,6 +365,60 @@ impl<'tx> WriteTxRef<'tx> {
             .lock()
             .expect("on_commit poisoned")
             .push(Box::new(f));
+    }
+
+    // ─── Native-typed ops (spike; will replace the bytes layer) ──────────
+    //
+    // Closure-based to sidestep GAT-related trait-resolution pain around
+    // `redb::Value::SelfType<'a>`. The closure gets a real `redb::Table<'_>`
+    // and can call `.insert`, `.get`, `.range`, `.iter` etc. directly.
+
+    /// Open the native redb table at this view's prefix+name and hand it to
+    /// `f`. Registers the table in `touched` for post-commit notification.
+    pub fn with_native_table<K, V, R>(
+        &self,
+        def: &NativeTableDef<K, V>,
+        f: impl FnOnce(&mut redb::Table<'_, K, V>) -> R,
+    ) -> R
+    where
+        K: redb::Key + 'static,
+        V: redb::Value + 'static,
+    {
+        let resolved = def.resolved_name(&self.prefix);
+        let td: TableDefinition<K, V> = TableDefinition::new(&resolved);
+        let mut table = self
+            .tx
+            .open_table(td)
+            .expect("redb open_table (write) failed");
+        let r = f(&mut table);
+        drop(table);
+        self.touched
+            .lock()
+            .expect("touched poisoned")
+            .insert(resolved);
+        r
+    }
+}
+
+impl ReadTxRef<'_> {
+    /// Open the native redb table and hand it to `f`. Returns `None` if the
+    /// table has never been written — treat that as "empty" at the call site.
+    pub fn with_native_table<K, V, R>(
+        &self,
+        def: &NativeTableDef<K, V>,
+        f: impl FnOnce(&redb::ReadOnlyTable<K, V>) -> R,
+    ) -> Option<R>
+    where
+        K: redb::Key + 'static,
+        V: redb::Value + 'static,
+    {
+        let resolved = def.resolved_name(&self.prefix);
+        let td: TableDefinition<K, V> = TableDefinition::new(&resolved);
+        match self.tx.open_table(td) {
+            Ok(t) => Some(f(&t)),
+            Err(redb::TableError::TableDoesNotExist(_)) => None,
+            Err(e) => panic!("redb open_table (read) failed: {e}"),
+        }
     }
 }
 

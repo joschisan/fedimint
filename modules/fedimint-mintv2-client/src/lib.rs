@@ -958,8 +958,8 @@ async fn await_output_finalisation(
 ) {
     use futures::StreamExt as _;
 
-    let mut stream = client_ctx
-        .subscribe_operation_events_typed::<events::OutputFinalisedEvent>(operation_id);
+    let mut stream =
+        client_ctx.subscribe_operation_events_typed::<events::OutputFinalisedEvent>(operation_id);
     while let Some(ev) = stream.next().await {
         if ev.range == range {
             return;

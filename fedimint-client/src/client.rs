@@ -37,9 +37,7 @@ use fedimint_core::{
     Amount, PeerId, TransactionId, apply, async_trait_maybe_send, maybe_add_send,
     maybe_add_send_sync,
 };
-use fedimint_eventlog::{
-    DBTransactionEventLogReadExt as _, Event, EventKind, EventLogId, PersistedLogEntry,
-};
+use fedimint_eventlog::{Event, EventKind, EventLogId, PersistedLogEntry};
 use fedimint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
 use fedimint_redb::{Database, WriteTxRef};
 use futures::{Stream, StreamExt as _};
@@ -806,11 +804,22 @@ impl Client {
         pos: Option<EventLogId>,
         limit: u64,
     ) -> Vec<PersistedLogEntry> {
+        let pos = pos.unwrap_or(EventLogId::LOG_START);
+        let end = pos.saturating_add(limit);
         self.db
             .begin_read()
             .await
             .as_ref()
-            .get_event_log(pos, limit)
+            .with_native_table(&fedimint_eventlog::EVENT_LOG, |t| {
+                t.range(pos..end)
+                    .expect("redb range failed")
+                    .map(|r| {
+                        let (k, v) = r.expect("redb range item failed");
+                        fedimint_eventlog::PersistedLogEntry::new(k.value(), v.value())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
     }
 
     /// Get a receiver that signals when new events are added to the event log

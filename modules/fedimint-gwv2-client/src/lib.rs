@@ -271,12 +271,11 @@ impl GatewayClientModuleV2 {
     }
 
     pub async fn subscribe_send(&self, operation_id: OperationId) -> Result<[u8; 32], Signature> {
-        let status = await_event::<SendPaymentUpdateEvent, _>(
-            &self.client_ctx,
-            operation_id,
-            |ev| Some(ev.status.clone()),
-        )
-        .await;
+        let status =
+            await_event::<SendPaymentUpdateEvent, _>(&self.client_ctx, operation_id, |ev| {
+                Some(ev.status.clone())
+            })
+            .await;
 
         match status {
             SendPaymentStatus::Success(preimage) => Ok(preimage),
@@ -422,12 +421,11 @@ impl GatewayClientModuleV2 {
     }
 
     pub async fn await_receive(&self, operation_id: OperationId) -> FinalReceiveState {
-        let status = await_event::<ReceivePaymentUpdateEvent, _>(
-            &self.client_ctx,
-            operation_id,
-            |ev| Some(ev.status.clone()),
-        )
-        .await;
+        let status =
+            await_event::<ReceivePaymentUpdateEvent, _>(&self.client_ctx, operation_id, |ev| {
+                Some(ev.status.clone())
+            })
+            .await;
 
         match status {
             ReceivePaymentStatus::Success(preimage) => FinalReceiveState::Success(preimage),
@@ -451,11 +449,10 @@ pub(crate) async fn await_receive_from_log(
     client_ctx: &ClientContext<GatewayClientModuleV2>,
     operation_id: OperationId,
 ) -> FinalReceiveState {
-    let status =
-        await_event::<ReceivePaymentUpdateEvent, _>(client_ctx, operation_id, |ev| {
-            Some(ev.status.clone())
-        })
-        .await;
+    let status = await_event::<ReceivePaymentUpdateEvent, _>(client_ctx, operation_id, |ev| {
+        Some(ev.status.clone())
+    })
+    .await;
 
     match status {
         ReceivePaymentStatus::Success(preimage) => FinalReceiveState::Success(preimage),

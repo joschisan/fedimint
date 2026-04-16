@@ -51,7 +51,19 @@ use crate::{
 /// submitted the transaction's ID can be used as operation ID. If there is no
 /// transaction related to it, it should be generated randomly. Since it is a
 /// 256bit value collisions are impossible for all intents and purposes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Encodable, Decodable, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Encodable,
+    Decodable,
+    PartialOrd,
+    Ord,
+    borsh::BorshSerialize,
+    borsh::BorshDeserialize,
+)]
 pub struct OperationId(pub [u8; 32]);
 
 pub struct OperationIdFullFmt<'a>(&'a OperationId);
@@ -135,6 +147,8 @@ impl<'de> Deserialize<'de> for OperationId {
     }
 }
 
+crate::redb_newtype_key!(OperationId, [u8; 32]);
+
 /// Module instance ID
 ///
 /// This value uniquely identifies a single instance of a module in a
@@ -184,6 +198,19 @@ impl fmt::Display for ModuleKind {
 impl fmt::Debug for ModuleKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl borsh::BorshSerialize for ModuleKind {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        borsh::BorshSerialize::serialize(self.0.as_ref(), writer)
+    }
+}
+
+impl borsh::BorshDeserialize for ModuleKind {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        let s = String::deserialize_reader(reader)?;
+        Ok(Self(Cow::Owned(s)))
     }
 }
 

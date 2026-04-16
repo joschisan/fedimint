@@ -15,12 +15,152 @@
 //! The concrete redb-backed types (`Database`, `ReadTransaction`,
 //! `WriteTransaction`, `ReadTxRef`, `WriteTxRef`) live in `fedimint-redb`.
 
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeBounds};
 use std::sync::OnceLock;
 
+use borsh::{BorshDeserialize, BorshSerialize};
+
 use crate::encoding::{Decodable, Encodable};
 use crate::module::registry::ModuleDecoderRegistry;
+
+// ─── Borsh<T>: redb::Value adapter ───────────────────────────────────────
+//
+// Any `BorshSerialize + BorshDeserialize` type becomes a redb `Value` by
+// wrapping it in `Borsh<T>` **in the table definition only** —
+// `SelfType<'a> = T` keeps the wrapper invisible at call sites. Variable
+// width; not a `Key` (borsh integers are LE, which don't sort lexicographically
+// — use `redb_newtype_key!` for ordered primitive-newtype keys instead).
+
+#[derive(Debug)]
+pub struct Borsh<T>(PhantomData<T>);
+
+impl<T> redb::Value for Borsh<T>
+where
+    T: BorshSerialize + BorshDeserialize + Debug + 'static,
+{
+    type SelfType<'a>
+        = T
+    where
+        Self: 'a;
+
+    type AsBytes<'a>
+        = Vec<u8>
+    where
+        Self: 'a;
+
+    fn fixed_width() -> Option<usize> {
+        None
+    }
+
+    fn from_bytes<'a>(data: &'a [u8]) -> T
+    where
+        Self: 'a,
+    {
+        borsh::from_slice(data).expect("borsh decode failed")
+    }
+
+    fn as_bytes<'a, 'b: 'a>(value: &'a T) -> Vec<u8>
+    where
+        Self: 'b,
+    {
+        borsh::to_vec(value).expect("borsh encode can't fail")
+    }
+
+    fn type_name() -> redb::TypeName {
+        redb::TypeName::new(&format!("fedimint::Borsh<{}>", std::any::type_name::<T>()))
+    }
+}
+
+/// Implement `redb::Key` + `redb::Value` for a fixed-width primitive newtype.
+///
+/// ```ignore
+/// pub struct EventLogId(pub u64);
+/// redb_newtype_key!(EventLogId, u64);
+/// ```
+///
+/// The newtype must be `struct Foo(pub $inner)`. Encoding delegates to the
+/// inner primitive's redb impl, which is LE fixed-width with integer-correct
+/// `compare`.
+#[macro_export]
+macro_rules! redb_newtype_key {
+    ($ty:ty, $inner:ty) => {
+        impl $crate::redb::Value for $ty {
+            type SelfType<'a>
+                = $ty
+            where
+                Self: 'a;
+
+            type AsBytes<'a>
+                = <$inner as $crate::redb::Value>::AsBytes<'a>
+            where
+                Self: 'a;
+
+            fn fixed_width() -> Option<usize> {
+                <$inner as $crate::redb::Value>::fixed_width()
+            }
+
+            fn from_bytes<'a>(data: &'a [u8]) -> Self
+            where
+                Self: 'a,
+            {
+                Self(<$inner as $crate::redb::Value>::from_bytes(data))
+            }
+
+            fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
+            where
+                Self: 'b,
+            {
+                <$inner as $crate::redb::Value>::as_bytes(&value.0)
+            }
+
+            fn type_name() -> $crate::redb::TypeName {
+                $crate::redb::TypeName::new(concat!("fedimint::", stringify!($ty)))
+            }
+        }
+
+        impl $crate::redb::Key for $ty {
+            fn compare(data1: &[u8], data2: &[u8]) -> ::std::cmp::Ordering {
+                <$inner as $crate::redb::Key>::compare(data1, data2)
+            }
+        }
+    };
+}
+
+// ─── NativeTableDef: redb-native typed table reference ───────────────────
+//
+// Parallel to `TableDef<K, V>`, but `K`/`V` are redb types
+// (implement `redb::Key`/`redb::Value`). Gives direct access to redb's
+// native typed `TableDefinition<K, V>` with zero bytes-level indirection —
+// intended to replace `TableDef` once the migration is complete.
+
+pub struct NativeTableDef<K: redb::Key + 'static, V: redb::Value + 'static> {
+    name: &'static str,
+    _phantom: PhantomData<(K, V)>,
+}
+
+impl<K, V> NativeTableDef<K, V>
+where
+    K: redb::Key + 'static,
+    V: redb::Value + 'static,
+{
+    pub const fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn resolved_name(&self, prefix: &[String]) -> String {
+        prefix
+            .iter()
+            .map(String::as_str)
+            .chain(std::iter::once(self.name))
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+}
 
 // ─── Table definition ────────────────────────────────────────────────────
 

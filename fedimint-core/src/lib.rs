@@ -55,7 +55,7 @@ pub use macro_rules_attribute::apply;
 pub use peer_id::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
-pub use {bitcoin, hex, secp256k1};
+pub use {bitcoin, borsh, hex, redb, secp256k1};
 
 use crate::encoding::{Decodable, DecodeError, Encodable};
 use crate::module::registry::ModuleDecoderRegistry;

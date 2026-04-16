@@ -11,9 +11,9 @@ use std::fmt;
 use std::str::FromStr;
 
 use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
-use fedimint_core::db::{IReadDatabaseTransactionOpsTyped, IWriteDatabaseTransactionOpsTyped};
-use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::table;
+use fedimint_core::db::{Borsh, NativeTableDef};
+use fedimint_core::redb::ReadableTable as _;
+use fedimint_core::redb_newtype_key;
 use fedimint_redb::{Database, WriteTxRef};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -29,8 +29,6 @@ pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
     Copy,
     Clone,
     Debug,
-    Encodable,
-    Decodable,
     Default,
     PartialEq,
     Eq,
@@ -38,8 +36,12 @@ pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
     Ord,
     Serialize,
     Deserialize,
+    borsh::BorshSerialize,
+    borsh::BorshDeserialize,
 )]
-pub struct EventLogId(u64);
+pub struct EventLogId(pub u64);
+
+redb_newtype_key!(EventLogId, u64);
 
 impl EventLogId {
     pub const LOG_START: EventLogId = EventLogId(0);
@@ -74,12 +76,25 @@ impl fmt::Display for EventLogId {
     }
 }
 
-#[derive(Debug, Clone, Encodable, Decodable, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventKind(Cow<'static, str>);
 
 impl EventKind {
     pub const fn from_static(value: &'static str) -> Self {
         Self(Cow::Borrowed(value))
+    }
+}
+
+impl borsh::BorshSerialize for EventKind {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        borsh::BorshSerialize::serialize(self.0.as_ref(), writer)
+    }
+}
+
+impl borsh::BorshDeserialize for EventKind {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        let s = String::deserialize_reader(reader)?;
+        Ok(Self(Cow::Owned(s)))
     }
 }
 
@@ -101,7 +116,7 @@ impl fmt::Display for EventKind {
     }
 }
 
-#[derive(Debug, Encodable, Decodable, Clone)]
+#[derive(Debug, Clone, borsh::BorshSerialize, borsh::BorshDeserialize)]
 pub struct EventLogEntry {
     pub kind: EventKind,
 
@@ -166,6 +181,10 @@ impl Serialize for PersistedLogEntry {
 }
 
 impl PersistedLogEntry {
+    pub fn new(id: EventLogId, inner: EventLogEntry) -> Self {
+        Self { id, inner }
+    }
+
     pub fn id(&self) -> EventLogId {
         self.id
     }
@@ -183,63 +202,11 @@ impl std::ops::Deref for PersistedLogEntry {
     }
 }
 
-table!(
-    EVENT_LOG,
-    EventLogId => EventLogEntry,
-    "event-log",
-);
+pub const EVENT_LOG: NativeTableDef<EventLogId, Borsh<EventLogEntry>> =
+    NativeTableDef::new("event-log");
 
-table!(
-    EVENT_LOG_BY_OPERATION,
-    (OperationId, EventLogId) => EventLogEntry,
-    "event-log-by-operation",
-);
-
-/// Read-only event log operations.
-pub trait DBTransactionEventLogReadExt {
-    fn get_next_event_log_id(&self) -> EventLogId;
-    fn get_event_log(&self, pos: Option<EventLogId>, limit: u64) -> Vec<PersistedLogEntry>;
-    fn get_events_for_operation(
-        &self,
-        operation_id: OperationId,
-        pos: Option<EventLogId>,
-        limit: u64,
-    ) -> Vec<PersistedLogEntry>;
-}
-
-impl<T: IReadDatabaseTransactionOpsTyped + ?Sized> DBTransactionEventLogReadExt for T {
-    fn get_next_event_log_id(&self) -> EventLogId {
-        self.iter(&EVENT_LOG)
-            .into_iter()
-            .next_back()
-            .map(|(k, _)| k.next())
-            .unwrap_or_default()
-    }
-
-    fn get_event_log(&self, pos: Option<EventLogId>, limit: u64) -> Vec<PersistedLogEntry> {
-        let pos = pos.unwrap_or_default();
-        self.range(&EVENT_LOG, pos..pos.saturating_add(limit))
-            .into_iter()
-            .map(|(k, v)| PersistedLogEntry { id: k, inner: v })
-            .collect()
-    }
-
-    fn get_events_for_operation(
-        &self,
-        operation_id: OperationId,
-        pos: Option<EventLogId>,
-        limit: u64,
-    ) -> Vec<PersistedLogEntry> {
-        let pos = pos.unwrap_or_default();
-        self.range(
-            &EVENT_LOG_BY_OPERATION,
-            (operation_id, pos)..(operation_id, pos.saturating_add(limit)),
-        )
-        .into_iter()
-        .map(|((_, id), entry)| PersistedLogEntry { id, inner: entry })
-        .collect()
-    }
-}
+pub const EVENT_LOG_BY_OPERATION: NativeTableDef<(OperationId, EventLogId), Borsh<EventLogEntry>> =
+    NativeTableDef::new("event-log-by-operation");
 
 /// Append an event to [`EVENT_LOG`] and — if `operation_id` is set — to
 /// [`EVENT_LOG_BY_OPERATION`]. IDs are allocated inline under redb's
@@ -259,7 +226,7 @@ pub fn log_event_raw(
         "Events of modules must have module_id set"
     );
 
-    let id = dbtx.get_next_event_log_id();
+    let id = next_event_log_id(dbtx);
     let ts_usecs =
         u64::try_from(fedimint_core::time::duration_since_epoch().as_micros()).unwrap_or(u64::MAX);
     let entry = EventLogEntry {
@@ -270,17 +237,22 @@ pub fn log_event_raw(
         payload,
     };
 
-    assert!(
-        dbtx.insert(&EVENT_LOG, &id, &entry).is_none(),
-        "Must never overwrite existing event"
-    );
-
-    if let Some(operation_id) = operation_id {
+    dbtx.with_native_table(&EVENT_LOG, |t| {
         assert!(
-            dbtx.insert(&EVENT_LOG_BY_OPERATION, &(operation_id, id), &entry)
-                .is_none(),
+            t.insert(&id, &entry).expect("redb insert failed").is_none(),
             "Must never overwrite existing event"
         );
+    });
+
+    if let Some(operation_id) = operation_id {
+        dbtx.with_native_table(&EVENT_LOG_BY_OPERATION, |t| {
+            assert!(
+                t.insert(&(operation_id, id), &entry)
+                    .expect("redb insert failed")
+                    .is_none(),
+                "Must never overwrite existing event"
+            );
+        });
     }
 
     dbtx.on_commit(move || {
@@ -307,6 +279,16 @@ pub fn log_event<E: Event>(
     );
 }
 
+/// Next unused log id — one past the max existing id, or 0 if empty.
+fn next_event_log_id(dbtx: &WriteTxRef<'_>) -> EventLogId {
+    dbtx.with_native_table(&EVENT_LOG, |t| {
+        t.last()
+            .expect("redb last failed")
+            .map(|(k, _)| k.value().next())
+            .unwrap_or_default()
+    })
+}
+
 /// Stream every event belonging to `operation_id`, in insertion order.
 ///
 /// Yields existing events first, then live ones. The cursor is kept internally
@@ -324,7 +306,17 @@ pub fn subscribe_operation_events(
                 .begin_read()
                 .await
                 .as_ref()
-                .get_events_for_operation(operation_id, Some(next_id), u64::MAX);
+                .with_native_table(&EVENT_LOG_BY_OPERATION, |t| {
+                    t.range((operation_id, next_id)..(operation_id, EventLogId::LOG_END))
+                        .expect("redb range failed")
+                        .map(|r| {
+                            let (k, v) = r.expect("redb range item failed");
+                            let (_, id) = k.value();
+                            PersistedLogEntry { id, inner: v.value() }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             for entry in batch {
                 next_id = entry.id().next();
                 yield entry;
