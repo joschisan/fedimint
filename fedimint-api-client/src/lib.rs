@@ -5,8 +5,11 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::return_self_not_must_use)]
 
+use std::collections::BTreeMap;
+
 use anyhow::{Context as _, bail};
-use api::{DynGlobalApi, FederationApiExt as _, ServerError};
+use api::{FederationApi, ServerError};
+use fedimint_core::PeerId;
 use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::endpoint_constants::CLIENT_CONFIG_ENDPOINT;
 use fedimint_core::invite_code::InviteCode;
@@ -33,7 +36,7 @@ pub use iroh::Endpoint;
 pub async fn download_from_invite_code(
     endpoint: &Endpoint,
     invite: &InviteCode,
-) -> anyhow::Result<(ClientConfig, DynGlobalApi)> {
+) -> anyhow::Result<(ClientConfig, FederationApi)> {
     debug!(
         target: LOG_CLIENT_NET,
         %invite,
@@ -42,7 +45,7 @@ pub async fn download_from_invite_code(
     );
 
     let federation_id = invite.federation_id();
-    let api_from_invite = DynGlobalApi::new(endpoint.clone(), invite.peers());
+    let api_from_invite = FederationApi::new(endpoint.clone(), invite.peers());
 
     fedimint_core::util::retry(
         "Downloading client config",
@@ -56,9 +59,9 @@ pub async fn download_from_invite_code(
 /// Tries to download the [`ClientConfig`] only once.
 pub async fn try_download_client_config(
     endpoint: &Endpoint,
-    api_from_invite: &DynGlobalApi,
+    api_from_invite: &FederationApi,
     federation_id: FederationId,
-) -> anyhow::Result<(ClientConfig, DynGlobalApi)> {
+) -> anyhow::Result<(ClientConfig, FederationApi)> {
     debug!(target: LOG_CLIENT_NET, "Downloading client config from peer");
     let query_strategy = FilterMap::new(move |cfg: ClientConfig| {
         if federation_id != cfg.global.calculate_federation_id() {
@@ -70,7 +73,7 @@ pub async fn try_download_client_config(
         Ok(cfg.global.api_endpoints)
     });
 
-    let api_endpoints = api_from_invite
+    let api_endpoints: BTreeMap<PeerId, fedimint_core::config::PeerEndpoint> = api_from_invite
         .request_with_strategy(
             query_strategy,
             CLIENT_CONFIG_ENDPOINT.to_owned(),
@@ -85,7 +88,7 @@ pub async fn try_download_client_config(
 
     debug!(target: LOG_CLIENT_NET, "Verifying client config with all peers");
 
-    let api_full = DynGlobalApi::new(endpoint.clone(), api_endpoints);
+    let api_full = FederationApi::new(endpoint.clone(), api_endpoints);
     let client_config = api_full
         .request_current_consensus::<ClientConfig>(
             CLIENT_CONFIG_ENDPOINT.to_owned(),

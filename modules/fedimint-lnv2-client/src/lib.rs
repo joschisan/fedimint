@@ -17,7 +17,7 @@ use std::sync::Arc;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
 use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
-use fedimint_api_client::api::DynModuleApi;
+use fedimint_api_client::api::FederationApi;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
@@ -116,7 +116,7 @@ pub struct LightningClientModule {
     federation_id: FederationId,
     cfg: LightningClientConfig,
     client_ctx: ClientContext<Self>,
-    module_api: DynModuleApi,
+    module_api: FederationApi,
     keypair: Keypair,
     lnurl_keypair: Keypair,
     gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
@@ -157,7 +157,7 @@ impl LightningClientModule {
         federation_id: FederationId,
         cfg: LightningClientConfig,
         client_ctx: ClientContext<Self>,
-        module_api: DynModuleApi,
+        module_api: FederationApi,
         module_root_secret: &DerivableSecret,
         gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
         task_group: &TaskGroup,

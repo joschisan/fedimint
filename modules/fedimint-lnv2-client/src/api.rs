@@ -1,13 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use fedimint_api_client::api::{
-    FederationApiExt, FederationResult, IRawFederationApi, ServerResult,
-};
+use fedimint_api_client::api::{FederationApi, FederationResult, ServerResult};
 use fedimint_api_client::query::FilterMapThreshold;
 use fedimint_core::module::ApiRequestErased;
-use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::SafeUrl;
-use fedimint_core::{NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send};
+use fedimint_core::{NumPeersExt, OutPoint, PeerId};
 use fedimint_lnv2_common::ContractId;
 use fedimint_lnv2_common::contracts::IncomingContract;
 use fedimint_lnv2_common::endpoint_constants::{
@@ -16,7 +13,7 @@ use fedimint_lnv2_common::endpoint_constants::{
 };
 use rand::seq::SliceRandom;
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 pub trait LightningFederationApi {
     async fn consensus_block_count(&self) -> FederationResult<u64>;
 
@@ -35,11 +32,8 @@ pub trait LightningFederationApi {
     async fn gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<SafeUrl>>;
 }
 
-#[apply(async_trait_maybe_send!)]
-impl<T: ?Sized> LightningFederationApi for T
-where
-    T: IRawFederationApi + MaybeSend + MaybeSync + 'static,
-{
+#[async_trait::async_trait]
+impl LightningFederationApi for FederationApi {
     async fn consensus_block_count(&self) -> FederationResult<u64> {
         self.request_current_consensus(
             CONSENSUS_BLOCK_COUNT_ENDPOINT.to_string(),

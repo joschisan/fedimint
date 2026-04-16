@@ -1,11 +1,10 @@
-use fedimint_api_client::api::{FederationApiExt, FederationResult, IRawFederationApi};
+use fedimint_api_client::api::{FederationApi, FederationResult};
+use fedimint_core::OutPoint;
 use fedimint_core::module::ApiRequestErased;
-use fedimint_core::task::{MaybeSend, MaybeSync};
-use fedimint_core::{OutPoint, apply, async_trait_maybe_send};
 use fedimint_lnv2_common::ContractId;
 use fedimint_lnv2_common::endpoint_constants::OUTGOING_CONTRACT_EXPIRATION_ENDPOINT;
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 pub trait GatewayFederationApi {
     async fn outgoing_contract_expiration(
         &self,
@@ -13,11 +12,8 @@ pub trait GatewayFederationApi {
     ) -> FederationResult<Option<(ContractId, u64)>>;
 }
 
-#[apply(async_trait_maybe_send!)]
-impl<T: ?Sized> GatewayFederationApi for T
-where
-    T: IRawFederationApi + MaybeSend + MaybeSync + 'static,
-{
+#[async_trait::async_trait]
+impl GatewayFederationApi for FederationApi {
     async fn outgoing_contract_expiration(
         &self,
         outpoint: OutPoint,

@@ -6,7 +6,7 @@ use std::{marker, ops};
 
 use anyhow::bail;
 use bitcoin::secp256k1::PublicKey;
-use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
+use fedimint_api_client::api::FederationApi;
 use fedimint_core::config::ClientConfig;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::invite_code::InviteCode;
@@ -68,7 +68,7 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
     /// downcast to the concrete module type. Panics if no module is mounted
     /// at the given instance id.
     fn get_module(&self, instance: ModuleInstanceId) -> &(maybe_add_send_sync!(dyn Any));
-    fn api_clone(&self) -> DynGlobalApi;
+    fn api_clone(&self) -> FederationApi;
     async fn finalize_and_submit_transaction(
         &self,
         operation_id: OperationId,
@@ -234,12 +234,12 @@ where
     }
 
     /// Get a reference to a global Api handle
-    pub fn global_api(&self) -> DynGlobalApi {
+    pub fn global_api(&self) -> FederationApi {
         self.client.get().api_clone()
     }
 
     /// Get a reference to a module Api handle
-    pub fn module_api(&self) -> DynModuleApi {
+    pub fn module_api(&self) -> FederationApi {
         self.global_api().with_module(self.module_instance_id)
     }
 

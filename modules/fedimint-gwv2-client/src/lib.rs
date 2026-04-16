@@ -17,7 +17,7 @@ use events::{
     CompleteLightningPaymentEvent, ReceivePaymentStatus, ReceivePaymentUpdateEvent,
     SendPaymentStatus, SendPaymentUpdateEvent,
 };
-use fedimint_api_client::api::DynModuleApi;
+use fedimint_api_client::api::FederationApi;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
@@ -116,7 +116,7 @@ pub struct GatewayClientModuleV2 {
     pub federation_id: FederationId,
     pub cfg: LightningClientConfig,
     pub client_ctx: ClientContext<Self>,
-    pub module_api: DynModuleApi,
+    pub module_api: FederationApi,
     pub keypair: Keypair,
     pub gateway: Arc<dyn IGatewayClientV2>,
     send_executor: ModuleExecutor<SendStateMachine>,

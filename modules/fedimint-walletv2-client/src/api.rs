@@ -1,7 +1,6 @@
-use fedimint_api_client::api::{FederationApiExt, FederationResult, IRawFederationApi};
+use fedimint_api_client::api::{FederationApi, FederationResult};
+use fedimint_core::OutPoint;
 use fedimint_core::module::ApiRequestErased;
-use fedimint_core::task::{MaybeSend, MaybeSync};
-use fedimint_core::{OutPoint, apply, async_trait_maybe_send};
 use fedimint_walletv2_common::endpoint_constants::{
     CONSENSUS_BLOCK_COUNT_ENDPOINT, CONSENSUS_FEERATE_ENDPOINT, FEDERATION_WALLET_ENDPOINT,
     OUTPUT_INFO_SLICE_ENDPOINT, PENDING_TRANSACTION_CHAIN_ENDPOINT, RECEIVE_FEE_ENDPOINT,
@@ -9,7 +8,7 @@ use fedimint_walletv2_common::endpoint_constants::{
 };
 use fedimint_walletv2_common::{FederationWallet, OutputInfo, TxInfo};
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 pub trait WalletFederationApi {
     async fn consensus_block_count(&self) -> FederationResult<u64>;
 
@@ -32,11 +31,8 @@ pub trait WalletFederationApi {
     async fn tx_id(&self, outpoint: OutPoint) -> Option<bitcoin::Txid>;
 }
 
-#[apply(async_trait_maybe_send!)]
-impl<T: ?Sized> WalletFederationApi for T
-where
-    T: IRawFederationApi + MaybeSend + MaybeSync + 'static,
-{
+#[async_trait::async_trait]
+impl WalletFederationApi for FederationApi {
     async fn consensus_block_count(&self) -> FederationResult<u64> {
         self.request_current_consensus(
             CONSENSUS_BLOCK_COUNT_ENDPOINT.to_string(),

@@ -2,7 +2,7 @@ use core::fmt;
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
-use fedimint_api_client::api::{FederationApiExt, ServerError};
+use fedimint_api_client::api::ServerError;
 use fedimint_api_client::query::FilterMapThreshold;
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};

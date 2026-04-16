@@ -21,7 +21,7 @@ use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
 use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
 use events::{ReceivePaymentEvent, SendPaymentEvent};
-use fedimint_api_client::api::{DynModuleApi, FederationResult};
+use fedimint_api_client::api::{FederationApi, FederationResult};
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
@@ -56,7 +56,7 @@ pub struct WalletClientModule {
     cfg: WalletClientConfig,
     client_ctx: ClientContext<Self>,
     db: Database,
-    module_api: DynModuleApi,
+    module_api: FederationApi,
     send_executor: ModuleExecutor<SendStateMachine>,
     receive_executor: ModuleExecutor<ReceiveStateMachine>,
 }

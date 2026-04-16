@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use fedimint_api_client::api::{DynGlobalApi, FederationApiExt as _};
+use fedimint_api_client::api::FederationApi;
 use fedimint_api_client::transaction::{Transaction, TransactionSubmissionOutcome};
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
@@ -62,7 +62,7 @@ pub enum TxSubmissionStates {
 /// [`crate::executor::ModuleExecutor`].
 #[derive(Debug, Clone)]
 pub struct TxSubmissionSmContext {
-    pub api: DynGlobalApi,
+    pub api: FederationApi,
     pub client: FinalClientIface,
 }
 
@@ -157,7 +157,7 @@ fn log_tx_event<E: Event + Send>(
 
 async fn tx_submission_trigger_rejected(
     transaction: Transaction,
-    api: DynGlobalApi,
+    api: FederationApi,
     tx_submitted: watch::Sender<bool>,
 ) -> String {
     let txid = transaction.tx_hash();
@@ -187,7 +187,7 @@ async fn tx_submission_trigger_rejected(
 
 async fn tx_submission_trigger_accepted(
     txid: TransactionId,
-    api: DynGlobalApi,
+    api: FederationApi,
     mut tx_submitted: watch::Receiver<bool>,
 ) {
     let _ = tx_submitted.wait_for(|submitted| *submitted).await;

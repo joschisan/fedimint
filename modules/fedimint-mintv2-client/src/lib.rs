@@ -27,7 +27,7 @@ use anyhow::Context as _;
 use bitcoin_hashes::sha256;
 use client_db::{NOTE, RECEIVE_OPERATION, RECOVERY_STATE, RecoveryState};
 pub use events::*;
-use fedimint_api_client::api::{DynModuleApi, FederationApiExt as _};
+use fedimint_api_client::api::FederationApi;
 use fedimint_client_module::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
@@ -918,7 +918,7 @@ impl PeerSelector {
 
 /// Download a slice with hash verification and peer selection
 async fn download_slice_with_hash(
-    module_api: DynModuleApi,
+    module_api: FederationApi,
     peer_selector: PeerSelector,
     start: u64,
     end: u64,

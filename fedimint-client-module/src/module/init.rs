@@ -1,5 +1,5 @@
 use fedimint_api_client::Endpoint;
-use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
+use fedimint_api_client::api::FederationApi;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::ModuleKind;
 use fedimint_core::module::{CommonModuleInit, ModuleInit};
@@ -23,8 +23,8 @@ where
     pub cfg: <<C as ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     pub db: Database,
     pub module_root_secret: DerivableSecret,
-    pub api: DynGlobalApi,
-    pub module_api: DynModuleApi,
+    pub api: FederationApi,
+    pub module_api: FederationApi,
     pub context: ClientContext<<C as ClientModuleInit>::Module>,
     pub task_group: TaskGroup,
     pub connector_registry: Endpoint,
@@ -54,11 +54,11 @@ where
         &self.module_root_secret
     }
 
-    pub fn api(&self) -> &DynGlobalApi {
+    pub fn api(&self) -> &FederationApi {
         &self.api
     }
 
-    pub fn module_api(&self) -> &DynModuleApi {
+    pub fn module_api(&self) -> &FederationApi {
         &self.module_api
     }
 
@@ -90,8 +90,8 @@ where
     pub cfg: <<C as ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     pub db: Database,
     pub module_root_secret: DerivableSecret,
-    pub api: DynGlobalApi,
-    pub module_api: DynModuleApi,
+    pub api: FederationApi,
+    pub module_api: FederationApi,
     pub context: ClientContext<<C as ClientModuleInit>::Module>,
     pub progress_tx: tokio::sync::watch::Sender<RecoveryProgress>,
     pub task_group: TaskGroup,
@@ -125,11 +125,11 @@ where
         &self.module_root_secret
     }
 
-    pub fn api(&self) -> &DynGlobalApi {
+    pub fn api(&self) -> &FederationApi {
         &self.api
     }
 
-    pub fn module_api(&self) -> &DynModuleApi {
+    pub fn module_api(&self) -> &FederationApi {
         &self.module_api
     }
 

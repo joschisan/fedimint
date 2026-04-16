@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use bitcoin::key::Secp256k1;
-use fedimint_api_client::api::{DynGlobalApi, FederationApi};
+use fedimint_api_client::api::FederationApi;
 use fedimint_api_client::{Endpoint, download_from_invite_code, wire};
 use fedimint_client_module::ModuleRecoveryStarted;
 use fedimint_client_module::executor::ModuleExecutor;
@@ -265,7 +265,7 @@ impl ClientBuilder {
             .iter()
             .map(|(peer, endpoint)| (*peer, endpoint.node_id))
             .collect();
-        let api: DynGlobalApi = FederationApi::new(connectors.clone(), peer_node_ids).into();
+        let api: FederationApi = FederationApi::new(connectors.clone(), peer_node_ids).into();
 
         let task_group = TaskGroup::new();
 
@@ -476,7 +476,7 @@ async fn init_or_recover<I: ClientModuleInit>(
     kind_str: &'static str,
     config: &ClientConfig,
     db: &Database,
-    api: &DynGlobalApi,
+    api: &FederationApi,
     connectors: &Endpoint,
     task_group: &TaskGroup,
     root_secret: &DerivableSecret,
@@ -553,7 +553,7 @@ async fn schedule_recovery<I: ClientModuleInit>(
     kind_str: &'static str,
     cfg: <<I as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     db: &Database,
-    api: &DynGlobalApi,
+    api: &FederationApi,
     task_group: &TaskGroup,
     root_secret: &DerivableSecret,
     final_client: FinalClientIface,

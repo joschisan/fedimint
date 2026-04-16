@@ -13,7 +13,7 @@
 
 use std::ops::{self};
 
-use fedimint_api_client::api::DynModuleApi;
+use fedimint_api_client::api::FederationApi;
 pub use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::{PeerId, TransactionId};
 use fedimint_eventlog::{Event, EventKind};
@@ -96,7 +96,7 @@ pub struct ClientModuleInstance<'m, M: ClientModule> {
     /// Module-specific DB
     pub db: Database,
     /// Module-specific API
-    pub api: DynModuleApi,
+    pub api: FederationApi,
 
     pub module: &'m M,
 }

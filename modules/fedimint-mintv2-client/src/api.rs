@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use bitcoin_hashes::sha256;
-use fedimint_api_client::api::{DynModuleApi, FederationApiExt, ServerError};
+use fedimint_api_client::api::{FederationApi, ServerError};
 use fedimint_api_client::query::FilterMapThreshold;
 use fedimint_core::module::ApiRequestErased;
 use fedimint_core::{NumPeersExt, OutPointRange, PeerId};
@@ -45,7 +45,7 @@ pub trait MintV2ModuleApi {
 }
 
 #[async_trait::async_trait]
-impl MintV2ModuleApi for DynModuleApi {
+impl MintV2ModuleApi for FederationApi {
     async fn fetch_signature_shares(
         &self,
         range: OutPointRange,

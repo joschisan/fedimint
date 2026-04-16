@@ -5,24 +5,23 @@ use std::fmt::Debug;
 use std::future::pending;
 use std::pin::Pin;
 use std::result;
-use std::sync::Arc;
 
 use anyhow::anyhow;
 pub use error::{FederationError, OutputOutcomeError};
 use fedimint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
 use fedimint_core::core::ModuleInstanceId;
+use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };
-use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{
     ApiError, ApiMethod, ApiRequestErased, FEDIMINT_API_ALPN, IrohApiRequest,
 };
 use fedimint_core::runtime::sleep;
-use fedimint_core::task::{MaybeSend, MaybeSync};
+use fedimint_core::task::MaybeSend;
 use fedimint_core::util::FmtCompact as _;
 use fedimint_core::util::backoff_util::api_networking_backoff;
-use fedimint_core::{NumPeersExt, PeerId, TransactionId, apply, async_trait_maybe_send, util};
+use fedimint_core::{NumPeersExt, PeerId, TransactionId, util};
 use fedimint_logging::LOG_CLIENT_NET_API;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{Future, StreamExt};
@@ -112,40 +111,115 @@ pub type FederationResult<T> = Result<T, FederationError>;
 
 pub type OutputOutcomeResult<O> = result::Result<O, OutputOutcomeError>;
 
-/// An API (module or global) that can query a federation
-#[apply(async_trait_maybe_send!)]
-pub trait IRawFederationApi: Debug + MaybeSend + MaybeSync {
-    /// List of all federation peers for the purpose of iterating each peer
-    /// in the federation.
-    ///
-    /// The underlying implementation is responsible for knowing how many
-    /// and `PeerId`s of each. The caller of this interface most probably
-    /// have some idea as well, but passing this set across every
-    /// API call to the federation would be inconvenient.
-    fn all_peers(&self) -> &BTreeSet<PeerId>;
+/// Federation API client.
+///
+/// Spawns a background task per peer at construction time that eagerly
+/// connects and reconnects over iroh. Each task publishes its current
+/// [`PeerState`] on a watch channel; requests wait for the first transition
+/// out of `None` and read the live connection (or fail) from the current
+/// value.
+#[derive(Clone, Debug)]
+pub struct FederationApi {
+    peers: BTreeSet<PeerId>,
+    module_id: Option<ModuleInstanceId>,
+    states: BTreeMap<PeerId, watch::Receiver<Option<PeerState>>>,
+}
 
-    fn with_module(&self, id: ModuleInstanceId) -> DynModuleApi;
+impl FederationApi {
+    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, PublicKey>) -> Self {
+        let mut states = BTreeMap::new();
 
-    /// Make request to a specific federation peer by `peer_id`, returning the
-    /// raw consensus-encoded response bytes.
-    async fn request_raw(
+        for (peer_id, node_id) in &peers {
+            let (tx, rx) = watch::channel(None);
+            fedimint_core::runtime::spawn("fedimint-api-client-connection", {
+                let endpoint = endpoint.clone();
+                let node_id = *node_id;
+                async move { connection_task(node_id, endpoint, tx).await }
+            });
+            states.insert(*peer_id, rx);
+        }
+
+        Self {
+            peers: peers.keys().copied().collect(),
+            module_id: None,
+            states,
+        }
+    }
+
+    /// List of all federation peers.
+    pub fn all_peers(&self) -> &BTreeSet<PeerId> {
+        &self.peers
+    }
+
+    /// Return a clone of this API scoped to a specific module, so subsequent
+    /// calls dispatch to `ApiMethod::Module(module_id, ...)`.
+    pub fn with_module(&self, id: ModuleInstanceId) -> FederationApi {
+        FederationApi {
+            peers: self.peers.clone(),
+            module_id: Some(id),
+            states: self.states.clone(),
+        }
+    }
+
+    /// Stream of live connection status for each peer.
+    pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>> {
+        let streams = self.states.iter().map(|(&peer, rx)| {
+            WatchStream::new(rx.clone())
+                .map(move |s| (peer, matches!(s, Some(PeerState::Connected(_)))))
+        });
+
+        let mut current = BTreeMap::new();
+        futures::stream::select_all(streams)
+            .map(move |(peer, connected)| {
+                current.insert(peer, connected);
+                current.clone()
+            })
+            .boxed()
+    }
+
+    #[instrument(
+        target = LOG_CLIENT_NET_API,
+        skip_all,
+        fields(peer_id = %peer_id, method = %method),
+    )]
+    pub async fn request_raw(
         &self,
         peer_id: PeerId,
         method: &str,
         params: &ApiRequestErased,
-    ) -> ServerResult<Vec<u8>>;
+    ) -> ServerResult<Vec<u8>> {
+        let method = match self.module_id {
+            Some(module_id) => ApiMethod::Module(module_id, method.to_string()),
+            None => ApiMethod::Core(method.to_string()),
+        };
 
-    /// Returns a stream of connection status for each peer
-    ///
-    /// The stream emits a new value whenever the connection status changes.
-    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>>;
-}
+        trace!(target: LOG_CLIENT_NET_API, %peer_id, %method, "Api request");
 
-/// An extension trait allowing to making federation-wide API call on top
-/// [`IRawFederationApi`].
-#[apply(async_trait_maybe_send!)]
-pub trait FederationApiExt: IRawFederationApi {
-    async fn request_single_peer<Ret>(
+        let mut rx = self
+            .states
+            .get(&peer_id)
+            .ok_or(ServerError::InvalidPeerId { peer_id })?
+            .clone();
+
+        let state = rx
+            .wait_for(Option::is_some)
+            .await
+            .expect("connection task dropped")
+            .clone()
+            .expect("wait_for guarantees Some");
+
+        let PeerState::Connected(conn) = state else {
+            return Err(ServerError::Connection(anyhow!("peer not connected")));
+        };
+
+        let res = request_over_connection(&conn, method.clone(), params.clone()).await;
+
+        trace!(target: LOG_CLIENT_NET_API, ?method, res_ok = res.is_ok(), "Api response");
+
+        res
+    }
+
+    pub async fn request_single_peer<Ret>(
         &self,
         method: String,
         params: ApiRequestErased,
@@ -162,7 +236,7 @@ pub trait FederationApiExt: IRawFederationApi {
             })
     }
 
-    async fn request_single_peer_federation<FedRet>(
+    pub async fn request_single_peer_federation<FedRet>(
         &self,
         method: String,
         params: ApiRequestErased,
@@ -182,8 +256,8 @@ pub trait FederationApiExt: IRawFederationApi {
 
     /// Make an aggregate request to federation, using `strategy` to logically
     /// merge the responses.
-    #[instrument(target = LOG_CLIENT_NET_API, skip_all, fields(method=method))]
-    async fn request_with_strategy<PR: Decodable, FR: Debug>(
+    #[instrument(target = LOG_CLIENT_NET_API, skip_all, fields(method = method))]
+    pub async fn request_with_strategy<PR: Decodable, FR: Debug>(
         &self,
         mut strategy: impl QueryStrategy<PR, FR> + MaybeSend,
         method: String,
@@ -260,15 +334,12 @@ pub trait FederationApiExt: IRawFederationApi {
     }
 
     #[instrument(target = LOG_CLIENT_NET_API, level = "debug", skip(self, strategy))]
-    async fn request_with_strategy_retry<PR: Decodable + MaybeSend, FR: Debug>(
+    pub async fn request_with_strategy_retry<PR: Decodable + MaybeSend, FR: Debug>(
         &self,
         mut strategy: impl QueryStrategy<PR, FR> + MaybeSend,
         method: String,
         params: ApiRequestErased,
     ) -> FR {
-        // NOTE: `FuturesUnorderded` is a footgun, but all we do here is polling
-        // completed results from it and we don't do any `await`s when
-        // processing them, it should be totally OK.
         #[cfg(not(target_family = "wasm"))]
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
         #[cfg(target_family = "wasm")]
@@ -347,7 +418,7 @@ pub trait FederationApiExt: IRawFederationApi {
         }
     }
 
-    async fn request_current_consensus<Ret>(
+    pub async fn request_current_consensus<Ret>(
         &self,
         method: String,
         params: ApiRequestErased,
@@ -363,7 +434,7 @@ pub trait FederationApiExt: IRawFederationApi {
         .await
     }
 
-    async fn request_current_consensus_retry<Ret>(
+    pub async fn request_current_consensus_retry<Ret>(
         &self,
         method: String,
         params: ApiRequestErased,
@@ -379,7 +450,7 @@ pub trait FederationApiExt: IRawFederationApi {
         .await
     }
 
-    async fn submit_transaction(&self, tx: Transaction) -> TransactionSubmissionOutcome {
+    pub async fn submit_transaction(&self, tx: Transaction) -> TransactionSubmissionOutcome {
         self.request_current_consensus_retry(
             SUBMIT_TRANSACTION_ENDPOINT.to_owned(),
             ApiRequestErased::new(tx),
@@ -387,7 +458,7 @@ pub trait FederationApiExt: IRawFederationApi {
         .await
     }
 
-    async fn await_transaction(&self, txid: TransactionId) -> TransactionId {
+    pub async fn await_transaction(&self, txid: TransactionId) -> TransactionId {
         self.request_current_consensus_retry(
             AWAIT_TRANSACTION_ENDPOINT.to_owned(),
             ApiRequestErased::new(txid),
@@ -395,145 +466,11 @@ pub trait FederationApiExt: IRawFederationApi {
         .await
     }
 
-    /// Lightweight liveness check — returns Ok(()) if the federation is
-    /// reachable
-    async fn liveness(&self) -> FederationResult<()> {
+    /// Lightweight liveness check — returns `Ok(())` if the federation is
+    /// reachable.
+    pub async fn liveness(&self) -> FederationResult<()> {
         self.request_current_consensus(LIVENESS_ENDPOINT.to_owned(), ApiRequestErased::default())
             .await
-    }
-}
-
-#[apply(async_trait_maybe_send!)]
-impl<T: ?Sized> FederationApiExt for T where T: IRawFederationApi {}
-
-#[derive(Clone)]
-pub struct DynModuleApi {
-    inner: Arc<dyn IRawFederationApi + Send + Sync + 'static>,
-}
-
-impl std::ops::Deref for DynModuleApi {
-    type Target = dyn IRawFederationApi + Send + Sync + 'static;
-
-    fn deref(&self) -> &Self::Target {
-        &*self.inner
-    }
-}
-
-impl<I> From<I> for DynModuleApi
-where
-    I: IRawFederationApi + Send + Sync + 'static,
-{
-    fn from(i: I) -> Self {
-        Self { inner: Arc::new(i) }
-    }
-}
-
-impl std::fmt::Debug for DynModuleApi {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self.inner, f)
-    }
-}
-
-#[derive(Clone)]
-pub struct DynGlobalApi {
-    inner: Arc<dyn IRawFederationApi + Send + Sync + 'static>,
-}
-
-impl std::ops::Deref for DynGlobalApi {
-    type Target = dyn IRawFederationApi + Send + Sync + 'static;
-
-    fn deref(&self) -> &Self::Target {
-        &*self.inner
-    }
-}
-
-impl<I> From<I> for DynGlobalApi
-where
-    I: IRawFederationApi + Send + Sync + 'static,
-{
-    fn from(i: I) -> Self {
-        Self { inner: Arc::new(i) }
-    }
-}
-
-impl std::fmt::Debug for DynGlobalApi {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self.inner, f)
-    }
-}
-
-impl DynGlobalApi {
-    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, PublicKey>) -> Self {
-        FederationApi::new(endpoint, peers).into()
-    }
-}
-
-/// Federation API client
-///
-/// Spawns a background task per peer at construction time that eagerly
-/// connects and reconnects. Each task publishes its current [`PeerState`] on
-/// a watch channel; requests wait for the first transition out of `None` and
-/// read the live connection (or fail) from the current value.
-#[derive(Clone, Debug)]
-pub struct FederationApi {
-    peers: BTreeMap<PeerId, PublicKey>,
-    peers_keys: BTreeSet<PeerId>,
-    module_id: Option<ModuleInstanceId>,
-    states: BTreeMap<PeerId, watch::Receiver<Option<PeerState>>>,
-}
-
-impl FederationApi {
-    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, PublicKey>) -> Self {
-        let mut states = BTreeMap::new();
-
-        for (peer_id, node_id) in &peers {
-            let (tx, rx) = watch::channel(None);
-            fedimint_core::runtime::spawn("fedimint-api-client-connection", {
-                let endpoint = endpoint.clone();
-                let node_id = *node_id;
-                async move { connection_task(node_id, endpoint, tx).await }
-            });
-            states.insert(*peer_id, rx);
-        }
-
-        Self {
-            peers_keys: peers.keys().copied().collect(),
-            peers,
-            module_id: None,
-            states,
-        }
-    }
-
-    async fn request(
-        &self,
-        peer: PeerId,
-        method: ApiMethod,
-        request: ApiRequestErased,
-    ) -> ServerResult<Vec<u8>> {
-        trace!(target: LOG_CLIENT_NET_API, %peer, %method, "Api request");
-
-        let mut rx = self
-            .states
-            .get(&peer)
-            .ok_or(ServerError::InvalidPeerId { peer_id: peer })?
-            .clone();
-
-        let state = rx
-            .wait_for(Option::is_some)
-            .await
-            .expect("connection task dropped")
-            .clone()
-            .expect("wait_for guarantees Some");
-
-        let PeerState::Connected(conn) = state else {
-            return Err(ServerError::Connection(anyhow!("peer not connected")));
-        };
-
-        let res = request_over_connection(&conn, method.clone(), request).await;
-
-        trace!(target: LOG_CLIENT_NET_API, ?method, res_ok = res.is_ok(), "Api response");
-
-        res
     }
 }
 
@@ -561,8 +498,6 @@ async fn connection_task(
         }
     }
 }
-
-// ── Transport trait + iroh impl ─────────────────────────────────────────────
 
 const IROH_MAX_RESPONSE_BYTES: usize = ALEPH_BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
 
@@ -594,60 +529,6 @@ async fn request_over_connection(
         .map_err(|e| ServerError::InvalidResponse(e.into()))?;
 
     response.map_err(|e| ServerError::InvalidResponse(anyhow::anyhow!("Api Error: {:?}", e)))
-}
-
-#[apply(async_trait_maybe_send!)]
-impl IRawFederationApi for FederationApi {
-    fn all_peers(&self) -> &BTreeSet<PeerId> {
-        &self.peers_keys
-    }
-
-    fn with_module(&self, id: ModuleInstanceId) -> DynModuleApi {
-        FederationApi {
-            peers: self.peers.clone(),
-            peers_keys: self.peers_keys.clone(),
-            module_id: Some(id),
-            states: self.states.clone(),
-        }
-        .into()
-    }
-
-    #[instrument(
-        target = LOG_CLIENT_NET_API,
-        skip_all,
-        fields(
-            peer_id = %peer_id,
-            method = %method,
-        )
-    )]
-    async fn request_raw(
-        &self,
-        peer_id: PeerId,
-        method: &str,
-        params: &ApiRequestErased,
-    ) -> ServerResult<Vec<u8>> {
-        let method = match self.module_id {
-            Some(module_id) => ApiMethod::Module(module_id, method.to_string()),
-            None => ApiMethod::Core(method.to_string()),
-        };
-
-        self.request(peer_id, method, params.clone()).await
-    }
-
-    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>> {
-        let streams = self.states.iter().map(|(&peer, rx)| {
-            WatchStream::new(rx.clone())
-                .map(move |s| (peer, matches!(s, Some(PeerState::Connected(_)))))
-        });
-
-        let mut current = BTreeMap::new();
-        futures::stream::select_all(streams)
-            .map(move |(peer, connected)| {
-                current.insert(peer, connected);
-                current.clone()
-            })
-            .boxed()
-    }
 }
 
 #[cfg(test)]

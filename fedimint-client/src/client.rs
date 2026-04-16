@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, bail};
 use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1::{self, PublicKey};
-use fedimint_api_client::api::{DynGlobalApi, IRawFederationApi};
+use fedimint_api_client::api::FederationApi;
 use fedimint_api_client::transaction::Transaction;
 use fedimint_api_client::{Endpoint, wire};
 use fedimint_client_module::executor::ModuleExecutor;
@@ -121,7 +121,7 @@ pub struct Client {
     pub(crate) wallet: Arc<WalletClientModule>,
     pub(crate) ln: LnFlavor,
     tx_submission_executor: ModuleExecutor<TxSubmissionStatesSM>,
-    pub(crate) api: DynGlobalApi,
+    pub(crate) api: FederationApi,
     secp_ctx: Secp256k1<secp256k1::All>,
 
     task_group: TaskGroup,
@@ -142,11 +142,11 @@ impl Client {
         Ok(ClientBuilder::new())
     }
 
-    pub fn api(&self) -> &(dyn IRawFederationApi + 'static) {
-        &*self.api
+    pub fn api(&self) -> &FederationApi {
+        &self.api
     }
 
-    pub fn api_clone(&self) -> DynGlobalApi {
+    pub fn api_clone(&self) -> FederationApi {
         self.api.clone()
     }
 
@@ -881,7 +881,7 @@ impl ClientContextIface for Client {
         Client::get_module_any(self, instance)
     }
 
-    fn api_clone(&self) -> DynGlobalApi {
+    fn api_clone(&self) -> FederationApi {
         Client::api_clone(self)
     }
 

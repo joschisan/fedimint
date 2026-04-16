@@ -133,7 +133,7 @@ pub async fn run(
     });
 
     // Drop the unused endpoint handle — it was originally needed to build a
-    // client-side `DynGlobalApi`, which the static-module rip no longer uses.
+    // client-side `FederationApi`, which the static-module rip no longer uses.
     drop(connectors);
 
     info!(target: LOG_CONSENSUS, "Starting Consensus Api...");
