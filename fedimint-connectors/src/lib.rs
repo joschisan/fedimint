@@ -508,13 +508,7 @@ pub trait Connector: Send + Sync + 'static + Debug {
     async fn connect_gateway(&self, url: &SafeUrl) -> anyhow::Result<DynGatewayConnection>;
 
     /// Report how a connection to `url` is currently reaching its peer.
-    ///
-    /// Defaults to [`Connectivity::Direct`] for transports without a relay
-    /// or anonymization concept. Iroh and Tor impls override this.
-    fn connectivity(&self, url: &SafeUrl) -> Connectivity {
-        let _ = url;
-        Connectivity::Direct
-    }
+    fn connectivity(&self, url: &SafeUrl) -> Connectivity;
 }
 
 /// How a connection is currently reaching its peer.

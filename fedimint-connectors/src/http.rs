@@ -8,7 +8,8 @@ use serde_json::Value;
 
 use crate::error::ServerError;
 use crate::{
-    DynGatewayConnection, DynGuaridianConnection, IConnection, IGatewayConnection, ServerResult,
+    Connectivity, DynGatewayConnection, DynGuaridianConnection, IConnection, IGatewayConnection,
+    ServerResult,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -35,6 +36,10 @@ impl crate::Connector for HttpConnector {
         };
 
         Ok(IGatewayConnection::into_dyn(http_connection))
+    }
+
+    fn connectivity(&self, _url: &SafeUrl) -> Connectivity {
+        Connectivity::Direct
     }
 }
 
