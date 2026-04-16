@@ -8,10 +8,10 @@ use bitcoin::hashes::sha256;
 use picomint_core::config::FederationId;
 use picomint_core::task::TaskHandle;
 use picomint_lnurl::LnurlResponse;
-use picomint_lnv2_common::endpoint_constants::{
+use picomint_ln_common::endpoint_constants::{
     CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
 };
-use picomint_lnv2_common::gateway_api::{CreateBolt11InvoicePayload, SendPaymentPayload};
+use picomint_ln_common::gateway_api::{CreateBolt11InvoicePayload, SendPaymentPayload};
 use picomint_logging::LOG_GATEWAY;
 use reqwest::StatusCode;
 use serde_json::json;

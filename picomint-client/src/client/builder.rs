@@ -21,12 +21,12 @@ use picomint_core::task::TaskGroup;
 use picomint_core::util::FmtCompactAnyhow as _;
 use picomint_core::{NumPeers, PeerId, maybe_add_send};
 use picomint_derive_secret::DerivableSecret;
-use picomint_gwv2_client::{GatewayClientInitV2, IGatewayClientV2};
-use picomint_lnv2_client::LightningClientInit;
+use picomint_gw_client::{GatewayClientInitV2, IGatewayClientV2};
+use picomint_ln_client::LightningClientInit;
 use picomint_logging::LOG_CLIENT;
-use picomint_mintv2_client::MintClientInit;
+use picomint_mint_client::MintClientInit;
 use picomint_redb::Database;
-use picomint_walletv2_client::WalletClientInit;
+use picomint_wallet_client::WalletClientInit;
 use tokio::sync::watch;
 use tracing::{debug, trace, warn};
 
@@ -87,7 +87,7 @@ impl RootSecret {
 ///
 /// Regular applications get `Regular`; the gateway daemon supplies `Gateway`
 /// via [`ClientBuilder::with_gateway_ln`]. The two are mutually exclusive
-/// because the federation-side lnv2 module at instance id `1` accepts only
+/// because the federation-side ln module at instance id `1` accepts only
 /// one client-side wrapper.
 pub enum LnInit {
     Regular(LightningClientInit),
@@ -288,7 +288,7 @@ impl ClientBuilder {
         let mint = init_or_recover(
             &self.mint_init,
             wire::MINT_INSTANCE_ID,
-            "mintv2",
+            "mint",
             &config,
             &db,
             &api,
@@ -308,7 +308,7 @@ impl ClientBuilder {
         let wallet = init_or_recover(
             &self.wallet_init,
             wire::WALLET_INSTANCE_ID,
-            "walletv2",
+            "wallet",
             &config,
             &db,
             &api,
@@ -330,7 +330,7 @@ impl ClientBuilder {
                 init_or_recover(
                     &init,
                     wire::LN_INSTANCE_ID,
-                    "lnv2",
+                    "ln",
                     &config,
                     &db,
                     &api,
@@ -351,7 +351,7 @@ impl ClientBuilder {
                 init_or_recover(
                     &init,
                     wire::LN_INSTANCE_ID,
-                    "lnv2",
+                    "ln",
                     &config,
                     &db,
                     &api,

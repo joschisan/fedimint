@@ -1,0 +1,33 @@
+[package]
+authors = { workspace = true }
+description = "picomint-ln-common is a lightning payment service module (common types)."
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-ln-common"
+version = { workspace = true }
+
+[package.metadata.cargo-udeps.ignore]
+# cargo udeps can't detect that one
+normal = ["aquamarine"]
+
+[lib]
+name = "picomint_ln_common"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+bitcoin = { workspace = true }
+picomint-core = { workspace = true }
+group = { workspace = true }
+lightning-invoice = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tpe = { workspace = true }
+
+[lints]
+workspace = true

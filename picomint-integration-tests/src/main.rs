@@ -1,8 +1,8 @@
 mod cli;
 mod env;
-mod lnv2;
-mod mintv2;
-mod walletv2;
+mod ln;
+mod mint;
+mod wallet;
 
 use std::sync::Arc;
 
@@ -23,14 +23,14 @@ fn main() -> anyhow::Result<()> {
     info!("Invite code: {}", env.invite_code);
     info!("Gateway: {}", env.gw_addr);
 
-    info!("Running walletv2 tests...");
-    runtime.block_on(walletv2::run_tests(&env, &client_send))?;
+    info!("Running wallet tests...");
+    runtime.block_on(wallet::run_tests(&env, &client_send))?;
 
-    info!("Running lnv2 + mintv2 tests in parallel...");
+    info!("Running ln + mint tests in parallel...");
     runtime.block_on(async {
         tokio::try_join!(
-            lnv2::run_tests(&env, &client_send),
-            mintv2::run_tests(&env, &client_send),
+            ln::run_tests(&env, &client_send),
+            mint::run_tests(&env, &client_send),
         )
     })?;
 

@@ -12,11 +12,11 @@ use picomint_api_client::wire::{self, LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_I
 use picomint_core::module::InputMeta;
 use picomint_core::module::audit::Audit;
 use picomint_core::{InPoint, OutPoint, PeerId};
-use picomint_lnv2_server::Lightning;
-use picomint_mintv2_server::Mint;
+use picomint_ln_server::Lightning;
+use picomint_mint_server::Mint;
 use picomint_redb::{ReadTxRef, WriteTransaction, WriteTxRef};
 use picomint_server_core::ServerModule;
-use picomint_walletv2_server::Wallet;
+use picomint_wallet_server::Wallet;
 
 /// Per-module database isolation namespaces. Each `Server` method scopes its
 /// view through [`picomint_redb::ReadTxRef::isolate`] / [`WriteTxRef::isolate`]

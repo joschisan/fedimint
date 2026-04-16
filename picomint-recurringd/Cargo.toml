@@ -1,0 +1,33 @@
+[package]
+description = "recurringd is a stateless service that allows Picomint users to receive recurring payments via ln"
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+name = "picomint-recurringd"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[[bin]]
+name = "picomint-recurringd"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+bitcoin = { workspace = true, features = ["serde"] }
+clap = { workspace = true }
+picomint-core = { workspace = true }
+picomint-lnurl = { workspace = true }
+picomint-ln-common = { workspace = true }
+picomint-logging = { workspace = true }
+lightning-invoice = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tpe = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

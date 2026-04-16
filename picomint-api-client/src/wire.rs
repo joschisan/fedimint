@@ -1,17 +1,17 @@
-//! Static wire enums for the fixed module set: mintv2 + lnv2 + walletv2.
+//! Static wire enums for the fixed module set: mint + ln + wallet.
 
 use std::fmt;
 
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::encoding::{Decodable, Encodable};
-use picomint_lnv2_common::{
+use picomint_ln_common::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError,
 };
-use picomint_mintv2_common::{
+use picomint_mint_common::{
     MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError,
 };
-use picomint_walletv2_common::{
+use picomint_wallet_common::{
     WalletConsensusItem, WalletInput, WalletInputError, WalletOutput, WalletOutputError,
 };
 use thiserror::Error;
@@ -131,9 +131,9 @@ impl ModuleConsensusItem {
 
     pub fn module_kind(&self) -> &'static str {
         match self {
-            Self::Mint(_) => "mintv2",
-            Self::Ln(_) => "lnv2",
-            Self::Wallet(_) => "walletv2",
+            Self::Mint(_) => "mint",
+            Self::Ln(_) => "ln",
+            Self::Wallet(_) => "wallet",
         }
     }
 }

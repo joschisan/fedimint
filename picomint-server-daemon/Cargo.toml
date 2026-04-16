@@ -37,17 +37,17 @@ picomint-api-client = { workspace = true }
 picomint-client-module = { workspace = true }
 picomint-core = { workspace = true }
 picomint-derive-secret = { workspace = true }
-picomint-lnv2-common = { workspace = true }
-picomint-lnv2-server = { workspace = true }
+picomint-ln-common = { workspace = true }
+picomint-ln-server = { workspace = true }
 picomint-logging = { workspace = true, features = ["telemetry"] }
-picomint-mintv2-common = { workspace = true }
-picomint-mintv2-server = { workspace = true }
+picomint-mint-common = { workspace = true }
+picomint-mint-server = { workspace = true }
 picomint-redb = { workspace = true }
 picomint-server-bitcoin-rpc = { workspace = true }
 picomint-server-cli-core = { workspace = true }
 picomint-server-core = { workspace = true }
-picomint-walletv2-common = { workspace = true }
-picomint-walletv2-server = { workspace = true }
+picomint-wallet-common = { workspace = true }
+picomint-wallet-server = { workspace = true }
 futures = { workspace = true }
 group = { workspace = true }
 hex = { workspace = true }

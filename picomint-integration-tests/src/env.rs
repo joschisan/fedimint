@@ -15,7 +15,7 @@ use picomint_client::secret::RootSecretStrategy;
 use picomint_client::{Client, ClientHandleArc, RootSecret};
 use picomint_core::Amount;
 use picomint_core::invite_code::InviteCode;
-use picomint_walletv2_client::WalletClientModule;
+use picomint_wallet_client::WalletClientModule;
 use tokio::process::Command;
 use tokio::task::block_in_place;
 use tracing::info;
@@ -197,8 +197,8 @@ impl TestEnv {
         client: &ClientHandleArc,
         amount: bitcoin::Amount,
     ) -> anyhow::Result<()> {
-        let walletv2 = client.get_first_module::<WalletClientModule>()?;
-        let addr = walletv2.receive().await;
+        let wallet = client.get_first_module::<WalletClientModule>()?;
+        let addr = wallet.receive().await;
         info!(%addr, "Pegin address ready");
 
         let txid = self.send_to_address(&addr, amount)?;

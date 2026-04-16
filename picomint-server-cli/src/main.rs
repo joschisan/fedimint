@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use picomint_server_cli_core::{
-    Lnv2GatewayRequest, ROUTE_AUDIT, ROUTE_INVITE, ROUTE_MODULE_LNV2_GATEWAY_ADD,
-    ROUTE_MODULE_LNV2_GATEWAY_LIST, ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
+    LnGatewayRequest, ROUTE_AUDIT, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
+    ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
     ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
     ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
     ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_SET_LOCAL_PARAMS,
@@ -64,10 +64,10 @@ enum SetupCommands {
 enum ModuleCommands {
     /// Wallet module commands
     #[command(subcommand)]
-    Walletv2(WalletCommands),
+    Wallet(WalletCommands),
     /// LNv2 module commands
     #[command(subcommand)]
-    Lnv2(Lnv2Commands),
+    Ln(LnCommands),
 }
 
 #[derive(Subcommand)]
@@ -85,14 +85,14 @@ enum WalletCommands {
 }
 
 #[derive(Subcommand)]
-enum Lnv2Commands {
+enum LnCommands {
     /// Gateway management
     #[command(subcommand)]
-    Gateway(Lnv2GatewayCommands),
+    Gateway(LnGatewayCommands),
 }
 
 #[derive(Subcommand)]
-enum Lnv2GatewayCommands {
+enum LnGatewayCommands {
     /// Add a vetted gateway
     Add { url: String },
     /// Remove a vetted gateway
@@ -160,7 +160,7 @@ fn main() -> Result<()> {
             SetupCommands::StartDkg => request(addr, ROUTE_SETUP_START_DKG, ())?,
         },
         Commands::Module(cmd) => match cmd {
-            ModuleCommands::Walletv2(cmd) => match cmd {
+            ModuleCommands::Wallet(cmd) => match cmd {
                 WalletCommands::TotalValue => request(addr, ROUTE_MODULE_WALLET_TOTAL_VALUE, ())?,
                 WalletCommands::BlockCount => request(addr, ROUTE_MODULE_WALLET_BLOCK_COUNT, ())?,
                 WalletCommands::Feerate => request(addr, ROUTE_MODULE_WALLET_FEERATE, ())?,
@@ -169,19 +169,19 @@ fn main() -> Result<()> {
                 }
                 WalletCommands::TxChain => request(addr, ROUTE_MODULE_WALLET_TX_CHAIN, ())?,
             },
-            ModuleCommands::Lnv2(cmd) => match cmd {
-                Lnv2Commands::Gateway(cmd) => match cmd {
-                    Lnv2GatewayCommands::Add { url } => request(
+            ModuleCommands::Ln(cmd) => match cmd {
+                LnCommands::Gateway(cmd) => match cmd {
+                    LnGatewayCommands::Add { url } => request(
                         addr,
-                        ROUTE_MODULE_LNV2_GATEWAY_ADD,
-                        Lnv2GatewayRequest { url },
+                        ROUTE_MODULE_LN_GATEWAY_ADD,
+                        LnGatewayRequest { url },
                     )?,
-                    Lnv2GatewayCommands::Remove { url } => request(
+                    LnGatewayCommands::Remove { url } => request(
                         addr,
-                        ROUTE_MODULE_LNV2_GATEWAY_REMOVE,
-                        Lnv2GatewayRequest { url },
+                        ROUTE_MODULE_LN_GATEWAY_REMOVE,
+                        LnGatewayRequest { url },
                     )?,
-                    Lnv2GatewayCommands::List => request(addr, ROUTE_MODULE_LNV2_GATEWAY_LIST, ())?,
+                    LnGatewayCommands::List => request(addr, ROUTE_MODULE_LN_GATEWAY_LIST, ())?,
                 },
             },
         },

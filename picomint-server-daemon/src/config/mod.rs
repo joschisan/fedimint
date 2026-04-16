@@ -17,10 +17,10 @@ use picomint_core::setup_code::PeerSetupCode;
 use picomint_core::task::sleep;
 use picomint_core::util::SafeUrl;
 use picomint_core::{NumPeersExt, PeerId, secp256k1, timing};
-use picomint_lnv2_common::config::{LightningConfigConsensus, LightningConfigPrivate};
+use picomint_ln_common::config::{LightningConfigConsensus, LightningConfigPrivate};
 use picomint_logging::LOG_NET_PEER_DKG;
-use picomint_mintv2_common::config::{MintConfig, MintConfigConsensus, MintConfigPrivate};
-use picomint_walletv2_common::config::{WalletConfig, WalletConfigConsensus, WalletConfigPrivate};
+use picomint_mint_common::config::{MintConfig, MintConfigConsensus, MintConfigPrivate};
+use picomint_wallet_common::config::{WalletConfig, WalletConfigConsensus, WalletConfigPrivate};
 use rand::rngs::OsRng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
@@ -185,8 +185,8 @@ impl ServerConfigConsensus {
                 MINT_INSTANCE_ID,
                 ClientModuleConfig::from_typed(
                     MINT_INSTANCE_ID,
-                    ModuleKind::from_static_str("mintv2"),
-                    picomint_mintv2_common::MODULE_CONSENSUS_VERSION,
+                    ModuleKind::from_static_str("mint"),
+                    picomint_mint_common::MODULE_CONSENSUS_VERSION,
                     self.mint.to_client(),
                 )
                 .expect("Encoding mint client config must succeed"),
@@ -195,8 +195,8 @@ impl ServerConfigConsensus {
                 LN_INSTANCE_ID,
                 ClientModuleConfig::from_typed(
                     LN_INSTANCE_ID,
-                    ModuleKind::from_static_str("lnv2"),
-                    picomint_lnv2_common::MODULE_CONSENSUS_VERSION,
+                    ModuleKind::from_static_str("ln"),
+                    picomint_ln_common::MODULE_CONSENSUS_VERSION,
                     self.ln.to_client(),
                 )
                 .expect("Encoding ln client config must succeed"),
@@ -205,8 +205,8 @@ impl ServerConfigConsensus {
                 WALLET_INSTANCE_ID,
                 ClientModuleConfig::from_typed(
                     WALLET_INSTANCE_ID,
-                    ModuleKind::from_static_str("walletv2"),
-                    picomint_walletv2_common::MODULE_CONSENSUS_VERSION,
+                    ModuleKind::from_static_str("wallet"),
+                    picomint_wallet_common::MODULE_CONSENSUS_VERSION,
                     self.wallet.to_client(),
                 )
                 .expect("Encoding wallet client config must succeed"),
@@ -235,7 +235,7 @@ impl ServerConfig {
         broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
         broadcast_secret_key: SecretKey,
         mint: MintConfig,
-        ln: picomint_lnv2_common::config::LightningConfig,
+        ln: picomint_ln_common::config::LightningConfig,
         wallet: WalletConfig,
         code_version: String,
     ) -> Self {
@@ -302,8 +302,8 @@ impl ServerConfig {
         }
     }
 
-    pub fn ln_config(&self) -> picomint_lnv2_common::config::LightningConfig {
-        picomint_lnv2_common::config::LightningConfig {
+    pub fn ln_config(&self) -> picomint_ln_common::config::LightningConfig {
+        picomint_ln_common::config::LightningConfig {
             private: self.private.ln.clone(),
             consensus: self.consensus.ln.clone(),
         }
@@ -333,9 +333,9 @@ impl ServerConfig {
             bail!("Peer ids are not indexed from 0");
         }
 
-        picomint_mintv2_server::validate_config(identity, &self.mint_config())?;
-        picomint_lnv2_server::validate_config(identity, &self.ln_config())?;
-        picomint_walletv2_server::validate_config(identity, &self.wallet_config())?;
+        picomint_mint_server::validate_config(identity, &self.mint_config())?;
+        picomint_ln_server::validate_config(identity, &self.ln_config())?;
+        picomint_wallet_server::validate_config(identity, &self.wallet_config())?;
 
         Ok(())
     }
@@ -438,21 +438,21 @@ impl ServerConfig {
 
         info!(
             target: LOG_NET_PEER_DKG,
-            "Running config generation for module of kind mintv2..."
+            "Running config generation for module of kind mint..."
         );
-        let mint = picomint_mintv2_server::distributed_gen(&handle).await?;
+        let mint = picomint_mint_server::distributed_gen(&handle).await?;
 
         info!(
             target: LOG_NET_PEER_DKG,
-            "Running config generation for module of kind lnv2..."
+            "Running config generation for module of kind ln..."
         );
-        let ln = picomint_lnv2_server::distributed_gen(&handle, params.network).await?;
+        let ln = picomint_ln_server::distributed_gen(&handle, params.network).await?;
 
         info!(
             target: LOG_NET_PEER_DKG,
-            "Running config generation for module of kind walletv2..."
+            "Running config generation for module of kind wallet..."
         );
-        let wallet = picomint_walletv2_server::distributed_gen(&handle, params.network).await?;
+        let wallet = picomint_wallet_server::distributed_gen(&handle, params.network).await?;
 
         let cfg = ServerConfig::from(
             params.clone(),

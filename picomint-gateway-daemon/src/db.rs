@@ -1,7 +1,7 @@
 use picomint_core::config::{ClientConfig, FederationId};
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::table;
-use picomint_lnv2_common::contracts::{IncomingContract, PaymentImage};
+use picomint_ln_common::contracts::{IncomingContract, PaymentImage};
 
 table!(
     ROOT_ENTROPY,

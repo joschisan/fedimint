@@ -161,10 +161,10 @@ enum FederationCommands {
 enum ModuleCommands {
     /// Mint module commands
     #[command(subcommand)]
-    Mintv2(MintCommands),
+    Mint(MintCommands),
     /// Wallet module commands
     #[command(subcommand)]
-    Walletv2(WalletCommands),
+    Wallet(WalletCommands),
 }
 
 #[derive(Subcommand)]
@@ -349,7 +349,7 @@ fn main() -> Result<()> {
             federation_id,
             module,
         } => match module {
-            ModuleCommands::Mintv2(cmd) => match cmd {
+            ModuleCommands::Mint(cmd) => match cmd {
                 MintCommands::Count => request(
                     addr,
                     ROUTE_MODULE_MINT_COUNT,
@@ -369,7 +369,7 @@ fn main() -> Result<()> {
                     MintReceiveRequest { notes: ecash },
                 )?,
             },
-            ModuleCommands::Walletv2(cmd) => match cmd {
+            ModuleCommands::Wallet(cmd) => match cmd {
                 WalletCommands::Info { subcommand } => request(
                     addr,
                     ROUTE_MODULE_WALLET_INFO,

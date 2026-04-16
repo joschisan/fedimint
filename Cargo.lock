@@ -4531,10 +4531,10 @@ dependencies = [
  "iroh-base",
  "jsonrpsee-core",
  "picomint-core",
- "picomint-lnv2-common",
+ "picomint-ln-common",
  "picomint-logging",
- "picomint-mintv2-common",
- "picomint-walletv2-common",
+ "picomint-mint-common",
+ "picomint-wallet-common",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -4585,13 +4585,13 @@ dependencies = [
  "picomint-core",
  "picomint-derive-secret",
  "picomint-eventlog",
- "picomint-gwv2-client",
- "picomint-lnv2-client",
- "picomint-lnv2-common",
+ "picomint-gw-client",
+ "picomint-ln-client",
+ "picomint-ln-common",
  "picomint-logging",
- "picomint-mintv2-client",
+ "picomint-mint-client",
  "picomint-redb",
- "picomint-walletv2-client",
+ "picomint-wallet-client",
  "reqwest 0.12.22",
  "serde",
  "serde_json",
@@ -4796,16 +4796,16 @@ dependencies = [
  "picomint-derive-secret",
  "picomint-eventlog",
  "picomint-gateway-cli-core",
- "picomint-gwv2-client",
+ "picomint-gw-client",
+ "picomint-ln-client",
+ "picomint-ln-common",
+ "picomint-ln-server",
  "picomint-lnurl",
- "picomint-lnv2-client",
- "picomint-lnv2-common",
- "picomint-lnv2-server",
  "picomint-logging",
- "picomint-mintv2-client",
+ "picomint-mint-client",
  "picomint-redb",
  "picomint-tpe",
- "picomint-walletv2-client",
+ "picomint-wallet-client",
  "rand 0.8.5",
  "reqwest 0.12.22",
  "serde",
@@ -4821,7 +4821,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-gwv2-client"
+name = "picomint-gw-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4836,7 +4836,7 @@ dependencies = [
  "picomint-client-module",
  "picomint-core",
  "picomint-eventlog",
- "picomint-lnv2-common",
+ "picomint-ln-common",
  "picomint-logging",
  "picomint-redb",
  "picomint-tpe",
@@ -4872,20 +4872,96 @@ dependencies = [
  "picomint-core",
  "picomint-eventlog",
  "picomint-gateway-cli-core",
- "picomint-lnv2-client",
- "picomint-lnv2-common",
+ "picomint-ln-client",
+ "picomint-ln-common",
  "picomint-logging",
- "picomint-mintv2-client",
- "picomint-mintv2-common",
+ "picomint-mint-client",
+ "picomint-mint-common",
  "picomint-redb",
  "picomint-server-cli-core",
- "picomint-walletv2-client",
- "picomint-walletv2-common",
+ "picomint-wallet-client",
+ "picomint-wallet-common",
  "rand 0.8.5",
  "reqwest 0.12.22",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-ln-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aquamarine",
+ "async-stream",
+ "async-trait",
+ "bitcoin",
+ "erased-serde",
+ "futures",
+ "itertools 0.14.0",
+ "lightning-invoice",
+ "picomint-api-client",
+ "picomint-client-module",
+ "picomint-core",
+ "picomint-derive-secret",
+ "picomint-eventlog",
+ "picomint-ln-common",
+ "picomint-lnurl",
+ "picomint-logging",
+ "picomint-redb",
+ "picomint-tpe",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "strum 0.27.1",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-ln-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitcoin",
+ "group",
+ "lightning-invoice",
+ "picomint-core",
+ "picomint-tpe",
+ "rand 0.8.5",
+ "reqwest 0.12.22",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "picomint-ln-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bls12_381",
+ "erased-serde",
+ "futures",
+ "group",
+ "picomint-core",
+ "picomint-ln-common",
+ "picomint-logging",
+ "picomint-redb",
+ "picomint-server-core",
+ "picomint-tpe",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
  "tokio",
  "tracing",
 ]
@@ -4903,82 +4979,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-lnv2-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aquamarine",
- "async-stream",
- "async-trait",
- "bitcoin",
- "erased-serde",
- "futures",
- "itertools 0.14.0",
- "lightning-invoice",
- "picomint-api-client",
- "picomint-client-module",
- "picomint-core",
- "picomint-derive-secret",
- "picomint-eventlog",
- "picomint-lnurl",
- "picomint-lnv2-common",
- "picomint-logging",
- "picomint-redb",
- "picomint-tpe",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "strum 0.27.1",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "picomint-lnv2-common"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "group",
- "lightning-invoice",
- "picomint-core",
- "picomint-tpe",
- "rand 0.8.5",
- "reqwest 0.12.22",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "picomint-lnv2-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bls12_381",
- "erased-serde",
- "futures",
- "group",
- "picomint-core",
- "picomint-lnv2-common",
- "picomint-logging",
- "picomint-redb",
- "picomint-server-core",
- "picomint-tpe",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serde",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "picomint-logging"
 version = "0.1.0"
 dependencies = [
@@ -4992,7 +4992,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-mintv2-client"
+name = "picomint-mint-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -5014,7 +5014,7 @@ dependencies = [
  "picomint-derive-secret",
  "picomint-eventlog",
  "picomint-logging",
- "picomint-mintv2-common",
+ "picomint-mint-common",
  "picomint-redb",
  "picomint-tbs",
  "rand 0.8.5",
@@ -5030,7 +5030,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-mintv2-common"
+name = "picomint-mint-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -5044,7 +5044,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-mintv2-server"
+name = "picomint-mint-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -5056,7 +5056,7 @@ dependencies = [
  "itertools 0.14.0",
  "picomint-core",
  "picomint-logging",
- "picomint-mintv2-common",
+ "picomint-mint-common",
  "picomint-redb",
  "picomint-server-core",
  "picomint-tbs",
@@ -5070,7 +5070,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-recurringdv2"
+name = "picomint-recurringd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -5079,8 +5079,8 @@ dependencies = [
  "clap",
  "lightning-invoice",
  "picomint-core",
+ "picomint-ln-common",
  "picomint-lnurl",
- "picomint-lnv2-common",
  "picomint-logging",
  "picomint-tpe",
  "serde",
@@ -5190,17 +5190,17 @@ dependencies = [
  "picomint-client-module",
  "picomint-core",
  "picomint-derive-secret",
- "picomint-lnv2-common",
- "picomint-lnv2-server",
+ "picomint-ln-common",
+ "picomint-ln-server",
  "picomint-logging",
- "picomint-mintv2-common",
- "picomint-mintv2-server",
+ "picomint-mint-common",
+ "picomint-mint-server",
  "picomint-redb",
  "picomint-server-bitcoin-rpc",
  "picomint-server-cli-core",
  "picomint-server-core",
- "picomint-walletv2-common",
- "picomint-walletv2-server",
+ "picomint-wallet-common",
+ "picomint-wallet-server",
  "pin-project",
  "pkarr 3.10.0",
  "qrcode",
@@ -5263,7 +5263,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-walletv2-client"
+name = "picomint-wallet-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -5278,7 +5278,7 @@ dependencies = [
  "picomint-eventlog",
  "picomint-logging",
  "picomint-redb",
- "picomint-walletv2-common",
+ "picomint-wallet-common",
  "secp256k1",
  "serde",
  "serde_json",
@@ -5289,7 +5289,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-walletv2-common"
+name = "picomint-wallet-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -5302,7 +5302,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-walletv2-server"
+name = "picomint-wallet-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -5315,7 +5315,7 @@ dependencies = [
  "picomint-logging",
  "picomint-redb",
  "picomint-server-core",
- "picomint-walletv2-common",
+ "picomint-wallet-common",
  "rand 0.8.5",
  "secp256k1",
  "serde",

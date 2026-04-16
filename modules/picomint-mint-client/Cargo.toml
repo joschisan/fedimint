@@ -1,0 +1,60 @@
+[package]
+authors = ["The Picomint Developers"]
+description = "picomint-mint is a chaumian ecash mint module."
+edition = "2021"
+license = "MIT"
+name = "picomint-mint-client"
+readme = "../../README.md"
+repository = "https://github.com/picomint/picomint"
+version = { workspace = true }
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "tokio_unstable"]
+
+[package.metadata.cargo-udeps.ignore]
+# cargo udeps can't detect that one
+normal = ["aquamarine"]
+
+[lib]
+name = "picomint_mint_client"
+path = "src/lib.rs"
+
+[[bench]]
+harness = false
+name = "recovery"
+
+[dependencies]
+anyhow = { workspace = true }
+aquamarine = { workspace = true }
+async-channel = { workspace = true }
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+bitcoin_hashes = { workspace = true }
+bls12_381 = { workspace = true }
+erased-serde = { workspace = true }
+picomint-api-client = { workspace = true }
+picomint-client-module = { workspace = true }
+picomint-core = { workspace = true }
+picomint-derive-secret = { workspace = true }
+picomint-eventlog = { workspace = true }
+picomint-logging = { workspace = true }
+picomint-mint-common = { workspace = true }
+picomint-redb = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+itertools = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serdect = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+tbs = { workspace = true }
+thiserror = { workspace = true }
+threshold_crypto = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+divan = "0.1.21"

@@ -126,28 +126,28 @@ pub fn gatewayd_ldk_invoice_pay(gw_addr: &str, invoice: &str) -> Result<Value> {
         .run_cli::<Value>()
 }
 
-pub fn picomintd_lnv2_gateway_add(peer: usize, gateway: &str) -> Result<bool> {
+pub fn picomintd_ln_gateway_add(peer: usize, gateway: &str) -> Result<bool> {
     let cli_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN) + 4;
 
     Command::new("target/debug/picomint-server-cli")
         .arg("-a")
         .arg(format!("http://127.0.0.1:{cli_port}"))
         .arg("module")
-        .arg("lnv2")
+        .arg("ln")
         .arg("gateway")
         .arg("add")
         .arg(gateway)
         .run_cli::<bool>()
 }
 
-pub fn picomintd_lnv2_gateway_remove(peer: usize, gateway: &str) -> Result<bool> {
+pub fn picomintd_ln_gateway_remove(peer: usize, gateway: &str) -> Result<bool> {
     let cli_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN) + 4;
 
     Command::new("target/debug/picomint-server-cli")
         .arg("-a")
         .arg(format!("http://127.0.0.1:{cli_port}"))
         .arg("module")
-        .arg("lnv2")
+        .arg("ln")
         .arg("gateway")
         .arg("remove")
         .arg(gateway)

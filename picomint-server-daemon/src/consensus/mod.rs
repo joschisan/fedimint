@@ -75,20 +75,20 @@ pub async fn run(
     let _num_peers = NumPeers::from(cfg.consensus.api_endpoints().len());
 
     info!(target: LOG_CORE, "Initialise module mint...");
-    let mint = Arc::new(picomint_mintv2_server::Mint::new(
+    let mint = Arc::new(picomint_mint_server::Mint::new(
         cfg.mint_config(),
         db.isolate("mint".to_string()),
     ));
 
     info!(target: LOG_CORE, "Initialise module ln...");
-    let ln = Arc::new(picomint_lnv2_server::Lightning::new(
+    let ln = Arc::new(picomint_ln_server::Lightning::new(
         cfg.ln_config(),
         db.isolate("ln".to_string()),
         bitcoin_rpc_connection.clone(),
     ));
 
     info!(target: LOG_CORE, "Initialise module wallet...");
-    let wallet = Arc::new(picomint_walletv2_server::Wallet::new(
+    let wallet = Arc::new(picomint_wallet_server::Wallet::new(
         cfg.wallet_config(),
         db.isolate("wallet".to_string()),
         task_group,
@@ -334,9 +334,9 @@ async fn run_iroh_api(
     max_connections: usize,
     max_requests_per_connection: usize,
 ) {
-    use picomint_lnv2_server::Lightning;
-    use picomint_mintv2_server::Mint;
-    use picomint_walletv2_server::Wallet;
+    use picomint_ln_server::Lightning;
+    use picomint_mint_server::Mint;
+    use picomint_wallet_server::Wallet;
 
     let core_api = server_endpoints()
         .into_iter()
@@ -401,9 +401,9 @@ async fn run_iroh_api(
     }
 }
 
-type MintApi = BTreeMap<String, ApiEndpoint<picomint_mintv2_server::Mint>>;
-type LnApi = BTreeMap<String, ApiEndpoint<picomint_lnv2_server::Lightning>>;
-type WalletApi = BTreeMap<String, ApiEndpoint<picomint_walletv2_server::Wallet>>;
+type MintApi = BTreeMap<String, ApiEndpoint<picomint_mint_server::Mint>>;
+type LnApi = BTreeMap<String, ApiEndpoint<picomint_ln_server::Lightning>>;
+type WalletApi = BTreeMap<String, ApiEndpoint<picomint_wallet_server::Wallet>>;
 
 #[allow(clippy::too_many_arguments)]
 async fn handle_incoming(

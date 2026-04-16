@@ -33,12 +33,12 @@ use picomint_core::{
     maybe_add_send_sync,
 };
 use picomint_eventlog::{Event, EventKind, EventLogId, PersistedLogEntry};
-use picomint_gwv2_client::GatewayClientModuleV2;
-use picomint_lnv2_client::LightningClientModule;
+use picomint_gw_client::GatewayClientModuleV2;
+use picomint_ln_client::LightningClientModule;
 use picomint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
-use picomint_mintv2_client::MintClientModule;
+use picomint_mint_client::MintClientModule;
 use picomint_redb::{Database, WriteTxRef};
-use picomint_walletv2_client::WalletClientModule;
+use picomint_wallet_client::WalletClientModule;
 use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, warn};
@@ -71,7 +71,7 @@ impl LnFlavor {
     fn input_fee(
         &self,
         amount: Amount,
-        input: &picomint_lnv2_common::LightningInput,
+        input: &picomint_ln_common::LightningInput,
     ) -> Option<Amount> {
         match self {
             LnFlavor::Regular(m) => m.input_fee(amount, input),
@@ -82,7 +82,7 @@ impl LnFlavor {
     fn output_fee(
         &self,
         amount: Amount,
-        output: &picomint_lnv2_common::LightningOutput,
+        output: &picomint_ln_common::LightningOutput,
     ) -> Option<Amount> {
         match self {
             LnFlavor::Regular(m) => m.output_fee(amount, output),
@@ -617,9 +617,9 @@ impl Client {
         let db = self.db.clone();
         let log_event_added_tx = self.log_event_added_tx.clone();
         let module_kinds: BTreeMap<ModuleInstanceId, String> = [
-            (wire::MINT_INSTANCE_ID, "mintv2".to_string()),
-            (wire::LN_INSTANCE_ID, "lnv2".to_string()),
-            (wire::WALLET_INSTANCE_ID, "walletv2".to_string()),
+            (wire::MINT_INSTANCE_ID, "mint".to_string()),
+            (wire::LN_INSTANCE_ID, "ln".to_string()),
+            (wire::WALLET_INSTANCE_ID, "wallet".to_string()),
         ]
         .into();
         let task_group = self.task_group.clone();

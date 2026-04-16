@@ -1,3 +1,3 @@
-pub mod lnv2;
-pub mod mintv2;
-pub mod walletv2;
+pub mod ln;
+pub mod mint;
+pub mod wallet;

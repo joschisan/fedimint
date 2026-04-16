@@ -47,14 +47,14 @@ use picomint_core::time::duration_since_epoch;
 use picomint_core::util::{FmtCompact, Spanned};
 use picomint_core::{Amount, PeerId, crit};
 use picomint_gateway_cli_core::FederationInfo;
-use picomint_gwv2_client::{
+use picomint_gw_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
     LightningRpcError, PaymentAction,
 };
 use picomint_lnurl::VerifyResponse;
-use picomint_lnv2_common::Bolt11InvoiceDescription;
-use picomint_lnv2_common::contracts::{IncomingContract, PaymentImage};
-use picomint_lnv2_common::gateway_api::{
+use picomint_ln_common::Bolt11InvoiceDescription;
+use picomint_ln_common::contracts::{IncomingContract, PaymentImage};
+use picomint_ln_common::gateway_api::{
     CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
 use picomint_logging::LOG_GATEWAY;
@@ -153,19 +153,19 @@ impl AppState {
         let federation_id = client.federation_id();
         let config = client.config().await;
 
-        let lnv2_cfg = config
+        let ln_cfg = config
             .modules
             .values()
-            .find(|m| picomint_lnv2_common::LightningCommonInit::KIND == m.kind);
+            .find(|m| picomint_ln_common::LightningCommonInit::KIND == m.kind);
 
-        if lnv2_cfg.is_none() {
+        if ln_cfg.is_none() {
             return Err(anyhow::anyhow!(format!(
                 "Federation {federation_id} does not have an LNv2 lightning module"
             )));
         }
 
-        if let Some(cfg) = lnv2_cfg {
-            let ln_cfg: picomint_lnv2_common::config::LightningClientConfig = cfg.cast()?;
+        if let Some(cfg) = ln_cfg {
+            let ln_cfg: picomint_ln_common::config::LightningClientConfig = cfg.cast()?;
 
             if ln_cfg.network != network {
                 crit!(
@@ -515,7 +515,7 @@ impl AppState {
 
 #[async_trait]
 impl IGatewayClientV2 for AppState {
-    async fn complete_htlc(&self, htlc_response: picomint_gwv2_client::InterceptPaymentResponse) {
+    async fn complete_htlc(&self, htlc_response: picomint_gw_client::InterceptPaymentResponse) {
         let ph = PaymentHash(*htlc_response.payment_hash.as_byte_array());
         let claimable_amount_msat = 999_999_999_999_999;
         let ph_hex_str = hex::encode(htlc_response.payment_hash);

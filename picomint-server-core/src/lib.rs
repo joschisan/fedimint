@@ -2,8 +2,8 @@
 //!
 //! This crate is the narrow shared layer between `picomint-server-daemon` and
 //! the three concrete server-side module implementations
-//! (`picomint-mintv2-server`, `picomint-lnv2-server`,
-//! `picomint-walletv2-server`). It defines the `ServerModule` trait (which each
+//! (`picomint-mint-server`, `picomint-ln-server`,
+//! `picomint-wallet-server`). It defines the `ServerModule` trait (which each
 //! module implements), the Bitcoin RPC abstraction consumed by modules, and the
 //! DKG-time `PeerHandleOps` trait.
 //!

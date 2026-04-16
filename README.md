@@ -130,15 +130,15 @@ picomint-server-cli setup start-dkg
 picomint-server-cli invite
 picomint-server-cli audit
 
-picomint-server-cli module walletv2 total-value
-picomint-server-cli module walletv2 block-count
-picomint-server-cli module walletv2 feerate
-picomint-server-cli module walletv2 tx-chain
-picomint-server-cli module walletv2 pending-tx-chain
+picomint-server-cli module wallet total-value
+picomint-server-cli module wallet block-count
+picomint-server-cli module wallet feerate
+picomint-server-cli module wallet tx-chain
+picomint-server-cli module wallet pending-tx-chain
 
-picomint-server-cli module lnv2 gateway add <url>
-picomint-server-cli module lnv2 gateway remove <url>
-picomint-server-cli module lnv2 gateway list
+picomint-server-cli module ln gateway add <url>
+picomint-server-cli module ln gateway remove <url>
+picomint-server-cli module ln gateway list
 ```
 
 ## Gateway CLI
@@ -165,12 +165,12 @@ picomint-gateway-cli federation config <federation-id>
 picomint-gateway-cli federation invite <federation-id>
 picomint-gateway-cli federation balance <federation-id>
 
-picomint-gateway-cli module <federation-id> mintv2 count
-picomint-gateway-cli module <federation-id> mintv2 send <amount>
-picomint-gateway-cli module <federation-id> mintv2 receive <ecash>
-picomint-gateway-cli module <federation-id> walletv2 receive
-picomint-gateway-cli module <federation-id> walletv2 send <address> <amount> [--fee F]
-picomint-gateway-cli module <federation-id> walletv2 send-fee
+picomint-gateway-cli module <federation-id> mint count
+picomint-gateway-cli module <federation-id> mint send <amount>
+picomint-gateway-cli module <federation-id> mint receive <ecash>
+picomint-gateway-cli module <federation-id> wallet receive
+picomint-gateway-cli module <federation-id> wallet send <address> <amount> [--fee F]
+picomint-gateway-cli module <federation-id> wallet send-fee
 ```
 
 ## License

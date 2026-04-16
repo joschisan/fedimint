@@ -22,14 +22,14 @@ pub const ROUTE_INVITE: &str = "/invite";
 pub const ROUTE_AUDIT: &str = "/audit";
 
 // Module routes
-pub const ROUTE_MODULE_WALLET_TOTAL_VALUE: &str = "/module/walletv2/total-value";
-pub const ROUTE_MODULE_WALLET_BLOCK_COUNT: &str = "/module/walletv2/block-count";
-pub const ROUTE_MODULE_WALLET_FEERATE: &str = "/module/walletv2/feerate";
-pub const ROUTE_MODULE_WALLET_PENDING_TX_CHAIN: &str = "/module/walletv2/pending-tx-chain";
-pub const ROUTE_MODULE_WALLET_TX_CHAIN: &str = "/module/walletv2/tx-chain";
-pub const ROUTE_MODULE_LNV2_GATEWAY_ADD: &str = "/module/lnv2/gateway/add";
-pub const ROUTE_MODULE_LNV2_GATEWAY_REMOVE: &str = "/module/lnv2/gateway/remove";
-pub const ROUTE_MODULE_LNV2_GATEWAY_LIST: &str = "/module/lnv2/gateway/list";
+pub const ROUTE_MODULE_WALLET_TOTAL_VALUE: &str = "/module/wallet/total-value";
+pub const ROUTE_MODULE_WALLET_BLOCK_COUNT: &str = "/module/wallet/block-count";
+pub const ROUTE_MODULE_WALLET_FEERATE: &str = "/module/wallet/feerate";
+pub const ROUTE_MODULE_WALLET_PENDING_TX_CHAIN: &str = "/module/wallet/pending-tx-chain";
+pub const ROUTE_MODULE_WALLET_TX_CHAIN: &str = "/module/wallet/tx-chain";
+pub const ROUTE_MODULE_LN_GATEWAY_ADD: &str = "/module/ln/gateway/add";
+pub const ROUTE_MODULE_LN_GATEWAY_REMOVE: &str = "/module/ln/gateway/remove";
+pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/ln/gateway/list";
 
 // --- /setup/status ---
 // Response: SetupStatus (re-exported from picomint-server-core)
@@ -77,30 +77,30 @@ pub struct AuditResponse {
     pub audit: AuditSummary,
 }
 
-// --- /module/walletv2/total-value ---
+// --- /module/wallet/total-value ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletTotalValueResponse {
     pub total_value_sats: Option<u64>,
 }
 
-// --- /module/walletv2/block-count ---
+// --- /module/wallet/block-count ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletBlockCountResponse {
     pub block_count: u64,
 }
 
-// --- /module/walletv2/feerate ---
+// --- /module/wallet/feerate ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletFeerateResponse {
     pub sats_per_vbyte: Option<u64>,
 }
 
-// --- /module/lnv2/gateway/* ---
+// --- /module/ln/gateway/* ---
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Lnv2GatewayRequest {
+pub struct LnGatewayRequest {
     pub url: String,
 }

@@ -20,7 +20,7 @@ members = [
     "picomint-integration-tests",
     "picomint-lnurl",
     "picomint-logging",
-    "picomint-recurringdv2",
+    "picomint-recurringd",
     "picomint-redb",
     "picomint-server-bitcoin-rpc",
     "picomint-server-cli",
@@ -28,16 +28,16 @@ members = [
     "picomint-server-core",
     "picomint-server-daemon",
     "picomint-util-error",
-    "modules/picomint-gwv2-client",
-    "modules/picomint-lnv2-client",
-    "modules/picomint-lnv2-common",
-    "modules/picomint-lnv2-server",
-    "modules/picomint-mintv2-client",
-    "modules/picomint-mintv2-common",
-    "modules/picomint-mintv2-server",
-    "modules/picomint-walletv2-client",
-    "modules/picomint-walletv2-common",
-    "modules/picomint-walletv2-server",
+    "modules/picomint-gw-client",
+    "modules/picomint-ln-client",
+    "modules/picomint-ln-common",
+    "modules/picomint-ln-server",
+    "modules/picomint-mint-client",
+    "modules/picomint-mint-common",
+    "modules/picomint-mint-server",
+    "modules/picomint-wallet-client",
+    "modules/picomint-wallet-common",
+    "modules/picomint-wallet-server",
 ]
 resolver = "2"
 
@@ -118,15 +118,15 @@ picomint-derive-secret = { path = "./crypto/picomint-derive-secret", version = "
 picomint-eventlog = { path = "./picomint-eventlog", version = "=0.1.0" }
 picomint-gateway-cli-core = { path = "./picomint-gateway-cli-core", version = "=0.1.0" }
 picomint-gateway-daemon = { path = "./picomint-gateway-daemon", version = "=0.1.0" }
-picomint-gwv2-client = { path = "./modules/picomint-gwv2-client", version = "=0.1.0" }
+picomint-gw-client = { path = "./modules/picomint-gw-client", version = "=0.1.0" }
 picomint-lnurl = { path = "./picomint-lnurl", version = "=0.1.0" }
-picomint-lnv2-client = { path = "./modules/picomint-lnv2-client", version = "=0.1.0" }
-picomint-lnv2-common = { path = "./modules/picomint-lnv2-common", version = "=0.1.0" }
-picomint-lnv2-server = { path = "./modules/picomint-lnv2-server", version = "=0.1.0" }
+picomint-ln-client = { path = "./modules/picomint-ln-client", version = "=0.1.0" }
+picomint-ln-common = { path = "./modules/picomint-ln-common", version = "=0.1.0" }
+picomint-ln-server = { path = "./modules/picomint-ln-server", version = "=0.1.0" }
 picomint-logging = { path = "./picomint-logging", version = "=0.1.0" }
-picomint-mintv2-client = { path = "./modules/picomint-mintv2-client", version = "=0.1.0" }
-picomint-mintv2-common = { path = "./modules/picomint-mintv2-common", version = "=0.1.0" }
-picomint-mintv2-server = { path = "./modules/picomint-mintv2-server", version = "=0.1.0" }
+picomint-mint-client = { path = "./modules/picomint-mint-client", version = "=0.1.0" }
+picomint-mint-common = { path = "./modules/picomint-mint-common", version = "=0.1.0" }
+picomint-mint-server = { path = "./modules/picomint-mint-server", version = "=0.1.0" }
 picomint-redb = { path = "./picomint-redb", version = "=0.1.0" }
 picomint-server-bitcoin-rpc = { path = "./picomint-server-bitcoin-rpc", version = "=0.1.0" }
 picomint-server-cli = { path = "./picomint-server-cli", version = "=0.1.0" }
@@ -134,9 +134,9 @@ picomint-server-cli-core = { path = "./picomint-server-cli-core", version = "=0.
 picomint-server-core = { path = "./picomint-server-core", version = "=0.1.0" }
 picomint-server-daemon = { path = "./picomint-server-daemon", version = "=0.1.0" }
 picomint-util-error = { path = "./picomint-util-error", version = "=0.1.0" }
-picomint-walletv2-client = { path = "./modules/picomint-walletv2-client", version = "=0.1.0" }
-picomint-walletv2-common = { path = "./modules/picomint-walletv2-common", version = "=0.1.0" }
-picomint-walletv2-server = { path = "./modules/picomint-walletv2-server", version = "=0.1.0" }
+picomint-wallet-client = { path = "./modules/picomint-wallet-client", version = "=0.1.0" }
+picomint-wallet-common = { path = "./modules/picomint-wallet-common", version = "=0.1.0" }
+picomint-wallet-server = { path = "./modules/picomint-wallet-server", version = "=0.1.0" }
 fs2 = "0.4.3"
 futures = "0.3.32"
 futures-util = "0.3.30"

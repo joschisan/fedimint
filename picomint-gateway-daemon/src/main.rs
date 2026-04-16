@@ -24,8 +24,8 @@ use picomint_core::rustls::install_crypto_provider;
 use picomint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
-use picomint_gwv2_client::GatewayClientModuleV2;
-use picomint_lnv2_common::gateway_api::PaymentFee;
+use picomint_gw_client::GatewayClientModuleV2;
+use picomint_ln_common::gateway_api::PaymentFee;
 use picomint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use rand::rngs::OsRng;
 use tokio::sync::RwLock;
@@ -279,7 +279,7 @@ async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
 /// payment off to it. Otherwise, fails the HTLC since forwarding is not
 /// supported.
 async fn handle_lightning_payment(state: &AppState, payment_hash: [u8; 32], amount_msat: u64) {
-    if try_handle_lightning_payment_lnv2(state, payment_hash, amount_msat)
+    if try_handle_lightning_payment_ln(state, payment_hash, amount_msat)
         .await
         .is_ok()
     {
@@ -299,12 +299,12 @@ async fn handle_lightning_payment(state: &AppState, payment_hash: [u8; 32], amou
     }
 }
 
-async fn try_handle_lightning_payment_lnv2(
+async fn try_handle_lightning_payment_ln(
     state: &AppState,
     payment_hash: [u8; 32],
     amount_msat: u64,
 ) -> anyhow::Result<()> {
-    use picomint_lnv2_common::contracts::PaymentImage;
+    use picomint_ln_common::contracts::PaymentImage;
 
     let hash = sha256::Hash::from_byte_array(payment_hash);
 

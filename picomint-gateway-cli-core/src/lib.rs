@@ -32,13 +32,13 @@ pub const ROUTE_FEDERATION_INVITE: &str = "/federation/invite";
 pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
 
 // Per-federation module commands
-pub const ROUTE_MODULE_MINT_COUNT: &str = "/module/mintv2/count";
-pub const ROUTE_MODULE_MINT_SEND: &str = "/module/mintv2/send";
-pub const ROUTE_MODULE_MINT_RECEIVE: &str = "/module/mintv2/receive";
-pub const ROUTE_MODULE_WALLET_INFO: &str = "/module/walletv2/info";
-pub const ROUTE_MODULE_WALLET_SEND_FEE: &str = "/module/walletv2/send-fee";
-pub const ROUTE_MODULE_WALLET_SEND: &str = "/module/walletv2/send";
-pub const ROUTE_MODULE_WALLET_RECEIVE: &str = "/module/walletv2/receive";
+pub const ROUTE_MODULE_MINT_COUNT: &str = "/module/mint/count";
+pub const ROUTE_MODULE_MINT_SEND: &str = "/module/mint/send";
+pub const ROUTE_MODULE_MINT_RECEIVE: &str = "/module/mint/receive";
+pub const ROUTE_MODULE_WALLET_INFO: &str = "/module/wallet/info";
+pub const ROUTE_MODULE_WALLET_SEND_FEE: &str = "/module/wallet/send-fee";
+pub const ROUTE_MODULE_WALLET_SEND: &str = "/module/wallet/send";
+pub const ROUTE_MODULE_WALLET_RECEIVE: &str = "/module/wallet/receive";
 
 // --- /info ---
 
@@ -242,14 +242,14 @@ pub struct FederationInviteResponse {
     pub invite_codes: BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>,
 }
 
-// --- /module/mintv2/count ---
+// --- /module/mint/count ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MintCountRequest {
     pub federation_id: FederationId,
 }
 
-// --- /module/mintv2/send ---
+// --- /module/mint/send ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MintSendRequest {
@@ -262,7 +262,7 @@ pub struct MintSendResponse {
     pub notes: String,
 }
 
-// --- /module/mintv2/receive ---
+// --- /module/mint/receive ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MintReceiveRequest {
@@ -274,7 +274,7 @@ pub struct MintReceiveResponse {
     pub amount: Amount,
 }
 
-// --- /module/walletv2/info ---
+// --- /module/wallet/info ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WalletInfoRequest {
@@ -282,14 +282,14 @@ pub struct WalletInfoRequest {
     pub subcommand: String,
 }
 
-// --- /module/walletv2/send-fee ---
+// --- /module/wallet/send-fee ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WalletSendFeeRequest {
     pub federation_id: FederationId,
 }
 
-// --- /module/walletv2/send ---
+// --- /module/wallet/send ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WalletSendRequest {
@@ -299,7 +299,7 @@ pub struct WalletSendRequest {
     pub fee: Option<bitcoin::Amount>,
 }
 
-// --- /module/walletv2/receive ---
+// --- /module/wallet/receive ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WalletReceiveRequest {

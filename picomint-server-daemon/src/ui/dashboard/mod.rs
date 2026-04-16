@@ -22,7 +22,7 @@ use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG
 use crate::consensus::api::ConsensusApi;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::auth::UserAuth;
-use crate::ui::dashboard::modules::{lnv2, mintv2, walletv2};
+use crate::ui::dashboard::modules::{ln, mint, wallet};
 use crate::ui::{
     CONNECTIVITY_CHECK_ROUTE, DOWNLOAD_BACKUP_ROUTE, GuardianConfigBackup, LOGIN_ROUTE, LoginInput,
     ROOT_ROUTE, UiState, connectivity_check_handler, dashboard_layout, login_form,
@@ -163,15 +163,15 @@ async fn dashboard_view(
 
         div class="row gy-4 mt-2" {
             div class="col-12" {
-                (lnv2::render(&api.server.ln).await)
+                (ln::render(&api.server.ln).await)
             }
         }
 
-        (walletv2::render(&api.server.wallet).await)
+        (wallet::render(&api.server.wallet).await)
 
         div class="row gy-4 mt-2" {
             div class="col-12" {
-                (mintv2::render(&api.server.mint).await)
+                (mint::render(&api.server.mint).await)
             }
         }
 
@@ -204,8 +204,8 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
             CONNECTIVITY_CHECK_ROUTE,
             get(connectivity_check_handler::<Arc<ConsensusApi>>),
         )
-        .route(lnv2::LNV2_ADD_ROUTE, post(lnv2::post_add))
-        .route(lnv2::LNV2_REMOVE_ROUTE, post(lnv2::post_remove))
+        .route(ln::LN_ADD_ROUTE, post(ln::post_add))
+        .route(ln::LN_REMOVE_ROUTE, post(ln::post_remove))
         .with_static_routes()
         .with_state(UiState::new(api))
 }

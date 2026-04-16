@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Picomint is a minimalist fork of Fedimint — two binaries (federation guardian + Lightning gateway), Iroh networking, redb storage, static module set (mintv2, walletv2, lnv2). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. See README.md for deployment.
+Picomint is a minimalist fork of Fedimint — two binaries (federation guardian + Lightning gateway), Iroh networking, redb storage, static module set (mint, wallet, ln). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. See README.md for deployment.
 
 ## Build and development
 
@@ -27,7 +27,7 @@ Picomint is a minimalist fork of Fedimint — two binaries (federation guardian 
 - `picomint-server-core` — `ServerModule` trait + concrete module set
 - `picomint-redb` — redb-based database layer
 - `picomint-api-client` — client-side API transport (Iroh-only)
-- `modules/picomint-{mintv2,walletv2,lnv2,gwv2}-*` — the three active modules
+- `modules/picomint-{mint,wallet,ln,gw}-*` — the three active modules
 
 ### Wire + storage
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-core::encoding`
