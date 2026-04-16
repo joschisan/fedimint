@@ -480,19 +480,25 @@ impl ServerConfig {
 
         let mut module_cfgs = BTreeMap::new();
 
-        for (module_id, (kind, module_init)) in registry
+        for (kind, module_init) in registry
             .iter()
             .filter(|(kind, _)| params.enabled_modules.contains(kind))
-            .enumerate()
         {
             info!(
                 target: LOG_NET_PEER_DKG,
                 "Running config generation for module of kind {kind}..."
             );
 
+            let module_id = match kind.as_str() {
+                "mintv2" => fedimint_api_client::wire::MINT_INSTANCE_ID,
+                "lnv2" => fedimint_api_client::wire::LN_INSTANCE_ID,
+                "walletv2" => fedimint_api_client::wire::WALLET_INSTANCE_ID,
+                other => bail!("Unknown module kind during DKG: {other}"),
+            };
+
             let cfg = module_init.distributed_gen(&handle, &args).await?;
 
-            module_cfgs.insert(module_id as ModuleInstanceId, cfg);
+            module_cfgs.insert(module_id, cfg);
         }
 
         let cfg = ServerConfig::from(
