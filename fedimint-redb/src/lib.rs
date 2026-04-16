@@ -422,6 +422,168 @@ impl ReadTxRef<'_> {
     }
 }
 
+// ─── Ergonomic typed ops over NativeTableDef<K, Borsh<V>> ────────────────
+//
+// These mirror the shape of the old bytes-level typed ops but use redb's
+// native typed tables under the hood. The `K: for<'a> redb::Key<SelfType<'a> = K>`
+// HRTB is the "owned key" contract: true for primitive newtypes made via
+// `redb_newtype_key!` and tuples thereof.
+
+use std::ops::RangeBounds;
+
+use borsh::{BorshDeserialize, BorshSerialize};
+use fedimint_core::db::Borsh;
+
+impl<'tx> WriteTxRef<'tx> {
+    pub fn native_insert<K, V>(
+        &self,
+        def: &NativeTableDef<K, Borsh<V>>,
+        key: &K,
+        value: &V,
+    ) -> Option<V>
+    where
+        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+    {
+        self.with_native_table(def, |t| {
+            t.insert(key, value)
+                .expect("redb insert failed")
+                .map(|g| g.value())
+        })
+    }
+
+    pub fn native_remove<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>, key: &K) -> Option<V>
+    where
+        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+    {
+        self.with_native_table(def, |t| {
+            t.remove(key)
+                .expect("redb remove failed")
+                .map(|g| g.value())
+        })
+    }
+
+    pub fn native_delete_table<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>)
+    where
+        K: redb::Key + 'static,
+        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+    {
+        let resolved = def.resolved_name(&self.prefix);
+        let td: TableDefinition<K, Borsh<V>> = TableDefinition::new(&resolved);
+        match self.tx.delete_table(td) {
+            Ok(_) => {}
+            Err(redb::TableError::TableDoesNotExist(_)) => {}
+            Err(e) => panic!("redb delete_table failed: {e}"),
+        }
+        self.touched
+            .lock()
+            .expect("touched poisoned")
+            .insert(resolved);
+    }
+
+    pub fn native_get<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>, key: &K) -> Option<V>
+    where
+        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+    {
+        self.with_native_table(def, |t| {
+            t.get(key).expect("redb get failed").map(|g| g.value())
+        })
+    }
+
+    pub fn native_iter<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>) -> Vec<(K, V)>
+    where
+        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+    {
+        use redb::ReadableTable as _;
+        self.with_native_table(def, |t| {
+            t.iter()
+                .expect("redb iter failed")
+                .map(|r| {
+                    let (k, v) = r.expect("redb iter item failed");
+                    (k.value(), v.value())
+                })
+                .collect()
+        })
+    }
+
+    pub fn native_range<K, V, R>(
+        &self,
+        def: &NativeTableDef<K, Borsh<V>>,
+        range: R,
+    ) -> Vec<(K, V)>
+    where
+        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        R: RangeBounds<K>,
+    {
+        self.with_native_table(def, |t| {
+            t.range::<&K>((range.start_bound(), range.end_bound()))
+                .expect("redb range failed")
+                .map(|r| {
+                    let (k, v) = r.expect("redb range item failed");
+                    (k.value(), v.value())
+                })
+                .collect()
+        })
+    }
+}
+
+impl ReadTxRef<'_> {
+    pub fn native_get<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>, key: &K) -> Option<V>
+    where
+        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+    {
+        self.with_native_table(def, |t| {
+            t.get(key).expect("redb get failed").map(|g| g.value())
+        })
+        .flatten()
+    }
+
+    pub fn native_iter<K, V>(&self, def: &NativeTableDef<K, Borsh<V>>) -> Vec<(K, V)>
+    where
+        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+    {
+        use redb::ReadableTable as _;
+        self.with_native_table(def, |t| {
+            t.iter()
+                .expect("redb iter failed")
+                .map(|r| {
+                    let (k, v) = r.expect("redb iter item failed");
+                    (k.value(), v.value())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn native_range<K, V, R>(
+        &self,
+        def: &NativeTableDef<K, Borsh<V>>,
+        range: R,
+    ) -> Vec<(K, V)>
+    where
+        K: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        V: BorshSerialize + BorshDeserialize + Debug + 'static,
+        R: RangeBounds<K>,
+    {
+        self.with_native_table(def, |t| {
+            t.range::<&K>((range.start_bound(), range.end_bound()))
+                .expect("redb range failed")
+                .map(|r| {
+                    let (k, v) = r.expect("redb range item failed");
+                    (k.value(), v.value())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+}
+
 // ─── Bytes-level implementations ─────────────────────────────────────────
 
 fn read_raw_get_bytes(
