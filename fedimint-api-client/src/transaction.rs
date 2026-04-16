@@ -24,7 +24,6 @@ use crate::wire;
 pub struct Transaction {
     pub inputs: Vec<wire::Input>,
     pub outputs: Vec<wire::Output>,
-    pub nonce: [u8; 8],
     pub signatures: Vec<fedimint_core::secp256k1::schnorr::Signature>,
 }
 
@@ -34,7 +33,6 @@ impl fmt::Debug for Transaction {
             .field("txid", &self.tx_hash())
             .field("inputs", &self.inputs)
             .field("outputs", &self.outputs)
-            .field("nonce", &self.nonce)
             .field("signatures", &self.signatures)
             .finish()
     }
@@ -46,22 +44,18 @@ impl Transaction {
     pub const MAX_TX_SIZE: usize = fedimint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT - 32;
 
     pub fn tx_hash(&self) -> TransactionId {
-        Self::tx_hash_from_parts(&self.inputs, &self.outputs, self.nonce)
+        Self::tx_hash_from_parts(&self.inputs, &self.outputs)
     }
 
     pub fn tx_hash_from_parts(
         inputs: &[wire::Input],
         outputs: &[wire::Output],
-        nonce: [u8; 8],
     ) -> TransactionId {
         let mut engine = TransactionId::engine();
         inputs
             .consensus_encode(&mut engine)
             .expect("write to hash engine can't fail");
         outputs
-            .consensus_encode(&mut engine)
-            .expect("write to hash engine can't fail");
-        nonce
             .consensus_encode(&mut engine)
             .expect("write to hash engine can't fail");
         TransactionId::from_engine(engine)

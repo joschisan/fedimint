@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, bail};
 use bitcoin::key::Secp256k1;
-use bitcoin::key::rand::thread_rng;
 use bitcoin::secp256k1::{self, PublicKey};
 use fedimint_api_client::api::{DynGlobalApi, IRawFederationApi};
 use fedimint_api_client::transaction::Transaction;
@@ -315,7 +314,7 @@ impl Client {
 
         assert!(input_amount >= output_amount, "Transaction is underfunded");
 
-        let tx = partial_transaction.build(&self.secp_ctx, thread_rng());
+        let tx = partial_transaction.build(&self.secp_ctx);
 
         Ok((
             tx,

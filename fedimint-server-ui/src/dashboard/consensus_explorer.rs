@@ -2,7 +2,6 @@ use axum::extract::{Path, State};
 use axum::response::{Html, IntoResponse};
 use fedimint_api_client::session_outcome::{AcceptedItem, SessionStatusV2};
 use fedimint_api_client::transaction::ConsensusItem;
-use fedimint_core::hex;
 use fedimint_server_core::dashboard_ui::DynDashboardApi;
 use fedimint_ui_common::UiState;
 use fedimint_ui_common::auth::UserAuth;
@@ -155,9 +154,6 @@ fn format_item_details(item: &AcceptedItem) -> Markup {
                 div class="consensus-item-details" {
                     div class="mb-2" {
                         "Transaction ID: " code { (tx.tx_hash()) }
-                    }
-                    div class="mb-2" {
-                        "Nonce: " code { (hex::encode(tx.nonce)) }
                     }
 
                     // Inputs section

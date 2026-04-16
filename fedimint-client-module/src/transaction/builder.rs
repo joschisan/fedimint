@@ -5,7 +5,6 @@ use fedimint_api_client::wire;
 use fedimint_core::Amount;
 use fedimint_logging::LOG_CLIENT;
 use itertools::multiunzip;
-use rand::{CryptoRng, Rng, RngCore};
 use secp256k1::Secp256k1;
 use tracing::warn;
 
@@ -148,11 +147,7 @@ impl TransactionBuilder {
 
     /// Build the signed `Transaction`. Signature collection happens here;
     /// all SM spawning now lives outside the builder.
-    pub fn build<C, R: RngCore + CryptoRng>(
-        self,
-        secp_ctx: &Secp256k1<C>,
-        mut rng: R,
-    ) -> Transaction
+    pub fn build<C>(self, secp_ctx: &Secp256k1<C>) -> Transaction
     where
         C: secp256k1::Signing + secp256k1::Verification,
     {
@@ -170,9 +165,7 @@ impl TransactionBuilder {
             .map(|output| output.output)
             .collect();
 
-        let nonce: [u8; 8] = rng.r#gen();
-
-        let txid = Transaction::tx_hash_from_parts(&inputs, &outputs, nonce);
+        let txid = Transaction::tx_hash_from_parts(&inputs, &outputs);
         let msg = secp256k1::Message::from_digest_slice(&txid[..]).expect("txid has right length");
 
         let signatures = input_keys
@@ -184,7 +177,6 @@ impl TransactionBuilder {
         Transaction {
             inputs,
             outputs,
-            nonce,
             signatures,
         }
     }
