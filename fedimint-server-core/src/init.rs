@@ -2,7 +2,6 @@
 #![allow(clippy::pedantic)]
 
 use std::collections::BTreeSet;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{any, marker};
 
@@ -22,9 +21,9 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::{NumPeers, PeerId, apply, async_trait_maybe_send, dyn_newtype_define};
 use fedimint_redb::Database as V2Database;
 
+use crate::ServerModule;
 use crate::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use crate::config::PeerHandleOps;
-use crate::{DynServerModule, ServerModule};
 
 /// Arguments passed to modules during config generation
 ///
@@ -39,28 +38,16 @@ pub struct ConfigGenModuleArgs {
 /// Interface for Module Generation
 ///
 /// This trait contains the methods responsible for the module's
-/// - initialization
 /// - config generation
 /// - config validation
 ///
-/// Once the module configuration is ready, the module can be instantiated via
-/// `[Self::init]`.
+/// It no longer exposes the `init()` path — typed instantiation of the
+/// concrete modules happens directly in `fedimint-server` via the three
+/// module-specific `ServerModuleInit` impls (`MintInit`, `LightningInit`,
+/// `WalletInit`). The dyn registry is retained only for DKG-time operations.
 #[apply(async_trait_maybe_send!)]
 pub trait IServerModuleInit: IDynCommonModuleInit {
     fn as_common(&self) -> &(dyn IDynCommonModuleInit + Send + Sync + 'static);
-
-    /// Initialize the [`DynServerModule`] instance from its config
-    #[allow(clippy::too_many_arguments)]
-    async fn init(
-        &self,
-        peer_num: NumPeers,
-        cfg: ServerModuleConfig,
-        db: V2Database,
-        task_group: &TaskGroup,
-        our_peer_id: PeerId,
-        module_api: DynModuleApi,
-        server_bitcoin_rpc_monitor: ServerBitcoinRpcMonitor,
-    ) -> anyhow::Result<DynServerModule>;
 
     async fn distributed_gen(
         &self,
@@ -203,52 +190,9 @@ pub trait ServerModuleInit: ModuleInit + Sized {
 impl<T> IServerModuleInit for T
 where
     T: ServerModuleInit + 'static + Sync,
-    fedimint_api_client::wire::Input: From<
-        <<<T as ServerModuleInit>::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::Input,
-    >,
-    fedimint_api_client::wire::Output: From<
-        <<<T as ServerModuleInit>::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::Output,
-    >,
-    fedimint_api_client::wire::ModuleConsensusItem: From<
-        <<<T as ServerModuleInit>::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::ConsensusItem,
-    >,
-    fedimint_api_client::wire::InputError: From<
-        <<<T as ServerModuleInit>::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::InputError,
-    >,
-    fedimint_api_client::wire::OutputError: From<
-        <<<T as ServerModuleInit>::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::OutputError,
-    >,
 {
     fn as_common(&self) -> &(dyn IDynCommonModuleInit + Send + Sync + 'static) {
         self
-    }
-
-    async fn init(
-        &self,
-        num_peers: NumPeers,
-        cfg: ServerModuleConfig,
-        db: V2Database,
-        task_group: &TaskGroup,
-        our_peer_id: PeerId,
-        module_api: DynModuleApi,
-        server_bitcoin_rpc_monitor: ServerBitcoinRpcMonitor,
-    ) -> anyhow::Result<DynServerModule> {
-        let module = <Self as ServerModuleInit>::init(
-            self,
-            &ServerModuleInitArgs {
-                num_peers,
-                cfg,
-                db,
-                task_group: task_group.clone(),
-                our_peer_id,
-                _marker: PhantomData,
-                module_api,
-                server_bitcoin_rpc_monitor,
-            },
-        )
-        .await?;
-
-        Ok(DynServerModule::from(module))
     }
 
     async fn distributed_gen(
