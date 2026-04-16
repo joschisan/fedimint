@@ -1,16 +1,15 @@
 //! Implements the client API through which users interact with the federation
+
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use fedimint_api_client::session_outcome::SessionStatusV2;
 use fedimint_api_client::transaction::{
     ConsensusItem, SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
 };
-use fedimint_core::config::{ClientConfig, META_FEDERATION_NAME_KEY};
+use fedimint_core::config::ClientConfig;
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
@@ -18,27 +17,22 @@ use fedimint_core::endpoint_constants::{
 };
 use fedimint_core::module::audit::{Audit, AuditSummary};
 use fedimint_core::module::{
-    ApiAuth, ApiEndpoint, ApiError, ApiResult, ApiVersion, SerdeModuleEncoding, api_endpoint,
+    ApiAuth, ApiEndpoint, ApiError, ApiVersion, SerdeModuleEncoding, api_endpoint,
 };
-use fedimint_core::net::auth::GuardianAuthToken;
 use fedimint_core::task::TaskGroup;
-use fedimint_core::util::{FmtCompact, SafeUrl};
+use fedimint_core::util::FmtCompact;
 use fedimint_core::{PeerId, TransactionId};
 use fedimint_logging::LOG_NET_API;
 use fedimint_redb::{Database, ReadTransaction};
 use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
-use fedimint_server_ui::{
-    GuardianConfigBackup, IDashboardApi, P2PConnectionStatus, ServerBitcoinRpcStatus,
-};
 use tokio::sync::watch::{self, Receiver, Sender};
 use tracing::{debug, warn};
 
 use crate::config::ServerConfig;
-use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG};
 use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION, SIGNED_SESSION_OUTCOME};
 use crate::consensus::engine::get_finished_session_count_static;
+use crate::consensus::server::{Server, process_transaction_with_server};
 use crate::net::p2p::P2PStatusReceivers;
-use crate::server::{Server, process_transaction_with_server};
 
 #[derive(Clone)]
 pub struct ConsensusApi {
@@ -64,8 +58,8 @@ pub struct ConsensusApi {
 }
 
 impl ConsensusApi {
-    // we want to return an error if and only if the submitted transaction is
-    // invalid and will be rejected if we were to submit it to consensus
+    // Returns an error if and only if the submitted transaction is invalid
+    // and will be rejected if we were to submit it to consensus.
     pub async fn submit_transaction(
         &self,
         transaction: Transaction,
@@ -83,10 +77,10 @@ impl ConsensusApi {
         }
 
         process_transaction_with_server(&self.server, &tx, &transaction)
-        .await
-        .inspect_err(|err| {
-            debug!(target: LOG_NET_API, %txid, err = %err.fmt_compact(), "Transaction rejected");
-        })?;
+            .await
+            .inspect_err(|err| {
+                debug!(target: LOG_NET_API, %txid, err = %err.fmt_compact(), "Transaction rejected");
+            })?;
 
         drop(tx);
 
@@ -111,11 +105,11 @@ impl ConsensusApi {
             .await
     }
 
-    async fn session_count_internal(&self) -> u64 {
+    pub async fn session_count(&self) -> u64 {
         get_finished_session_count_static(&self.db.begin_read().await).await
     }
 
-    async fn session_status_internal(&self, session_index: u64) -> SessionStatusV2 {
+    pub async fn session_status(&self, session_index: u64) -> SessionStatusV2 {
         let tx = self.db.begin_read().await;
 
         match session_index.cmp(&get_finished_session_count_static(&tx).await) {
@@ -133,7 +127,7 @@ impl ConsensusApi {
         }
     }
 
-    async fn get_federation_audit(&self) -> ApiResult<AuditSummary> {
+    pub async fn federation_audit(&self) -> AuditSummary {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
         use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
@@ -150,138 +144,7 @@ impl ConsensusApi {
         ]
         .into();
 
-        Ok(AuditSummary::from_audit(
-            &audit,
-            &module_instance_id_to_kind,
-        ))
-    }
-
-    /// Uses the in-memory config to write a config backup tar archive that
-    /// guardians can download. Private keys are stored as plaintext JSON.
-    /// Operators should rely on disk encryption for at-rest protection.
-    fn get_guardian_config_backup(&self, _auth: &GuardianAuthToken) -> GuardianConfigBackup {
-        let mut tar_archive_builder = tar::Builder::new(Vec::new());
-
-        let mut append = |name: &Path, data: &[u8]| {
-            let mut header = tar::Header::new_gnu();
-            header.set_path(name).expect("Error setting path");
-            header.set_size(data.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            tar_archive_builder
-                .append(&header, data)
-                .expect("Error adding data to tar archive");
-        };
-
-        append(
-            &PathBuf::from(LOCAL_CONFIG).with_extension(JSON_EXT),
-            &serde_json::to_vec(&self.cfg.local).expect("Error encoding local config"),
-        );
-
-        append(
-            &PathBuf::from(CONSENSUS_CONFIG).with_extension(JSON_EXT),
-            &serde_json::to_vec(&self.cfg.consensus).expect("Error encoding consensus config"),
-        );
-
-        append(
-            &PathBuf::from(PRIVATE_CONFIG).with_extension(JSON_EXT),
-            &serde_json::to_vec(&self.cfg.private).expect("Error encoding private config"),
-        );
-
-        let tar_archive_bytes = tar_archive_builder
-            .into_inner()
-            .expect("Error building tar archive");
-
-        GuardianConfigBackup { tar_archive_bytes }
-    }
-}
-
-#[async_trait]
-impl IDashboardApi for ConsensusApi {
-    async fn auth(&self) -> ApiAuth {
-        self.auth.clone()
-    }
-
-    async fn guardian_id(&self) -> PeerId {
-        self.cfg.local.identity
-    }
-
-    async fn guardian_names(&self) -> BTreeMap<PeerId, String> {
-        self.cfg
-            .consensus
-            .api_endpoints()
-            .iter()
-            .map(|(peer_id, endpoint)| (*peer_id, endpoint.name.clone()))
-            .collect()
-    }
-
-    async fn federation_name(&self) -> String {
-        self.cfg
-            .consensus
-            .meta
-            .get(META_FEDERATION_NAME_KEY)
-            .cloned()
-            .expect("Federation name must be set")
-    }
-
-    async fn session_count(&self) -> u64 {
-        self.session_count_internal().await
-    }
-
-    async fn get_session_status(&self, session_idx: u64) -> SessionStatusV2 {
-        self.session_status_internal(session_idx).await
-    }
-
-    async fn consensus_ord_latency(&self) -> Option<Duration> {
-        *self.ord_latency_receiver.borrow()
-    }
-
-    async fn p2p_connection_status(&self) -> BTreeMap<PeerId, Option<P2PConnectionStatus>> {
-        self.p2p_status_receivers
-            .iter()
-            .map(|(peer, receiver)| (*peer, receiver.borrow().clone()))
-            .collect()
-    }
-
-    async fn federation_invite_code(&self) -> String {
-        self.cfg.get_invite_code().to_string()
-    }
-
-    async fn federation_audit(&self) -> AuditSummary {
-        self.get_federation_audit()
-            .await
-            .expect("Failed to get federation audit")
-    }
-
-    async fn bitcoin_rpc_url(&self) -> SafeUrl {
-        self.bitcoin_rpc_connection.url()
-    }
-
-    async fn bitcoin_rpc_status(&self) -> Option<ServerBitcoinRpcStatus> {
-        self.bitcoin_rpc_connection.status()
-    }
-
-    async fn download_guardian_config_backup(
-        &self,
-        guardian_auth: &GuardianAuthToken,
-    ) -> GuardianConfigBackup {
-        self.get_guardian_config_backup(guardian_auth)
-    }
-
-    fn mint(&self) -> &fedimint_mintv2_server::Mint {
-        &self.server.mint
-    }
-
-    fn lightning(&self) -> &fedimint_lnv2_server::Lightning {
-        &self.server.ln
-    }
-
-    fn wallet(&self) -> &fedimint_walletv2_server::Wallet {
-        &self.server.wallet
-    }
-
-    async fn fedimintd_version(&self) -> String {
-        self.code_version_str.clone()
+        AuditSummary::from_audit(&audit, &module_instance_id_to_kind)
     }
 }
 

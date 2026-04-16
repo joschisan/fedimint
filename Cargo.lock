@@ -2773,75 +2773,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-server"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-channel",
- "async-trait",
- "axum 0.8.8",
- "base64 0.22.1",
- "bincode",
- "bitcoin",
- "bls12_381",
- "bytes",
- "clap",
- "fedimint-aead",
- "fedimint-aleph-bft",
- "fedimint-api-client",
- "fedimint-build",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-derive-secret",
- "fedimint-lnv2-common",
- "fedimint-lnv2-server",
- "fedimint-logging",
- "fedimint-mintv2-common",
- "fedimint-mintv2-server",
- "fedimint-redb",
- "fedimint-server-bitcoin-rpc",
- "fedimint-server-cli-core",
- "fedimint-server-core",
- "fedimint-server-ui",
- "fedimint-walletv2-common",
- "fedimint-walletv2-server",
- "fedimintd-envs",
- "futures",
- "group",
- "hex",
- "hyper 1.6.0",
- "iroh",
- "iroh-base",
- "iroh-relay",
- "itertools 0.14.0",
- "jsonrpsee",
- "parity-scale-codec",
- "pin-project",
- "pkarr 3.10.0",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "rayon",
- "rcgen",
- "serde",
- "serde_json",
- "sha3",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "subtle",
- "tar",
- "test-log",
- "thiserror 2.0.18",
- "tikv-jemallocator",
- "tokio",
- "tokio-rustls 0.26.4",
- "tokio-util",
- "tower 0.4.13",
- "tracing",
- "url",
- "z32",
-]
-
-[[package]]
 name = "fedimint-server-bitcoin-rpc"
 version = "0.11.0-alpha"
 dependencies = [
@@ -2897,28 +2828,75 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-server-ui"
+name = "fedimint-server-daemon"
 version = "0.11.0-alpha"
 dependencies = [
  "anyhow",
+ "async-channel",
  "async-trait",
  "axum 0.8.8",
  "axum-extra",
+ "base64 0.22.1",
+ "bincode",
+ "bitcoin",
+ "bls12_381",
+ "bytes",
  "chrono",
+ "clap",
+ "fedimint-aead",
+ "fedimint-aleph-bft",
  "fedimint-api-client",
+ "fedimint-build",
+ "fedimint-client-module",
  "fedimint-core",
+ "fedimint-derive-secret",
+ "fedimint-lnv2-common",
  "fedimint-lnv2-server",
+ "fedimint-logging",
+ "fedimint-mintv2-common",
  "fedimint-mintv2-server",
+ "fedimint-redb",
+ "fedimint-server-bitcoin-rpc",
+ "fedimint-server-cli-core",
  "fedimint-server-core",
- "fedimint-ui-common",
+ "fedimint-walletv2-common",
  "fedimint-walletv2-server",
+ "fedimintd-envs",
+ "futures",
+ "group",
+ "hex",
+ "hyper 1.6.0",
+ "iroh",
+ "iroh-base",
+ "iroh-relay",
+ "itertools 0.14.0",
+ "jsonrpsee",
  "maud",
+ "parity-scale-codec",
+ "pin-project",
+ "pkarr 3.10.0",
  "qrcode",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rayon",
+ "rcgen",
  "serde",
  "serde_json",
+ "sha3",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "subtle",
+ "tar",
+ "test-log",
  "thiserror 2.0.18",
+ "tikv-jemallocator",
  "tokio",
+ "tokio-rustls 0.26.4",
+ "tokio-util",
+ "tower 0.4.13",
  "tracing",
+ "url",
+ "z32",
 ]
 
 [[package]]
@@ -2970,18 +2948,6 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serde-big-array",
-]
-
-[[package]]
-name = "fedimint-ui-common"
-version = "0.11.0-alpha"
-dependencies = [
- "axum 0.8.8",
- "axum-extra",
- "fedimint-core",
- "maud",
- "serde",
- "tokio",
 ]
 
 [[package]]

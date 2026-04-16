@@ -1,5 +1,24 @@
+//! Server-side admin web UI.
+//!
+//! The UI runs in two phases:
+//!
+//! - Setup UI (before the federation is configured). Served by
+//!   [`setup::router`] which takes an `Arc<SetupApi>` directly.
+//! - Dashboard UI (once the federation is running). Served by
+//!   [`dashboard::router`] which takes an `Arc<ConsensusApi>` and reaches
+//!   straight into the three typed module instances (`mint`, `ln`, `wallet`)
+//!   hanging off it.
+//!
+//! Previously this lived in two sibling crates (`fedimint-server-ui` and
+//! `fedimint-ui-common`) and exposed a trait-indirection (`IDashboardApi` /
+//! `ISetupApi` / `DynDashboardApi` / `DynSetupApi`) purely so those crates
+//! could avoid a dep cycle back into the daemon. That cycle is gone now that
+//! UI lives inside the daemon; we use the concrete types directly.
+
 pub mod assets;
 pub mod auth;
+pub mod dashboard;
+pub mod setup;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
@@ -12,15 +31,27 @@ use fedimint_core::hex::ToHex;
 use fedimint_core::module::ApiAuth;
 use fedimint_core::secp256k1::rand::{Rng, thread_rng};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
+// Common route constants shared between setup and dashboard.
 pub const ROOT_ROUTE: &str = "/";
 pub const LOGIN_ROUTE: &str = "/login";
 pub const CONNECTIVITY_CHECK_ROUTE: &str = "/ui/connectivity-check";
+pub const DOWNLOAD_BACKUP_ROUTE: &str = "/download-backup";
 
-/// Generic state for both setup and dashboard UIs
+/// Archive of the guardian config files that can be downloaded from the
+/// dashboard to restore this guardian on a new machine.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GuardianConfigBackup {
+    #[serde(with = "fedimint_core::hex::serde")]
+    pub tar_archive_bytes: Vec<u8>,
+}
+
+/// Generic state wrapper for the setup and dashboard axum routers. Holds the
+/// concrete API handle plus a random per-process auth cookie pair used to
+/// gate authenticated routes.
 #[derive(Clone)]
 pub struct UiState<T> {
     pub api: T,
@@ -48,7 +79,7 @@ pub fn common_head(title: &str) -> Markup {
         link rel="icon" type="image/png" href="/assets/logo.png";
 
         // Note: this needs to be included in the header, so that web-page does not
-        // get in a state where htmx is not yet loaded. `deref` helps with blocking the load.
+        // get in a state where htmx is not yet loaded. `defer` helps with blocking the load.
         // Learned the hard way. --dpc
         script defer src="/assets/htmx.org-2.0.4.min.js" {}
 
@@ -214,13 +245,13 @@ async fn check_tcp_connect(addr: SocketAddr) -> bool {
 
 /// Handler that checks internet connectivity by attempting TCP connections
 /// to well-known anycast IPs and returns an HTML fragment.
-/// Manually checks auth cookie to avoid `UserAuth` extractor's redirect,
-/// which would cause htmx to swap the entire login page into the widget.
+///
+/// Manually checks the auth cookie to avoid `UserAuth`'s redirect, which would
+/// cause htmx to swap the entire login page into the widget.
 pub async fn connectivity_check_handler<Api: Send + Sync + 'static>(
     State(state): State<UiState<Api>>,
     jar: CookieJar,
 ) -> Html<String> {
-    // Check auth manually — return empty fragment if not authenticated
     let authenticated = jar
         .get(&state.auth_cookie_name)
         .is_some_and(|c| c.value() == state.auth_cookie_value);

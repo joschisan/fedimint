@@ -102,7 +102,6 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     async fn audit(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<AuditResponse>, CliError> {
-        use fedimint_server_ui::IDashboardApi as _;
         Ok(Json(AuditResponse {
             audit: api.federation_audit().await,
         }))

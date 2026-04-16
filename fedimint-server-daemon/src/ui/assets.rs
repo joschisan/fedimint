@@ -1,3 +1,7 @@
+//! Static asset routes for the admin UI (vendored CSS/JS/fonts + style
+//! sheet). Every file under `fedimint-server-daemon/assets/` gets mounted
+//! under `/assets/...` by [`WithStaticRoutesExt::with_static_routes`].
+
 use axum::Router;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
@@ -55,49 +59,53 @@ where
     fn with_static_routes(self) -> Self {
         self.route(
             BOOTSTRAP_CSS_ROUTE,
-            get(|| async move { get_static_css(include_str!("../assets/bootstrap.min.css")) }),
+            get(|| async move {
+                get_static_css(include_str!("../../assets/bootstrap.min.css"))
+            }),
         )
         .route(
             BOOTSTRAP_JS_ROUTE,
-            get(|| async move { get_static_js(include_str!("../assets/bootstrap.bundle.min.js")) }),
+            get(|| async move {
+                get_static_js(include_str!("../../assets/bootstrap.bundle.min.js"))
+            }),
         )
         .route(
             BOOTSTRAP_ICONS_CSS_ROUTE,
-            get(
-                || async move { get_static_css(include_str!("../assets/bootstrap-icons.min.css")) },
-            ),
+            get(|| async move {
+                get_static_css(include_str!("../../assets/bootstrap-icons.min.css"))
+            }),
         )
         .route(
             BOOTSTRAP_ICONS_WOFF2_ROUTE,
             get(|| async move {
-                get_static_font(include_bytes!("../assets/fonts/bootstrap-icons.woff2"))
+                get_static_font(include_bytes!("../../assets/fonts/bootstrap-icons.woff2"))
             }),
         )
         .route(
             BOOTSTRAP_ICONS_WOFF_ROUTE,
             get(|| async move {
-                get_static_woff(include_bytes!("../assets/fonts/bootstrap-icons.woff"))
+                get_static_woff(include_bytes!("../../assets/fonts/bootstrap-icons.woff"))
             }),
         )
         .route(
             HTMX_JS_ROUTE,
-            get(|| async move { get_static_js(include_str!("../assets/htmx.org-2.0.4.min.js")) }),
+            get(|| async move { get_static_js(include_str!("../../assets/htmx.org-2.0.4.min.js")) }),
         )
         .route(
             HTML5_QRCODE_JS_ROUTE,
-            get(|| async move { get_static_js(include_str!("../assets/html5-qrcode.min.js")) }),
+            get(|| async move { get_static_js(include_str!("../../assets/html5-qrcode.min.js")) }),
         )
         .route(
             CHARTJS_ROUTE,
-            get(|| async move { get_static_js(include_str!("../assets/chart.umd.min.js")) }),
+            get(|| async move { get_static_js(include_str!("../../assets/chart.umd.min.js")) }),
         )
         .route(
             STYLE_CSS_ROUTE,
-            get(|| async move { get_static_css(include_str!("../assets/style.css")) }),
+            get(|| async move { get_static_css(include_str!("../../assets/style.css")) }),
         )
         .route(
             LOGO_PNG_ROUTE,
-            get(|| async move { get_static_png(include_bytes!("../assets/logo.png")) }),
+            get(|| async move { get_static_png(include_bytes!("../../assets/logo.png")) }),
         )
     }
 }

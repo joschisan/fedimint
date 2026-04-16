@@ -1,9 +1,9 @@
 [package]
 authors = { workspace = true }
-description = "fedimint-server' facilitates federated consensus with atomic broadcast and distributed configuration."
+description = "fedimint-server-daemon facilitates federated consensus with atomic broadcast and distributed configuration. Produces the `fedimint-server-daemon` binary."
 edition = { workspace = true }
 license = { workspace = true }
-name = "fedimint-server"
+name = "fedimint-server-daemon"
 readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
@@ -15,24 +15,22 @@ rustc-args = ["--cfg", "tokio_unstable"]
 default = []
 
 [lib]
-name = "fedimint_server"
+name = "fedimint_server_daemon"
 path = "src/lib.rs"
-
-[[bin]]
-name = "fedimintd"
-path = "src/bin/fedimintd.rs"
 
 [dependencies]
 aleph-bft = { workspace = true }
 anyhow = { workspace = true }
 async-channel = { workspace = true }
 async-trait = { workspace = true }
-axum = { workspace = true }
+axum = { workspace = true, features = ["macros"] }
+axum-extra = { workspace = true, features = ["cookie", "form"] }
 base64 = { workspace = true }
 bincode = { workspace = true }
 bitcoin = { workspace = true }
 bls12_381 = { workspace = true }
 bytes = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true }
 fedimint-aead = { workspace = true }
 fedimint-api-client = { workspace = true }
@@ -48,7 +46,6 @@ fedimint-redb = { workspace = true }
 fedimint-server-bitcoin-rpc = { workspace = true }
 fedimint-server-cli-core = { workspace = true }
 fedimint-server-core = { workspace = true }
-fedimint-server-ui = { workspace = true }
 fedimint-walletv2-common = { workspace = true }
 fedimint-walletv2-server = { workspace = true }
 fedimintd-envs = { workspace = true }
@@ -61,9 +58,11 @@ iroh-base = { workspace = true, default-features = false }
 iroh-relay = { workspace = true, default-features = false }
 itertools = { workspace = true }
 jsonrpsee = { workspace = true, features = ["server"] }
+maud = { workspace = true }
 parity-scale-codec = { workspace = true }
 pin-project = { workspace = true }
 pkarr = { workspace = true, features = ["dht", "relays"] }
+qrcode = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 rayon = { workspace = true }

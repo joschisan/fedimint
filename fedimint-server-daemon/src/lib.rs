@@ -20,22 +20,22 @@
 
 //! Federation server daemon.
 //!
-//! This crate hosts both the daemon library (`fedimint_server::run`) and the
-//! `fedimintd` binary. It drives config generation, consensus, and the UI/CLI
-//! servers for the fixed module set (mint + lightning + wallet).
+//! This crate hosts both the daemon library and the `fedimint-server-daemon`
+//! binary (`src/main.rs`). It drives config generation, consensus, and the
+//! admin UI/CLI for the fixed module set (mint + lightning + wallet).
 
 extern crate fedimint_core;
 
 pub mod cli;
 pub mod config;
 pub mod consensus;
-pub mod entry;
 pub mod net;
 pub mod p2p;
-pub mod server;
+pub mod ui;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Context;
 use config::ServerConfig;
@@ -57,20 +57,10 @@ use tracing::info;
 use crate::config::ConfigGenSettings;
 use crate::config::io::write_server_config;
 use crate::config::setup::SetupApi;
-pub use crate::entry::{default_network, run};
 use crate::fedimint_core::net::peers::IP2PConnections;
 use crate::net::p2p::{ReconnectP2PConnections, p2p_status_channels};
 use crate::net::p2p_connector::IP2PConnector;
 use crate::p2p::P2PMessage;
-
-/// A function/closure type for handling dashboard UI
-pub type DashboardUiRouter =
-    Box<dyn Fn(std::sync::Arc<crate::consensus::api::ConsensusApi>) -> axum::Router + Send>;
-pub type DashboardCliRouter =
-    Box<dyn Fn(std::sync::Arc<crate::consensus::api::ConsensusApi>) -> axum::Router + Send>;
-
-/// A function/closure type for handling setup UI
-pub type SetupUiRouter = Box<dyn Fn(std::sync::Arc<SetupApi>) -> axum::Router + Send>;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_server(
@@ -81,12 +71,9 @@ pub async fn run_server(
     code_version_str: String,
     task_group: TaskGroup,
     bitcoin_rpc: DynServerBitcoinRpc,
-    setup_ui_router: SetupUiRouter,
-    dashboard_ui_router: DashboardUiRouter,
-    module_cli_router: DashboardCliRouter,
     max_connections: usize,
     max_requests_per_connection: usize,
-    cli_bind: std::net::SocketAddr,
+    cli_bind: SocketAddr,
 ) -> anyhow::Result<()> {
     let (cfg, connections, p2p_status_receivers) = match get_config(&data_dir)? {
         Some(cfg) => {
@@ -120,7 +107,6 @@ pub async fn run_server(
                 settings.clone(),
                 &task_group,
                 code_version_str.clone(),
-                setup_ui_router,
                 auth.clone(),
                 cli_bind,
             ))
@@ -143,8 +129,6 @@ pub async fn run_server(
         code_version_str,
         bitcoin_rpc,
         settings.ui_bind,
-        dashboard_ui_router,
-        module_cli_router,
         max_connections,
         max_requests_per_connection,
         cli_bind,
@@ -166,13 +150,11 @@ pub fn get_config(data_dir: &Path) -> anyhow::Result<Option<ServerConfig>> {
     read_server_config(data_dir).map(Some)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn run_config_gen(
     data_dir: PathBuf,
     settings: ConfigGenSettings,
     task_group: &TaskGroup,
     code_version_str: String,
-    setup_ui_handler: SetupUiRouter,
     auth: ApiAuth,
     cli_bind: SocketAddr,
 ) -> anyhow::Result<(
@@ -184,11 +166,11 @@ pub async fn run_config_gen(
 
     let (cgp_sender, mut cgp_receiver) = tokio::sync::mpsc::channel(1);
 
-    let setup_api = std::sync::Arc::new(SetupApi::new(settings.clone(), cgp_sender, auth));
+    let setup_api = Arc::new(SetupApi::new(settings.clone(), cgp_sender, auth));
 
     let ui_task_group = TaskGroup::new();
 
-    let ui_service = setup_ui_handler(setup_api.clone()).into_make_service();
+    let ui_service = ui::setup::router(setup_api.clone()).into_make_service();
 
     let ui_listener = TcpListener::bind(settings.ui_bind)
         .await

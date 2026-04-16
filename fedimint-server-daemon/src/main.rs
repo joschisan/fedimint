@@ -1,13 +1,11 @@
-//! `fedimintd` process entry point.
+//! `fedimint-server-daemon` process entry point.
 //!
 //! Parses CLI arguments, opens the database, wires up the bitcoin RPC, and
-//! hands off to [`crate::run_server`]. The actual daemon main is at
-//! `src/bin/fedimintd.rs` and just calls [`run`].
+//! hands off to [`fedimint_server_daemon::run_server`].
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -16,13 +14,16 @@ use clap::{ArgGroup, Parser};
 use fedimint_core::envs::{FM_IROH_DNS_ENV, FM_IROH_RELAY_ENV};
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::TaskGroup;
-use fedimint_core::timing;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl, handle_version_hash_command};
+use fedimint_core::{fedimint_build_code_version_env, timing};
 use fedimint_logging::{LOG_CORE, TracingSetup};
 use fedimint_server_bitcoin_rpc::BitcoindClientWithFallback;
 use fedimint_server_bitcoin_rpc::bitcoind::BitcoindClient;
 use fedimint_server_bitcoin_rpc::esplora::EsploraClient;
 use fedimint_server_core::bitcoin_rpc::IServerBitcoinRpc;
+use fedimint_server_daemon::config::ConfigGenSettings;
+use fedimint_server_daemon::config::io::DB_FILE;
+use fedimint_server_daemon::run_server;
 use fedimintd_envs::{
     FM_BIND_P2P_ENV, FM_BIND_TOKIO_CONSOLE_ENV, FM_BIND_UI_ENV, FM_BITCOIN_NETWORK_ENV,
     FM_BITCOIND_PASSWORD_ENV, FM_BITCOIND_URL_ENV, FM_BITCOIND_URL_PASSWORD_FILE_ENV,
@@ -30,17 +31,16 @@ use fedimintd_envs::{
     FM_MAX_REQUESTS_PER_CONNECTION_ENV, FM_UI_PASSWORD_ENV,
 };
 use futures::FutureExt as _;
+#[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
+use tikv_jemallocator::Jemalloc;
 use tracing::{debug, error, info};
 
-use crate::config::ConfigGenSettings;
-use crate::config::io::DB_FILE;
+#[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
-/// Time we will wait before forcefully shutting down tasks
+/// Time we will wait before forcefully shutting down tasks on exit.
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
-
-pub fn default_network() -> Network {
-    Network::Regtest
-}
 
 #[derive(Parser)]
 #[command(version)]
@@ -153,18 +153,10 @@ impl ServerOpts {
     }
 }
 
-/// Block the thread and run a Fedimintd server.
-///
-/// `code_version_hash` is the git hash of the binary being built (see the
-/// `fedimint-build` crate). It is surfaced via `fedimintd version-hash`.
-/// `code_version_vendor_suffix` is an optional suffix appended to the internal
-/// fedimint release version to distinguish binaries built by different vendors
-/// with different module sets. DKG enforces that the combined `code_version` is
-/// the same across all peers.
-pub async fn run(
-    code_version_hash: &str,
-    code_version_vendor_suffix: Option<&str>,
-) -> anyhow::Result<Infallible> {
+#[tokio::main]
+async fn main() -> anyhow::Result<Infallible> {
+    let code_version_hash = fedimint_build_code_version_env!();
+
     assert_eq!(
         env!("FEDIMINT_BUILD_CODE_VERSION").len(),
         code_version_hash.len(),
@@ -181,12 +173,11 @@ pub async fn run(
     tracing_builder.tokio_console_bind(server_opts.bind_tokio_console);
     tracing_builder.init().unwrap();
 
-    info!("Starting fedimintd (version: {fedimint_version} version_hash: {code_version_hash})");
-
-    let code_version_str = code_version_vendor_suffix.map_or_else(
-        || fedimint_version.to_string(),
-        |suffix| format!("{fedimint_version}+{suffix}"),
+    info!(
+        "Starting fedimint-server-daemon (version: {fedimint_version} version_hash: {code_version_hash})"
     );
+
+    let code_version_str = fedimint_version.to_string();
 
     let timing_total_runtime = timing::TimeReporter::new("total-runtime").info();
 
@@ -202,7 +193,7 @@ pub async fn run(
 
     let db = fedimint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
         .await
-        .expect("Failed to open fedimintd database");
+        .expect("Failed to open fedimint-server-daemon database");
 
     let dyn_server_bitcoin_rpc = match (
         server_opts.bitcoind_url.as_ref(),
@@ -256,7 +247,7 @@ pub async fn run(
     let cli_bind = server_opts.bind_cli;
 
     root_task_group.spawn_cancellable("main", async move {
-        crate::run_server(
+        run_server(
             data_dir,
             ui_password,
             settings,
@@ -264,9 +255,6 @@ pub async fn run(
             code_version_str,
             task_group,
             dyn_server_bitcoin_rpc,
-            Box::new(|api| fedimint_server_ui::setup::router(api)),
-            Box::new(|api| fedimint_server_ui::dashboard::router(api)),
-            Box::new(|api| crate::cli::dashboard_cli_router(api)),
             max_connections,
             max_requests_per_connection,
             cli_bind,
@@ -295,9 +283,6 @@ pub async fn run(
     fedimint_logging::shutdown();
 
     drop(timing_total_runtime);
-
-    // Silence the `Arc` warning — `Arc` keeps `dyn_server_bitcoin_rpc` alive.
-    let _ = Arc::<u32>::new(0);
 
     std::process::exit(-1);
 }

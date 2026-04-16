@@ -1,11 +1,13 @@
+use std::sync::Arc;
+
 use axum::extract::{Form, State};
 use axum::response::{IntoResponse, Redirect};
 use fedimint_core::util::SafeUrl;
-use fedimint_ui_common::auth::UserAuth;
-use fedimint_ui_common::{ROOT_ROUTE, UiState};
 use maud::{Markup, html};
 
-use crate::DynDashboardApi;
+use crate::consensus::api::ConsensusApi;
+use crate::ui::auth::UserAuth;
+use crate::ui::{ROOT_ROUTE, UiState};
 
 // LNv2 route constants
 pub const LNV2_ADD_ROUTE: &str = "/lnv2/add";
@@ -116,24 +118,25 @@ pub async fn render(lightning: &fedimint_lnv2_server::Lightning) -> Markup {
 
 // Handler for adding a new gateway
 pub async fn post_add(
-    State(state): State<UiState<DynDashboardApi>>,
+    State(state): State<UiState<Arc<ConsensusApi>>>,
     _auth: UserAuth,
     Form(form): Form<GatewayForm>,
 ) -> impl IntoResponse {
-    state.api.lightning().add_gateway_ui(form.gateway_url).await;
+    state.api.server.ln.add_gateway_ui(form.gateway_url).await;
 
     Redirect::to(ROOT_ROUTE).into_response()
 }
 
 // Handler for removing a gateway
 pub async fn post_remove(
-    State(state): State<UiState<DynDashboardApi>>,
+    State(state): State<UiState<Arc<ConsensusApi>>>,
     _auth: UserAuth,
     Form(form): Form<GatewayForm>,
 ) -> impl IntoResponse {
     state
         .api
-        .lightning()
+        .server
+        .ln
         .remove_gateway_ui(form.gateway_url)
         .await;
 

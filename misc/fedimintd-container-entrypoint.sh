@@ -17,5 +17,5 @@ fi
 
 mkdir -p "$FM_DATA_DIR"
 
-1>&2 echo 'Starting fedimintd'
-fedimintd --data-dir "$FM_DATA_DIR/"
+1>&2 echo 'Starting fedimint-server-daemon'
+fedimint-server-daemon --data-dir "$FM_DATA_DIR/"

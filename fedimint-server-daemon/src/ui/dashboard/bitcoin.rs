@@ -1,7 +1,6 @@
 use fedimint_core::util::SafeUrl;
+use fedimint_server_core::ServerBitcoinRpcStatus;
 use maud::{Markup, html};
-
-use crate::ServerBitcoinRpcStatus;
 
 pub fn render(url: SafeUrl, status: &Option<ServerBitcoinRpcStatus>) -> Markup {
     html! {

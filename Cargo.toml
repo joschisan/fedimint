@@ -25,13 +25,11 @@ members = [
     "fedimint-logging",
     "fedimint-recurringdv2",
     "fedimint-redb",
-    "fedimint-server",
     "fedimint-server-bitcoin-rpc",
     "fedimint-server-cli",
     "fedimint-server-cli-core",
     "fedimint-server-core",
-    "fedimint-server-ui",
-    "fedimint-ui-common",
+    "fedimint-server-daemon",
     "fedimint-util-error",
     "fedimintd-envs",
     "modules/fedimint-gwv2-client",
@@ -148,13 +146,11 @@ fedimint-mintv2-common = { path = "./modules/fedimint-mintv2-common", version = 
 fedimint-mintv2-server = { path = "./modules/fedimint-mintv2-server", version = "=0.11.0-alpha" }
 fedimint-portalloc = { path = "utils/portalloc", version = "=0.11.0-alpha" }
 fedimint-redb = { path = "./fedimint-redb", version = "=0.11.0-alpha" }
-fedimint-server = { path = "./fedimint-server", version = "=0.11.0-alpha" }
 fedimint-server-bitcoin-rpc = { path = "./fedimint-server-bitcoin-rpc", version = "=0.11.0-alpha" }
 fedimint-server-cli = { path = "./fedimint-server-cli", version = "=0.11.0-alpha" }
 fedimint-server-cli-core = { path = "./fedimint-server-cli-core", version = "=0.11.0-alpha" }
 fedimint-server-core = { path = "./fedimint-server-core", version = "=0.11.0-alpha" }
-fedimint-server-ui = { path = "./fedimint-server-ui", version = "=0.11.0-alpha" }
-fedimint-ui-common = { path = "./fedimint-ui-common", version = "=0.11.0-alpha" }
+fedimint-server-daemon = { path = "./fedimint-server-daemon", version = "=0.11.0-alpha" }
 fedimint-util-error = { path = "./fedimint-util-error", version = "=0.11.0-alpha" }
 fedimint-walletv2-client = { path = "./modules/fedimint-walletv2-client", version = "=0.11.0-alpha" }
 fedimint-walletv2-common = { path = "./modules/fedimint-walletv2-common", version = "=0.11.0-alpha" }

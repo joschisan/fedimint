@@ -3,13 +3,11 @@ use std::iter::once;
 use std::sync::Arc;
 
 use anyhow::{Context, ensure};
-use async_trait::async_trait;
 use fedimint_core::base32::FEDIMINT_PREFIX;
 use fedimint_core::config::META_FEDERATION_NAME_KEY;
 use fedimint_core::module::ApiAuth;
 use fedimint_core::setup_code::PeerEndpoints;
 use fedimint_core::{PeerId, base32};
-use fedimint_server_ui::ISetupApi;
 use iroh::SecretKey;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
@@ -327,53 +325,5 @@ impl SetupApi {
             .iter()
             .chain(local_setup_code.iter())
             .find_map(|info| info.federation_name.clone())
-    }
-}
-
-#[async_trait]
-impl ISetupApi for SetupApi {
-    async fn setup_code(&self) -> Option<String> {
-        Self::setup_code(self).await
-    }
-
-    async fn guardian_name(&self) -> Option<String> {
-        Self::guardian_name(self).await
-    }
-
-    async fn auth(&self) -> ApiAuth {
-        Self::auth(self).await
-    }
-
-    async fn connected_peers(&self) -> Vec<String> {
-        Self::connected_peers(self).await
-    }
-
-    async fn reset_setup_codes(&self) {
-        Self::reset_setup_codes(self).await;
-    }
-
-    async fn set_local_parameters(
-        &self,
-        name: String,
-        federation_name: Option<String>,
-        federation_size: Option<u32>,
-    ) -> anyhow::Result<String> {
-        Self::set_local_parameters(self, name, federation_name, federation_size).await
-    }
-
-    async fn add_peer_setup_code(&self, info: String) -> anyhow::Result<String> {
-        Self::add_peer_setup_code(self, info).await
-    }
-
-    async fn start_dkg(&self) -> anyhow::Result<()> {
-        Self::start_dkg(self).await
-    }
-
-    async fn federation_size(&self) -> Option<u32> {
-        Self::federation_size(self).await
-    }
-
-    async fn cfg_federation_name(&self) -> Option<String> {
-        Self::cfg_federation_name(self).await
     }
 }

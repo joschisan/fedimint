@@ -1,15 +1,15 @@
 //! Shared server-side traits and helpers
 //!
-//! This crate is the narrow shared layer between `fedimint-server` and the
-//! three concrete server-side module implementations (`fedimint-mintv2-server`,
-//! `fedimint-lnv2-server`, `fedimint-walletv2-server`). It defines the
-//! `ServerModule` trait (which each module implements), the Bitcoin RPC
-//! abstraction consumed by modules, and the DKG-time `PeerHandleOps` trait.
+//! This crate is the narrow shared layer between `fedimint-server-daemon` and
+//! the three concrete server-side module implementations
+//! (`fedimint-mintv2-server`, `fedimint-lnv2-server`,
+//! `fedimint-walletv2-server`). It defines the `ServerModule` trait (which each
+//! module implements), the Bitcoin RPC abstraction consumed by modules, and the
+//! DKG-time `PeerHandleOps` trait.
 //!
 //! It intentionally does not know anything about the dashboard / setup UI or
-//! the dynamic module registry — after the minimint rip both of those live in
-//! `fedimint-server`/`fedimint-server-ui` alongside the single known module
-//! set.
+//! the dynamic module registry — after the minimint rip those live inside
+//! `fedimint-server-daemon` alongside the single known module set.
 
 pub mod bitcoin_rpc;
 pub mod config;

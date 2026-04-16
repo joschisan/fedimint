@@ -8,10 +8,6 @@ readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
 
-[[bin]]
-name = "gatewayd"
-path = "src/main.rs"
-
 [lib]
 name = "fedimint_gateway_daemon"
 path = "src/lib.rs"

@@ -2,10 +2,11 @@
 
 set -eo pipefail
 
-if grep -E "fedimint-[a-zA-Z0-9]+-(server|client|common)" fedimint-server/Cargo.toml | grep -v -E "fedimint-api-client|fedimint-dummy-common|fedimint-dummy-server" >&2 ; then
-  >&2 echo "fedimint-server/Cargo.toml must not depend on modules"
-  return 1
-fi
+# Post-minimint-rip: `fedimint-server-daemon` deliberately pulls in the three
+# concrete module crates (mintv2/lnv2/walletv2 + their -common siblings) and
+# the UI was folded in from `fedimint-server-ui`. The check that forbade any
+# `fedimint-*-server` / `-client` / `-common` deps in the daemon no longer
+# fits reality, so it's removed.
 if grep -E "fedimint-[a-zA-Z0-9]+-(server|client)" fedimint-testing/Cargo.toml | grep -v -E "fedimint-api-client|fedimint-gateway-*" >&2 ; then
   >&2 echo "fedimint-testing/Cargo.toml must not depend on modules"
   return 1

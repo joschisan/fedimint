@@ -1,6 +1,7 @@
-use fedimint_ui_common::copiable_text;
 use maud::{Markup, PreEscaped, html};
 use qrcode::QrCode;
+
+use crate::ui::copiable_text;
 
 // Card with invite code text and copy button
 pub fn render(invite_code: &str, session_count: u64) -> Markup {

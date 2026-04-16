@@ -288,7 +288,7 @@ in
         (nameValuePair "fedimintd-${fedimintdName}" (
           let
             startScript = pkgs.writeShellScriptBin "fedimintd" ''
-              exec ${cfg.package}/bin/fedimintd
+              exec ${cfg.package}/bin/fedimint-server-daemon
             '';
           in
           {

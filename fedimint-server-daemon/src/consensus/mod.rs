@@ -3,6 +3,7 @@ pub mod api;
 pub mod db;
 pub mod debug;
 pub mod engine;
+pub mod server;
 pub mod transaction;
 
 use std::collections::BTreeMap;
@@ -34,7 +35,6 @@ use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
 use tracing::{info, warn};
 
-use crate::DashboardUiRouter;
 use crate::config::ServerConfig;
 use crate::consensus::api::{ConsensusApi, server_endpoints};
 use crate::consensus::engine::ConsensusEngine;
@@ -56,8 +56,6 @@ pub async fn run(
     code_version_str: String,
     dyn_server_bitcoin_rpc: DynServerBitcoinRpc,
     ui_bind: SocketAddr,
-    dashboard_ui_router: DashboardUiRouter,
-    dashboard_cli_router: crate::DashboardCliRouter,
     max_connections: usize,
     max_requests_per_connection: usize,
     cli_bind: SocketAddr,
@@ -99,7 +97,7 @@ pub async fn run(
         bitcoin_rpc_connection.clone(),
     ));
 
-    let server = crate::server::Server { mint, ln, wallet };
+    let server = crate::consensus::server::Server { mint, ln, wallet };
 
     let client_cfg = cfg.consensus.to_client_config();
 
@@ -176,7 +174,7 @@ pub async fn run(
         submission_sender.clone(),
     );
 
-    let ui_service = dashboard_ui_router(consensus_api.clone()).into_make_service();
+    let ui_service = crate::ui::dashboard::router(consensus_api.clone()).into_make_service();
 
     let ui_listener = TcpListener::bind(ui_bind)
         .await
@@ -192,7 +190,7 @@ pub async fn run(
     info!(target: LOG_CONSENSUS, "Dashboard UI running at http://{ui_bind} 🚀");
 
     {
-        let dashboard_router = dashboard_cli_router(consensus_api.clone());
+        let dashboard_router = crate::cli::dashboard_cli_router(consensus_api.clone());
         task_group.spawn("consensus-cli", move |handle| async move {
             crate::cli::run_dashboard_cli(cli_bind, dashboard_router, handle).await;
         });

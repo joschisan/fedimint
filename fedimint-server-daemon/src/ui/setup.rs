@@ -1,21 +1,23 @@
+use std::sync::Arc;
+
 use axum::Router;
 use axum::extract::State;
 use axum::response::{Html, IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum_extra::extract::Form;
 use axum_extra::extract::cookie::CookieJar;
-use fedimint_ui_common::assets::WithStaticRoutesExt;
-use fedimint_ui_common::auth::UserAuth;
-use fedimint_ui_common::{
-    CONNECTIVITY_CHECK_ROUTE, LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState,
-    connectivity_check_handler, copiable_text, login_form, login_submit_response,
-    single_card_layout,
-};
 use maud::{Markup, PreEscaped, html};
 use qrcode::QrCode;
 use serde::Deserialize;
 
-use crate::DynSetupApi;
+use crate::config::setup::SetupApi;
+use crate::ui::assets::WithStaticRoutesExt;
+use crate::ui::auth::UserAuth;
+use crate::ui::{
+    CONNECTIVITY_CHECK_ROUTE, LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState,
+    connectivity_check_handler, copiable_text, login_form, login_submit_response,
+    single_card_layout,
+};
 
 // Setup route constants
 pub const FEDERATION_SETUP_ROUTE: &str = "/federation_setup";
@@ -176,7 +178,7 @@ fn setup_form_content(error: Option<&str>) -> Markup {
 }
 
 // GET handler for the /setup route (display the setup form)
-async fn setup_form(State(state): State<UiState<DynSetupApi>>) -> impl IntoResponse {
+async fn setup_form(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
     if state.api.setup_code().await.is_some() {
         return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
     }
@@ -187,7 +189,7 @@ async fn setup_form(State(state): State<UiState<DynSetupApi>>) -> impl IntoRespo
 
 // POST handler for the /setup route (process the setup form)
 async fn setup_submit(
-    State(state): State<UiState<DynSetupApi>>,
+    State(state): State<UiState<Arc<SetupApi>>>,
     Form(input): Form<SetupInput>,
 ) -> impl IntoResponse {
     // Only use these settings if is_lead is true
@@ -229,7 +231,7 @@ async fn setup_submit(
 }
 
 // GET handler for the /login route (display the login form)
-async fn login_form_handler(State(state): State<UiState<DynSetupApi>>) -> impl IntoResponse {
+async fn login_form_handler(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
     if state.api.setup_code().await.is_none() {
         return Redirect::to(ROOT_ROUTE).into_response();
     }
@@ -239,7 +241,7 @@ async fn login_form_handler(State(state): State<UiState<DynSetupApi>>) -> impl I
 
 // POST handler for the /login route (authenticate and set session cookie)
 async fn login_submit(
-    State(state): State<UiState<DynSetupApi>>,
+    State(state): State<UiState<Arc<SetupApi>>>,
     jar: CookieJar,
     Form(input): Form<LoginInput>,
 ) -> impl IntoResponse {
@@ -255,7 +257,7 @@ async fn login_submit(
 
 // GET handler for the /federation-setup route (main federation management page)
 async fn federation_setup(
-    State(state): State<UiState<DynSetupApi>>,
+    State(state): State<UiState<Arc<SetupApi>>>,
     _auth: UserAuth,
 ) -> impl IntoResponse {
     let our_connection_info = state
@@ -389,7 +391,7 @@ async fn federation_setup(
 }
 
 async fn post_add_setup_code(
-    State(state): State<UiState<DynSetupApi>>,
+    State(state): State<UiState<Arc<SetupApi>>>,
     _auth: UserAuth,
     Form(input): Form<PeerInfoInput>,
 ) -> impl IntoResponse {
@@ -412,7 +414,7 @@ async fn post_add_setup_code(
 }
 
 async fn post_start_dkg(
-    State(state): State<UiState<DynSetupApi>>,
+    State(state): State<UiState<Arc<SetupApi>>>,
     _auth: UserAuth,
 ) -> impl IntoResponse {
     let our_connection_info = state.api.setup_code().await;
@@ -475,7 +477,7 @@ async fn post_start_dkg(
 }
 
 async fn post_reset_setup_codes(
-    State(state): State<UiState<DynSetupApi>>,
+    State(state): State<UiState<Arc<SetupApi>>>,
     _auth: UserAuth,
 ) -> impl IntoResponse {
     state.api.reset_setup_codes().await;
@@ -483,7 +485,7 @@ async fn post_reset_setup_codes(
     Redirect::to(FEDERATION_SETUP_ROUTE).into_response()
 }
 
-pub fn router(api: DynSetupApi) -> Router {
+pub fn router(api: Arc<SetupApi>) -> Router {
     Router::new()
         .route(ROOT_ROUTE, get(setup_form).post(setup_submit))
         .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
@@ -493,7 +495,7 @@ pub fn router(api: DynSetupApi) -> Router {
         .route(START_DKG_ROUTE, post(post_start_dkg))
         .route(
             CONNECTIVITY_CHECK_ROUTE,
-            get(connectivity_check_handler::<DynSetupApi>),
+            get(connectivity_check_handler::<Arc<SetupApi>>),
         )
         .with_static_routes()
         .with_state(UiState::new(api))

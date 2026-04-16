@@ -2,9 +2,8 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use fedimint_core::PeerId;
+use fedimint_server_core::P2PConnectionStatus;
 use maud::{Markup, html};
-
-use crate::P2PConnectionStatus;
 
 pub fn render(
     consensus_ord_latency: Option<Duration>,

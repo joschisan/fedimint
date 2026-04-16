@@ -4,14 +4,14 @@ use axum::response::Redirect;
 use axum_extra::extract::CookieJar;
 use fedimint_core::net::auth::GuardianAuthToken;
 
-use crate::{LOGIN_ROUTE, UiState};
+use crate::ui::{LOGIN_ROUTE, UiState};
 
-/// Extractor that validates user authentication
+/// Extractor that validates the UI admin cookie.
+///
+/// Holding a `UserAuth` proves the admin password was verified — and by
+/// construction yields a `GuardianAuthToken`, which is what the
+/// fedimint-core internals require for guardian-scoped operations.
 pub struct UserAuth {
-    /// UserAuth is an axum extractor guaranteeing when the admin password was
-    /// verified. This implies we can grant logic holding it access to
-    /// fedimint-core internals that require `GuardianAuthToken`, which is a
-    /// very similar mechanism.
     pub guardian_auth_token: GuardianAuthToken,
 }
 
@@ -37,7 +37,6 @@ where
             .await
             .map_err(|_| Redirect::to(LOGIN_ROUTE))?;
 
-        // Check if the auth cookie exists and has the correct value
         match jar.get(&state.auth_cookie_name) {
             Some(cookie) if cookie.value() == state.auth_cookie_value => {
                 Ok(UserAuth::authenticated())

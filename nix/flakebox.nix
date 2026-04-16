@@ -823,7 +823,7 @@ in
       pname = "fedimint-pkgs";
 
       packages = [
-        "fedimintd"
+        "fedimint-server-daemon"
         "fedimint-cli"
         "fedimint-dbtool"
         "fedimint-recoverytool"
@@ -872,7 +872,7 @@ in
 
     fedimintd = pickBinary {
       pkg = fedimint-pkgs;
-      bin = "fedimintd";
+      bin = "fedimint-server-daemon";
     };
 
     fedimint-cli = pickBinary {
@@ -885,7 +885,7 @@ in
     };
     gatewayd = pickBinary {
       pkg = gateway-pkgs;
-      bin = "gatewayd";
+      bin = "fedimint-gateway-daemon";
     };
     gateway-cli = pickBinary {
       pkg = gateway-pkgs;
@@ -962,7 +962,7 @@ in
           name = "gatewayd";
           contents = [ gateway-pkgs ] ++ defaultPackages;
           config = {
-            Cmd = [ "${gateway-pkgs}/bin/gatewayd" ];
+            Cmd = [ "${gateway-pkgs}/bin/fedimint-gateway-daemon" ];
           };
         };
 
