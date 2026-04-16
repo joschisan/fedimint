@@ -64,6 +64,8 @@ use crate::module::registry::ModuleDecoderRegistry;
 mod amount;
 /// Legacy serde encoding for `bls12_381`
 pub mod bls12_381_serde;
+
+pub mod borsh_ext;
 /// Federation configuration
 pub mod config;
 /// Fundamental types
