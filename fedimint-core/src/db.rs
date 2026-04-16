@@ -11,6 +11,7 @@
 //! expose `insert`/`get`/`remove`/`iter`/`range`/`delete_table` as inherent
 //! methods over `NativeTableDef`.
 
+use std::cell::Cell;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
@@ -18,6 +19,50 @@ use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::encoding::{Decodable, Encodable};
 use crate::module::registry::ModuleDecoderRegistry;
+
+// ─── Decoder scope ───────────────────────────────────────────────────────
+//
+// redb's `Value::from_bytes` is a static method with no channel for passing
+// the module decoder registry. `ConsensusKey<T>` / `Consensus<V>` need it to
+// decode dynamic module types (e.g. `AcceptedItem`). Callers install the
+// registry via [`with_decoders`] for the duration of a redb op; the wrappers
+// read it from this thread-local. The raw pointer never outlives the scope
+// because redb ops are sync and we restore on drop.
+
+thread_local! {
+    static CURRENT_DECODERS: Cell<*const ModuleDecoderRegistry> =
+        const { Cell::new(std::ptr::null()) };
+}
+
+/// Install `decoders` as the decoder registry visible to `Consensus`/
+/// `ConsensusKey` `from_bytes` for the duration of `f`. Restores the prior
+/// registry on return.
+pub fn with_decoders<R>(decoders: &ModuleDecoderRegistry, f: impl FnOnce() -> R) -> R {
+    let prev = CURRENT_DECODERS.with(|c| c.replace(decoders as *const _));
+
+    struct Restore(*const ModuleDecoderRegistry);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CURRENT_DECODERS.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(prev);
+
+    f()
+}
+
+fn decode_with_current_scope<T: Decodable>(data: &[u8]) -> T {
+    let ptr = CURRENT_DECODERS.with(Cell::get);
+    if ptr.is_null() {
+        T::consensus_decode_whole(data, &ModuleDecoderRegistry::default())
+            .expect("consensus_decode failed")
+    } else {
+        // SAFETY: `with_decoders` keeps the registry alive for the duration
+        // of `f`, and redb ops are synchronous — we never read the pointer
+        // after the scope returns.
+        T::consensus_decode_whole(data, unsafe { &*ptr }).expect("consensus_decode failed")
+    }
+}
 
 // ─── Borsh<T>: redb::Value adapter ───────────────────────────────────────
 //
@@ -100,8 +145,7 @@ where
     where
         Self: 'a,
     {
-        T::consensus_decode_whole(data, &ModuleDecoderRegistry::default())
-            .expect("consensus_decode failed")
+        decode_with_current_scope::<T>(data)
     }
 
     fn as_bytes<'a, 'b: 'a>(value: &'a T) -> Vec<u8>
@@ -159,8 +203,7 @@ where
     where
         Self: 'a,
     {
-        T::consensus_decode_whole(data, &ModuleDecoderRegistry::default())
-            .expect("consensus_decode failed")
+        decode_with_current_scope::<T>(data)
     }
 
     fn as_bytes<'a, 'b: 'a>(value: &'a T) -> Vec<u8>

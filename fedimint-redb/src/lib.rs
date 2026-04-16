@@ -395,7 +395,10 @@ impl<'tx> WriteTxRef<'tx> {
             .tx
             .open_table(td)
             .expect("redb open_table (write) failed");
-        let r = f(&mut table);
+        let r = match self.db.decoders.get() {
+            Some(d) => fedimint_core::db::with_decoders(d, || f(&mut table)),
+            None => f(&mut table),
+        };
         drop(table);
         self.touched
             .lock()
@@ -420,7 +423,10 @@ impl ReadTxRef<'_> {
         let resolved = def.resolved_name(&self.prefix);
         let td: TableDefinition<K, V> = TableDefinition::new(&resolved);
         match self.tx.open_table(td) {
-            Ok(t) => Some(f(&t)),
+            Ok(t) => Some(match self.db.decoders.get() {
+                Some(d) => fedimint_core::db::with_decoders(d, || f(&t)),
+                None => f(&t),
+            }),
             Err(redb::TableError::TableDoesNotExist(_)) => None,
             Err(e) => panic!("redb open_table (read) failed: {e}"),
         }
