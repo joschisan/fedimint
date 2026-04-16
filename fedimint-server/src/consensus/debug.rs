@@ -1,8 +1,8 @@
 use std::fmt;
 
 use bitcoin::hashes::{Hash as _, sha256};
+use fedimint_api_client::session_outcome::AcceptedItem;
 use fedimint_core::encoding::{CountWrite, Encodable as _};
-use fedimint_core::session_outcome::AcceptedItem;
 
 use crate::ConsensusItem;
 

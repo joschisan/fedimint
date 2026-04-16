@@ -1,4 +1,4 @@
-use fedimint_core::config::P2PMessage;
+use crate::p2p::P2PMessage;
 use fedimint_core::net::peers::DynP2PConnections;
 use fedimint_core::{NumPeers, PeerId};
 

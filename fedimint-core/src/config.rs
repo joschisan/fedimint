@@ -7,7 +7,6 @@ use std::str::FromStr;
 use anyhow::{Context, format_err};
 use bitcoin::hashes::sha256::HashEngine;
 use bitcoin::hashes::{Hash as BitcoinHash, hex, sha256};
-use bls12_381::Scalar;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::{DynRawFallback, Encodable};
 use fedimint_core::module::registry::ModuleRegistry;
@@ -19,7 +18,6 @@ use secp256k1::PublicKey;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
-use threshold_crypto::{G1Projective, G2Projective};
 use tracing::warn;
 
 use crate::core::DynClientConfig;
@@ -27,7 +25,6 @@ use crate::encoding::Decodable;
 use crate::module::{
     CoreConsensusVersion, DynCommonModuleInit, IDynCommonModuleInit, ModuleConsensusVersion,
 };
-use crate::session_outcome::SignedSessionOutcome;
 use crate::{PeerId, maybe_add_send_sync, secp256k1};
 
 // TODO: make configurable
@@ -730,37 +727,6 @@ pub trait TypedServerModuleConfig: DeserializeOwned + Serialize {
             },
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
-pub enum P2PMessage {
-    Aleph(Vec<u8>),
-    SessionSignature(secp256k1::schnorr::Signature),
-    SessionIndex(u64),
-    SignedSessionOutcome(SignedSessionOutcome),
-    Checksum(sha256::Hash),
-    DkgG1(DkgMessageG1),
-    DkgG2(DkgMessageG2),
-    Encodable(Vec<u8>),
-    #[encodable_default]
-    Default {
-        variant: u64,
-        bytes: Vec<u8>,
-    },
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]
-pub enum DkgMessageG1 {
-    Hash(sha256::Hash),
-    Commitment(Vec<G1Projective>),
-    Share(Scalar),
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]
-pub enum DkgMessageG2 {
-    Hash(sha256::Hash),
-    Commitment(Vec<G2Projective>),
-    Share(Scalar),
 }
 
 /// Key under which the federation name can be sent to client in the `meta` part

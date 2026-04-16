@@ -4,9 +4,10 @@ use std::io::Write as _;
 use bitcoin::hashes::{Hash, sha256};
 use secp256k1::{Message, PublicKey, SECP256K1};
 
-use crate::encoding::{Decodable, Encodable};
-use crate::epoch::ConsensusItem;
-use crate::{NumPeersExt as _, PeerId, secp256k1};
+use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::{NumPeersExt as _, PeerId, secp256k1};
+
+use crate::transaction::ConsensusItem;
 
 /// A consensus item accepted in the consensus
 ///

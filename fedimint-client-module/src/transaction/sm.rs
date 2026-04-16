@@ -3,11 +3,11 @@
 use std::time::Duration;
 
 use fedimint_api_client::api::{DynGlobalApi, FederationApiExt as _};
+use fedimint_api_client::transaction::{Transaction, TransactionSubmissionOutcome};
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
-use fedimint_core::transaction::{Transaction, TransactionSubmissionOutcome};
 use fedimint_core::util::backoff_util::custom_backoff;
 use fedimint_core::util::retry;
 use fedimint_eventlog::Event;

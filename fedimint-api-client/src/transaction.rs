@@ -1,17 +1,20 @@
+//! Wire-level transaction and consensus-item types shared between client and
+//! server. Previously lived in `fedimint-core::transaction` / `epoch.rs`;
+//! moved here with the module-system rip so we can reference static module
+//! Input/Output/ConsensusItem enums without creating a cycle through
+//! fedimint-core.
+
 use std::fmt;
 
 use bitcoin::hashes::Hash;
 use bitcoin::hex::DisplayHex as _;
-use fedimint_core::core::{DynInput, DynOutput};
+use fedimint_core::core::{DynInput, DynInputError, DynOutput, DynOutputError};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::SerdeModuleEncoding;
 use fedimint_core::{Amount, TransactionId};
 use thiserror::Error;
 
-use crate::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
-use crate::core::{DynInputError, DynOutputError};
-
-/// An atomic value transfer operation within the Fedimint system and consensus
+/// An atomic value transfer operation within the Fedimint system and consensus.
 ///
 /// The mint enforces that the total value of the outputs equals the total value
 /// of the inputs, to prevent creating funds out of thin air. In some cases, the
@@ -19,18 +22,9 @@ use crate::core::{DynInputError, DynOutputError};
 /// a Lightning Gateway.
 #[derive(Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct Transaction {
-    /// [`DynInput`]s consumed by the transaction
     pub inputs: Vec<DynInput>,
-    /// [`DynOutput`]s created as a result of the transaction
     pub outputs: Vec<DynOutput>,
-    /// No defined meaning, can be used to send the otherwise exactly same
-    /// transaction multiple times if the module inputs and outputs don't
-    /// introduce enough entropy.
-    ///
-    /// In the future the nonce can be used for grinding a tx hash that fulfills
-    /// certain PoW requirements.
     pub nonce: [u8; 8],
-    /// signatures for all the public keys of the inputs
     pub signatures: TransactionSignature,
 }
 
@@ -49,29 +43,12 @@ impl fmt::Debug for Transaction {
 pub type SerdeTransaction = SerdeModuleEncoding<Transaction>;
 
 impl Transaction {
-    /// Maximum size that a transaction can have while still fitting into an
-    /// AlephBFT unit. Subtracting 32 bytes is overly conservative, even in the
-    /// worst case the CI serialization around the transaction should never add
-    /// that much overhead. But since the byte limit is 50kb right now a few
-    /// bytes more or less won't make a difference and we can afford the safety
-    /// margin.
-    ///
-    /// A realistic value would be 7:
-    ///  * 1 byte for length of vector of CIs
-    ///  * 1 byte for the CI enum variant
-    ///  * 5 byte for the CI enum variant length
-    pub const MAX_TX_SIZE: usize = ALEPH_BFT_UNIT_BYTE_LIMIT - 32;
+    pub const MAX_TX_SIZE: usize = fedimint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT - 32;
 
-    /// Hash of the transaction (excluding the signature).
-    ///
-    /// Transaction signature commits to this hash.
-    /// To generate it without already having a signature use
-    /// [`Self::tx_hash_from_parts`].
     pub fn tx_hash(&self) -> TransactionId {
         Self::tx_hash_from_parts(&self.inputs, &self.outputs, self.nonce)
     }
 
-    /// Generate the transaction hash.
     pub fn tx_hash_from_parts(
         inputs: &[DynInput],
         outputs: &[DynOutput],
@@ -90,11 +67,12 @@ impl Transaction {
         TransactionId::from_engine(engine)
     }
 
-    /// Validate the schnorr signatures signed over the `tx_hash`
     pub fn validate_signatures(
         &self,
-        pub_keys: &[secp256k1::PublicKey],
+        pub_keys: &[fedimint_core::secp256k1::PublicKey],
     ) -> Result<(), TransactionError> {
+        use fedimint_core::secp256k1;
+
         let signatures = match &self.signatures {
             TransactionSignature::NaiveMultisig(sigs) => sigs,
             TransactionSignature::Default { variant, .. } => {
@@ -131,10 +109,7 @@ impl Transaction {
 pub enum TransactionSignature {
     NaiveMultisig(Vec<fedimint_core::secp256k1::schnorr::Signature>),
     #[encodable_default]
-    Default {
-        variant: u64,
-        bytes: Vec<u8>,
-    },
+    Default { variant: u64, bytes: Vec<u8> },
 }
 
 impl fmt::Debug for TransactionSignature {
@@ -146,7 +121,7 @@ impl fmt::Debug for TransactionSignature {
                     .finish()?;
             }
             Self::Default { variant, bytes } => {
-                f.debug_struct(stringify!($name))
+                f.debug_struct("TransactionSignature::Default")
                     .field("variant", variant)
                     .field("bytes", &bytes.as_hex())
                     .finish()?;
@@ -158,10 +133,6 @@ impl fmt::Debug for TransactionSignature {
 
 #[derive(Debug, Error, Encodable, Decodable, Clone, Eq, PartialEq)]
 pub enum TransactionError {
-    /// Transaction was not balanced
-    ///
-    /// Note: since this type existed before multi-unit amounts were implemented
-    /// and can't change shape, the unit of the imbalance is not specified.
     #[error("The transaction is unbalanced (in={inputs}, out={outputs}, fee={fee})")]
     UnbalancedTransaction {
         inputs: Amount,
@@ -185,12 +156,6 @@ pub enum TransactionError {
     Output(DynOutputError),
 }
 
-/// The transaction caused an overflow.
-///
-/// We can't add a new variant to transaction errors, so we define a special
-/// case for the retroactively added overflow error type. In a second iteration
-/// of the transaction submission API this should become a separate error
-/// variant.
 pub const TRANSACTION_OVERFLOW_ERROR: TransactionError = TransactionError::UnbalancedTransaction {
     inputs: Amount::ZERO,
     outputs: Amount::ZERO,
@@ -199,3 +164,16 @@ pub const TRANSACTION_OVERFLOW_ERROR: TransactionError = TransactionError::Unbal
 
 #[derive(Debug, Encodable, Decodable, Clone, Eq, PartialEq)]
 pub struct TransactionSubmissionOutcome(pub Result<TransactionId, TransactionError>);
+
+/// All the items that may be produced during a consensus epoch.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
+pub enum ConsensusItem {
+    /// Threshold sign the epoch history for verification via the API
+    Transaction(Transaction),
+    /// Any data that modules require consensus on
+    Module(fedimint_core::core::DynModuleConsensusItem),
+    /// Allows us to add new items in the future without crashing old clients
+    /// that try to interpret the session log.
+    #[encodable_default]
+    Default { variant: u64, bytes: Vec<u8> },
+}

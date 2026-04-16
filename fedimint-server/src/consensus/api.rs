@@ -12,18 +12,17 @@ use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT,
 };
-use fedimint_core::epoch::ConsensusItem;
+use fedimint_api_client::session_outcome::SessionStatusV2;
+use fedimint_api_client::transaction::{
+    ConsensusItem, SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
+};
 use fedimint_core::module::audit::{Audit, AuditSummary};
 use fedimint_core::module::{
     ApiAuth, ApiEndpoint, ApiError, ApiRequestErased, ApiResult, ApiVersion, SerdeModuleEncoding,
     api_endpoint,
 };
 use fedimint_core::net::auth::GuardianAuthToken;
-use fedimint_core::session_outcome::SessionStatusV2;
 use fedimint_core::task::TaskGroup;
-use fedimint_core::transaction::{
-    SerdeTransaction, Transaction, TransactionError, TransactionSubmissionOutcome,
-};
 use fedimint_core::util::{FmtCompact, SafeUrl};
 use fedimint_core::{PeerId, TransactionId};
 use fedimint_logging::LOG_NET_API;

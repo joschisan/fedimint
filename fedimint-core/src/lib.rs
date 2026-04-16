@@ -75,7 +75,6 @@ pub mod encoding;
 pub mod endpoint_constants;
 /// Common environment variables
 pub mod envs;
-pub mod epoch;
 /// Formatting helpers
 pub mod fmt_utils;
 /// Federation invite code
@@ -104,16 +103,12 @@ pub mod task;
 pub mod time;
 /// Timing helpers
 pub mod timing;
-/// Fedimint transaction (inpus + outputs + signature) types
-pub mod transaction;
-/// Peg-in txo proofs
 /// General purpose utilities
 pub mod util;
 /// Version
 pub mod version;
 
 /// Atomic BFT unit containing consensus items
-pub mod session_outcome;
 
 // It's necessary to wrap `hash_newtype!` in a module because the generated code
 // references a module called "core", but we export a conflicting module in this

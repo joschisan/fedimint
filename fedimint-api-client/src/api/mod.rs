@@ -20,7 +20,7 @@ use fedimint_core::module::{
 };
 use fedimint_core::runtime::sleep;
 use fedimint_core::task::{MaybeSend, MaybeSync};
-use fedimint_core::transaction::{SerdeTransaction, Transaction, TransactionSubmissionOutcome};
+use crate::transaction::{SerdeTransaction, Transaction, TransactionSubmissionOutcome};
 use fedimint_core::util::backoff_util::api_networking_backoff;
 use fedimint_core::util::{FmtCompact as _, SafeUrl};
 use fedimint_core::{

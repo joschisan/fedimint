@@ -1,9 +1,8 @@
 use axum::extract::{Path, State};
 use axum::response::{Html, IntoResponse};
-use fedimint_core::epoch::ConsensusItem;
+use fedimint_api_client::session_outcome::{AcceptedItem, SessionStatusV2};
+use fedimint_api_client::transaction::{ConsensusItem, TransactionSignature};
 use fedimint_core::hex;
-use fedimint_core::session_outcome::{AcceptedItem, SessionStatusV2};
-use fedimint_core::transaction::TransactionSignature;
 use fedimint_server_core::dashboard_ui::DynDashboardApi;
 use fedimint_ui_common::UiState;
 use fedimint_ui_common::auth::UserAuth;

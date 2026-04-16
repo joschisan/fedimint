@@ -5,7 +5,7 @@ use fedimint_core::core::{
     DynInput, DynOutput, IInput, IOutput, IntoDynInstance, ModuleInstanceId,
 };
 use fedimint_core::task::{MaybeSend, MaybeSync};
-use fedimint_core::transaction::{Transaction, TransactionSignature};
+use fedimint_api_client::transaction::{Transaction, TransactionSignature};
 use fedimint_logging::LOG_CLIENT;
 use itertools::multiunzip;
 use rand::{CryptoRng, Rng, RngCore};

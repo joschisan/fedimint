@@ -13,10 +13,10 @@ use std::time::Duration;
 use anyhow::bail;
 use async_channel::Sender;
 use fedimint_core::NumPeers;
-use fedimint_core::config::P2PMessage;
+use fedimint_api_client::transaction::ConsensusItem;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::envs::is_running_in_test_env;
-use fedimint_core::epoch::ConsensusItem;
+use crate::p2p::P2PMessage;
 use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::module::{
     ApiAuth, ApiEndpoint, ApiError, ApiMethod, FEDIMINT_API_ALPN, IrohApiRequest,

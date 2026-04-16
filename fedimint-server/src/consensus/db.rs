@@ -1,5 +1,5 @@
+use fedimint_api_client::session_outcome::{AcceptedItem, SignedSessionOutcome};
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::session_outcome::{AcceptedItem, SignedSessionOutcome};
 use fedimint_core::{TransactionId, table};
 
 table!(

@@ -28,7 +28,7 @@ use fedimint_core::encoding::Encodable as _;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::TaskGroup;
-use fedimint_core::transaction::Transaction;
+use fedimint_api_client::transaction::Transaction;
 use fedimint_core::util::{BoxStream, FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{
     Amount, PeerId, TransactionId, apply, async_trait_maybe_send, maybe_add_send,

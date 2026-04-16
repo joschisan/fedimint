@@ -22,8 +22,8 @@
 
 extern crate fedimint_core;
 pub mod cli;
+pub mod p2p;
 pub mod server;
-pub mod wire;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -31,8 +31,8 @@ use std::sync::{Arc, OnceLock};
 use anyhow::Context;
 use config::ServerConfig;
 use config::io::read_server_config;
-use fedimint_core::config::P2PMessage;
-use fedimint_core::epoch::ConsensusItem;
+use fedimint_api_client::transaction::ConsensusItem;
+use crate::p2p::P2PMessage;
 use fedimint_core::module::ApiAuth;
 use fedimint_core::net::peers::DynP2PConnections;
 use fedimint_core::task::TaskGroup;

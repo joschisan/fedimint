@@ -19,6 +19,12 @@ use tracing::debug;
 pub mod api;
 /// Client query system
 pub mod query;
+/// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
+pub mod session_outcome;
+/// Wire-level Transaction and ConsensusItem types.
+pub mod transaction;
+/// Static wire enums over the fixed module set.
+pub mod wire;
 
 pub use iroh::Endpoint;
 

@@ -32,6 +32,7 @@ borsh = { workspace = true }
 bytes = { workspace = true }
 fedimint-aead = { workspace = true }
 fedimint-api-client = { workspace = true }
+fedimint-client-module = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-derive-secret = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
