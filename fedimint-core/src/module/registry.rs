@@ -157,4 +157,3 @@ impl<M: std::fmt::Debug, State> ModuleRegistry<M, State> {
         );
     }
 }
-

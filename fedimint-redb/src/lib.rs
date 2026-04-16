@@ -417,15 +417,11 @@ impl ReadTxRef<'_> {
     }
 }
 
-// ─── Ergonomic typed ops over NativeTableDef<K, W> ───────────────────────
+// ─── Ergonomic typed ops over NativeTableDef<K, V> ───────────────────────
 //
-// Mirror the shape of the old bytes-level typed ops but ride redb's native
-// typed tables. Generic over the value wrapper `W` (e.g. `Borsh<V>` or
-// `Consensus<V>`) via HRTB `W: for<'a> redb::Value<SelfType<'a> = V>`, so
-// call sites see `V` (not the wrapper).
-//
-// The `K: for<'a> redb::Key<SelfType<'a> = K>` HRTB is the "owned key"
-// contract: satisfied by primitive newtypes built with `redb_newtype_key!`
+// HRTB `T: for<'a> redb::Value<SelfType<'a> = T>` is the "owned" contract —
+// call sites hand in and receive back owned `T`, not borrowed slices.
+// Satisfied by any type built with `consensus_value!` / `consensus_key!`
 // and tuples thereof.
 
 use std::ops::RangeBounds;

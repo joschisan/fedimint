@@ -711,7 +711,10 @@ pub(crate) mod tests {
         values.sort();
         let mut encoded = values.iter().map(encode_value).collect::<Vec<_>>();
         encoded.sort();
-        let decoded = encoded.iter().map(|v| decode_value::<T>(v)).collect::<Vec<_>>();
+        let decoded = encoded
+            .iter()
+            .map(|v| decode_value::<T>(v))
+            .collect::<Vec<_>>();
         for (i, (a, b)) in values.iter().zip(decoded.iter()).enumerate() {
             assert_eq!(a, b, "mismatch at index {i}");
         }
@@ -731,12 +734,20 @@ pub(crate) mod tests {
         preserves_numeric_order((0..20_000).map(Amount).collect());
         preserves_numeric_order(
             (10..200)
-                .flat_map(|i| (i - 1..=i + 1).flat_map(move |j| (i - 1..=i + 1).map(move |k| Complex(i as u16, j as u32, k as u64))))
+                .flat_map(|i| {
+                    (i - 1..=i + 1).flat_map(move |j| {
+                        (i - 1..=i + 1).map(move |k| Complex(i as u16, j as u32, k as u64))
+                    })
+                })
                 .collect(),
         );
         preserves_numeric_order(
             (' '..'~')
-                .flat_map(|i| (' '..'~').map(|j| Text(format!("{i}{j}"))).collect::<Vec<_>>())
+                .flat_map(|i| {
+                    (' '..'~')
+                        .map(|j| Text(format!("{i}{j}")))
+                        .collect::<Vec<_>>()
+                })
                 .collect(),
         );
     }

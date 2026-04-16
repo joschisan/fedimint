@@ -14,7 +14,7 @@ use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::NativeTableDef;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::redb::ReadableTable as _;
-use fedimint_core::{consensus_value, redb_newtype_key};
+use fedimint_core::{consensus_key, consensus_value};
 use fedimint_redb::{Database, WriteTxRef};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -42,7 +42,7 @@ pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
 )]
 pub struct EventLogId(pub u64);
 
-redb_newtype_key!(EventLogId, u64);
+consensus_key!(EventLogId);
 
 impl EventLogId {
     pub const LOG_START: EventLogId = EventLogId(0);
@@ -192,8 +192,7 @@ impl std::ops::Deref for PersistedLogEntry {
 
 consensus_value!(EventLogEntry);
 
-pub const EVENT_LOG: NativeTableDef<EventLogId, EventLogEntry> =
-    NativeTableDef::new("event-log");
+pub const EVENT_LOG: NativeTableDef<EventLogId, EventLogEntry> = NativeTableDef::new("event-log");
 
 pub const EVENT_LOG_BY_OPERATION: NativeTableDef<(OperationId, EventLogId), EventLogEntry> =
     NativeTableDef::new("event-log-by-operation");

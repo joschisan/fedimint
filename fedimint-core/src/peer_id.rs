@@ -5,8 +5,8 @@ use std::str::FromStr;
 use fedimint_core::config::PeerUrl;
 use serde::{Deserialize, Serialize};
 
+use crate::consensus_key;
 use crate::encoding::{Decodable, Encodable};
-use crate::redb_newtype_key;
 
 #[derive(
     Debug,
@@ -24,7 +24,7 @@ use crate::redb_newtype_key;
 )]
 pub struct PeerId(u8);
 
-redb_newtype_key!(PeerId, u8);
+consensus_key!(PeerId);
 
 impl PeerId {
     pub fn new(id: u8) -> Self {

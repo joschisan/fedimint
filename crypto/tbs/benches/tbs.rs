@@ -123,10 +123,7 @@ fn bench_decode_signature(c: &mut Criterion) {
     let sig_bytes = sig.consensus_encode_to_vec();
 
     c.bench_function("signature decoding", |b| {
-        b.iter(|| {
-            Signature::consensus_decode_whole(&sig_bytes)
-                .expect("Decoding works")
-        })
+        b.iter(|| Signature::consensus_decode_whole(&sig_bytes).expect("Decoding works"))
     });
 }
 

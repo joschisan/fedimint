@@ -283,10 +283,12 @@ impl ClientConfig {
     PartialEq,
     Ord,
     PartialOrd,
+    Encodable,
+    Decodable,
 )]
 pub struct FederationId(pub sha256::Hash);
 
-crate::redb_sha256_key!(FederationId);
+crate::consensus_key!(FederationId);
 
 #[derive(
     Debug,

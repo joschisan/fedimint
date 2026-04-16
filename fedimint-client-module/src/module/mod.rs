@@ -243,7 +243,7 @@ where
         self.global_api().with_module(self.module_instance_id)
     }
 
-/// Lift a typed [`ClientOutputBundle`] into a wire-level one.
+    /// Lift a typed [`ClientOutputBundle`] into a wire-level one.
     pub fn make_client_outputs<O>(&self, output: ClientOutputBundle<O>) -> ClientOutputBundle
     where
         fedimint_api_client::wire::Output: From<O>,

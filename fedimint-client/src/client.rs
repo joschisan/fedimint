@@ -177,7 +177,7 @@ impl Client {
         self.config.read().await.clone()
     }
 
-/// Returns the module at the given instance id as `&dyn Any`, or panics
+    /// Returns the module at the given instance id as `&dyn Any`, or panics
     /// if the instance id doesn't match the fixed module set.
     fn get_module_any(&self, instance: ModuleInstanceId) -> &(maybe_add_send_sync!(dyn Any)) {
         match instance {

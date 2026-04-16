@@ -37,17 +37,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 /// submitted the transaction's ID can be used as operation ID. If there is no
 /// transaction related to it, it should be generated randomly. Since it is a
 /// 256bit value collisions are impossible for all intents and purposes.
-#[derive(
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Encodable,
-    Decodable,
-    PartialOrd,
-    Ord,
-)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Encodable, Decodable, PartialOrd, Ord)]
 pub struct OperationId(pub [u8; 32]);
 
 pub struct OperationIdFullFmt<'a>(&'a OperationId);
@@ -131,7 +121,7 @@ impl<'de> Deserialize<'de> for OperationId {
     }
 }
 
-crate::redb_newtype_key!(OperationId, [u8; 32]);
+crate::consensus_key!(OperationId);
 
 /// Module instance ID
 ///

@@ -43,7 +43,7 @@ pub const MODULE_CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVers
 )]
 pub struct Denomination(pub u8);
 
-fedimint_core::redb_newtype_key!(Denomination, u8);
+fedimint_core::consensus_key!(Denomination);
 
 impl Denomination {
     /// Convert to Amount (only call at boundaries)
