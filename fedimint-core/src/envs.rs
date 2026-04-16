@@ -12,10 +12,6 @@ use tracing::warn;
 
 use crate::util::FmtCompact as _;
 
-/// In tests we want to routinely enable an extra unknown module to ensure
-/// all client code handles correct modules that client doesn't know about.
-pub const FM_USE_UNKNOWN_MODULE_ENV: &str = "FM_USE_UNKNOWN_MODULE";
-
 /// Disable automatic consensus version voting for testing and development
 /// environments
 pub const FM_WALLET_DISABLE_AUTOMATIC_CONSENSUS_VERSION_VOTING_ENV: &str =

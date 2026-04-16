@@ -72,8 +72,6 @@ tikv-jemallocator = { workspace = true }
 [dev-dependencies]
 assert_matches = { workspace = true }
 fedimint-lnv2-server = { workspace = true }
-fedimint-unknown-common = { workspace = true }
-fedimint-unknown-server = { workspace = true }
 itertools = { workspace = true }
 tpe = { workspace = true }
 

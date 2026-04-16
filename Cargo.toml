@@ -42,8 +42,6 @@ members = [
     "modules/fedimint-mintv2-client",
     "modules/fedimint-mintv2-common",
     "modules/fedimint-mintv2-server",
-    "modules/fedimint-unknown-common",
-    "modules/fedimint-unknown-server",
     "modules/fedimint-walletv2-client",
     "modules/fedimint-walletv2-common",
     "modules/fedimint-walletv2-server",
@@ -158,8 +156,6 @@ fedimint-server-cli-core = { path = "./fedimint-server-cli-core", version = "=0.
 fedimint-server-core = { path = "./fedimint-server-core", version = "=0.11.0-alpha" }
 fedimint-server-ui = { path = "./fedimint-server-ui", version = "=0.11.0-alpha" }
 fedimint-ui-common = { path = "./fedimint-ui-common", version = "=0.11.0-alpha" }
-fedimint-unknown-common = { path = "./modules/fedimint-unknown-common", version = "=0.11.0-alpha" }
-fedimint-unknown-server = { path = "./modules/fedimint-unknown-server", version = "=0.11.0-alpha" }
 fedimint-util-error = { path = "./fedimint-util-error", version = "=0.11.0-alpha" }
 fedimint-walletv2-client = { path = "./modules/fedimint-walletv2-client", version = "=0.11.0-alpha" }
 fedimint-walletv2-common = { path = "./modules/fedimint-walletv2-common", version = "=0.11.0-alpha" }

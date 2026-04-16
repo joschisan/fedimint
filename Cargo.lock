@@ -2404,8 +2404,6 @@ dependencies = [
  "fedimint-mintv2-client",
  "fedimint-redb",
  "fedimint-tpe",
- "fedimint-unknown-common",
- "fedimint-unknown-server",
  "fedimint-walletv2-client",
  "futures",
  "futures-util",
@@ -2983,31 +2981,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-unknown-common"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "fedimint-core",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "fedimint-unknown-server"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "erased-serde",
- "fedimint-core",
- "fedimint-redb",
- "fedimint-server-core",
- "fedimint-unknown-common",
- "strum 0.27.1",
- "strum_macros 0.27.1",
-]
-
-[[package]]
 name = "fedimint-util-error"
 version = "0.11.0-alpha"
 dependencies = [
@@ -3099,8 +3072,6 @@ dependencies = [
  "fedimint-server-cli-core",
  "fedimint-server-core",
  "fedimint-server-ui",
- "fedimint-unknown-common",
- "fedimint-unknown-server",
  "fedimint-walletv2-common",
  "fedimint-walletv2-server",
  "fedimintd-envs",

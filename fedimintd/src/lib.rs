@@ -15,9 +15,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
-use fedimint_core::envs::{
-    FM_IROH_DNS_ENV, FM_IROH_RELAY_ENV, FM_USE_UNKNOWN_MODULE_ENV, is_env_var_set,
-};
+use fedimint_core::envs::{FM_IROH_DNS_ENV, FM_IROH_RELAY_ENV};
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::timing;
@@ -466,17 +464,6 @@ pub fn default_modules() -> ServerModuleInitRegistry {
     server_gens.attach(fedimint_mintv2_server::MintInit);
     server_gens.attach(fedimint_walletv2_server::WalletInit);
     server_gens.attach(fedimint_lnv2_server::LightningInit);
-
-    // NOTE: The unknown module is incompatible with the static wire enum
-    // (`fedimint_api_client::wire::Input`/`Output`/...) that only supports
-    // the canonical mint/ln/wallet triple on the `minimint-design` branch.
-    // Keep the env var check as a no-op warning so tests that rely on the
-    // flag don't silently change behaviour.
-    if is_env_var_set(FM_USE_UNKNOWN_MODULE_ENV) {
-        tracing::warn!(
-            "FM_USE_UNKNOWN_MODULE is set but the unknown module is disabled on this branch"
-        );
-    }
 
     server_gens
 }

@@ -36,8 +36,6 @@ fedimint-server-bitcoin-rpc = { workspace = true }
 fedimint-server-cli-core = { workspace = true }
 fedimint-server-core = { workspace = true }
 fedimint-server-ui = { workspace = true }
-fedimint-unknown-common = { workspace = true }
-fedimint-unknown-server = { workspace = true }
 fedimint-walletv2-common = { workspace = true }
 fedimint-walletv2-server = { workspace = true }
 fedimintd-envs = { workspace = true }
