@@ -162,7 +162,7 @@ impl std::fmt::Display for WalletConsensusItem {
     }
 }
 
-extensible_associated_module_type!(WalletInput, WalletInputV0, UnknownWalletInputVariantError);
+extensible_associated_module_type!(WalletInput, WalletInputV0);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct WalletInputV0 {
@@ -177,11 +177,7 @@ impl std::fmt::Display for WalletInputV0 {
     }
 }
 
-extensible_associated_module_type!(
-    WalletOutput,
-    WalletOutputV0,
-    UnknownWalletOutputVariantError
-);
+extensible_associated_module_type!(WalletOutput, WalletOutputV0);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct WalletOutputV0 {
@@ -207,8 +203,6 @@ impl std::fmt::Display for WalletOutputOutcome {
 
 #[derive(Debug, Error, Encodable, Decodable, Hash, Clone, Eq, PartialEq)]
 pub enum WalletInputError {
-    #[error("The wallet input version is not supported by this federation")]
-    UnknownInputVariant(#[from] UnknownWalletInputVariantError),
     #[error("The output has already been claimed")]
     OutputAlreadySpent,
     #[error("Unknown output index")]
@@ -225,8 +219,6 @@ pub enum WalletInputError {
 
 #[derive(Debug, Error, Encodable, Decodable, Hash, Clone, Eq, PartialEq)]
 pub enum WalletOutputError {
-    #[error("The wallet output version is not supported by this federation")]
-    UnknownOutputVariant(#[from] UnknownWalletOutputVariantError),
     #[error("The output value is below the dust limit.")]
     UnderDustLimit,
     #[error("The federation does not have any funds yet")]

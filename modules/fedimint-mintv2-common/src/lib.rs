@@ -113,7 +113,7 @@ impl CommonModuleInit for MintCommonInit {
     }
 }
 
-extensible_associated_module_type!(MintInput, MintInputV0, UnknownMintInputVariantError);
+extensible_associated_module_type!(MintInput, MintInputV0);
 
 impl MintInput {
     pub fn new_v0(note: Note) -> Self {
@@ -132,7 +132,7 @@ impl std::fmt::Display for MintInputV0 {
     }
 }
 
-extensible_associated_module_type!(MintOutput, MintOutputV0, UnknownMintOutputVariantError);
+extensible_associated_module_type!(MintOutput, MintOutputV0);
 
 impl MintOutput {
     pub fn new_v0(denomination: Denomination, nonce: BlindedMessage, tweak: [u8; 16]) -> Self {
@@ -209,8 +209,6 @@ plugin_types_trait_impl_common!(
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum MintInputError {
-    #[error("The mint input version is not supported by this federation")]
-    UnknownInputVariant(#[from] UnknownMintInputVariantError),
     #[error("The note is already spent")]
     SpentCoin,
     #[error("The note has an invalid amount not issued by the mint")]
@@ -221,8 +219,6 @@ pub enum MintInputError {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum MintOutputError {
-    #[error("The mint output version is not supported by this federation")]
-    UnknownOutputVariant(#[from] UnknownMintOutputVariantError),
     #[error("The note has an invalid amount not issued by the mint")]
     InvalidDenomination,
 }

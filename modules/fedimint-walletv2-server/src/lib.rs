@@ -277,7 +277,7 @@ impl ServerModule for Wallet {
         input: &WalletInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, WalletInputError> {
-        let input = input.ensure_v0_ref()?;
+        let input = input.as_v0_ref();
 
         if dbtx
             .insert(&SPENT_OUTPUT, &input.output_index, &())
@@ -430,7 +430,7 @@ impl ServerModule for Wallet {
         output: &WalletOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, WalletOutputError> {
-        let output = output.ensure_v0_ref()?;
+        let output = output.as_v0_ref();
 
         if output.value < self.cfg.consensus.dust_limit {
             return Err(WalletOutputError::UnderDustLimit);

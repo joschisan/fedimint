@@ -177,7 +177,7 @@ impl ServerModule for Mint {
         input: &MintInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, MintInputError> {
-        let input = input.ensure_v0_ref()?;
+        let input = input.as_v0_ref();
 
         let pk = self
             .cfg
@@ -229,7 +229,7 @@ impl ServerModule for Mint {
         output: &MintOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, MintOutputError> {
-        let output = output.ensure_v0_ref()?;
+        let output = output.as_v0_ref();
 
         let signature = self
             .cfg

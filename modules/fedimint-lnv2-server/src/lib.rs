@@ -199,7 +199,7 @@ impl ServerModule for Lightning {
         input: &LightningInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, LightningInputError> {
-        let (pub_key, amount) = match input.ensure_v0_ref()? {
+        let (pub_key, amount) = match input.as_v0_ref() {
             LightningInputV0::Outgoing(outpoint, outgoing_witness) => {
                 let contract = dbtx
                     .remove(&OUTGOING_CONTRACT, outpoint)
@@ -278,7 +278,7 @@ impl ServerModule for Lightning {
         output: &LightningOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, LightningOutputError> {
-        let amount = match output.ensure_v0_ref()? {
+        let amount = match output.as_v0_ref() {
             LightningOutputV0::Outgoing(contract) => {
                 dbtx.insert(&OUTGOING_CONTRACT, &outpoint, contract);
 

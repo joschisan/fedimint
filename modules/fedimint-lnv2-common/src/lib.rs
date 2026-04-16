@@ -57,11 +57,7 @@ pub struct ContractId(pub sha256::Hash);
 
 fedimint_core::redb_sha256_key!(ContractId);
 
-extensible_associated_module_type!(
-    LightningInput,
-    LightningInputV0,
-    UnknownLightningInputVariantError
-);
+extensible_associated_module_type!(LightningInput, LightningInputV0);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub enum LightningInputV0 {
@@ -82,11 +78,7 @@ impl std::fmt::Display for LightningInputV0 {
     }
 }
 
-extensible_associated_module_type!(
-    LightningOutput,
-    LightningOutputV0,
-    UnknownLightningOutputVariantError
-);
+extensible_associated_module_type!(LightningOutput, LightningOutputV0);
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
@@ -112,8 +104,6 @@ impl std::fmt::Display for LightningOutputOutcome {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum LightningInputError {
-    #[error("The lightning input version is not supported by this federation")]
-    UnknownInputVariant(#[from] UnknownLightningInputVariantError),
     #[error("No contract found for given ContractId")]
     UnknownContract,
     #[error("The preimage is invalid")]
@@ -130,8 +120,6 @@ pub enum LightningInputError {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum LightningOutputError {
-    #[error("The lightning input version is not supported by this federation")]
-    UnknownOutputVariant(#[from] UnknownLightningOutputVariantError),
     #[error("The contract is invalid")]
     InvalidContract,
     #[error("The contract is expired")]

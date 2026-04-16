@@ -721,7 +721,7 @@ macro_rules! module_plugin_dyn_newtype_display_passthrough {
 /// preferred (e.g. new module versions, pure client-side changes, …).
 #[macro_export]
 macro_rules! extensible_associated_module_type {
-    ($name:ident, $name_v0:ident, $error:ident) => {
+    ($name:ident, $name_v0:ident) => {
         #[derive(
             Clone,
             Eq,
@@ -734,26 +734,12 @@ macro_rules! extensible_associated_module_type {
         )]
         pub enum $name {
             V0($name_v0),
-            #[encodable_default]
-            Default {
-                variant: u64,
-                bytes: Vec<u8>,
-            },
         }
 
         impl $name {
-            pub fn maybe_v0_ref(&self) -> Option<&$name_v0> {
-                match self {
-                    $name::V0(v0) => Some(v0),
-                    $name::Default { .. } => None,
-                }
-            }
-
-            pub fn ensure_v0_ref(&self) -> Result<&$name_v0, $error> {
-                match self {
-                    $name::V0(v0) => Ok(v0),
-                    $name::Default { variant, .. } => Err($error { variant: *variant }),
-                }
+            pub fn as_v0_ref(&self) -> &$name_v0 {
+                let $name::V0(v0) = self;
+                v0
             }
         }
 
@@ -765,47 +751,15 @@ macro_rules! extensible_associated_module_type {
 
         impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                use $crate::bitcoin::hashes::hex::DisplayHex;
-                match self {
-                    $name::V0(v0) => {
-                        std::fmt::Debug::fmt(v0, f)?;
-                    }
-                    $name::Default { variant, bytes } => {
-                        f.debug_struct(stringify!($name))
-                            .field("variant", variant)
-                            .field("bytes", &bytes.as_hex())
-                            .finish()?;
-                    }
-                }
-                Ok(())
+                let $name::V0(v0) = self;
+                std::fmt::Debug::fmt(v0, f)
             }
-        }
-
-        #[derive(
-            Debug,
-            thiserror::Error,
-            Clone,
-            Eq,
-            PartialEq,
-            Hash,
-            serde::Deserialize,
-            serde::Serialize,
-            fedimint_core::encoding::Encodable,
-            fedimint_core::encoding::Decodable,
-        )]
-        #[error("Unknown {} variant {variant}", stringify!($name))]
-        pub struct $error {
-            pub variant: u64,
         }
 
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                match self {
-                    $name::V0(inner) => std::fmt::Display::fmt(inner, f),
-                    $name::Default { variant, .. } => {
-                        write!(f, "Unknown {} (variant={variant})", stringify!($name))
-                    }
-                }
+                let $name::V0(inner) = self;
+                std::fmt::Display::fmt(inner, f)
             }
         }
     };
