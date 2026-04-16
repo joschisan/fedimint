@@ -75,7 +75,7 @@ where
     ) -> anyhow::Result<BTreeMap<PeerId, T>> {
         let mut decoded = BTreeMap::new();
         for (k, bytes) in self.exchange_bytes(data.consensus_encode_to_vec()).await? {
-            decoded.insert(k, T::consensus_decode_whole(&bytes)?);
+            decoded.insert(k, T::consensus_decode_exact(&bytes)?);
         }
         Ok(decoded)
     }

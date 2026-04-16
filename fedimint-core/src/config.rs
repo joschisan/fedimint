@@ -531,7 +531,7 @@ impl ClientModuleConfig {
     where
         T: Decodable + 'static,
     {
-        Ok(T::consensus_decode_whole(&self.config)?)
+        Ok(T::consensus_decode_exact(&self.config)?)
     }
 }
 
@@ -551,7 +551,7 @@ impl ServerModuleConfig {
 
     pub fn to_typed<T: TypedServerModuleConfig>(&self) -> anyhow::Result<T> {
         let private = serde_json::from_value(self.private.value().clone())?;
-        let consensus = <T::Consensus>::consensus_decode_whole(&self.consensus.config[..])?;
+        let consensus = <T::Consensus>::consensus_decode_exact(&self.consensus.config[..])?;
 
         Ok(TypedServerModuleConfig::from_parts(private, consensus))
     }
@@ -566,7 +566,7 @@ pub trait TypedServerModuleConsensusConfig:
     fn version(&self) -> ModuleConsensusVersion;
 
     fn from_erased(erased: &ServerModuleConsensusConfig) -> anyhow::Result<Self> {
-        Ok(Self::consensus_decode_whole(&erased.config[..])?)
+        Ok(Self::consensus_decode_exact(&erased.config[..])?)
     }
 }
 

@@ -191,7 +191,7 @@ impl FromStr for InviteCode {
 
         ensure!(hrp == BECH32_HRP, "Invalid HRP in bech32 encoding");
 
-        let invite = Self::consensus_decode_whole(&data)?;
+        let invite = Self::consensus_decode_exact(&data)?;
 
         Ok(invite)
     }

@@ -80,7 +80,7 @@ pub fn encode_prefixed_bytes(prefix: &str, bytes: &[u8]) -> String {
 }
 
 pub fn decode_prefixed<T: Decodable>(prefix: &str, s: &str) -> anyhow::Result<T> {
-    Ok(T::consensus_decode_whole(&decode_prefixed_bytes(
+    Ok(T::consensus_decode_exact(&decode_prefixed_bytes(
         prefix, s,
     )?)?)
 }

@@ -210,7 +210,7 @@ mod tests {
 
         let encoded = original.consensus_encode_to_vec();
         let decoded =
-            DerivableSecret::consensus_decode_whole(&encoded).expect("decode should succeed");
+            DerivableSecret::consensus_decode_exact(&encoded).expect("decode should succeed");
 
         assert_eq!(original.level(), decoded.level());
         assert_eq!(

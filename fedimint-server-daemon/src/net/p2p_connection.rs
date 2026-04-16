@@ -66,7 +66,7 @@ where
     async fn read_to_end(&mut self) -> anyhow::Result<M> {
         let bytes = self.stream.read_to_end(MAX_P2P_MESSAGE_SIZE).await?;
 
-        Ok(M::consensus_decode_whole(&bytes)?)
+        Ok(M::consensus_decode_exact(&bytes)?)
     }
 }
 

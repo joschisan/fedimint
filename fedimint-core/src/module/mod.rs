@@ -434,7 +434,7 @@ impl<T: Encodable + Decodable> From<&T> for SerdeModuleEncoding<T> {
 
 impl<T: Encodable + Decodable + 'static> SerdeModuleEncoding<T> {
     pub fn try_into_inner(&self) -> std::io::Result<T> {
-        Decodable::consensus_decode_whole(&self.0)
+        Decodable::consensus_decode_exact(&self.0)
     }
 }
 
@@ -473,6 +473,6 @@ impl<T: Encodable + Decodable> From<&T> for SerdeModuleEncodingBase64<T> {
 
 impl<T: Encodable + Decodable + 'static> SerdeModuleEncodingBase64<T> {
     pub fn try_into_inner(&self) -> std::io::Result<T> {
-        Decodable::consensus_decode_whole(&self.0)
+        Decodable::consensus_decode_exact(&self.0)
     }
 }

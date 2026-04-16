@@ -25,7 +25,7 @@ where
 {
     let hex = String::deserialize(de)?;
     let bytes = hex::decode(&hex).map_err(serde::de::Error::custom)?;
-    T::consensus_decode_whole(&bytes).map_err(serde::de::Error::custom)
+    T::consensus_decode_exact(&bytes).map_err(serde::de::Error::custom)
 }
 
 #[macro_export]
@@ -53,7 +53,7 @@ macro_rules! deserialize_as_encodable_hex {
             {
                 let hex = String::deserialize(deserializer)?;
                 let bytes = ::fedimint_core::hex::decode(&hex).map_err(serde::de::Error::custom)?;
-                <Self as $crate::Decodable>::consensus_decode_whole(&bytes)
+                <Self as $crate::Decodable>::consensus_decode_exact(&bytes)
                     .map_err(serde::de::Error::custom)
             }
         }

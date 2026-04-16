@@ -22,10 +22,9 @@ mod secp256k1;
 
 use std::any::TypeId;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bitcoin::hashes::sha256;
 pub use fedimint_derive::{Decodable, Encodable};
@@ -73,7 +72,7 @@ pub trait Decodable: Sized {
     fn consensus_decode<R: Read>(reader: &mut R) -> io::Result<Self>;
 
     /// Decode from a byte slice, erroring if any bytes remain.
-    fn consensus_decode_whole(bytes: &[u8]) -> io::Result<Self> {
+    fn consensus_decode_exact(bytes: &[u8]) -> io::Result<Self> {
         let mut reader = bytes;
         let value = Self::consensus_decode(&mut reader)?;
         if !reader.is_empty() {
@@ -143,10 +142,6 @@ impl_encode_decode_int!(u8);
 impl_encode_decode_int!(u16);
 impl_encode_decode_int!(u32);
 impl_encode_decode_int!(u64);
-impl_encode_decode_int!(i8);
-impl_encode_decode_int!(i16);
-impl_encode_decode_int!(i32);
-impl_encode_decode_int!(i64);
 
 // ─── bool ───────────────────────────────────────────────────────────────
 
@@ -290,37 +285,6 @@ impl Decodable for Cow<'static, str> {
     }
 }
 
-// ─── SystemTime / Duration ──────────────────────────────────────────────
-
-impl Encodable for SystemTime {
-    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        self.duration_since(UNIX_EPOCH)
-            .expect("system time before UNIX_EPOCH")
-            .consensus_encode(w)
-    }
-}
-
-impl Decodable for SystemTime {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        Ok(UNIX_EPOCH + Duration::consensus_decode(r)?)
-    }
-}
-
-impl Encodable for Duration {
-    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        self.as_secs().consensus_encode(w)?;
-        self.subsec_nanos().consensus_encode(w)
-    }
-}
-
-impl Decodable for Duration {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        let secs = u64::consensus_decode(r)?;
-        let nanos = u32::consensus_decode(r)?;
-        Ok(Self::new(secs, nanos))
-    }
-}
-
 // ─── SafeUrl ────────────────────────────────────────────────────────────
 
 impl Encodable for SafeUrl {
@@ -337,7 +301,7 @@ impl Decodable for SafeUrl {
     }
 }
 
-// ─── Slices, Vec, VecDeque, [T; N] ──────────────────────────────────────
+// ─── Slices, Vec, [T; N] ────────────────────────────────────────────────
 //
 // `Vec<u8>` / `[u8; N]` / `&[u8]` take a specialized path via TypeId to
 // avoid going through `u8::consensus_encode` byte-by-byte. Matters for
@@ -391,28 +355,6 @@ where
             v.push(T::consensus_decode(r)?);
         }
         Ok(v)
-    }
-}
-
-impl<T> Encodable for VecDeque<T>
-where
-    T: Encodable + 'static,
-{
-    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        (self.len() as u64).consensus_encode(w)?;
-        for item in self {
-            item.consensus_encode(w)?;
-        }
-        Ok(())
-    }
-}
-
-impl<T> Decodable for VecDeque<T>
-where
-    T: Decodable + 'static,
-{
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        Ok(Self::from(Vec::<T>::consensus_decode(r)?))
     }
 }
 
@@ -539,7 +481,7 @@ pub(crate) mod tests {
         T: Encodable + Decodable + Eq + Debug,
     {
         let bytes = value.consensus_encode_to_vec();
-        let decoded = T::consensus_decode_whole(&bytes).unwrap();
+        let decoded = T::consensus_decode_exact(&bytes).unwrap();
         assert_eq!(value, &decoded);
     }
 
@@ -549,7 +491,7 @@ pub(crate) mod tests {
     {
         let bytes = value.consensus_encode_to_vec();
         assert_eq!(expected, &bytes[..]);
-        let decoded = T::consensus_decode_whole(&bytes).unwrap();
+        let decoded = T::consensus_decode_exact(&bytes).unwrap();
         assert_eq!(value, &decoded);
     }
 
@@ -615,19 +557,14 @@ pub(crate) mod tests {
         1u32.consensus_encode(&mut bad).unwrap();
         "a".to_string().consensus_encode(&mut bad).unwrap();
         2u32.consensus_encode(&mut bad).unwrap();
-        assert!(BTreeMap::<String, u32>::consensus_decode_whole(&bad).is_err());
+        assert!(BTreeMap::<String, u32>::consensus_decode_exact(&bad).is_err());
     }
 
     #[test]
     fn trailing_bytes_rejected() {
         let mut bytes = 42u32.consensus_encode_to_vec();
         bytes.push(0);
-        assert!(u32::consensus_decode_whole(&bytes).is_err());
-    }
-
-    #[test]
-    fn systemtime_roundtrip() {
-        test_roundtrip(&crate::time::now());
+        assert!(u32::consensus_decode_exact(&bytes).is_err());
     }
 
     #[derive(Debug, Eq, PartialEq, Encodable, Decodable)]
@@ -649,7 +586,7 @@ pub(crate) mod tests {
         // Variant index 99 doesn't exist.
         let mut bytes = Vec::new();
         99u64.consensus_encode(&mut bytes).unwrap();
-        assert!(TestEnum::consensus_decode_whole(&bytes).is_err());
+        assert!(TestEnum::consensus_decode_exact(&bytes).is_err());
     }
 
     #[derive(Debug, Encodable, Decodable)]
@@ -657,7 +594,7 @@ pub(crate) mod tests {
 
     #[test]
     fn derive_empty_enum_always_errors() {
-        assert!(NotConstructable::consensus_decode_whole(&[0]).is_err());
+        assert!(NotConstructable::consensus_decode_exact(&[0]).is_err());
     }
 
     #[derive(Debug, Encodable, Decodable, Eq, PartialEq)]
@@ -701,7 +638,7 @@ pub(crate) mod tests {
     }
 
     fn decode_value<T: Decodable>(bytes: &[u8]) -> T {
-        T::consensus_decode_whole(bytes).unwrap()
+        T::consensus_decode_exact(bytes).unwrap()
     }
 
     fn preserves_numeric_order<T>(mut values: Vec<T>)

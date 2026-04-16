@@ -20,5 +20,5 @@ where
     let bytes = URL_SAFE_NO_PAD
         .decode(&s)
         .map_err(serde::de::Error::custom)?;
-    T::consensus_decode_whole(&bytes).map_err(serde::de::Error::custom)
+    T::consensus_decode_exact(&bytes).map_err(serde::de::Error::custom)
 }

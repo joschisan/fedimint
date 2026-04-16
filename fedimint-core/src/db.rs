@@ -48,7 +48,7 @@ macro_rules! consensus_value {
             where
                 Self: 'a,
             {
-                <$ty as $crate::encoding::Decodable>::consensus_decode_whole(data)
+                <$ty as $crate::encoding::Decodable>::consensus_decode_exact(data)
                     .expect("consensus_decode failed")
             }
 

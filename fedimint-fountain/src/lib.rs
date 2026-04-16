@@ -56,7 +56,7 @@ impl<E: Decodable> FountainDecoder<E> {
             .receive(fragment.clone())
             .transpose()? // The fragment is valid but the decoding is not yet complete
             .ok()
-            .map(|b| Decodable::consensus_decode_whole(&b).ok())
+            .map(|b| Decodable::consensus_decode_exact(&b).ok())
         {
             return Some(d);
         }
