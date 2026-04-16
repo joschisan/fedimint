@@ -265,9 +265,6 @@ impl ServerModule for Wallet {
             WalletConsensusItem::Signatures(txid, signatures) => {
                 self.process_signatures(dbtx, txid, signatures, peer).await
             }
-            WalletConsensusItem::Default { variant, .. } => Err(anyhow!(
-                "Received wallet consensus item with unknown variant {variant}"
-            )),
         }
     }
 
@@ -466,10 +463,7 @@ impl ServerModule for Wallet {
             return Err(WalletOutputError::ChangeUnderDustLimit);
         }
 
-        let script_pubkey = output
-            .destination
-            .script_pubkey()
-            .ok_or(WalletOutputError::UnknownScriptVariant)?;
+        let script_pubkey = output.destination.script_pubkey();
 
         let tx = Transaction {
             version: Version(2),

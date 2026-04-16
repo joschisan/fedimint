@@ -170,10 +170,6 @@ enum InviteCodePart {
 
     /// Authentication id for the federation
     FederationId(FederationId),
-
-    /// Unknown invite code fields to be defined in the future
-    #[encodable_default]
-    Default { variant: u64, bytes: Vec<u8> },
 }
 
 /// We can represent client invite code as a bech32 string for compactness and

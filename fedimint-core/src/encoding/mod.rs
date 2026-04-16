@@ -853,17 +853,6 @@ mod tests {
         Baz { baz: u8 },
     }
 
-    #[derive(Debug, Eq, PartialEq, Encodable, Decodable)]
-    enum DefaultEnum {
-        Foo,
-        Bar(u32, String),
-        #[encodable_default]
-        Default {
-            variant: u64,
-            bytes: Vec<u8>,
-        },
-    }
-
     #[test_log::test]
     fn test_derive_enum_no_default_roundtrip_success() {
         let enums = [
@@ -881,15 +870,14 @@ mod tests {
     }
 
     #[test_log::test]
-    fn test_derive_enum_no_default_decode_fail() {
-        let unknown_variant = DefaultEnum::Default {
-            variant: 42,
-            bytes: vec![0, 1, 2, 3],
+    fn test_derive_enum_unknown_variant_decode_fail() {
+        // Raw encoding of a variant index 42 with empty payload bytes.
+        let unknown_variant_encoding = {
+            let mut buf = vec![];
+            42u64.consensus_encode(&mut buf).unwrap();
+            Vec::<u8>::new().consensus_encode(&mut buf).unwrap();
+            buf
         };
-        let mut unknown_variant_encoding = vec![];
-        unknown_variant
-            .consensus_encode(&mut unknown_variant_encoding)
-            .unwrap();
 
         let mut cursor = Cursor::new(&unknown_variant_encoding);
         let decode_res =
@@ -899,27 +887,6 @@ mod tests {
             Ok(_) => panic!("Should return error"),
             Err(e) => assert!(e.to_string().contains("Invalid enum variant")),
         }
-    }
-
-    #[test_log::test]
-    fn test_derive_enum_default_decode_success() {
-        let unknown_variant = NoDefaultEnum::Baz { baz: 123 };
-        let mut unknown_variant_encoding = vec![];
-        unknown_variant
-            .consensus_encode(&mut unknown_variant_encoding)
-            .unwrap();
-
-        let mut cursor = Cursor::new(&unknown_variant_encoding);
-        let decode_res =
-            DefaultEnum::consensus_decode_partial(&mut cursor, &ModuleRegistry::default());
-
-        assert_eq!(
-            decode_res.unwrap(),
-            DefaultEnum::Default {
-                variant: 2,
-                bytes: vec![123],
-            }
-        );
     }
 
     #[test_log::test]
@@ -999,39 +966,19 @@ mod tests {
     #[test]
     fn test_custom_index_enum() {
         #[derive(Debug, PartialEq, Eq, Encodable, Decodable)]
-        enum Old {
-            Foo,
-            Bar,
-            Baz,
-        }
-
-        #[derive(Debug, PartialEq, Eq, Encodable, Decodable)]
-        enum New {
+        enum IndexedEnum {
             #[encodable(index = 0)]
             Foo,
             #[encodable(index = 2)]
             Baz,
-            #[encodable_default]
-            Default { variant: u64, bytes: Vec<u8> },
         }
 
-        let test_vector = vec![
-            (Old::Foo, New::Foo),
-            (
-                Old::Bar,
-                New::Default {
-                    variant: 1,
-                    bytes: vec![],
-                },
-            ),
-            (Old::Baz, New::Baz),
-        ];
-
-        for (old, new) in test_vector {
-            let old_bytes = old.consensus_encode_to_vec();
-            let decoded_new = New::consensus_decode_whole(&old_bytes, &ModuleRegistry::default())
-                .expect("Decoding failed");
-            assert_eq!(decoded_new, new);
+        for value in [IndexedEnum::Foo, IndexedEnum::Baz] {
+            let bytes = value.consensus_encode_to_vec();
+            let decoded =
+                IndexedEnum::consensus_decode_whole(&bytes, &ModuleRegistry::default())
+                    .expect("Decoding failed");
+            assert_eq!(decoded, value);
         }
     }
 

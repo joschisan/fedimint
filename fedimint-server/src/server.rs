@@ -59,11 +59,7 @@ impl Server {
         peer_id: PeerId,
     ) -> anyhow::Result<()> {
         match item {
-            wire::ModuleConsensusItem::Mint(ci) => {
-                self.mint
-                    .process_consensus_item(dbtx, ci.clone(), peer_id)
-                    .await
-            }
+            wire::ModuleConsensusItem::Mint(ci) => match *ci {},
             wire::ModuleConsensusItem::Ln(ci) => {
                 self.ln
                     .process_consensus_item(dbtx, ci.clone(), peer_id)

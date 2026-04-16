@@ -58,19 +58,13 @@ impl fmt::Display for Denomination {
     }
 }
 
-/// The mint module currently doesn't define any consensus items and generally
-/// throws an error on encountering one. To allow old clients to still decode
-/// blocks in the future, should we decide to add consensus items, this has to
-/// be an enum with only a default variant.
+/// The mint module does not define any consensus items.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub enum MintConsensusItem {
-    #[encodable_default]
-    Default { variant: u64, bytes: Vec<u8> },
-}
+pub enum MintConsensusItem {}
 
 impl std::fmt::Display for MintConsensusItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MintConsensusItem")
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {}
     }
 }
 

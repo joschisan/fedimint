@@ -136,11 +136,6 @@ pub enum WalletConsensusItem {
     BlockCount(u64),
     Feerate(Option<u64>),
     Signatures(Txid, Vec<Signature>),
-    #[encodable_default]
-    Default {
-        variant: u64,
-        bytes: Vec<u8>,
-    },
 }
 
 impl std::fmt::Display for WalletConsensusItem {
@@ -154,9 +149,6 @@ impl std::fmt::Display for WalletConsensusItem {
             }
             WalletConsensusItem::Signatures(..) => {
                 write!(f, "Wallet Signatures")
-            }
-            WalletConsensusItem::Default { variant, .. } => {
-                write!(f, "Unknown Wallet CI variant={variant}")
             }
         }
     }
@@ -231,8 +223,6 @@ pub enum WalletOutputError {
     ChangeUnderDustLimit,
     #[error("Constructing the pegout transaction caused an arithmetic overflow")]
     ArithmeticOverflow,
-    #[error("Unknown script variant")]
-    UnknownScriptVariant,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable, Serialize, Deserialize)]
@@ -242,11 +232,6 @@ pub enum StandardScript {
     P2WPKH(hash160::Hash),
     P2WSH(sha256::Hash),
     P2TR(XOnlyPublicKey),
-    #[encodable_default]
-    Default {
-        variant: u64,
-        bytes: Vec<u8>,
-    },
 }
 
 impl StandardScript {
@@ -285,14 +270,13 @@ impl StandardScript {
         None
     }
 
-    pub fn script_pubkey(&self) -> Option<ScriptBuf> {
+    pub fn script_pubkey(&self) -> ScriptBuf {
         match self {
-            Self::P2PKH(hash) => Some(ScriptBuf::new_p2pkh(&PubkeyHash::from_raw_hash(*hash))),
-            Self::P2SH(hash) => Some(ScriptBuf::new_p2sh(&ScriptHash::from_raw_hash(*hash))),
-            Self::P2WPKH(hash) => Some(ScriptBuf::new_p2wpkh(&WPubkeyHash::from_raw_hash(*hash))),
-            Self::P2WSH(hash) => Some(ScriptBuf::new_p2wsh(&WScriptHash::from_raw_hash(*hash))),
-            Self::P2TR(pk) => Some(ScriptBuf::new_p2tr_tweaked(pk.dangerous_assume_tweaked())),
-            Self::Default { .. } => None,
+            Self::P2PKH(hash) => ScriptBuf::new_p2pkh(&PubkeyHash::from_raw_hash(*hash)),
+            Self::P2SH(hash) => ScriptBuf::new_p2sh(&ScriptHash::from_raw_hash(*hash)),
+            Self::P2WPKH(hash) => ScriptBuf::new_p2wpkh(&WPubkeyHash::from_raw_hash(*hash)),
+            Self::P2WSH(hash) => ScriptBuf::new_p2wsh(&WScriptHash::from_raw_hash(*hash)),
+            Self::P2TR(pk) => ScriptBuf::new_p2tr_tweaked(pk.dangerous_assume_tweaked()),
         }
     }
 }
@@ -310,7 +294,7 @@ fn assert_standard_script_roundtrip(addr: &str, variant: fn(&StandardScript) -> 
 
     assert!(variant(&script), "Unexpected StandardScript variant");
 
-    assert_eq!(Some(address.script_pubkey()), script.script_pubkey());
+    assert_eq!(address.script_pubkey(), script.script_pubkey());
 }
 
 #[test]

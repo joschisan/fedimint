@@ -130,11 +130,6 @@ pub enum LightningOutputError {
 pub enum LightningConsensusItem {
     BlockCountVote(u64),
     UnixTimeVote(u64),
-    #[encodable_default]
-    Default {
-        variant: u64,
-        bytes: Vec<u8>,
-    },
 }
 
 impl std::fmt::Display for LightningConsensusItem {
@@ -146,11 +141,6 @@ impl std::fmt::Display for LightningConsensusItem {
             LightningConsensusItem::UnixTimeVote(t) => {
                 write!(f, "LNv2 Unix Time {t}")
             }
-            LightningConsensusItem::Default { variant, bytes } => write!(
-                f,
-                "LNv2 Unknown - variant: {variant}, bytes_len: {}",
-                bytes.len()
-            ),
         }
     }
 }

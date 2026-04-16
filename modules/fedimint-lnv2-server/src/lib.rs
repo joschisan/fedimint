@@ -8,7 +8,7 @@ mod db;
 
 use std::time::Duration;
 
-use anyhow::{Context, anyhow, ensure};
+use anyhow::{Context, ensure};
 use fedimint_core::config::{
     ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
     TypedServerModuleConsensusConfig,
@@ -187,9 +187,6 @@ impl ServerModule for Lightning {
 
                 Ok(())
             }
-            LightningConsensusItem::Default { variant, .. } => Err(anyhow!(
-                "Received lnv2 consensus item with unknown variant {variant}"
-            )),
         }
     }
 

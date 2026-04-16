@@ -8,7 +8,7 @@ mod db;
 
 use std::collections::BTreeMap;
 
-use anyhow::{bail, ensure};
+use anyhow::ensure;
 use fedimint_core::config::{
     ServerModuleConfig, ServerModuleConsensusConfig, TypedServerModuleConfig,
     TypedServerModuleConsensusConfig,
@@ -165,10 +165,10 @@ impl ServerModule for Mint {
     async fn process_consensus_item(
         &self,
         _dbtx: &WriteTxRef<'_>,
-        _consensus_item: MintConsensusItem,
+        consensus_item: MintConsensusItem,
         _peer_id: PeerId,
     ) -> anyhow::Result<()> {
-        bail!("Mint does not process consensus items");
+        match consensus_item {}
     }
 
     async fn process_input(

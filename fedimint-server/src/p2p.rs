@@ -18,11 +18,6 @@ pub enum P2PMessage {
     DkgG1(DkgMessageG1),
     DkgG2(DkgMessageG2),
     Encodable(Vec<u8>),
-    #[encodable_default]
-    Default {
-        variant: u64,
-        bytes: Vec<u8>,
-    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]

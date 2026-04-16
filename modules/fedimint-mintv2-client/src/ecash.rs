@@ -11,11 +11,6 @@ pub struct ECash(Vec<ECashField>);
 enum ECashField {
     Mint(FederationId),
     Note(SpendableNote),
-    #[encodable_default]
-    Default {
-        variant: u64,
-        bytes: Vec<u8>,
-    },
 }
 
 impl ECash {
