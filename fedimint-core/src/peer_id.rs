@@ -6,6 +6,7 @@ use fedimint_core::config::PeerUrl;
 use serde::{Deserialize, Serialize};
 
 use crate::encoding::{Decodable, Encodable};
+use crate::redb_newtype_key;
 
 #[derive(
     Debug,
@@ -20,11 +21,15 @@ use crate::encoding::{Decodable, Encodable};
     Deserialize,
     Encodable,
     Decodable,
+    borsh::BorshSerialize,
+    borsh::BorshDeserialize,
 )]
-pub struct PeerId(u16);
+pub struct PeerId(u8);
+
+redb_newtype_key!(PeerId, u8);
 
 impl PeerId {
-    pub fn new(id: u16) -> Self {
+    pub fn new(id: u8) -> Self {
         Self(id)
     }
 
@@ -40,20 +45,20 @@ impl std::fmt::Display for PeerId {
 }
 
 impl FromStr for PeerId {
-    type Err = <u16 as FromStr>::Err;
+    type Err = <u8 as FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         s.parse().map(PeerId)
     }
 }
 
-impl From<u16> for PeerId {
-    fn from(id: u16) -> Self {
+impl From<u8> for PeerId {
+    fn from(id: u8) -> Self {
         Self(id)
     }
 }
 
-impl From<PeerId> for u16 {
+impl From<PeerId> for u8 {
     fn from(peer: PeerId) -> Self {
         peer.0
     }
@@ -66,7 +71,7 @@ pub struct NumPeers(usize);
 impl NumPeers {
     /// Returns an iterator over all peer IDs in the federation.
     pub fn peer_ids(self) -> impl Iterator<Item = PeerId> {
-        (0u16..(self.0 as u16)).map(PeerId)
+        (0u8..(self.0 as u8)).map(PeerId)
     }
 
     /// Returns the total number of guardians in the federation.

@@ -213,7 +213,7 @@ mod tests {
 
     #[test_log::test]
     fn test_dkg_g2() {
-        let peers = (0..7_u16).map(PeerId::from).collect::<Vec<PeerId>>();
+        let peers = (0..7u8).map(PeerId::from).collect::<Vec<PeerId>>();
 
         let mut dkgs = peers
             .iter()

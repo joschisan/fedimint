@@ -840,7 +840,7 @@ impl Wallet {
         let signatures_by_peer: BTreeMap<PeerId, Vec<Signature>> = dbtx
             .range(
                 &SIGNATURES,
-                (txid, PeerId::from(u16::MIN))..=(txid, PeerId::from(u16::MAX)),
+                (txid, PeerId::from(u8::MIN))..=(txid, PeerId::from(u8::MAX)),
             )
             .into_iter()
             .map(|((_, peer), sigs)| (peer, sigs))

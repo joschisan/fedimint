@@ -315,11 +315,11 @@ impl ISetupApi for SetupApi {
             .expect("We inserted the key above.");
 
         let params = ConfigGenParams {
-            identity: PeerId::from(our_id as u16),
+            identity: PeerId::from(our_id as u8),
             iroh_api_sk: local_params.iroh_api_sk,
             iroh_p2p_sk: local_params.iroh_p2p_sk,
             peers: (0..)
-                .map(|i| PeerId::from(i as u16))
+                .map(|i| PeerId::from(i as u8))
                 .zip(state.setup_codes.clone().into_iter())
                 .collect(),
             meta: BTreeMap::from_iter(vec![(

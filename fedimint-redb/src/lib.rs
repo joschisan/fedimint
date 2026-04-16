@@ -529,11 +529,7 @@ impl<'tx> WriteTxRef<'tx> {
         })
     }
 
-    pub fn range<WK, K, WV, V, R>(
-        &self,
-        def: &NativeTableDef<WK, WV>,
-        range: R,
-    ) -> Vec<(K, V)>
+    pub fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
@@ -587,11 +583,7 @@ impl ReadTxRef<'_> {
         .unwrap_or_default()
     }
 
-    pub fn range<WK, K, WV, V, R>(
-        &self,
-        def: &NativeTableDef<WK, WV>,
-        range: R,
-    ) -> Vec<(K, V)>
+    pub fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
@@ -644,12 +636,7 @@ pub trait DbRead {
 }
 
 pub trait DbWrite: DbRead {
-    fn insert<WK, K, WV, V>(
-        &self,
-        def: &NativeTableDef<WK, WV>,
-        key: &K,
-        value: &V,
-    ) -> Option<V>
+    fn insert<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K, value: &V) -> Option<V>
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
@@ -694,11 +681,7 @@ macro_rules! impl_db_read_via_inherent {
                 <$ty>::iter(self, def)
             }
 
-            fn range<WK, K, WV, V, R>(
-                &self,
-                def: &NativeTableDef<WK, WV>,
-                range: R,
-            ) -> Vec<(K, V)>
+            fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
             where
                 WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
                 WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
@@ -730,11 +713,7 @@ macro_rules! impl_db_write_via_inherent {
                 <$ty>::insert(self, def, key, value)
             }
 
-            fn remove<WK, K, WV, V>(
-                &self,
-                def: &NativeTableDef<WK, WV>,
-                key: &K,
-            ) -> Option<V>
+            fn remove<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
             where
                 WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
                 WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
