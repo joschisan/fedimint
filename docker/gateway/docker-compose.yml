@@ -1,0 +1,24 @@
+services:
+  picomint-gateway:
+    image: ghcr.io/joschisan/picomint-gateway:main
+    container_name: picomint-gateway
+    restart: unless-stopped
+    ports:
+      # Public API (safe to expose publicly)
+      - "8175:8175"
+      # LDK lightning P2P (safe to expose publicly)
+      - "8177:8177"
+      # Admin CLI (localhost only, never expose publicly)
+      # - "127.0.0.1:8176:8176"
+    volumes:
+      - picomint_gateway_data:/data
+    environment:
+      - DATA_DIR=/data
+      - BITCOIN_NETWORK=bitcoin
+      - ESPLORA_URL=https://mempool.space/api
+      - API_BIND=0.0.0.0:8175
+      - CLI_BIND=0.0.0.0:8176
+      - LDK_BIND=0.0.0.0:8177
+
+volumes:
+  picomint_gateway_data:

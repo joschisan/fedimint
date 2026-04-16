@@ -1,0 +1,211 @@
+pub mod audit;
+pub mod bitcoin;
+pub mod general;
+pub mod invite;
+pub mod latency;
+pub mod modules;
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use axum::Router;
+use axum::body::Body;
+use axum::extract::{Form, State};
+use axum::http::header;
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::{get, post};
+use axum_extra::extract::cookie::CookieJar;
+use maud::html;
+use picomint_core::config::META_FEDERATION_NAME_KEY;
+
+use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG};
+use crate::consensus::api::ConsensusApi;
+use crate::ui::assets::WithStaticRoutesExt;
+use crate::ui::auth::UserAuth;
+use crate::ui::dashboard::modules::{lnv2, mintv2, walletv2};
+use crate::ui::{
+    CONNECTIVITY_CHECK_ROUTE, DOWNLOAD_BACKUP_ROUTE, GuardianConfigBackup, LOGIN_ROUTE, LoginInput,
+    ROOT_ROUTE, UiState, connectivity_check_handler, dashboard_layout, login_form,
+    login_submit_response, single_card_layout,
+};
+
+async fn login_form_handler() -> impl IntoResponse {
+    Html(single_card_layout("Enter Password", login_form(None)).into_string())
+}
+
+async fn login_submit(
+    State(state): State<UiState<Arc<ConsensusApi>>>,
+    jar: CookieJar,
+    Form(input): Form<LoginInput>,
+) -> impl IntoResponse {
+    login_submit_response(
+        state.api.auth.clone(),
+        state.auth_cookie_name,
+        state.auth_cookie_value,
+        jar,
+        input,
+    )
+}
+
+async fn download_backup(
+    State(state): State<UiState<Arc<ConsensusApi>>>,
+    _user_auth: UserAuth,
+) -> impl IntoResponse {
+    let backup = build_guardian_config_backup(&state.api);
+    let filename = "guardian-backup.tar";
+
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/x-tar")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{filename}\""),
+        )
+        .body(Body::from(backup.tar_archive_bytes))
+        .expect("Failed to build response")
+}
+
+/// Build a tarball of the guardian config files (local/consensus/private JSON).
+/// Private keys are stored as plaintext JSON; operators should rely on disk
+/// encryption for at-rest protection.
+fn build_guardian_config_backup(api: &ConsensusApi) -> GuardianConfigBackup {
+    let mut tar_archive_builder = tar::Builder::new(Vec::new());
+
+    let mut append = |name: &Path, data: &[u8]| {
+        let mut header = tar::Header::new_gnu();
+        header.set_path(name).expect("Error setting path");
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar_archive_builder
+            .append(&header, data)
+            .expect("Error adding data to tar archive");
+    };
+
+    append(
+        &PathBuf::from(LOCAL_CONFIG).with_extension(JSON_EXT),
+        &serde_json::to_vec(&api.cfg.local).expect("Error encoding local config"),
+    );
+    append(
+        &PathBuf::from(CONSENSUS_CONFIG).with_extension(JSON_EXT),
+        &serde_json::to_vec(&api.cfg.consensus).expect("Error encoding consensus config"),
+    );
+    append(
+        &PathBuf::from(PRIVATE_CONFIG).with_extension(JSON_EXT),
+        &serde_json::to_vec(&api.cfg.private).expect("Error encoding private config"),
+    );
+
+    let tar_archive_bytes = tar_archive_builder
+        .into_inner()
+        .expect("Error building tar archive");
+
+    GuardianConfigBackup { tar_archive_bytes }
+}
+
+async fn dashboard_view(
+    State(state): State<UiState<Arc<ConsensusApi>>>,
+    _auth: UserAuth,
+) -> impl IntoResponse {
+    let api = &*state.api;
+
+    let guardian_names: std::collections::BTreeMap<_, _> = api
+        .cfg
+        .consensus
+        .api_endpoints()
+        .iter()
+        .map(|(peer_id, endpoint)| (*peer_id, endpoint.name.clone()))
+        .collect();
+    let federation_name = api
+        .cfg
+        .consensus
+        .meta
+        .get(META_FEDERATION_NAME_KEY)
+        .cloned()
+        .expect("Federation name must be set");
+    let session_count = api.session_count().await;
+    let picomintd_version = api.code_version_str.clone();
+    let consensus_ord_latency = *api.ord_latency_receiver.borrow();
+    let p2p_connection_status: std::collections::BTreeMap<_, _> = api
+        .p2p_status_receivers
+        .iter()
+        .map(|(peer, receiver)| (*peer, receiver.borrow().clone()))
+        .collect();
+    let invite_code = api.cfg.get_invite_code().to_string();
+    let audit_summary = api.federation_audit().await;
+    let bitcoin_rpc_url = api.bitcoin_rpc_connection.url();
+    let bitcoin_rpc_status = api.bitcoin_rpc_connection.status();
+
+    let content = html! {
+        div class="row gy-4" {
+            div class="col-md-6" {
+                (general::render(&federation_name, session_count, &guardian_names))
+            }
+
+            div class="col-md-6" {
+                (invite::render(&invite_code, session_count))
+            }
+        }
+
+        div class="row gy-4 mt-2" {
+            div class="col-lg-6" {
+                (audit::render(&audit_summary))
+            }
+
+            div class="col-lg-6" {
+                (latency::render(consensus_ord_latency, &p2p_connection_status))
+            }
+        }
+
+        div class="row gy-4 mt-2" {
+            div class="col-12" {
+                (bitcoin::render(bitcoin_rpc_url, &bitcoin_rpc_status))
+            }
+        }
+
+        div class="row gy-4 mt-2" {
+            div class="col-12" {
+                (lnv2::render(&api.server.ln).await)
+            }
+        }
+
+        (walletv2::render(&api.server.wallet).await)
+
+        div class="row gy-4 mt-2" {
+            div class="col-12" {
+                (mintv2::render(&api.server.mint).await)
+            }
+        }
+
+        div class="row gy-4 mt-2" {
+            div class="col-lg-6" {
+                div class="card h-100" {
+                    div class="card-header dashboard-header" { "Guardian Backup" }
+                    div class="card-body" {
+                        div class="alert alert-warning mb-3" {
+                            "You only need to download this backup once. Use it to restore your guardian if your server fails. Store this file securely since it contains your guardians private key for the onchain threshold signature protecting your funds."
+                        }
+                        a href=(DOWNLOAD_BACKUP_ROUTE) class="btn btn-primary" {
+                            "Download"
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    Html(dashboard_layout(content, &picomintd_version).into_string()).into_response()
+}
+
+pub fn router(api: Arc<ConsensusApi>) -> Router {
+    Router::new()
+        .route(ROOT_ROUTE, get(dashboard_view))
+        .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
+        .route(DOWNLOAD_BACKUP_ROUTE, get(download_backup))
+        .route(
+            CONNECTIVITY_CHECK_ROUTE,
+            get(connectivity_check_handler::<Arc<ConsensusApi>>),
+        )
+        .route(lnv2::LNV2_ADD_ROUTE, post(lnv2::post_add))
+        .route(lnv2::LNV2_REMOVE_ROUTE, post(lnv2::post_remove))
+        .with_static_routes()
+        .with_state(UiState::new(api))
+}

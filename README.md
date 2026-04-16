@@ -1,85 +1,178 @@
-<h1 align="center">
-  <a href="https://fedimint.org">
-    Fedimint
-  </a>
-</h1>
+# Picomint
 
-<p align="center">
-    <img src="docs/banner.png">
-</p>
+A minimalist fork of [Fedimint](https://github.com/fedimint/fedimint). Picomint keeps the core Chaumian e-cash mint and Lightning integration but strips every pluggability layer, trait tower, setup flow, legacy module, and deployment knob that was not strictly required. The result is a small, deployment-focused codebase with two binaries (a federation guardian and a Lightning gateway) that you can ship via Docker in a single `docker-compose up`.
 
-<p align="center">
-  <a href="https://github.com/fedimint/fedimint/actions/workflows/ci-nix.yml">
-      <img src="https://github.com/fedimint/fedimint/actions/workflows/ci-nix.yml/badge.svg" alt="GitHub Actions CI Build Status">
-  </a>
-  <a href="https://chat.fedimint.org"><img alt="Developer Discord Chat" src="https://img.shields.io/discord/990354215060795454?label=dev%20chat"></a>
-  <a href="https://github.com/fedimint/fedimint/discussions">
-    <img src="https://img.shields.io/badge/community-discussion-blue" alt="GitHub Discussion">
-  </a>
-  <a href="https://docs.fedimint.org">
-    <img src="https://img.shields.io/static/v1?label=Docs&message=master&color=007ec6&logo=GitBook&logoColor=ffffff" alt="docs built from master">
-  </a>
-  <a href="https://app.radicle.xyz/nodes/radicle.fedimint.org/rad:z2eeB9LF8fDNJQaEcvAWxQmU7h2PG">
-    <img src="https://img.shields.io/badge/Radicle-explore-blue" alt="View on Radicle">
-  </a>
-</p>
+Picomint runs over [Iroh](https://iroh.computer/) (QUIC + hole-punching), uses [redb](https://github.com/cberner/redb) for storage, and ships without migrations, backups, or version negotiation.
 
-[Fedimint](https://fedimint.org) is a module based system for building federated applications. It is designed to be a
-trust-minimized, censorship-resistant, and private alternative to centralized applications.
+> ⚠️ **Beta / experimental.** Not recommended for real funds.
 
-> **Fedimint is released under
-an [MIT License](https://github.com/fedimint/fedimint/blob/master/LICENSE). This means that the software here is
-provided "as is", without warranty of any kind, express or implied. You can find our
-latest release [here](https://github.com/fedimint/fedimint/releases/latest).**
+## Features
 
-Fedimint ships with 3 default
-modules - [Bitcoin](https://github.com/bitcoin/bitcoin), [Lightning](https://github.com/lightning/bolts),
-and [Chaumian Ecash](https://en.wikipedia.org/wiki/Ecash) - for out-of-the-box best practices for private and
-trust-minimized payments. [You can write custom modules](https://github.com/fedimint/fedimint-custom-modules-example)
-that define further consensus items and transaction types leveraging the payments modules to build your own federated
-applications.
+- **Two binaries, two roles** — `picomint-server-daemon` (federation guardian) and `picomint-gateway-daemon` (Lightning gateway with embedded LDK node).
+- **Iroh-native networking** — no public IP, domain, or TLS configuration required.
+- **Static module set** — mint, wallet, lightning (v2 only). No dyn-module plumbing.
+- **redb storage** — single file per daemon, no migrations.
+- **Admin CLIs shipped in the container** — `picomint-server-cli` and `picomint-gateway-cli` reach the daemon over a localhost-only HTTP socket.
 
-The Fedimint Developer Discord is the best place to get help and ask
-questions. [Join the Discord](https://discord.gg/cEVEmqCgWG) and say hi! We are extremely active and work to onboard
-developers of all skill levels to Fedimint and associated open-source Bitcoin projects. Fedimint touches many different
-areas of Bitcoin development, so there is something for everyone. See below for more information on how to get involved.
+## Deploy a federation guardian
 
-## Using Fedimint
+Download the reference compose file:
 
-To use Fedimint you only need a client application, that will allow interacting with
-Fedimint federations.
+```bash
+curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker/server/docker-compose.yml
+```
 
-You can pick one of Fedimint-supporting applications:
+Edit `UI_PASSWORD` to a strong password, then:
 
-* [Fedi](https://www.fedi.xyz/) - for MacOS, Android and Web browsers
-* [Ecash App](https://ecash.love) - Android and desktop wallet
-* [Conduit Wallet](https://conduit.cash/) - iOS and Android wallet
-* [Harbor Wallet](https://harbor.cash/) - desktop wallet
-* [Vipr Wallet](https://github.com/ngutech21/vipr-wallet) - Web (PWA) wallet
-* `fedimint-cli` - built-in CLI wallet
+```bash
+docker-compose up -d
+```
 
-## Running your own Fedimint federation
+The UI is available at [http://localhost:8174](http://localhost:8174). Forward it over SSH if the daemon runs remotely:
 
-If you are interested in setting up a Fedimint federation, refer to [Running your own Fedimint federation](./docs/deploying.md).
+```bash
+ssh -NL 8174:127.0.0.1:8174 <your_server>
+```
 
-## Developing Fedimint
+## Deploy a Lightning gateway
 
-We are actively looking for developers to help build Fedimint and associated open-source Bitcoin projects. Fedimint
-touches many different areas of Bitcoin development, so there is something for everyone. The best places to get started
-are:
+```bash
+curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker/gateway/docker-compose.yml
+docker-compose up -d
+```
 
-- [Fedimint Hacking Guide](./HACKING.md#) for information about working on the code.
-- [Fedimint Contributing Guidelines](CONTRIBUTING.md#) for information for contributors.
-- [Fedimint Developer Discord Server](https://discord.gg/cEVEmqCgWG): the best place to get help and ask questions.
-- [Fedimint Technical Reference Documentation](https://docs.fedimint.org)
-- [Fedimint Contributor Calendar](https://calendar.google.com/calendar/u/0/embed?src=fedimintcalendar@gmail.com): This
-  calendar contains all the developer calls and events.
-- [Fedimint Developer Calls](https://meet.jit.si/fedimintdevcall): We have developer calls every Monday at 4PM UTC to
-  review PRs and discuss current development priorities. As a new developer, this is a great place to find good first
-  issues and mentorship from the core team on how to get started contributing to Fedimint.
-- [PR Review Club](https://meet.jit.si/fedimintdevcall): We have PR review calls every Tuesday at 4PM UTC.
-- [Weekly Deep Dive](https://meet.jit.si/fedimintdevcall): We have a deep dive every Thursday at 4PM UTC to discuss
-  technical topics relating to Fedimint in depth: cryptography, Rust programming, consensus, networking, etc. This is a
-  great place to learn about the internals of Fedimint and Bitcoin. We normally plan these calls based off requests from
-  contributors on aspects of Fedimint they want to learn more about, so please reach out if you have a topic you want to
-  learn more about.
+## Admin CLI
+
+Both CLIs are included in their respective images and available on the container `PATH`. Open a shell inside the container:
+
+```bash
+docker exec -it picomint-server bash
+picomint-server-cli --help
+```
+
+Or run commands one-shot:
+
+```bash
+docker exec picomint-server picomint-server-cli invite
+docker exec picomint-gateway picomint-gateway-cli info
+```
+
+For the admin CLI to reach the daemon, the admin port (`8175` for server, `8176` for gateway) must be reachable from inside the container. The reference compose files bind admin ports to `0.0.0.0` inside the container but do not forward them to the host — **never expose admin ports publicly**.
+
+## Interfaces
+
+### Server daemon (`picomint-server-daemon`)
+
+| Port | Purpose                      | Safe to expose? |
+|------|------------------------------|-----------------|
+| 8173 | P2P consensus (Iroh)         | Yes             |
+| 8174 | Web UI (setup + dashboard)   | Localhost only  |
+| 8175 | Admin CLI HTTP API           | **Never**       |
+
+### Gateway daemon (`picomint-gateway-daemon`)
+
+| Port | Purpose                      | Safe to expose? |
+|------|------------------------------|-----------------|
+| 8175 | Public API (Iroh)            | Yes             |
+| 8176 | Admin CLI HTTP API           | **Never**       |
+| 8177 | LDK Lightning P2P            | Yes             |
+
+## Configuration reference
+
+### Server daemon
+
+| Env                          | Required | Default           | Description                                |
+|------------------------------|----------|-------------------|--------------------------------------------|
+| `DATA_DIR`                   | yes      |                   | Directory for the redb database file       |
+| `BITCOIN_NETWORK`            | yes      | `regtest`         | `bitcoin`, `testnet`, `signet`, `regtest`  |
+| `UI_PASSWORD`                | yes      |                   | Password for the web UI                    |
+| `ESPLORA_URL`                | one of   |                   | Esplora HTTP URL, e.g. `https://mempool.space/api` |
+| `BITCOIND_URL`               | one of   |                   | Bitcoin Core RPC URL                       |
+| `BITCOIND_USERNAME`          | if RPC   |                   | Bitcoin Core RPC user                      |
+| `BITCOIND_PASSWORD`          | if RPC   |                   | Bitcoin Core RPC password                  |
+| `BITCOIND_URL_PASSWORD_FILE` | no       |                   | Alternative: file containing RPC password  |
+| `BIND_P2P`                   | no       | `0.0.0.0:8173`    | P2P consensus listen address               |
+| `BIND_UI`                    | no       | `127.0.0.1:8174`  | Web UI listen address                      |
+| `BIND_CLI`                   | no       | `127.0.0.1:8175`  | Admin CLI listen address (never public)    |
+| `IROH_DNS`                   | no       |                   | Override Iroh DNS server                   |
+| `IROH_RELAY`                 | no       |                   | Comma-separated list of Iroh relay URLs    |
+| `MAX_CONNECTIONS`            | no       | `1000`            | Max concurrent Iroh API connections        |
+| `MAX_REQUESTS_PER_CONNECTION`| no       | `50`              | Max parallel requests per Iroh connection  |
+
+*Either `ESPLORA_URL` or `BITCOIND_URL` must be set, but not both.*
+
+### Gateway daemon
+
+| Env                        | Required | Default           | Description                                 |
+|----------------------------|----------|-------------------|---------------------------------------------|
+| `DATA_DIR`                 | yes      |                   | Directory for redb + LDK node data          |
+| `BITCOIN_NETWORK`          | yes      |                   | Bitcoin network the gateway runs on         |
+| `ESPLORA_URL`              | one of   |                   | Esplora HTTP URL                            |
+| `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL                        |
+| `BITCOIND_USERNAME`        | if RPC   |                   | Bitcoin Core RPC user                       |
+| `BITCOIND_PASSWORD`        | if RPC   |                   | Bitcoin Core RPC password                   |
+| `API_BIND`                 | no       | `0.0.0.0:8175`    | Public API listen address                   |
+| `CLI_BIND`                 | no       | `127.0.0.1:8176`  | Admin CLI listen address (never public)     |
+| `LDK_BIND`                 | no       | `0.0.0.0:8177`    | LDK Lightning P2P listen address            |
+| `ROUTING_FEE_BASE_MSAT`    | no       | `2000`            | Lightning base routing fee (msat)           |
+| `ROUTING_FEE_PPM`          | no       | `3000`            | Lightning routing fee rate (ppm)            |
+| `TRANSACTION_FEE_BASE_MSAT`| no       | `2000`            | Federation transaction base fee (msat)      |
+| `TRANSACTION_FEE_PPM`      | no       | `3000`            | Federation transaction fee rate (ppm)       |
+
+## Server CLI
+
+```bash
+picomint-server-cli setup status
+picomint-server-cli setup set-local-params <name> [--federation-name X] [--federation-size N]
+picomint-server-cli setup add-peer <setup-code>
+picomint-server-cli setup start-dkg
+
+picomint-server-cli invite
+picomint-server-cli audit
+
+picomint-server-cli module walletv2 total-value
+picomint-server-cli module walletv2 block-count
+picomint-server-cli module walletv2 feerate
+picomint-server-cli module walletv2 tx-chain
+picomint-server-cli module walletv2 pending-tx-chain
+
+picomint-server-cli module lnv2 gateway add <url>
+picomint-server-cli module lnv2 gateway remove <url>
+picomint-server-cli module lnv2 gateway list
+```
+
+## Gateway CLI
+
+```bash
+picomint-gateway-cli info
+picomint-gateway-cli mnemonic
+
+picomint-gateway-cli ldk balances
+picomint-gateway-cli ldk onchain receive
+picomint-gateway-cli ldk onchain send --address <addr> --amount <amt> --sats-per-vbyte <n>
+picomint-gateway-cli ldk channel open <pubkey> <host> <channel-size-sats> [--push-amount-sats N]
+picomint-gateway-cli ldk channel close <pubkey> [--force] [--sats-per-vbyte N]
+picomint-gateway-cli ldk channel list
+picomint-gateway-cli ldk peer connect <pubkey> <host>
+picomint-gateway-cli ldk peer disconnect <pubkey>
+picomint-gateway-cli ldk peer list
+picomint-gateway-cli ldk invoice create <amount-msats> [--expiry-secs N] [--description S]
+picomint-gateway-cli ldk invoice pay <bolt11>
+
+picomint-gateway-cli federation join <invite>
+picomint-gateway-cli federation list
+picomint-gateway-cli federation config <federation-id>
+picomint-gateway-cli federation invite <federation-id>
+picomint-gateway-cli federation balance <federation-id>
+
+picomint-gateway-cli module <federation-id> mintv2 count
+picomint-gateway-cli module <federation-id> mintv2 send <amount>
+picomint-gateway-cli module <federation-id> mintv2 receive <ecash>
+picomint-gateway-cli module <federation-id> walletv2 receive
+picomint-gateway-cli module <federation-id> walletv2 send <address> <amount> [--fee F]
+picomint-gateway-cli module <federation-id> walletv2 send-fee
+```
+
+## License
+
+MIT. Derived from [Fedimint](https://github.com/fedimint/fedimint).

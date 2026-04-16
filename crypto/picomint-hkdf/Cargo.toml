@@ -1,0 +1,19 @@
+[package]
+authors = { workspace = true }
+description = "RFC5869 HKDF implementation on top of bitcoin_hashes"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-hkdf"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "hkdf"
+path = "src/lib.rs"
+
+[dependencies]
+bitcoin_hashes = { workspace = true }
+
+[lints]
+workspace = true

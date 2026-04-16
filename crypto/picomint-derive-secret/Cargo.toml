@@ -1,0 +1,27 @@
+[package]
+authors = { workspace = true }
+description = "Picomint derivable secret implementation"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-derive-secret"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "tokio_unstable"]
+
+[lib]
+name = "picomint_derive_secret"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+bitcoin_hashes = { workspace = true }
+bls12_381 = { workspace = true }
+picomint-core = { workspace = true }
+hkdf = { workspace = true }
+ring = { workspace = true }
+
+[lints]
+workspace = true

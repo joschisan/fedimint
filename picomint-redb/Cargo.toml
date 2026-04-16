@@ -1,0 +1,28 @@
+[package]
+authors = { workspace = true }
+description = "picomint-redb provides a redb-backed database implementation for Picomint."
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-redb"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "picomint_redb"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+picomint-core = { workspace = true }
+futures = { workspace = true }
+redb = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

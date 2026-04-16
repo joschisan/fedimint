@@ -1,0 +1,89 @@
+[package]
+authors = { workspace = true }
+description = "picomint-server-daemon facilitates federated consensus with atomic broadcast and distributed configuration. Produces the `picomint-server-daemon` binary."
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-server-daemon"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "tokio_unstable"]
+
+[features]
+default = []
+
+[lib]
+name = "picomint_server_daemon"
+path = "src/lib.rs"
+
+[dependencies]
+aleph-bft = { workspace = true }
+anyhow = { workspace = true }
+async-channel = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true, features = ["macros"] }
+axum-extra = { workspace = true, features = ["cookie", "form"] }
+base64 = { workspace = true }
+bincode = { workspace = true }
+bitcoin = { workspace = true }
+bls12_381 = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+picomint-aead = { workspace = true }
+picomint-api-client = { workspace = true }
+picomint-client-module = { workspace = true }
+picomint-core = { workspace = true }
+picomint-derive-secret = { workspace = true }
+picomint-lnv2-common = { workspace = true }
+picomint-lnv2-server = { workspace = true }
+picomint-logging = { workspace = true, features = ["telemetry"] }
+picomint-mintv2-common = { workspace = true }
+picomint-mintv2-server = { workspace = true }
+picomint-redb = { workspace = true }
+picomint-server-bitcoin-rpc = { workspace = true }
+picomint-server-cli-core = { workspace = true }
+picomint-server-core = { workspace = true }
+picomint-walletv2-common = { workspace = true }
+picomint-walletv2-server = { workspace = true }
+futures = { workspace = true }
+group = { workspace = true }
+hex = { workspace = true }
+hyper = { workspace = true }
+iroh = { workspace = true, default-features = false }
+iroh-base = { workspace = true, default-features = false }
+iroh-relay = { workspace = true, default-features = false }
+itertools = { workspace = true }
+jsonrpsee = { workspace = true, features = ["server"] }
+maud = { workspace = true }
+parity-scale-codec = { workspace = true }
+pin-project = { workspace = true }
+pkarr = { workspace = true, features = ["dht", "relays"] }
+qrcode = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rayon = { workspace = true }
+rcgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha3 = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+subtle = { workspace = true }
+tar = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
+tower = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+z32 = { workspace = true }
+
+[dev-dependencies]
+test-log = { workspace = true }
+
+[lints]
+workspace = true

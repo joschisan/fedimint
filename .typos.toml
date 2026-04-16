@@ -27,6 +27,6 @@ extend-exclude = [
   "hfuzz_target/**",
   "hfuzz_workspace/**",
   "releases/**",
-  "fedimint-ui-common/assets/**",
+  "picomint-ui-common/assets/**",
 
 ]

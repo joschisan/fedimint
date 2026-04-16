@@ -1,0 +1,25 @@
+services:
+  picomint-server:
+    image: ghcr.io/joschisan/picomint-server:main
+    container_name: picomint-server
+    restart: unless-stopped
+    ports:
+      # P2P consensus (safe to expose publicly)
+      - "8173:8173"
+      # UI (localhost only)
+      - "127.0.0.1:8174:8174"
+      # Admin CLI (localhost only, never expose publicly)
+      # - "127.0.0.1:8175:8175"
+    volumes:
+      - picomint_server_data:/data
+    environment:
+      - DATA_DIR=/data
+      - BITCOIN_NETWORK=bitcoin
+      - ESPLORA_URL=https://mempool.space/api
+      - BIND_P2P=0.0.0.0:8173
+      - BIND_UI=0.0.0.0:8174
+      - BIND_CLI=0.0.0.0:8175
+      - UI_PASSWORD=<change-me> # REQUIRED: set a strong password
+
+volumes:
+  picomint_server_data:

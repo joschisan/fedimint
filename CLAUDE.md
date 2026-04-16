@@ -2,113 +2,49 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Project
 
-Fedimint is a modular framework for building federated financial applications. It provides a trust-minimized, censorship-resistant, and private alternative to centralized applications. The core implementation focuses on a federated Chaumian e-cash mint that's natively compatible with Bitcoin and the Lightning Network.
+Picomint is a minimalist fork of Fedimint — two binaries (federation guardian + Lightning gateway), Iroh networking, redb storage, static module set (mintv2, walletv2, lnv2). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. See README.md for deployment.
 
-## Essential Commands
+## Build and development
 
-### Build and Development
-- `just build` - Build the entire workspace
-- `just check` - Run cargo check on everything
-- `just test` - Run tests (builds first)
-- `cargo check -q` - Quick syntax/type checking
-- `just lint` - Run linters (git pre-commit hook)
-- `just clippy` - Run clippy with warnings as errors
-- `just format` - Format code with rustfmt and nixfmt
+- `cargo check --workspace` — full workspace type check
+- `cargo build --workspace` — build everything
+- `cargo test --workspace` — run all tests
+- `just clippy` / `just format` / `just final-check`
+- `./test-integration.sh` — end-to-end integration test (requires Docker + bitcoind)
 
-### Testing
-- `just test-ci-all` - Run all tests in parallel like CI
-- `just final-check` - All checks recommended before opening a PR
-- `just check-wasm` - Verify WASM compatibility
+## Architecture
 
-### Development Environment
-- `just devimint-env` - Spawn development federation environment
-- `just devimint-env-pre-dkg` - Start pre-DKG federation on fixed ports
-- `nix develop` - Enter Nix development shell
+### Crates
+- `picomint-core` — shared types, encoding, networking primitives, db traits
+- `picomint-server-daemon` — federation guardian binary (consensus via AlephBFT)
+- `picomint-server-cli` — admin CLI for the server daemon (HTTP-over-localhost)
+- `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
+- `picomint-gateway-cli` — admin CLI for the gateway daemon
+- `picomint-client` — client library
+- `picomint-client-module` — client module traits + per-module state machines
+- `picomint-server-core` — `ServerModule` trait + concrete module set
+- `picomint-redb` — redb-based database layer
+- `picomint-api-client` — client-side API transport (Iroh-only)
+- `modules/picomint-{mintv2,walletv2,lnv2,gwv2}-*` — the three active modules
 
-### Documentation
-- `just build-docs` - Build cargo doc documentation
-- `just docs` - Build and open documentation
+### Wire + storage
+- Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-core::encoding`
+- Storage: redb only. No RocksDB. No migrations (types implement redb's `Key`/`Value` directly via macros in `picomint-redb`)
+- Transport: Iroh-only (QUIC + hole-punching). No TLS/websocket/DNS announcements
 
-## Architecture Overview
+### Admin CLIs
+- Both CLIs are thin HTTP clients. They POST JSON to the daemon's `BIND_CLI` (server: 8175) / `CLI_BIND` (gateway: 8176) port.
+- Route constants live in `picomint-server-cli-core` / `picomint-gateway-cli-core`.
+- Shared request/response types also live in the `*-cli-core` crates; daemon handlers live in `picomint-server-daemon/src/cli.rs` and `picomint-gateway-daemon/src/cli.rs`.
 
-### Core Components
-- **fedimint-core** - Core framework, types, and utilities shared between client/server
-- **fedimint-server** - Federation consensus logic using AlephBFT
-- **fedimint-client** - Client library for interacting with federations
-- **modules/** - Pluggable modules (mint, wallet, lightning, meta)
-- **gateway/** - Lightning gateway for payment routing
+### Env vars
+Env var names are unprefixed (puncture-style): `DATA_DIR`, `BITCOIN_NETWORK`, `BITCOIND_URL`, `LDK_BIND`, etc. No `FM_*` prefix. Defined inline via clap `#[arg(env = "...")]`.
 
-### Module Structure Pattern
-Each module follows a three-crate pattern:
-```
-fedimint-<module>-common/     # Shared types and config
-fedimint-<module>-client/     # Client-side functionality
-fedimint-<module>-server/     # Server-side consensus logic
-```
+## Conventions
 
-### Key Modules
-- **Mint Module** (`fedimint-mint-*`) - Chaumian e-cash implementation
-- **Wallet Module** (`fedimint-wallet-*`) - Bitcoin on-chain functionality
-- **Lightning Module** (`fedimint-ln-*`, `fedimint-lnv2-*`) - Lightning Network integration
-- **Meta Module** (`fedimint-meta-*`) - Federation metadata management
-
-### Entry Points
-- `fedimintd/src/bin/main.rs` - Federation node daemon
-- `fedimint-cli/src/main.rs` - Command-line client interface
-- `gateway/fedimint-gateway-server/src/bin/main.rs` - Lightning gateway
-
-## Development Patterns
-
-### Consensus Architecture
-- Byzantine fault-tolerant consensus using AlephBFT
-- Epoch-based transaction processing
-- Module-specific consensus contributions
-- Client operations driven by async state machines
-
-### Key Design Patterns
-- **Extensible Module System** - Modules implement `ServerModule` and `ClientModule` traits
-- **Type-Safe Encoding** - Custom `Encodable`/`Decodable` traits with module registries
-- **Operation-Based Client API** - Long-running operations with `OperationId` tracking
-- **Database Abstraction** - Key-value store with module-specific namespacing
-
-### Testing Strategy
-- Integration tests using `devimint` development environment
-- Module-specific test suites in `fedimint-*-tests` crates
-- Database migration testing with snapshot validation
-- WASM compatibility verification
-- Real service testing against bitcoind/Lightning nodes
-
-### Code Organization
-- Workspace with 78+ member crates
-- Nix-based reproducible development environment
-- `just` for build automation and common tasks
-- Multi-process development using `mprocs`
-- Extensive CI pipeline with compatibility testing
-
-### Code Quality Standards
-- **Never use `unwrap()` in non-test code** - Always use `expect()` with a succinct message explaining why the condition cannot fail
-- **Use structured logging** - Break logging statements into multiple lines for readability and use tracing's structured logging (field = value) instead of string interpolation
-- **Group related parameters** - When passing many related parameters, create utility structs (like `ConnectionLimits`) to reduce function parameter count and improve readability
-- Follow existing patterns and conventions in the codebase
-- Use meaningful error messages that help with debugging
-
-## Common Workflows
-
-### Adding New Module Functionality
-1. Implement consensus logic in `*-server` crate
-2. Add client-side operations in `*-client` crate
-3. Update shared types in `*-common` crate
-4. Add integration tests in `*-tests` crate
-5. Update database migrations if needed
-
-### After Making Code Changes
-- Always run `just format` after making code changes to ensure formatting is correct
-
-### Before Opening a PR
-Run `just final-check` which includes:
-- Linting and formatting
-- Full test suite
-- Documentation tests
-- WASM compatibility check
+- Never `unwrap()` outside tests — use `expect("...")` with a message explaining why it can't fail.
+- Prefer concrete types over dyn/trait-objects. This project aggressively replaced the Fedimint dyn module system with static typed module sets.
+- No comments that explain WHAT code does — names and types already say it. Only comment non-obvious WHY.
+- Prefer deleting code over preserving it — picomint is explicitly a simplification project.

@@ -1,76 +1,69 @@
 
 [workspace]
 members = [
-    "crypto/aead",
-    "crypto/derive-secret",
-    "crypto/hkdf",
-    "crypto/tbs",
-    "crypto/tpe",
-    "docs",
-    "fedimint-api-client",
-    "fedimint-bip39",
-    "fedimint-bitcoind",
-    "fedimint-build",
-    "fedimint-client",
-    "fedimint-client-module",
-    "fedimint-core",
-    "fedimint-derive",
-    "fedimint-eventlog",
-    "fedimint-gateway-cli",
-    "fedimint-gateway-cli-core",
-    "fedimint-gateway-daemon",
-    "fedimint-integration-tests",
-    "fedimint-lnurl",
-    "fedimint-logging",
-    "fedimint-recurringdv2",
-    "fedimint-redb",
-    "fedimint-server-bitcoin-rpc",
-    "fedimint-server-cli",
-    "fedimint-server-cli-core",
-    "fedimint-server-core",
-    "fedimint-server-daemon",
-    "fedimint-util-error",
-    "fedimintd-envs",
-    "modules/fedimint-gwv2-client",
-    "modules/fedimint-lnv2-client",
-    "modules/fedimint-lnv2-common",
-    "modules/fedimint-lnv2-server",
-    "modules/fedimint-mintv2-client",
-    "modules/fedimint-mintv2-common",
-    "modules/fedimint-mintv2-server",
-    "modules/fedimint-walletv2-client",
-    "modules/fedimint-walletv2-common",
-    "modules/fedimint-walletv2-server",
-    "utils/portalloc",
+    "crypto/picomint-aead",
+    "crypto/picomint-derive-secret",
+    "crypto/picomint-hkdf",
+    "crypto/picomint-tbs",
+    "crypto/picomint-tpe",
+    "picomint-api-client",
+    "picomint-bip39",
+    "picomint-bitcoind",
+    "picomint-client",
+    "picomint-client-module",
+    "picomint-core",
+    "picomint-derive",
+    "picomint-eventlog",
+    "picomint-gateway-cli",
+    "picomint-gateway-cli-core",
+    "picomint-gateway-daemon",
+    "picomint-integration-tests",
+    "picomint-lnurl",
+    "picomint-logging",
+    "picomint-recurringdv2",
+    "picomint-redb",
+    "picomint-server-bitcoin-rpc",
+    "picomint-server-cli",
+    "picomint-server-cli-core",
+    "picomint-server-core",
+    "picomint-server-daemon",
+    "picomint-util-error",
+    "modules/picomint-gwv2-client",
+    "modules/picomint-lnv2-client",
+    "modules/picomint-lnv2-common",
+    "modules/picomint-lnv2-server",
+    "modules/picomint-mintv2-client",
+    "modules/picomint-mintv2-common",
+    "modules/picomint-mintv2-server",
+    "modules/picomint-walletv2-client",
+    "modules/picomint-walletv2-common",
+    "modules/picomint-walletv2-server",
 ]
 resolver = "2"
 
 [workspace.package]
-authors = ["The Fedimint Developers"]
-description = "Fedimint is a Federated Chaumian E-Cash Mint, natively compatible with Bitcoin & the Lightning Network"
-documentation = "https://github.com/fedimint/fedimint/tree/master/docs"
+authors = ["joschisan"]
+description = "picomint: minimalist fork of fedimint"
+documentation = "https://github.com/joschisan/picomint"
 edition = "2024"
-homepage = "https://fedimint.org"
+homepage = "https://github.com/joschisan/picomint"
 keywords = ["bitcoin", "lightning", "chaumian", "e-cash", "federated"]
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/fedimint/fedimint"
-version = "0.11.0-alpha"
+repository = "https://github.com/joschisan/picomint"
+version = "0.1.0"
 
 [workspace.metadata]
-authors = ["The Fedimint Developers"]
-description = "Fedimint is a Federated Chaumian E-Cash Mint, natively compatible with Bitcoin & the Lightning Network"
-documentation = "https://github.com/fedimint/fedimint/tree/master/docs"
+authors = ["joschisan"]
+description = "picomint: minimalist fork of fedimint"
+documentation = "https://github.com/joschisan/picomint"
 edition = "2024"
-homepage = "https://fedimint.org"
+homepage = "https://github.com/joschisan/picomint"
 keywords = ["bitcoin", "lightning", "chaumian", "e-cash", "federated"]
 license-file = "LICENSE"
-name = "fedimint"
+name = "picomint"
 readme = "README.md"
-repository = "https://github.com/fedimint/fedimint"
-
-[workspace.metadata.crane]
-name = "fedimint"
+repository = "https://github.com/joschisan/picomint"
 
 [workspace.dependencies]
 aleph-bft = { package = "fedimint-aleph-bft", version = "0.36.0", default-features = false }
@@ -113,40 +106,37 @@ esplora-client = { version = "0.12.3", default-features = false, features = [
     "tokio",
 ] }
 
-fedimint-aead = { path = "./crypto/aead", version = "=0.11.0-alpha" }
-fedimint-api-client = { path = "./fedimint-api-client", version = "=0.11.0-alpha" }
-fedimint-bip39 = { path = "./fedimint-bip39", version = "=0.11.0-alpha" }
-fedimint-bitcoind = { path = "./fedimint-bitcoind", version = "=0.11.0-alpha" }
-fedimint-build = { path = "./fedimint-build", version = "=0.11.0-alpha" }
-fedimint-client = { path = "./fedimint-client", version = "=0.11.0-alpha" }
-fedimint-client-module = { path = "./fedimint-client-module", version = "=0.11.0-alpha" }
-fedimint-core = { path = "./fedimint-core", version = "=0.11.0-alpha" }
-fedimint-derive = { path = "./fedimint-derive", version = "=0.11.0-alpha" }
-fedimint-derive-secret = { path = "./crypto/derive-secret", version = "=0.11.0-alpha" }
-fedimint-eventlog = { path = "./fedimint-eventlog", version = "=0.11.0-alpha" }
-fedimint-gateway-cli-core = { path = "./fedimint-gateway-cli-core", version = "=0.11.0-alpha" }
-fedimint-gateway-daemon = { path = "./fedimint-gateway-daemon", version = "=0.11.0-alpha" }
-fedimint-gwv2-client = { path = "./modules/fedimint-gwv2-client", version = "=0.11.0-alpha" }
-fedimint-lnurl = { path = "./fedimint-lnurl", version = "=0.11.0-alpha" }
-fedimint-lnv2-client = { path = "./modules/fedimint-lnv2-client", version = "=0.11.0-alpha" }
-fedimint-lnv2-common = { path = "./modules/fedimint-lnv2-common", version = "=0.11.0-alpha" }
-fedimint-lnv2-server = { path = "./modules/fedimint-lnv2-server", version = "=0.11.0-alpha" }
-fedimint-logging = { path = "./fedimint-logging", version = "=0.11.0-alpha" }
-fedimint-mintv2-client = { path = "./modules/fedimint-mintv2-client", version = "=0.11.0-alpha" }
-fedimint-mintv2-common = { path = "./modules/fedimint-mintv2-common", version = "=0.11.0-alpha" }
-fedimint-mintv2-server = { path = "./modules/fedimint-mintv2-server", version = "=0.11.0-alpha" }
-fedimint-portalloc = { path = "utils/portalloc", version = "=0.11.0-alpha" }
-fedimint-redb = { path = "./fedimint-redb", version = "=0.11.0-alpha" }
-fedimint-server-bitcoin-rpc = { path = "./fedimint-server-bitcoin-rpc", version = "=0.11.0-alpha" }
-fedimint-server-cli = { path = "./fedimint-server-cli", version = "=0.11.0-alpha" }
-fedimint-server-cli-core = { path = "./fedimint-server-cli-core", version = "=0.11.0-alpha" }
-fedimint-server-core = { path = "./fedimint-server-core", version = "=0.11.0-alpha" }
-fedimint-server-daemon = { path = "./fedimint-server-daemon", version = "=0.11.0-alpha" }
-fedimint-util-error = { path = "./fedimint-util-error", version = "=0.11.0-alpha" }
-fedimint-walletv2-client = { path = "./modules/fedimint-walletv2-client", version = "=0.11.0-alpha" }
-fedimint-walletv2-common = { path = "./modules/fedimint-walletv2-common", version = "=0.11.0-alpha" }
-fedimint-walletv2-server = { path = "./modules/fedimint-walletv2-server", version = "=0.11.0-alpha" }
-fedimintd-envs = { path = "./fedimintd-envs", version = "=0.11.0-alpha" }
+picomint-aead = { path = "./crypto/picomint-aead", version = "=0.1.0" }
+picomint-api-client = { path = "./picomint-api-client", version = "=0.1.0" }
+picomint-bip39 = { path = "./picomint-bip39", version = "=0.1.0" }
+picomint-bitcoind = { path = "./picomint-bitcoind", version = "=0.1.0" }
+picomint-client = { path = "./picomint-client", version = "=0.1.0" }
+picomint-client-module = { path = "./picomint-client-module", version = "=0.1.0" }
+picomint-core = { path = "./picomint-core", version = "=0.1.0" }
+picomint-derive = { path = "./picomint-derive", version = "=0.1.0" }
+picomint-derive-secret = { path = "./crypto/picomint-derive-secret", version = "=0.1.0" }
+picomint-eventlog = { path = "./picomint-eventlog", version = "=0.1.0" }
+picomint-gateway-cli-core = { path = "./picomint-gateway-cli-core", version = "=0.1.0" }
+picomint-gateway-daemon = { path = "./picomint-gateway-daemon", version = "=0.1.0" }
+picomint-gwv2-client = { path = "./modules/picomint-gwv2-client", version = "=0.1.0" }
+picomint-lnurl = { path = "./picomint-lnurl", version = "=0.1.0" }
+picomint-lnv2-client = { path = "./modules/picomint-lnv2-client", version = "=0.1.0" }
+picomint-lnv2-common = { path = "./modules/picomint-lnv2-common", version = "=0.1.0" }
+picomint-lnv2-server = { path = "./modules/picomint-lnv2-server", version = "=0.1.0" }
+picomint-logging = { path = "./picomint-logging", version = "=0.1.0" }
+picomint-mintv2-client = { path = "./modules/picomint-mintv2-client", version = "=0.1.0" }
+picomint-mintv2-common = { path = "./modules/picomint-mintv2-common", version = "=0.1.0" }
+picomint-mintv2-server = { path = "./modules/picomint-mintv2-server", version = "=0.1.0" }
+picomint-redb = { path = "./picomint-redb", version = "=0.1.0" }
+picomint-server-bitcoin-rpc = { path = "./picomint-server-bitcoin-rpc", version = "=0.1.0" }
+picomint-server-cli = { path = "./picomint-server-cli", version = "=0.1.0" }
+picomint-server-cli-core = { path = "./picomint-server-cli-core", version = "=0.1.0" }
+picomint-server-core = { path = "./picomint-server-core", version = "=0.1.0" }
+picomint-server-daemon = { path = "./picomint-server-daemon", version = "=0.1.0" }
+picomint-util-error = { path = "./picomint-util-error", version = "=0.1.0" }
+picomint-walletv2-client = { path = "./modules/picomint-walletv2-client", version = "=0.1.0" }
+picomint-walletv2-common = { path = "./modules/picomint-walletv2-common", version = "=0.1.0" }
+picomint-walletv2-server = { path = "./modules/picomint-walletv2-server", version = "=0.1.0" }
 fs2 = "0.4.3"
 futures = "0.3.32"
 futures-util = "0.3.30"
@@ -155,7 +145,7 @@ gloo-timers = "0.3.0"
 group = "0.13.0"
 hex = "0.4.3"
 hex-conservative = "1.0.0"
-hkdf = { package = "fedimint-hkdf", path = "./crypto/hkdf", version = "=0.11.0-alpha" }
+hkdf = { package = "picomint-hkdf", path = "./crypto/picomint-hkdf", version = "=0.1.0" }
 hyper = "1.6"
 imbl = "5.0.0"
 iroh = { version = "=0.97.0", default-features = false }
@@ -213,7 +203,7 @@ strum_macros = "0.27"
 subtle = "2.6.1"
 syn = "2.0"
 tar = "0.4.45"
-tbs = { package = "fedimint-tbs", path = "./crypto/tbs", version = "=0.11.0-alpha" }
+tbs = { package = "picomint-tbs", path = "./crypto/picomint-tbs", version = "=0.1.0" }
 tempfile = "3.20.0"
 test-log = { version = "0.2", features = ["trace"], default-features = false }
 thiserror = "2.0.18"
@@ -225,7 +215,7 @@ tokio-test = "0.4.5"
 tokio-util = "0.7.18"
 tower = { version = "0.4.13", default-features = false }
 tower-http = { version = "0.6.8", features = ["cors"] }
-tpe = { package = "fedimint-tpe", path = "./crypto/tpe", version = "=0.11.0-alpha" }
+tpe = { package = "picomint-tpe", path = "./crypto/picomint-tpe", version = "=0.1.0" }
 tracing = "0.1.44"
 tracing-opentelemetry = "0.29.0"
 tracing-subscriber = "0.3.22"

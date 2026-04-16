@@ -1,0 +1,17 @@
+[package]
+authors = { workspace = true }
+description = "Shared types for picomint-server admin CLI"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-server-cli-core"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+picomint-core = { workspace = true }
+picomint-server-core = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

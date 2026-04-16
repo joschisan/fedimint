@@ -1,0 +1,19 @@
+pub mod backup;
+pub mod data_provider;
+pub mod finalization_handler;
+pub mod keychain;
+pub mod network;
+pub mod spawner;
+
+use aleph_bft::NodeIndex;
+use picomint_core::PeerId;
+
+pub fn to_peer_id(node_index: NodeIndex) -> PeerId {
+    u8::try_from(usize::from(node_index))
+        .expect("The node index corresponds to a valid PeerId")
+        .into()
+}
+
+pub fn to_node_index(peer_id: PeerId) -> NodeIndex {
+    usize::from(u8::from(peer_id)).into()
+}

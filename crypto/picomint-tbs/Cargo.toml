@@ -1,0 +1,38 @@
+[package]
+authors = { workspace = true }
+description = "tbs is a helper cryptography library for threshold blind signatures"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-tbs"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[features]
+default = []
+unstable = []
+
+[lib]
+name = "tbs"
+path = "src/lib.rs"
+
+[[bench]]
+harness = false
+name = "tbs"
+path = "benches/tbs.rs"
+
+[dependencies]
+bls12_381 = { workspace = true }
+picomint-core = { workspace = true }
+group = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+serde = { workspace = true }
+sha3 = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+[package]
+authors = { workspace = true }
+description = "Bitcoin RPC implementations for Picomint server"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-server-bitcoin-rpc"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "picomint_server_bitcoin_rpc"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+bitcoin = { workspace = true }
+bitcoincore-rpc = { workspace = true }
+esplora-client = { workspace = true }
+picomint-core = { workspace = true }
+picomint-logging = { workspace = true }
+picomint-server-core = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

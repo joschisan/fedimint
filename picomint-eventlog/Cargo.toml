@@ -1,0 +1,36 @@
+[package]
+authors = { workspace = true }
+description = "picomint-eventlog provides a eventlog handling primitives for Picomint."
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-eventlog"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "tokio_unstable"]
+
+[lib]
+name = "picomint_eventlog"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+picomint-core = { workspace = true }
+picomint-logging = { workspace = true }
+picomint-redb = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["time", "macros", "rt"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+test-log = { workspace = true }
+
+[lints]
+workspace = true

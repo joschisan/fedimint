@@ -1,0 +1,25 @@
+[package]
+description = "Allows using bip39 mnemonic phrases to generate picomint client keys"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-bip39"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "tokio_unstable"]
+
+[lib]
+name = "picomint_bip39"
+path = "./src/lib.rs"
+
+[dependencies]
+bip39 = { workspace = true, features = ["rand"] }
+picomint-client = { workspace = true }
+picomint-core = { workspace = true }
+picomint-derive-secret = { workspace = true }
+rand = { workspace = true }
+
+[lints]
+workspace = true

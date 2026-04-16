@@ -1,0 +1,22 @@
+[package]
+description = "LNURL types and utilities for Picomint"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-lnurl"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "picomint_lnurl"
+path = "src/lib.rs"
+
+[dependencies]
+bech32 = { workspace = true }
+lightning-invoice = { workspace = true, features = ["serde"] }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_with = { workspace = true }
+
+[dev-dependencies]
+serde_json.workspace = true

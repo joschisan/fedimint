@@ -1,0 +1,31 @@
+[package]
+description = "Client for interacting with the gateway"
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+name = "picomint-gateway-cli"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "tokio_unstable"]
+
+[[bin]]
+name = "picomint-gateway-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+bitcoin = { workspace = true }
+clap = { workspace = true }
+picomint-core = { workspace = true }
+picomint-gateway-cli-core = { workspace = true }
+lightning-invoice = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

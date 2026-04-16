@@ -1,0 +1,29 @@
+[package]
+authors = ["The Picomint Developers"]
+description = "picomint-mintv2-common is a chaumian ecash mint module. (common types)"
+edition = "2021"
+license = "MIT"
+name = "picomint-mintv2-common"
+readme = "../../README.md"
+repository = "https://github.com/picomint/picomint"
+version = { workspace = true }
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "tokio_unstable"]
+
+[lib]
+name = "picomint_mintv2_common"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+bitcoin_hashes = { workspace = true }
+picomint-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tbs = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

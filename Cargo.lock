@@ -1648,27 +1648,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dirs"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
-dependencies = [
- "dirs-sys",
-]
-
-[[package]]
-name = "dirs-sys"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
-dependencies = [
- "libc",
- "option-ext",
- "redox_users",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "dispatch2"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1996,17 +1975,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
-name = "fedimint-aead"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "argon2",
- "hex",
- "rand 0.8.5",
- "ring",
-]
-
-[[package]]
 name = "fedimint-aleph-bft"
 version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2025,394 +1993,6 @@ dependencies = [
  "parking_lot",
  "rand 0.8.5",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "fedimint-api-client"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "assert_matches",
- "async-channel",
- "async-trait",
- "bitcoin",
- "fedimint-core",
- "fedimint-lnv2-common",
- "fedimint-logging",
- "fedimint-mintv2-common",
- "fedimint-walletv2-common",
- "futures",
- "iroh",
- "iroh-base",
- "jsonrpsee-core",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tracing",
- "z32",
-]
-
-[[package]]
-name = "fedimint-bip39"
-version = "0.11.0-alpha"
-dependencies = [
- "bip39",
- "fedimint-client",
- "fedimint-core",
- "fedimint-derive-secret",
- "rand 0.8.5",
-]
-
-[[package]]
-name = "fedimint-bitcoind"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "bitcoincore-rpc",
- "esplora-client 0.12.3",
- "fedimint-core",
- "fedimint-logging",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-build"
-version = "0.11.0-alpha"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
-name = "fedimint-client"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "assert_matches",
- "async-stream",
- "async-trait",
- "bitcoin",
- "fedimint-api-client",
- "fedimint-build",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-derive-secret",
- "fedimint-eventlog",
- "fedimint-gwv2-client",
- "fedimint-lnv2-client",
- "fedimint-lnv2-common",
- "fedimint-logging",
- "fedimint-mintv2-client",
- "fedimint-redb",
- "fedimint-walletv2-client",
- "futures",
- "iroh-base",
- "reqwest 0.12.22",
- "serde",
- "serde_json",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-test",
-]
-
-[[package]]
-name = "fedimint-client-module"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "aquamarine",
- "async-stream",
- "async-trait",
- "bitcoin",
- "fedimint-api-client",
- "fedimint-build",
- "fedimint-core",
- "fedimint-derive-secret",
- "fedimint-eventlog",
- "fedimint-logging",
- "fedimint-redb",
- "futures",
- "itertools 0.14.0",
- "rand 0.8.5",
- "reqwest 0.12.22",
- "serde",
- "serde_json",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-core"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "assert_matches",
- "async-channel",
- "async-lock",
- "async-recursion",
- "async-trait",
- "backon",
- "backtrace",
- "base64 0.22.1",
- "bech32",
- "bitcoin",
- "bitcoin-io",
- "bitcoin-units",
- "bitvec",
- "bls12_381",
- "erased-serde",
- "fedimint-derive",
- "fedimint-logging",
- "fedimint-threshold-crypto",
- "fedimint-util-error",
- "futures",
- "futures-util",
- "getrandom 0.3.3",
- "gloo-timers",
- "group",
- "hex",
- "hex-conservative 1.0.1",
- "imbl",
- "iroh",
- "iroh-base",
- "iroh-relay",
- "itertools 0.14.0",
- "js-sys",
- "jsonrpsee-core",
- "lightning",
- "lightning-invoice",
- "lightning-types",
- "macro_rules_attribute",
- "miniscript",
- "n0-future 0.1.3",
- "rand 0.8.5",
- "redb",
- "scopeguard",
- "secp256k1",
- "serde",
- "serde_json",
- "serdect",
- "slotmap",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "subtle",
- "test-log",
- "thiserror 2.0.18",
- "tokio",
- "tokio-rustls 0.26.4",
- "tokio-test",
- "tracing",
- "url",
- "wasm-bindgen-futures",
- "z32",
-]
-
-[[package]]
-name = "fedimint-derive"
-version = "0.11.0-alpha"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.104",
-]
-
-[[package]]
-name = "fedimint-derive-secret"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "bitcoin_hashes",
- "bls12_381",
- "fedimint-core",
- "fedimint-hkdf",
- "ring",
-]
-
-[[package]]
-name = "fedimint-docs"
-version = "0.11.0-alpha"
-
-[[package]]
-name = "fedimint-eventlog"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-stream",
- "async-trait",
- "fedimint-core",
- "fedimint-logging",
- "fedimint-redb",
- "futures",
- "hex",
- "serde",
- "serde_json",
- "test-log",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-gateway-cli"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "bitcoin",
- "clap",
- "fedimint-build",
- "fedimint-core",
- "fedimint-gateway-cli-core",
- "lightning-invoice",
- "reqwest 0.12.22",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "fedimint-gateway-cli-core"
-version = "0.11.0-alpha"
-dependencies = [
- "bitcoin",
- "fedimint-core",
- "lightning-invoice",
- "serde",
-]
-
-[[package]]
-name = "fedimint-gateway-daemon"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "aquamarine",
- "assert_matches",
- "async-stream",
- "async-trait",
- "axum 0.8.8",
- "bitcoin",
- "bon",
- "clap",
- "erased-serde",
- "esplora-client 0.12.3",
- "fedimint-api-client",
- "fedimint-bip39",
- "fedimint-bitcoind",
- "fedimint-build",
- "fedimint-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-derive-secret",
- "fedimint-eventlog",
- "fedimint-gateway-cli-core",
- "fedimint-gwv2-client",
- "fedimint-ldk-node",
- "fedimint-lnurl",
- "fedimint-lnv2-client",
- "fedimint-lnv2-common",
- "fedimint-lnv2-server",
- "fedimint-logging",
- "fedimint-mintv2-client",
- "fedimint-redb",
- "fedimint-tpe",
- "fedimint-walletv2-client",
- "futures",
- "futures-util",
- "hex",
- "iroh",
- "itertools 0.14.0",
- "lightning",
- "lightning-invoice",
- "lockable",
- "rand 0.8.5",
- "reqwest 0.12.22",
- "serde",
- "serde_json",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tower-http",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "fedimint-gwv2-client"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "aquamarine",
- "async-stream",
- "async-trait",
- "bitcoin",
- "erased-serde",
- "fedimint-api-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-eventlog",
- "fedimint-lnv2-common",
- "fedimint-logging",
- "fedimint-redb",
- "fedimint-tpe",
- "futures",
- "lightning-invoice",
- "serde",
- "serde_millis",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-hkdf"
-version = "0.11.0-alpha"
-dependencies = [
- "bitcoin_hashes",
-]
-
-[[package]]
-name = "fedimint-integration-tests"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-stream",
- "bitcoin",
- "bitcoincore-rpc",
- "fedimint-api-client",
- "fedimint-bip39",
- "fedimint-client",
- "fedimint-core",
- "fedimint-eventlog",
- "fedimint-gateway-cli-core",
- "fedimint-ldk-node",
- "fedimint-lnv2-client",
- "fedimint-lnv2-common",
- "fedimint-logging",
- "fedimint-mintv2-client",
- "fedimint-mintv2-common",
- "fedimint-redb",
- "fedimint-server-cli-core",
- "fedimint-walletv2-client",
- "fedimint-walletv2-common",
- "futures",
- "iroh",
- "lightning-invoice",
- "lightning-types",
- "rand 0.8.5",
- "reqwest 0.12.22",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -2457,373 +2037,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-lnurl"
-version = "0.11.0-alpha"
-dependencies = [
- "bech32",
- "lightning-invoice",
- "reqwest 0.12.22",
- "serde",
- "serde_json",
- "serde_with",
-]
-
-[[package]]
-name = "fedimint-lnv2-client"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "aquamarine",
- "async-stream",
- "async-trait",
- "bitcoin",
- "erased-serde",
- "fedimint-api-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-derive-secret",
- "fedimint-eventlog",
- "fedimint-lnurl",
- "fedimint-lnv2-common",
- "fedimint-logging",
- "fedimint-redb",
- "fedimint-tpe",
- "futures",
- "itertools 0.14.0",
- "lightning-invoice",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "strum 0.27.1",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-lnv2-common"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "fedimint-core",
- "fedimint-tpe",
- "group",
- "lightning-invoice",
- "rand 0.8.5",
- "reqwest 0.12.22",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "fedimint-lnv2-server"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "bls12_381",
- "erased-serde",
- "fedimint-core",
- "fedimint-lnv2-common",
- "fedimint-logging",
- "fedimint-redb",
- "fedimint-server-core",
- "fedimint-tpe",
- "futures",
- "group",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serde",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-logging"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "console-subscriber",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "tracing-opentelemetry",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "fedimint-mintv2-client"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "aquamarine",
- "async-channel",
- "async-stream",
- "async-trait",
- "bitcoin_hashes",
- "bls12_381",
- "divan",
- "erased-serde",
- "fedimint-api-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-derive-secret",
- "fedimint-eventlog",
- "fedimint-logging",
- "fedimint-mintv2-common",
- "fedimint-redb",
- "fedimint-tbs",
- "fedimint-threshold-crypto",
- "futures",
- "hex",
- "itertools 0.14.0",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "serdect",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-mintv2-common"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "bitcoin_hashes",
- "fedimint-core",
- "fedimint-tbs",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-mintv2-server"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "erased-serde",
- "fedimint-core",
- "fedimint-logging",
- "fedimint-mintv2-common",
- "fedimint-redb",
- "fedimint-server-core",
- "fedimint-tbs",
- "fedimint-threshold-crypto",
- "futures",
- "itertools 0.14.0",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serde",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-portalloc"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "dirs",
- "fedimint-core",
- "fs2",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-recurringdv2"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "axum 0.8.8",
- "bitcoin",
- "clap",
- "fedimint-core",
- "fedimint-lnurl",
- "fedimint-lnv2-common",
- "fedimint-logging",
- "fedimint-tpe",
- "lightning-invoice",
- "serde",
- "tokio",
- "tower-http",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-redb"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "fedimint-core",
- "futures",
- "redb",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "fedimint-server-bitcoin-rpc"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "bitcoincore-rpc",
- "esplora-client 0.12.3",
- "fedimint-core",
- "fedimint-logging",
- "fedimint-server-core",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-server-cli"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "clap",
- "fedimint-server-cli-core",
- "reqwest 0.12.22",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "fedimint-server-cli-core"
-version = "0.11.0-alpha"
-dependencies = [
- "fedimint-core",
- "fedimint-server-core",
- "serde",
-]
-
-[[package]]
-name = "fedimint-server-core"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "bls12_381",
- "fedimint-api-client",
- "fedimint-core",
- "fedimint-logging",
- "fedimint-redb",
- "futures",
- "group",
- "serde",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-server-daemon"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-channel",
- "async-trait",
- "axum 0.8.8",
- "axum-extra",
- "base64 0.22.1",
- "bincode",
- "bitcoin",
- "bls12_381",
- "bytes",
- "chrono",
- "clap",
- "fedimint-aead",
- "fedimint-aleph-bft",
- "fedimint-api-client",
- "fedimint-build",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-derive-secret",
- "fedimint-lnv2-common",
- "fedimint-lnv2-server",
- "fedimint-logging",
- "fedimint-mintv2-common",
- "fedimint-mintv2-server",
- "fedimint-redb",
- "fedimint-server-bitcoin-rpc",
- "fedimint-server-cli-core",
- "fedimint-server-core",
- "fedimint-walletv2-common",
- "fedimint-walletv2-server",
- "fedimintd-envs",
- "futures",
- "group",
- "hex",
- "hyper 1.6.0",
- "iroh",
- "iroh-base",
- "iroh-relay",
- "itertools 0.14.0",
- "jsonrpsee",
- "maud",
- "parity-scale-codec",
- "pin-project",
- "pkarr 3.10.0",
- "qrcode",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "rayon",
- "rcgen",
- "serde",
- "serde_json",
- "sha3",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "subtle",
- "tar",
- "test-log",
- "thiserror 2.0.18",
- "tokio",
- "tokio-rustls 0.26.4",
- "tokio-util",
- "tower 0.4.13",
- "tracing",
- "url",
- "z32",
-]
-
-[[package]]
-name = "fedimint-tbs"
-version = "0.11.0-alpha"
-dependencies = [
- "bls12_381",
- "criterion",
- "fedimint-core",
- "group",
- "hex",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serde",
- "sha3",
-]
-
-[[package]]
 name = "fedimint-threshold-crypto"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2844,93 +2057,6 @@ dependencies = [
  "tiny-keccak",
  "zeroize",
 ]
-
-[[package]]
-name = "fedimint-tpe"
-version = "0.11.0-alpha"
-dependencies = [
- "bitcoin_hashes",
- "bls12_381",
- "fedimint-core",
- "group",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serde",
- "serde-big-array",
-]
-
-[[package]]
-name = "fedimint-util-error"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
-]
-
-[[package]]
-name = "fedimint-walletv2-client"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "erased-serde",
- "fedimint-api-client",
- "fedimint-client-module",
- "fedimint-core",
- "fedimint-derive-secret",
- "fedimint-eventlog",
- "fedimint-logging",
- "fedimint-redb",
- "fedimint-walletv2-common",
- "futures",
- "secp256k1",
- "serde",
- "serde_json",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-walletv2-common"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "bitcoin",
- "fedimint-core",
- "miniscript",
- "secp256k1",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "fedimint-walletv2-server"
-version = "0.11.0-alpha"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "erased-serde",
- "fedimint-core",
- "fedimint-logging",
- "fedimint-redb",
- "fedimint-server-core",
- "fedimint-walletv2-common",
- "futures",
- "miniscript",
- "rand 0.8.5",
- "secp256k1",
- "serde",
- "strum 0.27.1",
- "strum_macros 0.27.1",
- "tracing",
-]
-
-[[package]]
-name = "fedimintd-envs"
-version = "0.11.0-alpha"
 
 [[package]]
 name = "ff"
@@ -3019,16 +2145,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "fs2"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]
@@ -5247,12 +4363,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "option-ext"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
-
-[[package]]
 name = "pairing"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5394,6 +4504,824 @@ checksum = "e9567389417feee6ce15dd6527a8a1ecac205ef62c2932bcf3d9f6fc5b78b414"
 dependencies = [
  "futures",
  "rustc_version",
+]
+
+[[package]]
+name = "picomint-aead"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "hex",
+ "rand 0.8.5",
+ "ring",
+]
+
+[[package]]
+name = "picomint-api-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "async-channel",
+ "async-trait",
+ "bitcoin",
+ "futures",
+ "iroh",
+ "iroh-base",
+ "jsonrpsee-core",
+ "picomint-core",
+ "picomint-lnv2-common",
+ "picomint-logging",
+ "picomint-mintv2-common",
+ "picomint-walletv2-common",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "z32",
+]
+
+[[package]]
+name = "picomint-bip39"
+version = "0.1.0"
+dependencies = [
+ "bip39",
+ "picomint-client",
+ "picomint-core",
+ "picomint-derive-secret",
+ "rand 0.8.5",
+]
+
+[[package]]
+name = "picomint-bitcoind"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitcoin",
+ "bitcoincore-rpc",
+ "esplora-client 0.12.3",
+ "picomint-core",
+ "picomint-logging",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "async-stream",
+ "async-trait",
+ "bitcoin",
+ "futures",
+ "iroh-base",
+ "picomint-api-client",
+ "picomint-client-module",
+ "picomint-core",
+ "picomint-derive-secret",
+ "picomint-eventlog",
+ "picomint-gwv2-client",
+ "picomint-lnv2-client",
+ "picomint-lnv2-common",
+ "picomint-logging",
+ "picomint-mintv2-client",
+ "picomint-redb",
+ "picomint-walletv2-client",
+ "reqwest 0.12.22",
+ "serde",
+ "serde_json",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-test",
+]
+
+[[package]]
+name = "picomint-client-module"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aquamarine",
+ "async-stream",
+ "async-trait",
+ "bitcoin",
+ "futures",
+ "itertools 0.14.0",
+ "picomint-api-client",
+ "picomint-core",
+ "picomint-derive-secret",
+ "picomint-eventlog",
+ "picomint-logging",
+ "picomint-redb",
+ "rand 0.8.5",
+ "reqwest 0.12.22",
+ "serde",
+ "serde_json",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "async-channel",
+ "async-lock",
+ "async-recursion",
+ "async-trait",
+ "backon",
+ "backtrace",
+ "base64 0.22.1",
+ "bech32",
+ "bitcoin",
+ "bitcoin-io",
+ "bitcoin-units",
+ "bitvec",
+ "bls12_381",
+ "erased-serde",
+ "fedimint-threshold-crypto",
+ "futures",
+ "futures-util",
+ "getrandom 0.3.3",
+ "gloo-timers",
+ "group",
+ "hex",
+ "hex-conservative 1.0.1",
+ "imbl",
+ "iroh",
+ "iroh-base",
+ "iroh-relay",
+ "itertools 0.14.0",
+ "js-sys",
+ "jsonrpsee-core",
+ "lightning",
+ "lightning-invoice",
+ "lightning-types",
+ "macro_rules_attribute",
+ "miniscript",
+ "n0-future 0.1.3",
+ "picomint-derive",
+ "picomint-logging",
+ "picomint-util-error",
+ "rand 0.8.5",
+ "redb",
+ "scopeguard",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "serdect",
+ "slotmap",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "subtle",
+ "test-log",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tokio-test",
+ "tracing",
+ "url",
+ "wasm-bindgen-futures",
+ "z32",
+]
+
+[[package]]
+name = "picomint-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "picomint-derive-secret"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin_hashes",
+ "bls12_381",
+ "picomint-core",
+ "picomint-hkdf",
+ "ring",
+]
+
+[[package]]
+name = "picomint-eventlog"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "futures",
+ "hex",
+ "picomint-core",
+ "picomint-logging",
+ "picomint-redb",
+ "serde",
+ "serde_json",
+ "test-log",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-gateway-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "clap",
+ "lightning-invoice",
+ "picomint-core",
+ "picomint-gateway-cli-core",
+ "reqwest 0.12.22",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "picomint-gateway-cli-core"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "lightning-invoice",
+ "picomint-core",
+ "serde",
+]
+
+[[package]]
+name = "picomint-gateway-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aquamarine",
+ "assert_matches",
+ "async-stream",
+ "async-trait",
+ "axum 0.8.8",
+ "bitcoin",
+ "bon",
+ "clap",
+ "erased-serde",
+ "esplora-client 0.12.3",
+ "fedimint-ldk-node",
+ "futures",
+ "futures-util",
+ "hex",
+ "iroh",
+ "itertools 0.14.0",
+ "lightning",
+ "lightning-invoice",
+ "lockable",
+ "picomint-api-client",
+ "picomint-bip39",
+ "picomint-bitcoind",
+ "picomint-client",
+ "picomint-client-module",
+ "picomint-core",
+ "picomint-derive-secret",
+ "picomint-eventlog",
+ "picomint-gateway-cli-core",
+ "picomint-gwv2-client",
+ "picomint-lnurl",
+ "picomint-lnv2-client",
+ "picomint-lnv2-common",
+ "picomint-lnv2-server",
+ "picomint-logging",
+ "picomint-mintv2-client",
+ "picomint-redb",
+ "picomint-tpe",
+ "picomint-walletv2-client",
+ "rand 0.8.5",
+ "reqwest 0.12.22",
+ "serde",
+ "serde_json",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tower-http",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "picomint-gwv2-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aquamarine",
+ "async-stream",
+ "async-trait",
+ "bitcoin",
+ "erased-serde",
+ "futures",
+ "lightning-invoice",
+ "picomint-api-client",
+ "picomint-client-module",
+ "picomint-core",
+ "picomint-eventlog",
+ "picomint-lnv2-common",
+ "picomint-logging",
+ "picomint-redb",
+ "picomint-tpe",
+ "serde",
+ "serde_millis",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-hkdf"
+version = "0.1.0"
+dependencies = [
+ "bitcoin_hashes",
+]
+
+[[package]]
+name = "picomint-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "bitcoin",
+ "bitcoincore-rpc",
+ "fedimint-ldk-node",
+ "futures",
+ "iroh",
+ "lightning-invoice",
+ "lightning-types",
+ "picomint-api-client",
+ "picomint-bip39",
+ "picomint-client",
+ "picomint-core",
+ "picomint-eventlog",
+ "picomint-gateway-cli-core",
+ "picomint-lnv2-client",
+ "picomint-lnv2-common",
+ "picomint-logging",
+ "picomint-mintv2-client",
+ "picomint-mintv2-common",
+ "picomint-redb",
+ "picomint-server-cli-core",
+ "picomint-walletv2-client",
+ "picomint-walletv2-common",
+ "rand 0.8.5",
+ "reqwest 0.12.22",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-lnurl"
+version = "0.1.0"
+dependencies = [
+ "bech32",
+ "lightning-invoice",
+ "reqwest 0.12.22",
+ "serde",
+ "serde_json",
+ "serde_with",
+]
+
+[[package]]
+name = "picomint-lnv2-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aquamarine",
+ "async-stream",
+ "async-trait",
+ "bitcoin",
+ "erased-serde",
+ "futures",
+ "itertools 0.14.0",
+ "lightning-invoice",
+ "picomint-api-client",
+ "picomint-client-module",
+ "picomint-core",
+ "picomint-derive-secret",
+ "picomint-eventlog",
+ "picomint-lnurl",
+ "picomint-lnv2-common",
+ "picomint-logging",
+ "picomint-redb",
+ "picomint-tpe",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "strum 0.27.1",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-lnv2-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitcoin",
+ "group",
+ "lightning-invoice",
+ "picomint-core",
+ "picomint-tpe",
+ "rand 0.8.5",
+ "reqwest 0.12.22",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "picomint-lnv2-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bls12_381",
+ "erased-serde",
+ "futures",
+ "group",
+ "picomint-core",
+ "picomint-lnv2-common",
+ "picomint-logging",
+ "picomint-redb",
+ "picomint-server-core",
+ "picomint-tpe",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-logging"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "console-subscriber",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "picomint-mintv2-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aquamarine",
+ "async-channel",
+ "async-stream",
+ "async-trait",
+ "bitcoin_hashes",
+ "bls12_381",
+ "divan",
+ "erased-serde",
+ "fedimint-threshold-crypto",
+ "futures",
+ "hex",
+ "itertools 0.14.0",
+ "picomint-api-client",
+ "picomint-client-module",
+ "picomint-core",
+ "picomint-derive-secret",
+ "picomint-eventlog",
+ "picomint-logging",
+ "picomint-mintv2-common",
+ "picomint-redb",
+ "picomint-tbs",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "serdect",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-mintv2-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin_hashes",
+ "picomint-core",
+ "picomint-tbs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-mintv2-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitcoin",
+ "erased-serde",
+ "fedimint-threshold-crypto",
+ "futures",
+ "itertools 0.14.0",
+ "picomint-core",
+ "picomint-logging",
+ "picomint-mintv2-common",
+ "picomint-redb",
+ "picomint-server-core",
+ "picomint-tbs",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-recurringdv2"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum 0.8.8",
+ "bitcoin",
+ "clap",
+ "lightning-invoice",
+ "picomint-core",
+ "picomint-lnurl",
+ "picomint-lnv2-common",
+ "picomint-logging",
+ "picomint-tpe",
+ "serde",
+ "tokio",
+ "tower-http",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-redb"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "picomint-core",
+ "redb",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "picomint-server-bitcoin-rpc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitcoin",
+ "bitcoincore-rpc",
+ "esplora-client 0.12.3",
+ "picomint-core",
+ "picomint-logging",
+ "picomint-server-core",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-server-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "picomint-server-cli-core",
+ "reqwest 0.12.22",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "picomint-server-cli-core"
+version = "0.1.0"
+dependencies = [
+ "picomint-core",
+ "picomint-server-core",
+ "serde",
+]
+
+[[package]]
+name = "picomint-server-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitcoin",
+ "bls12_381",
+ "futures",
+ "group",
+ "picomint-api-client",
+ "picomint-core",
+ "picomint-logging",
+ "picomint-redb",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-server-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "async-trait",
+ "axum 0.8.8",
+ "axum-extra",
+ "base64 0.22.1",
+ "bincode",
+ "bitcoin",
+ "bls12_381",
+ "bytes",
+ "chrono",
+ "clap",
+ "fedimint-aleph-bft",
+ "futures",
+ "group",
+ "hex",
+ "hyper 1.6.0",
+ "iroh",
+ "iroh-base",
+ "iroh-relay",
+ "itertools 0.14.0",
+ "jsonrpsee",
+ "maud",
+ "parity-scale-codec",
+ "picomint-aead",
+ "picomint-api-client",
+ "picomint-client-module",
+ "picomint-core",
+ "picomint-derive-secret",
+ "picomint-lnv2-common",
+ "picomint-lnv2-server",
+ "picomint-logging",
+ "picomint-mintv2-common",
+ "picomint-mintv2-server",
+ "picomint-redb",
+ "picomint-server-bitcoin-rpc",
+ "picomint-server-cli-core",
+ "picomint-server-core",
+ "picomint-walletv2-common",
+ "picomint-walletv2-server",
+ "pin-project",
+ "pkarr 3.10.0",
+ "qrcode",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rayon",
+ "rcgen",
+ "serde",
+ "serde_json",
+ "sha3",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "subtle",
+ "tar",
+ "test-log",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tokio-util",
+ "tower 0.4.13",
+ "tracing",
+ "url",
+ "z32",
+]
+
+[[package]]
+name = "picomint-tbs"
+version = "0.1.0"
+dependencies = [
+ "bls12_381",
+ "criterion",
+ "group",
+ "hex",
+ "picomint-core",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "sha3",
+]
+
+[[package]]
+name = "picomint-tpe"
+version = "0.1.0"
+dependencies = [
+ "bitcoin_hashes",
+ "bls12_381",
+ "group",
+ "picomint-core",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "serde-big-array",
+]
+
+[[package]]
+name = "picomint-util-error"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
+name = "picomint-walletv2-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitcoin",
+ "erased-serde",
+ "futures",
+ "picomint-api-client",
+ "picomint-client-module",
+ "picomint-core",
+ "picomint-derive-secret",
+ "picomint-eventlog",
+ "picomint-logging",
+ "picomint-redb",
+ "picomint-walletv2-common",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-walletv2-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "miniscript",
+ "picomint-core",
+ "secp256k1",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "picomint-walletv2-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitcoin",
+ "erased-serde",
+ "futures",
+ "miniscript",
+ "picomint-core",
+ "picomint-logging",
+ "picomint-redb",
+ "picomint-server-core",
+ "picomint-walletv2-common",
+ "rand 0.8.5",
+ "secp256k1",
+ "serde",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "tracing",
 ]
 
 [[package]]
@@ -5999,17 +5927,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d04b7d0ee6b4a0207a0a7adb104d23ecb0b47d6beae7152d0fa34b692b29fd6"
 dependencies = [
  "bitflags 2.9.1",
-]
-
-[[package]]
-name = "redox_users"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd6f9d3d47bdd2ad6945c5015a226ec6155d0bcdfd8f7cd29f86b71f8de99d2b"
-dependencies = [
- "getrandom 0.2.16",
- "libredox",
- "thiserror 2.0.18",
 ]
 
 [[package]]
