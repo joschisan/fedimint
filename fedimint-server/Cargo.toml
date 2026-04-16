@@ -33,11 +33,17 @@ bytes = { workspace = true }
 fedimint-aead = { workspace = true }
 fedimint-api-client = { workspace = true }
 fedimint-core = { workspace = true }
-fedimint-redb = { workspace = true }
 fedimint-derive-secret = { workspace = true }
+fedimint-lnv2-common = { workspace = true }
+fedimint-lnv2-server = { workspace = true }
 fedimint-logging = { workspace = true }
+fedimint-mintv2-common = { workspace = true }
+fedimint-mintv2-server = { workspace = true }
+fedimint-redb = { workspace = true }
 fedimint-server-cli-core = { workspace = true }
 fedimint-server-core = { workspace = true }
+fedimint-walletv2-common = { workspace = true }
+fedimint-walletv2-server = { workspace = true }
 futures = { workspace = true }
 group = { workspace = true }
 hex = { workspace = true }
@@ -60,6 +66,7 @@ sha3 = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 subtle = { workspace = true }
+thiserror = { workspace = true }
 tar = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
