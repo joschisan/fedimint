@@ -35,7 +35,7 @@ use tracing::Instrument;
 mod version;
 pub use self::version::*;
 use crate::core::ModuleInstanceId;
-use crate::encoding::{Decodable, DecodeError, Encodable};
+use crate::encoding::{Decodable, Encodable};
 use crate::fmt_utils::AbbreviateHexBytes;
 use crate::task::MaybeSend;
 use crate::util::FmtCompact;
@@ -295,8 +295,6 @@ macro_rules! __api_endpoint {
 
 pub use __api_endpoint as api_endpoint;
 
-use self::registry::ModuleDecoderRegistry;
-
 type HandlerFnReturn<'a> =
     Pin<Box<maybe_add_send!(dyn Future<Output = Result<serde_json::Value, ApiError>> + 'a)>>;
 type HandlerFn<M> =
@@ -435,26 +433,20 @@ impl<T: Encodable + Decodable> From<&T> for SerdeModuleEncoding<T> {
 }
 
 impl<T: Encodable + Decodable + 'static> SerdeModuleEncoding<T> {
-    pub fn try_into_inner(&self, modules: &ModuleDecoderRegistry) -> Result<T, DecodeError> {
-        Decodable::consensus_decode_whole(&self.0, modules)
+    pub fn try_into_inner(&self) -> std::io::Result<T> {
+        Decodable::consensus_decode_whole(&self.0)
     }
 }
 
 impl<T: Encodable + Decodable> Encodable for SerdeModuleEncoding<T> {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         self.0.consensus_encode(writer)
     }
 }
 
 impl<T: Encodable + Decodable> Decodable for SerdeModuleEncoding<T> {
-    fn consensus_decode_partial_from_finite_reader<R: std::io::Read>(
-        reader: &mut R,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        Ok(Self(
-            Vec::<u8>::consensus_decode_partial_from_finite_reader(reader, modules)?,
-            PhantomData,
-        ))
+    fn consensus_decode<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        Ok(Self(Vec::<u8>::consensus_decode(reader)?, PhantomData))
     }
 }
 
@@ -480,7 +472,7 @@ impl<T: Encodable + Decodable> From<&T> for SerdeModuleEncodingBase64<T> {
 }
 
 impl<T: Encodable + Decodable + 'static> SerdeModuleEncodingBase64<T> {
-    pub fn try_into_inner(&self, modules: &ModuleDecoderRegistry) -> Result<T, DecodeError> {
-        Decodable::consensus_decode_whole(&self.0, modules)
+    pub fn try_into_inner(&self) -> std::io::Result<T> {
+        Decodable::consensus_decode_whole(&self.0)
     }
 }

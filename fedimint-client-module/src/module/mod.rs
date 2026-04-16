@@ -10,7 +10,6 @@ use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_core::config::ClientConfig;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::invite_code::InviteCode;
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::{BoxFuture, BoxStream};
@@ -70,7 +69,6 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
     /// at the given instance id.
     fn get_module(&self, instance: ModuleInstanceId) -> &(maybe_add_send_sync!(dyn Any));
     fn api_clone(&self) -> DynGlobalApi;
-    fn decoders(&self) -> &ModuleDecoderRegistry;
     async fn finalize_and_submit_transaction(
         &self,
         operation_id: OperationId,
@@ -245,12 +243,7 @@ where
         self.global_api().with_module(self.module_instance_id)
     }
 
-    /// A set of all decoders of all modules of the client
-    pub fn decoders(&self) -> ModuleDecoderRegistry {
-        Clone::clone(self.client.get().decoders())
-    }
-
-    /// Lift a typed [`ClientOutputBundle`] into a wire-level one.
+/// Lift a typed [`ClientOutputBundle`] into a wire-level one.
     pub fn make_client_outputs<O>(&self, output: ClientOutputBundle<O>) -> ClientOutputBundle
     where
         fedimint_api_client::wire::Output: From<O>,

@@ -3,8 +3,7 @@ use std::io::{Read, Write};
 
 use fedimint_core::config::FederationId;
 use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::encoding::{Decodable, DecodeError, Encodable};
-use fedimint_core::module::registry::ModuleRegistry;
+use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
 use rand::{CryptoRng, Rng, RngCore};
 
@@ -46,9 +45,7 @@ pub trait RootSecretStrategy: Debug {
     ) -> std::io::Result<()>;
 
     /// Deserialization function for the external encoding
-    fn consensus_decode_partial(
-        reader: &mut impl std::io::Read,
-    ) -> Result<Self::Encoding, DecodeError>;
+    fn consensus_decode(reader: &mut impl std::io::Read) -> std::io::Result<Self::Encoding>;
 
     /// Random generation function for the external secret type
     fn random<R>(rng: &mut R) -> Self::Encoding
@@ -72,8 +69,8 @@ impl RootSecretStrategy for PlainRootSecretStrategy {
         secret.consensus_encode(writer)
     }
 
-    fn consensus_decode_partial(reader: &mut impl Read) -> Result<Self::Encoding, DecodeError> {
-        Self::Encoding::consensus_decode_partial(reader, &ModuleRegistry::default())
+    fn consensus_decode(reader: &mut impl Read) -> std::io::Result<Self::Encoding> {
+        Self::Encoding::consensus_decode(reader)
     }
 
     fn random<R>(rng: &mut R) -> Self::Encoding

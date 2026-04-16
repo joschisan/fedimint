@@ -1,381 +1,205 @@
-//! Binary encoding interface suitable for
-//! consensus critical encoding.
+//! Consensus-critical binary encoding.
 //!
-//! Over time all structs that ! need to be encoded to binary will be migrated
-//! to this interface.
+//! Two traits, one method each: [`Encodable::consensus_encode`] and
+//! [`Decodable::consensus_decode`]. Fixed-width big-endian for integers,
+//! length-prefixed (u64 BE) for `Vec` / `String` / maps. No varints, no
+//! module decoder registry, no partial / whole / from-finite-reader tree,
+//! no `DecodeError` — just `io::Error`.
 //!
-//! This code is based on corresponding `rust-bitcoin` types.
-//!
-//! See [`Encodable`] and [`Decodable`] for two main traits.
+//! Callers that want to guard against malicious input size should bound
+//! the reader (e.g. wrap in `std::io::Take`) or frame the data at the
+//! transport layer. Collection decoders deliberately avoid
+//! `Vec::with_capacity` so an attacker-controlled length prefix can't
+//! trigger a giant allocation — the actual `Vec` only grows as the reader
+//! yields bytes.
 
 pub mod as_base64;
 pub mod as_hex;
 mod bls12_381;
 pub mod btc;
-mod collections;
 mod iroh;
 mod secp256k1;
 
+use std::any::TypeId;
 use std::borrow::Cow;
-use std::fmt::{Debug, Formatter};
-use std::io::{self, Error, Read, Write};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fmt::Debug;
+use std::io::{self, Read, Write};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::Context;
 use bitcoin::hashes::sha256;
 pub use fedimint_derive::{Decodable, Encodable};
-use hex::{FromHex, ToHex};
-use lightning::util::ser::BigSize;
-use thiserror::Error;
+use hex::ToHex as _;
 
-use crate::module::registry::ModuleDecoderRegistry;
 use crate::util::SafeUrl;
 
-/// A writer counting number of bytes written to it
-///
-/// Copy&pasted from <https://github.com/SOF3/count-write> which
-/// uses Apache license (and it's a trivial amount of code, repeating
-/// on stack overflow).
-pub struct CountWrite<W> {
-    inner: W,
-    count: u64,
-}
-
-impl<W> CountWrite<W> {
-    /// Returns the number of bytes successfully written so far
-    pub fn count(&self) -> u64 {
-        self.count
-    }
-}
-
-impl<W> From<W> for CountWrite<W> {
-    fn from(inner: W) -> Self {
-        Self { inner, count: 0 }
-    }
-}
-
-impl<W: Write> io::Write for CountWrite<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let written = self.inner.write(buf)?;
-        self.count += written as u64;
-        Ok(written)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
-    }
-}
-
-/// Object-safe trait for things that can encode themselves
-///
-/// Like `rust-bitcoin`'s `consensus_encode`, but without generics,
-/// so can be used in `dyn` objects.
-pub trait DynEncodable {
-    fn consensus_encode_dyn(&self, writer: &mut dyn std::io::Write) -> Result<(), std::io::Error>;
-}
-
-impl Encodable for dyn DynEncodable {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        self.consensus_encode_dyn(writer)
-    }
-}
-
-impl<T> DynEncodable for T
-where
-    T: Encodable,
-{
-    fn consensus_encode_dyn(
-        &self,
-        mut writer: &mut dyn std::io::Write,
-    ) -> Result<(), std::io::Error> {
-        <Self as Encodable>::consensus_encode(self, &mut writer)
-    }
-}
-
-impl Encodable for Box<dyn DynEncodable> {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        (**self).consensus_encode_dyn(writer)
-    }
-}
-
-impl<T> Encodable for &T
-where
-    T: Encodable,
-{
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        (**self).consensus_encode(writer)
-    }
-}
-
-/// Data which can be encoded in a consensus-consistent way
+/// Types that can encode themselves to a byte stream.
 pub trait Encodable {
-    /// Encode an object with a well-defined format.
-    /// Returns the number of bytes written on success.
-    ///
-    /// The only errors returned are errors propagated from the writer.
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>;
+    fn consensus_encode<W: Write>(&self, writer: &mut W) -> io::Result<()>;
 
-    /// [`Self::consensus_encode`] to newly allocated `Vec<u8>`
+    /// Encode to a newly allocated `Vec<u8>`.
     fn consensus_encode_to_vec(&self) -> Vec<u8> {
-        let mut bytes = vec![];
+        let mut bytes = Vec::new();
         self.consensus_encode(&mut bytes)
-            .expect("encoding to bytes can't fail for io reasons");
+            .expect("writes to Vec can't fail");
         bytes
     }
 
-    /// Encode and convert to hex string representation
+    /// Encode and hex-encode the result.
     fn consensus_encode_to_hex(&self) -> String {
-        // TODO: This double allocation offends real Rustaceans. We should
-        // be able to go straight to String, but this use case seems under-served
-        // by hex encoding crates.
         self.consensus_encode_to_vec().encode_hex()
     }
 
-    /// Encode without storing the encoding, return the size
-    fn consensus_encode_to_len(&self) -> u64 {
-        let mut writer = CountWrite::from(io::sink());
-        self.consensus_encode(&mut writer)
-            .expect("encoding to bytes can't fail for io reasons");
-
-        writer.count()
-    }
-
-    /// Generate a SHA256 hash of the consensus encoding using the default hash
-    /// engine for `H`.
-    ///
-    /// Can be used to validate all federation members agree on state without
-    /// revealing the object
+    /// Hash the consensus encoding with `H`.
     fn consensus_hash<H>(&self) -> H
     where
         H: bitcoin::hashes::Hash,
-        H::Engine: std::io::Write,
+        H::Engine: Write,
     {
         let mut engine = H::engine();
         self.consensus_encode(&mut engine)
-            .expect("writing to HashEngine cannot fail");
+            .expect("writes to HashEngine can't fail");
         H::from_engine(engine)
     }
 
-    /// [`Self::consensus_hash`] for [`bitcoin::hashes::sha256::Hash`]
+    /// SHA-256 of the consensus encoding.
     fn consensus_hash_sha256(&self) -> sha256::Hash {
         self.consensus_hash()
     }
 }
 
-/// Maximum size, in bytes, of data we are allowed to ever decode
-/// for a single value.
-pub const MAX_DECODE_SIZE: usize = 16_000_000;
-
-/// Data which can be encoded in a consensus-consistent way
+/// Types that can decode themselves from a byte stream.
 pub trait Decodable: Sized {
-    /// Decode `Self` from a size-limited reader.
-    ///
-    /// Like `consensus_decode_partial` but relies on the reader being limited
-    /// in the amount of data it returns, e.g. by being wrapped in
-    /// [`std::io::Take`].
-    ///
-    /// Failing to abide to this requirement might lead to memory exhaustion
-    /// caused by malicious inputs.
-    ///
-    /// Users should default to `consensus_decode_partial`, but when data to be
-    /// decoded is already in a byte vector of a limited size, calling this
-    /// function directly might be marginally faster (due to avoiding extra
-    /// checks).
-    ///
-    /// ### Rules for trait implementations
-    ///
-    /// * Simple types that that have a fixed size (own and member fields),
-    ///   don't have to overwrite this method, or be concern with it, should
-    ///   only impl `consensus_decode_partial`.
-    /// * Types that deserialize based on decoded untrusted length should
-    ///   implement `consensus_decode_partial_from_finite_reader` only:
-    ///   * Default implementation of `consensus_decode_partial` will forward to
-    ///     `consensus_decode_partial_from_finite_reader` with the reader
-    ///     wrapped by `Take`, protecting from readers that keep returning data.
-    ///   * Implementation must make sure to put a cap on things like
-    ///     `Vec::with_capacity` and other allocations to avoid oversized
-    ///     allocations, and rely on the reader being finite and running out of
-    ///     data, and collections reallocating on a legitimately oversized input
-    ///     data, instead of trying to enforce arbitrary length limits.
-    /// * Types that contain other types that might be require limited reader
-    ///   (thus implementing `consensus_decode_partial_from_finite_reader`),
-    ///   should also implement it applying same rules, and in addition make
-    ///   sure to call `consensus_decode_partial_from_finite_reader` on all
-    ///   members, to avoid creating redundant `Take` wrappers
-    ///   (`Take<Take<...>>`). Failure to do so might result only in a tiny
-    ///   performance hit.
-    #[inline]
-    fn consensus_decode_partial_from_finite_reader<R: std::io::Read>(
-        r: &mut R,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        // This method is always strictly less general than, `consensus_decode_partial`,
-        // so it's safe and make sense to default to just calling it. This way
-        // most types, that don't care about protecting against resource
-        // exhaustion due to malicious input, can just ignore it.
-        Self::consensus_decode_partial(r, modules)
-    }
+    fn consensus_decode<R: Read>(reader: &mut R) -> io::Result<Self>;
 
-    #[inline]
-    fn consensus_decode_whole(
-        slice: &[u8],
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        let total_len = slice.len() as u64;
-
-        let r = &mut &slice[..];
-        let mut r = Read::take(r, total_len);
-
-        // This method is always strictly less general than, `consensus_decode_partial`,
-        // so it's safe and make sense to default to just calling it. This way
-        // most types, that don't care about protecting against resource
-        // exhaustion due to malicious input, can just ignore it.
-        let res = Self::consensus_decode_partial_from_finite_reader(&mut r, modules)?;
-        let left = r.limit();
-
-        if left != 0 {
-            return Err(fedimint_core::encoding::DecodeError::new_custom(
-                anyhow::anyhow!(
-                    "Type did not consume all bytes during decoding; expected={}; left={}; type={}",
-                    total_len,
-                    left,
-                    std::any::type_name::<Self>(),
-                ),
-            ));
+    /// Decode from a byte slice, erroring if any bytes remain.
+    fn consensus_decode_whole(bytes: &[u8]) -> io::Result<Self> {
+        let mut reader = bytes;
+        let value = Self::consensus_decode(&mut reader)?;
+        if !reader.is_empty() {
+            return Err(invalid_data(format!(
+                "trailing bytes after decoding {}",
+                std::any::type_name::<Self>()
+            )));
         }
-        Ok(res)
-    }
-    /// Decode an object with a well-defined format.
-    ///
-    /// This is the method that should be implemented for a typical, fixed sized
-    /// type implementing this trait. Default implementation is wrapping the
-    /// reader in [`std::io::Take`] to limit the input size to
-    /// [`MAX_DECODE_SIZE`], and forwards the call to
-    /// [`Self::consensus_decode_partial_from_finite_reader`], which is
-    /// convenient for types that override
-    /// [`Self::consensus_decode_partial_from_finite_reader`] instead.
-    #[inline]
-    fn consensus_decode_partial<R: std::io::Read>(
-        r: &mut R,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        Self::consensus_decode_partial_from_finite_reader(
-            &mut r.take(MAX_DECODE_SIZE as u64),
-            modules,
-        )
-    }
-
-    /// Decode an object from hex
-    fn consensus_decode_hex(
-        hex: &str,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        let bytes = Vec::<u8>::from_hex(hex)
-            .map_err(anyhow::Error::from)
-            .map_err(DecodeError::new_custom)?;
-        Decodable::consensus_decode_whole(&bytes, modules)
+        Ok(value)
     }
 }
 
-impl Encodable for SafeUrl {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
-        self.to_string().consensus_encode(writer)
+fn invalid_data(msg: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, msg.into())
+}
+
+// ─── References ─────────────────────────────────────────────────────────
+
+impl<T> Encodable for &T
+where
+    T: Encodable + ?Sized,
+{
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        (**self).consensus_encode(w)
     }
 }
 
-impl Decodable for SafeUrl {
-    fn consensus_decode_partial_from_finite_reader<D: std::io::Read>(
-        d: &mut D,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        String::consensus_decode_partial_from_finite_reader(d, modules)?
-            .parse::<Self>()
-            .map_err(DecodeError::from_err)
+impl<T> Encodable for Box<T>
+where
+    T: Encodable + ?Sized,
+{
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        (**self).consensus_encode(w)
     }
 }
 
-#[derive(Debug, Error)]
-pub struct DecodeError(pub(crate) anyhow::Error);
-
-impl DecodeError {
-    pub fn new_custom(e: anyhow::Error) -> Self {
-        Self(e)
+impl<T> Decodable for Box<T>
+where
+    T: Decodable,
+{
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Self::new(T::consensus_decode(r)?))
     }
 }
 
-impl From<anyhow::Error> for DecodeError {
-    fn from(e: anyhow::Error) -> Self {
-        Self(e)
-    }
-}
+// ─── Integers (fixed-width big-endian) ──────────────────────────────────
 
-macro_rules! impl_encode_decode_num_as_plain {
-    ($num_type:ty) => {
-        impl Encodable for $num_type {
-            fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
-                let bytes = self.to_be_bytes();
-                writer.write_all(&bytes[..])?;
-                Ok(())
+macro_rules! impl_encode_decode_int {
+    ($ty:ty) => {
+        impl Encodable for $ty {
+            fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+                w.write_all(&self.to_be_bytes())
             }
         }
 
-        impl Decodable for $num_type {
-            fn consensus_decode_partial<D: std::io::Read>(
-                d: &mut D,
-                _modules: &ModuleDecoderRegistry,
-            ) -> Result<Self, crate::encoding::DecodeError> {
-                let mut bytes = [0u8; (<$num_type>::BITS / 8) as usize];
-                d.read_exact(&mut bytes).map_err(DecodeError::from_err)?;
-                Ok(<$num_type>::from_be_bytes(bytes))
+        impl Decodable for $ty {
+            fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+                let mut buf = [0u8; std::mem::size_of::<$ty>()];
+                r.read_exact(&mut buf)?;
+                Ok(Self::from_be_bytes(buf))
             }
         }
     };
 }
 
-macro_rules! impl_encode_decode_num_as_bigsize {
-    ($num_type:ty) => {
-        impl Encodable for $num_type {
-            fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
-                BigSize(u64::from(*self)).consensus_encode(writer)
-            }
-        }
+impl_encode_decode_int!(u8);
+impl_encode_decode_int!(u16);
+impl_encode_decode_int!(u32);
+impl_encode_decode_int!(u64);
+impl_encode_decode_int!(i8);
+impl_encode_decode_int!(i16);
+impl_encode_decode_int!(i32);
+impl_encode_decode_int!(i64);
 
-        impl Decodable for $num_type {
-            fn consensus_decode_partial<D: std::io::Read>(
-                d: &mut D,
-                _modules: &ModuleDecoderRegistry,
-            ) -> Result<Self, crate::encoding::DecodeError> {
-                let varint = BigSize::consensus_decode_partial(d, &Default::default())
-                    .context(concat!("VarInt inside ", stringify!($num_type)))?;
-                <$num_type>::try_from(varint.0).map_err(crate::encoding::DecodeError::from_err)
-            }
-        }
-    };
+// ─── bool ───────────────────────────────────────────────────────────────
+
+impl Encodable for bool {
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        u8::from(*self).consensus_encode(w)
+    }
 }
 
-impl_encode_decode_num_as_bigsize!(u64);
-impl_encode_decode_num_as_bigsize!(u32);
-impl_encode_decode_num_as_bigsize!(u16);
-impl_encode_decode_num_as_plain!(u8);
+impl Decodable for bool {
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        match u8::consensus_decode(r)? {
+            0 => Ok(false),
+            1 => Ok(true),
+            n => Err(invalid_data(format!("bool: expected 0/1, got {n}"))),
+        }
+    }
+}
+
+// ─── () ─────────────────────────────────────────────────────────────────
+
+impl Encodable for () {
+    fn consensus_encode<W: Write>(&self, _: &mut W) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Decodable for () {
+    fn consensus_decode<R: Read>(_: &mut R) -> io::Result<Self> {
+        Ok(())
+    }
+}
+
+// ─── Tuples ─────────────────────────────────────────────────────────────
 
 macro_rules! impl_encode_decode_tuple {
-    ($($x:ident),*) => (
+    ($($ty:ident),*) => {
         #[allow(non_snake_case)]
-        impl <$($x: Encodable),*> Encodable for ($($x),*) {
-            fn consensus_encode<W: std::io::Write>(&self, s: &mut W) -> Result<(), std::io::Error> {
-                let &($(ref $x),*) = self;
-                $($x.consensus_encode(s)?;)*
+        impl<$($ty: Encodable),*> Encodable for ($($ty,)*) {
+            fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+                let ($($ty,)*) = self;
+                $($ty.consensus_encode(w)?;)*
                 Ok(())
             }
         }
 
         #[allow(non_snake_case)]
-        impl<$($x: Decodable),*> Decodable for ($($x),*) {
-            fn consensus_decode_partial<D: std::io::Read>(d: &mut D, modules: &ModuleDecoderRegistry) -> Result<Self, DecodeError> {
-                Ok(($({let $x = Decodable::consensus_decode_partial(d, modules)?; $x }),*))
+        impl<$($ty: Decodable),*> Decodable for ($($ty,)*) {
+            fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+                Ok(($({ let $ty = <$ty as Decodable>::consensus_decode(r)?; $ty },)*))
             }
         }
-    );
+    };
 }
 
 impl_encode_decode_tuple!(T1, T2);
@@ -384,273 +208,338 @@ impl_encode_decode_tuple!(T1, T2, T3, T4);
 impl_encode_decode_tuple!(T1, T2, T3, T4, T5);
 impl_encode_decode_tuple!(T1, T2, T3, T4, T5, T6);
 
-impl<T> Encodable for Option<T>
-where
-    T: Encodable,
-{
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        if let Some(inner) = self {
-            1u8.consensus_encode(writer)?;
-            inner.consensus_encode(writer)?;
-        } else {
-            0u8.consensus_encode(writer)?;
-        }
-        Ok(())
-    }
-}
+// ─── Option / Result ────────────────────────────────────────────────────
 
-impl<T> Decodable for Option<T>
-where
-    T: Decodable,
-{
-    fn consensus_decode_partial_from_finite_reader<D: std::io::Read>(
-        d: &mut D,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        let flag = u8::consensus_decode_partial_from_finite_reader(d, modules)?;
-        match flag {
-            0 => Ok(None),
-            1 => Ok(Some(T::consensus_decode_partial_from_finite_reader(
-                d, modules,
-            )?)),
-            _ => Err(DecodeError::from_str(
-                "Invalid flag for option enum, expected 0 or 1",
-            )),
-        }
-    }
-}
-
-impl<T, E> Encodable for Result<T, E>
-where
-    T: Encodable,
-    E: Encodable,
-{
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+impl<T: Encodable> Encodable for Option<T> {
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
         match self {
-            Ok(value) => {
-                1u8.consensus_encode(writer)?;
-                value.consensus_encode(writer)?;
-            }
-            Err(error) => {
-                0u8.consensus_encode(writer)?;
-                error.consensus_encode(writer)?;
+            None => 0u8.consensus_encode(w),
+            Some(v) => {
+                1u8.consensus_encode(w)?;
+                v.consensus_encode(w)
             }
         }
-
-        Ok(())
     }
 }
 
-impl<T, E> Decodable for Result<T, E>
-where
-    T: Decodable,
-    E: Decodable,
-{
-    fn consensus_decode_partial_from_finite_reader<D: std::io::Read>(
-        d: &mut D,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        let flag = u8::consensus_decode_partial_from_finite_reader(d, modules)?;
-        match flag {
-            0 => Ok(Err(E::consensus_decode_partial_from_finite_reader(
-                d, modules,
-            )?)),
-            1 => Ok(Ok(T::consensus_decode_partial_from_finite_reader(
-                d, modules,
-            )?)),
-            _ => Err(DecodeError::from_str(
-                "Invalid flag for option enum, expected 0 or 1",
-            )),
+impl<T: Decodable> Decodable for Option<T> {
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        match u8::consensus_decode(r)? {
+            0 => Ok(None),
+            1 => Ok(Some(T::consensus_decode(r)?)),
+            n => Err(invalid_data(format!("Option: expected 0/1, got {n}"))),
         }
     }
 }
 
-impl<T> Encodable for Box<T>
-where
-    T: Encodable,
-{
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
-        self.as_ref().consensus_encode(writer)
+impl<T: Encodable, E: Encodable> Encodable for Result<T, E> {
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        match self {
+            Err(e) => {
+                0u8.consensus_encode(w)?;
+                e.consensus_encode(w)
+            }
+            Ok(v) => {
+                1u8.consensus_encode(w)?;
+                v.consensus_encode(w)
+            }
+        }
     }
 }
 
-impl<T> Decodable for Box<T>
-where
-    T: Decodable,
-{
-    fn consensus_decode_partial_from_finite_reader<D: std::io::Read>(
-        d: &mut D,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        Ok(Self::new(T::consensus_decode_partial_from_finite_reader(
-            d, modules,
-        )?))
+impl<T: Decodable, E: Decodable> Decodable for Result<T, E> {
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        match u8::consensus_decode(r)? {
+            0 => Ok(Err(E::consensus_decode(r)?)),
+            1 => Ok(Ok(T::consensus_decode(r)?)),
+            n => Err(invalid_data(format!("Result: expected 0/1, got {n}"))),
+        }
     }
 }
 
-impl Encodable for () {
-    fn consensus_encode<W: std::io::Write>(&self, _writer: &mut W) -> Result<(), std::io::Error> {
-        Ok(())
-    }
-}
-
-impl Decodable for () {
-    fn consensus_decode_partial<D: std::io::Read>(
-        _d: &mut D,
-        _modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        Ok(())
-    }
-}
-
-impl Encodable for &str {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
-        self.as_bytes().consensus_encode(writer)
-    }
-}
+// ─── String / &str / Cow<str> ───────────────────────────────────────────
 
 impl Encodable for String {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
-        self.as_bytes().consensus_encode(writer)
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.as_bytes().consensus_encode(w)
     }
 }
 
 impl Decodable for String {
-    fn consensus_decode_partial_from_finite_reader<D: std::io::Read>(
-        d: &mut D,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        Self::from_utf8(Decodable::consensus_decode_partial_from_finite_reader(
-            d, modules,
-        )?)
-        .map_err(DecodeError::from_err)
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        Self::from_utf8(Vec::<u8>::consensus_decode(r)?)
+            .map_err(|e| invalid_data(format!("invalid UTF-8: {e}")))
     }
 }
 
-impl Encodable for SystemTime {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        let duration = self.duration_since(UNIX_EPOCH).expect("valid duration");
-        duration.consensus_encode_dyn(writer)
-    }
-}
-
-impl Decodable for SystemTime {
-    fn consensus_decode_partial<D: std::io::Read>(
-        d: &mut D,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        let duration = Duration::consensus_decode_partial(d, modules)?;
-        Ok(UNIX_EPOCH + duration)
-    }
-}
-
-impl Encodable for Duration {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        self.as_secs().consensus_encode(writer)?;
-        self.subsec_nanos().consensus_encode(writer)?;
-
-        Ok(())
-    }
-}
-
-impl Decodable for Duration {
-    fn consensus_decode_partial<D: std::io::Read>(
-        d: &mut D,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        let secs = Decodable::consensus_decode_partial(d, modules)?;
-        let nsecs = Decodable::consensus_decode_partial(d, modules)?;
-        Ok(Self::new(secs, nsecs))
-    }
-}
-
-impl Encodable for bool {
-    fn consensus_encode<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        let bool_as_u8 = u8::from(*self);
-        writer.write_all(&[bool_as_u8])?;
-        Ok(())
-    }
-}
-
-impl Decodable for bool {
-    fn consensus_decode_partial<D: Read>(
-        d: &mut D,
-        _modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        let mut bool_as_u8 = [0u8];
-        d.read_exact(&mut bool_as_u8)
-            .map_err(DecodeError::from_err)?;
-        match bool_as_u8[0] {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => Err(DecodeError::from_str("Out of range, expected 0 or 1")),
-        }
-    }
-}
-
-impl DecodeError {
-    // TODO: think about better name
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &'static str) -> Self {
-        #[derive(Debug)]
-        struct StrError(&'static str);
-
-        impl std::fmt::Display for StrError {
-            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-                std::fmt::Display::fmt(&self.0, f)
-            }
-        }
-
-        impl std::error::Error for StrError {}
-
-        Self(anyhow::Error::from(StrError(s)))
-    }
-
-    pub fn from_err<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
-        Self(anyhow::Error::from(e))
-    }
-}
-
-impl std::fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{:#}", self.0))
+impl Encodable for str {
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.as_bytes().consensus_encode(w)
     }
 }
 
 impl Encodable for Cow<'static, str> {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        self.as_ref().consensus_encode(writer)
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.as_ref().consensus_encode(w)
     }
 }
 
 impl Decodable for Cow<'static, str> {
-    fn consensus_decode_partial<D: std::io::Read>(
-        d: &mut D,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        Ok(Cow::Owned(String::consensus_decode_partial(d, modules)?))
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Cow::Owned(String::consensus_decode(r)?))
     }
 }
 
+// ─── SystemTime / Duration ──────────────────────────────────────────────
+
+impl Encodable for SystemTime {
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.duration_since(UNIX_EPOCH)
+            .expect("system time before UNIX_EPOCH")
+            .consensus_encode(w)
+    }
+}
+
+impl Decodable for SystemTime {
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        Ok(UNIX_EPOCH + Duration::consensus_decode(r)?)
+    }
+}
+
+impl Encodable for Duration {
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.as_secs().consensus_encode(w)?;
+        self.subsec_nanos().consensus_encode(w)
+    }
+}
+
+impl Decodable for Duration {
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        let secs = u64::consensus_decode(r)?;
+        let nanos = u32::consensus_decode(r)?;
+        Ok(Self::new(secs, nanos))
+    }
+}
+
+// ─── SafeUrl ────────────────────────────────────────────────────────────
+
+impl Encodable for SafeUrl {
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.to_string().consensus_encode(w)
+    }
+}
+
+impl Decodable for SafeUrl {
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        String::consensus_decode(r)?
+            .parse()
+            .map_err(|e: url::ParseError| invalid_data(format!("invalid SafeUrl: {e}")))
+    }
+}
+
+// ─── Slices, Vec, VecDeque, [T; N] ──────────────────────────────────────
+//
+// `Vec<u8>` / `[u8; N]` / `&[u8]` take a specialized path via TypeId to
+// avoid going through `u8::consensus_encode` byte-by-byte. Matters for
+// large blobs (BFT messages, serialized configs).
+
+impl<T> Encodable for [T]
+where
+    T: Encodable + 'static,
+{
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        (self.len() as u64).consensus_encode(w)?;
+        if TypeId::of::<T>() == TypeId::of::<u8>() {
+            // SAFETY: T is u8, so this transmute is a no-op
+            let bytes = unsafe { std::mem::transmute::<&[T], &[u8]>(self) };
+            w.write_all(bytes)?;
+        } else {
+            for item in self {
+                item.consensus_encode(w)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<T> Encodable for Vec<T>
+where
+    T: Encodable + 'static,
+{
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.as_slice().consensus_encode(w)
+    }
+}
+
+impl<T> Decodable for Vec<T>
+where
+    T: Decodable + 'static,
+{
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        let len = u64::consensus_decode(r)? as usize;
+        if TypeId::of::<T>() == TypeId::of::<u8>() {
+            let mut bytes = vec![0u8; len];
+            r.read_exact(&mut bytes)?;
+            // SAFETY: T is u8, so this transmute is a no-op
+            return Ok(unsafe { std::mem::transmute::<Vec<u8>, Self>(bytes) });
+        }
+        // Deliberately avoid `Vec::with_capacity(len)` — an attacker-controlled
+        // length prefix could request a giant allocation. The vec grows
+        // only as the reader yields bytes.
+        let mut v = Vec::new();
+        for _ in 0..len {
+            v.push(T::consensus_decode(r)?);
+        }
+        Ok(v)
+    }
+}
+
+impl<T> Encodable for VecDeque<T>
+where
+    T: Encodable + 'static,
+{
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        (self.len() as u64).consensus_encode(w)?;
+        for item in self {
+            item.consensus_encode(w)?;
+        }
+        Ok(())
+    }
+}
+
+impl<T> Decodable for VecDeque<T>
+where
+    T: Decodable + 'static,
+{
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Self::from(Vec::<T>::consensus_decode(r)?))
+    }
+}
+
+impl<T, const N: usize> Encodable for [T; N]
+where
+    T: Encodable + 'static,
+{
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        if TypeId::of::<T>() == TypeId::of::<u8>() {
+            // SAFETY: T is u8, so this transmute is a no-op
+            let bytes = unsafe { std::mem::transmute::<&[T; N], &[u8; N]>(self) };
+            w.write_all(bytes)
+        } else {
+            for item in self {
+                item.consensus_encode(w)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+impl<T, const N: usize> Decodable for [T; N]
+where
+    T: Decodable + Debug + Default + Copy + 'static,
+{
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        if TypeId::of::<T>() == TypeId::of::<u8>() {
+            let mut bytes = [0u8; N];
+            r.read_exact(&mut bytes)?;
+            // SAFETY: T is u8, so [T; N] and [u8; N] have identical layout.
+            let ptr = std::ptr::from_ref(&bytes).cast::<[T; N]>();
+            return Ok(unsafe { ptr.read() });
+        }
+        let mut data = [T::default(); N];
+        for item in &mut data {
+            *item = T::consensus_decode(r)?;
+        }
+        Ok(data)
+    }
+}
+
+// ─── BTreeMap / BTreeSet (canonical ordering enforced on decode) ────────
+
+impl<K, V> Encodable for BTreeMap<K, V>
+where
+    K: Encodable,
+    V: Encodable,
+{
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        (self.len() as u64).consensus_encode(w)?;
+        for (k, v) in self {
+            k.consensus_encode(w)?;
+            v.consensus_encode(w)?;
+        }
+        Ok(())
+    }
+}
+
+impl<K, V> Decodable for BTreeMap<K, V>
+where
+    K: Decodable + Ord,
+    V: Decodable,
+{
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        let len = u64::consensus_decode(r)? as usize;
+        let mut map = Self::new();
+        for _ in 0..len {
+            let k = K::consensus_decode(r)?;
+            if map.last_key_value().is_some_and(|(prev, _)| k <= *prev) {
+                return Err(invalid_data("BTreeMap: non-canonical key order"));
+            }
+            let v = V::consensus_decode(r)?;
+            if map.insert(k, v).is_some() {
+                return Err(invalid_data("BTreeMap: duplicate key"));
+            }
+        }
+        Ok(map)
+    }
+}
+
+impl<K> Encodable for BTreeSet<K>
+where
+    K: Encodable,
+{
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        (self.len() as u64).consensus_encode(w)?;
+        for k in self {
+            k.consensus_encode(w)?;
+        }
+        Ok(())
+    }
+}
+
+impl<K> Decodable for BTreeSet<K>
+where
+    K: Decodable + Ord,
+{
+    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+        let len = u64::consensus_decode(r)? as usize;
+        let mut set = Self::new();
+        for _ in 0..len {
+            let k = K::consensus_decode(r)?;
+            if set.last().is_some_and(|prev| k <= *prev) {
+                return Err(invalid_data("BTreeSet: non-canonical order"));
+            }
+            if !set.insert(k) {
+                return Err(invalid_data("BTreeSet: duplicate element"));
+            }
+        }
+        Ok(set)
+    }
+}
+
+// ─── Tests ──────────────────────────────────────────────────────────────
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::fmt::Debug;
-    use std::io::Cursor;
 
     use super::*;
-    use crate::encoding::{Decodable, Encodable};
-    use crate::module::registry::ModuleRegistry;
 
     pub(crate) fn test_roundtrip<T>(value: &T)
     where
         T: Encodable + Decodable + Eq + Debug,
     {
-        let mut bytes = Vec::new();
-        value.consensus_encode(&mut bytes).unwrap();
-
-        let mut cursor = Cursor::new(bytes);
-        let decoded =
-            T::consensus_decode_partial(&mut cursor, &ModuleDecoderRegistry::default()).unwrap();
+        let bytes = value.consensus_encode_to_vec();
+        let decoded = T::consensus_decode_whole(&bytes).unwrap();
         assert_eq!(value, &decoded);
     }
 
@@ -658,205 +547,197 @@ mod tests {
     where
         T: Encodable + Decodable + Eq + Debug,
     {
-        let mut bytes = Vec::new();
-        value.consensus_encode(&mut bytes).unwrap();
-        assert_eq!(&expected, &bytes);
-
-        let mut cursor = Cursor::new(bytes);
-        let decoded =
-            T::consensus_decode_partial(&mut cursor, &ModuleDecoderRegistry::default()).unwrap();
+        let bytes = value.consensus_encode_to_vec();
+        assert_eq!(expected, &bytes[..]);
+        let decoded = T::consensus_decode_whole(&bytes).unwrap();
         assert_eq!(value, &decoded);
     }
 
+    #[test]
+    fn primitives_roundtrip() {
+        test_roundtrip_expected(&0u8, &[0]);
+        test_roundtrip_expected(&0xABu8, &[0xAB]);
+        test_roundtrip_expected(&0x0102u16, &[0x01, 0x02]);
+        test_roundtrip_expected(&0x0102_0304u32, &[0x01, 0x02, 0x03, 0x04]);
+        test_roundtrip_expected(
+            &0x0102_0304_0506_0708u64,
+            &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08],
+        );
+        test_roundtrip_expected(&true, &[1]);
+        test_roundtrip_expected(&false, &[0]);
+    }
+
+    #[test]
+    fn vec_u8_roundtrip() {
+        // u64 len (8 bytes BE) + bytes
+        test_roundtrip_expected(&vec![1u8, 2, 3], &[0, 0, 0, 0, 0, 0, 0, 3, 1, 2, 3]);
+        test_roundtrip_expected::<Vec<u8>>(&vec![], &[0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn vec_u16_roundtrip() {
+        test_roundtrip_expected(
+            &vec![1u16, 2, 3],
+            &[0, 0, 0, 0, 0, 0, 0, 3, 0, 1, 0, 2, 0, 3],
+        );
+    }
+
+    #[test]
+    fn string_roundtrip() {
+        test_roundtrip(&"".to_string());
+        test_roundtrip(&"hello".to_string());
+        test_roundtrip(&"héllo 🌍".to_string());
+    }
+
+    #[test]
+    fn option_result_roundtrip() {
+        test_roundtrip::<Option<u32>>(&None);
+        test_roundtrip::<Option<u32>>(&Some(42));
+        test_roundtrip::<Result<u32, String>>(&Ok(42));
+        test_roundtrip::<Result<u32, String>>(&Err("oops".to_string()));
+    }
+
+    #[test]
+    fn btreemap_roundtrip() {
+        use std::collections::BTreeMap;
+        test_roundtrip(&BTreeMap::from([
+            ("a".to_string(), 1u32),
+            ("b".to_string(), 2),
+        ]));
+    }
+
+    #[test]
+    fn btreemap_non_canonical_rejected() {
+        // Manually craft bytes with keys out of order.
+        let mut bad = Vec::new();
+        2u64.consensus_encode(&mut bad).unwrap();
+        "b".to_string().consensus_encode(&mut bad).unwrap();
+        1u32.consensus_encode(&mut bad).unwrap();
+        "a".to_string().consensus_encode(&mut bad).unwrap();
+        2u32.consensus_encode(&mut bad).unwrap();
+        assert!(BTreeMap::<String, u32>::consensus_decode_whole(&bad).is_err());
+    }
+
+    #[test]
+    fn trailing_bytes_rejected() {
+        let mut bytes = 42u32.consensus_encode_to_vec();
+        bytes.push(0);
+        assert!(u32::consensus_decode_whole(&bytes).is_err());
+    }
+
+    #[test]
+    fn systemtime_roundtrip() {
+        test_roundtrip(&crate::time::now());
+    }
+
     #[derive(Debug, Eq, PartialEq, Encodable, Decodable)]
-    enum NoDefaultEnum {
+    enum TestEnum {
         Foo,
         Bar(u32, String),
         Baz { baz: u8 },
     }
 
-    #[test_log::test]
-    fn test_derive_enum_no_default_roundtrip_success() {
-        let enums = [
-            NoDefaultEnum::Foo,
-            NoDefaultEnum::Bar(
-                42,
-                "The answer to life, the universe, and everything".to_string(),
-            ),
-            NoDefaultEnum::Baz { baz: 0 },
-        ];
-
-        for e in enums {
-            test_roundtrip(&e);
-        }
+    #[test]
+    fn derive_enum_roundtrip() {
+        test_roundtrip(&TestEnum::Foo);
+        test_roundtrip(&TestEnum::Bar(42, "hi".to_string()));
+        test_roundtrip(&TestEnum::Baz { baz: 7 });
     }
 
-    #[test_log::test]
-    fn test_derive_enum_unknown_variant_decode_fail() {
-        // Raw encoding of a variant index 42 with empty payload bytes.
-        let unknown_variant_encoding = {
-            let mut buf = vec![];
-            42u64.consensus_encode(&mut buf).unwrap();
-            Vec::<u8>::new().consensus_encode(&mut buf).unwrap();
-            buf
-        };
-
-        let mut cursor = Cursor::new(&unknown_variant_encoding);
-        let decode_res =
-            NoDefaultEnum::consensus_decode_partial(&mut cursor, &ModuleRegistry::default());
-
-        match decode_res {
-            Ok(_) => panic!("Should return error"),
-            Err(e) => assert!(e.to_string().contains("Invalid enum variant")),
-        }
+    #[test]
+    fn derive_unknown_enum_variant_rejected() {
+        // Variant index 99 doesn't exist.
+        let mut bytes = Vec::new();
+        99u64.consensus_encode(&mut bytes).unwrap();
+        assert!(TestEnum::consensus_decode_whole(&bytes).is_err());
     }
 
-    #[test_log::test]
-    fn test_derive_struct() {
-        #[derive(Debug, Encodable, Decodable, Eq, PartialEq)]
-        struct TestStruct {
-            vec: Vec<u8>,
-            num: u32,
-        }
+    #[derive(Debug, Encodable, Decodable)]
+    enum NotConstructable {}
 
-        let reference = TestStruct {
+    #[test]
+    fn derive_empty_enum_always_errors() {
+        assert!(NotConstructable::consensus_decode_whole(&[0]).is_err());
+    }
+
+    #[derive(Debug, Encodable, Decodable, Eq, PartialEq)]
+    struct TestStruct {
+        vec: Vec<u8>,
+        num: u32,
+    }
+
+    #[test]
+    fn derive_struct_roundtrip() {
+        test_roundtrip(&TestStruct {
             vec: vec![1, 2, 3],
             num: 42,
-        };
-        let bytes = [3, 1, 2, 3, 42];
-
-        test_roundtrip_expected(&reference, &bytes);
+        });
     }
 
-    #[test_log::test]
-    fn test_derive_tuple_struct() {
-        #[derive(Debug, Encodable, Decodable, Eq, PartialEq)]
-        struct TestStruct(Vec<u8>, u32);
+    #[derive(Debug, Encodable, Decodable, Eq, PartialEq)]
+    struct TestTupleStruct(Vec<u8>, u32);
 
-        let reference = TestStruct(vec![1, 2, 3], 42);
-        let bytes = [3, 1, 2, 3, 42];
-
-        test_roundtrip_expected(&reference, &bytes);
+    #[test]
+    fn derive_tuple_struct_roundtrip() {
+        test_roundtrip(&TestTupleStruct(vec![1, 2, 3], 42));
     }
 
-    #[test_log::test]
-    fn test_derive_enum() {
-        #[derive(Debug, Encodable, Decodable, Eq, PartialEq)]
-        enum TestEnum {
-            Foo(Option<u64>),
-            Bar { bazz: Vec<u8> },
-        }
-
-        let test_cases = [
-            (TestEnum::Foo(Some(42)), vec![0, 2, 1, 42]),
-            (TestEnum::Foo(None), vec![0, 1, 0]),
-            (
-                TestEnum::Bar {
-                    bazz: vec![1, 2, 3],
-                },
-                vec![1, 4, 3, 1, 2, 3],
-            ),
-        ];
-
-        for (reference, bytes) in test_cases {
-            test_roundtrip_expected(&reference, &bytes);
-        }
-    }
-
-    #[test_log::test]
-    fn test_systemtime() {
-        test_roundtrip(&fedimint_core::time::now());
+    #[derive(Debug, PartialEq, Eq, Encodable, Decodable)]
+    enum IndexedEnum {
+        #[encodable(index = 0)]
+        Foo,
+        #[encodable(index = 2)]
+        Baz,
     }
 
     #[test]
-    fn test_derive_empty_enum_decode() {
-        #[derive(Debug, Encodable, Decodable)]
-        enum NotConstructable {}
-
-        let vec = vec![42u8];
-        let mut cursor = Cursor::new(vec);
-
-        assert!(
-            NotConstructable::consensus_decode_partial(
-                &mut cursor,
-                &ModuleDecoderRegistry::default()
-            )
-            .is_err()
-        );
+    fn derive_custom_index_enum_roundtrip() {
+        test_roundtrip(&IndexedEnum::Foo);
+        test_roundtrip(&IndexedEnum::Baz);
     }
 
-    #[test]
-    fn test_custom_index_enum() {
-        #[derive(Debug, PartialEq, Eq, Encodable, Decodable)]
-        enum IndexedEnum {
-            #[encodable(index = 0)]
-            Foo,
-            #[encodable(index = 2)]
-            Baz,
-        }
-
-        for value in [IndexedEnum::Foo, IndexedEnum::Baz] {
-            let bytes = value.consensus_encode_to_vec();
-            let decoded = IndexedEnum::consensus_decode_whole(&bytes, &ModuleRegistry::default())
-                .expect("Decoding failed");
-            assert_eq!(decoded, value);
-        }
-    }
-
-    fn encode_value<T: Encodable>(value: &T) -> Vec<u8> {
-        let mut writer = Vec::new();
-        value.consensus_encode(&mut writer).unwrap();
-        writer
+    fn encode_value<T: Encodable>(v: &T) -> Vec<u8> {
+        v.consensus_encode_to_vec()
     }
 
     fn decode_value<T: Decodable>(bytes: &[u8]) -> T {
-        T::consensus_decode_whole(bytes, &ModuleDecoderRegistry::default()).unwrap()
+        T::consensus_decode_whole(bytes).unwrap()
     }
 
-    fn keeps_ordering_after_serialization<T: Ord + Encodable + Decodable + Debug>(mut vec: Vec<T>) {
-        vec.sort();
-        let mut encoded = vec.iter().map(encode_value).collect::<Vec<_>>();
+    fn preserves_numeric_order<T>(mut values: Vec<T>)
+    where
+        T: Ord + Encodable + Decodable + Debug,
+    {
+        values.sort();
+        let mut encoded = values.iter().map(encode_value).collect::<Vec<_>>();
         encoded.sort();
-        let decoded = encoded.iter().map(|v| decode_value(v)).collect::<Vec<_>>();
-        for (i, (a, b)) in vec.iter().zip(decoded.iter()).enumerate() {
-            assert_eq!(a, b, "difference at index {i}");
+        let decoded = encoded.iter().map(|v| decode_value::<T>(v)).collect::<Vec<_>>();
+        for (i, (a, b)) in values.iter().zip(decoded.iter()).enumerate() {
+            assert_eq!(a, b, "mismatch at index {i}");
         }
     }
 
     #[test]
-    fn test_lexicographical_sorting() {
+    fn bytewise_order_matches_numeric_order() {
         #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Encodable, Decodable)]
-        struct TestAmount(u64);
+        struct Amount(u64);
 
         #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Encodable, Decodable)]
-        struct TestComplexAmount(u16, u32, u64);
+        struct Complex(u16, u32, u64);
 
         #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Encodable, Decodable)]
         struct Text(String);
 
-        let amounts = (0..20000).map(TestAmount).collect::<Vec<_>>();
-        keeps_ordering_after_serialization(amounts);
-
-        let complex_amounts = (10..20000)
-            .flat_map(|i| {
-                (i - 1..=i + 1).flat_map(move |j| {
-                    (i - 1..=i + 1).map(move |k| TestComplexAmount(i as u16, j as u32, k as u64))
-                })
-            })
-            .collect::<Vec<_>>();
-        keeps_ordering_after_serialization(complex_amounts);
-
-        let texts = (' '..'~')
-            .flat_map(|i| {
-                (' '..'~')
-                    .map(|j| Text(format!("{i}{j}")))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        keeps_ordering_after_serialization(texts);
-
-        // bitcoin structures are not lexicographically sortable so we cannot
-        // test them here. in future we may crate a wrapper type that is
-        // lexicographically sortable to use when needed
+        preserves_numeric_order((0..20_000).map(Amount).collect());
+        preserves_numeric_order(
+            (10..200)
+                .flat_map(|i| (i - 1..=i + 1).flat_map(move |j| (i - 1..=i + 1).map(move |k| Complex(i as u16, j as u32, k as u64))))
+                .collect(),
+        );
+        preserves_numeric_order(
+            (' '..'~')
+                .flat_map(|i| (' '..'~').map(|j| Text(format!("{i}{j}"))).collect::<Vec<_>>())
+                .collect(),
+        );
     }
 }

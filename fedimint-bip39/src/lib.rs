@@ -6,8 +6,7 @@ use std::io::{Read, Write};
 
 pub use bip39::{Language, Mnemonic};
 use fedimint_client::secret::RootSecretStrategy;
-use fedimint_core::encoding::{Decodable, DecodeError, Encodable};
-use fedimint_core::module::registry::ModuleRegistry;
+use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_derive_secret::DerivableSecret;
 use rand::{CryptoRng, RngCore};
 
@@ -32,11 +31,10 @@ impl<const WORD_COUNT: usize> RootSecretStrategy for Bip39RootSecretStrategy<WOR
         secret.to_entropy().consensus_encode(writer)
     }
 
-    fn consensus_decode_partial(
-        reader: &mut impl Read,
-    ) -> Result<Self::Encoding, fedimint_core::encoding::DecodeError> {
-        let bytes = Vec::<u8>::consensus_decode_partial(reader, &ModuleRegistry::default())?;
-        Mnemonic::from_entropy(&bytes).map_err(DecodeError::from_err)
+    fn consensus_decode(reader: &mut impl Read) -> std::io::Result<Self::Encoding> {
+        let bytes = Vec::<u8>::consensus_decode(reader)?;
+        Mnemonic::from_entropy(&bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
     }
 
     fn random<R>(rng: &mut R) -> Self::Encoding

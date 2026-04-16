@@ -9,9 +9,8 @@ use bitcoin::hashes::sha256::HashEngine;
 use bitcoin::hashes::{Hash as BitcoinHash, hex, sha256};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::Encodable;
-use fedimint_core::module::registry::ModuleRegistry;
+use fedimint_core::format_hex;
 use fedimint_core::util::SafeUrl;
-use fedimint_core::{ModuleDecoderRegistry, format_hex};
 use hex::FromHex;
 use secp256k1::PublicKey;
 use serde::de::DeserializeOwned;
@@ -532,10 +531,7 @@ impl ClientModuleConfig {
     where
         T: Decodable + 'static,
     {
-        Ok(T::consensus_decode_whole(
-            &self.config,
-            &ModuleDecoderRegistry::default(),
-        )?)
+        Ok(T::consensus_decode_whole(&self.config)?)
     }
 }
 
@@ -555,10 +551,7 @@ impl ServerModuleConfig {
 
     pub fn to_typed<T: TypedServerModuleConfig>(&self) -> anyhow::Result<T> {
         let private = serde_json::from_value(self.private.value().clone())?;
-        let consensus = <T::Consensus>::consensus_decode_whole(
-            &self.consensus.config[..],
-            &ModuleRegistry::default(),
-        )?;
+        let consensus = <T::Consensus>::consensus_decode_whole(&self.consensus.config[..])?;
 
         Ok(TypedServerModuleConfig::from_parts(private, consensus))
     }
@@ -573,10 +566,7 @@ pub trait TypedServerModuleConsensusConfig:
     fn version(&self) -> ModuleConsensusVersion;
 
     fn from_erased(erased: &ServerModuleConsensusConfig) -> anyhow::Result<Self> {
-        Ok(Self::consensus_decode_whole(
-            &erased.config[..],
-            &ModuleRegistry::default(),
-        )?)
+        Ok(Self::consensus_decode_whole(&erased.config[..])?)
     }
 }
 

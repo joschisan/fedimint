@@ -1,37 +1,28 @@
-use std::io::{Error, Read, Write};
+use std::io;
 
-use crate::encoding::{Decodable, DecodeError, Encodable};
-use crate::module::registry::ModuleDecoderRegistry;
+use super::{Decodable, Encodable};
 
 impl Encodable for iroh_base::SecretKey {
-    fn consensus_encode<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        self.to_bytes().consensus_encode(writer)
+    fn consensus_encode<W: io::Write>(&self, w: &mut W) -> io::Result<()> {
+        self.to_bytes().consensus_encode(w)
     }
 }
 
 impl Decodable for iroh_base::SecretKey {
-    fn consensus_decode_partial<D: Read>(
-        d: &mut D,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        Ok(Self::from_bytes(&<[u8; 32]>::consensus_decode_partial(
-            d, modules,
-        )?))
+    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Self::from_bytes(&<[u8; 32]>::consensus_decode(r)?))
     }
 }
 
 impl Encodable for iroh_base::PublicKey {
-    fn consensus_encode<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        self.as_bytes().consensus_encode(writer)
+    fn consensus_encode<W: io::Write>(&self, w: &mut W) -> io::Result<()> {
+        self.as_bytes().consensus_encode(w)
     }
 }
 
 impl Decodable for iroh_base::PublicKey {
-    fn consensus_decode_partial<D: Read>(
-        d: &mut D,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        Self::from_bytes(&<[u8; 32]>::consensus_decode_partial(d, modules)?)
-            .map_err(DecodeError::from_err)
+    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Self::from_bytes(&<[u8; 32]>::consensus_decode(r)?)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
     }
 }

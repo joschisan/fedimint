@@ -1,21 +1,15 @@
-//! Serde implementations using hex-encoded encodables
+//! Serde adapter that encodes an `Encodable` as a hex string.
 //!
-//! Oftentimes it's convenient to de/serialize consensus encodable data
-//! as using consensus encoding (wrapped in hex encoding).
-//!
-//! If you have just a field use just:
-//!
-//! ```norust
-//! #[serde(with = "::fedimint_core::encoding::as_hex")] EncodableType,
+//! Field use:
+//! ```ignore
+//! #[serde(with = "::fedimint_core::encoding::as_hex")]
 //! ```
 //!
-//! If you want to do it for the whole `struct`, use
-//! [`crate::serde_as_encodable_hex`] macro.
+//! Whole-type use: [`crate::serde_as_encodable_hex`].
 
 use serde::Deserialize;
 
 use super::{Decodable, Encodable};
-use crate::module::registry::ModuleRegistry;
 
 pub fn serialize<T, S>(t: &T, ser: S) -> Result<S::Ok, S::Error>
 where
@@ -29,8 +23,9 @@ pub fn deserialize<'de, T: Decodable, D>(de: D) -> Result<T, D::Error>
 where
     D: serde::de::Deserializer<'de>,
 {
-    Decodable::consensus_decode_hex(&String::deserialize(de)?, &ModuleRegistry::default())
-        .map_err(|e| serde::de::Error::custom(format!("decodable deserialization failed: {e:#}")))
+    let hex = String::deserialize(de)?;
+    let bytes = hex::decode(&hex).map_err(serde::de::Error::custom)?;
+    T::consensus_decode_whole(&bytes).map_err(serde::de::Error::custom)
 }
 
 #[macro_export]
@@ -42,9 +37,7 @@ macro_rules! serialize_as_encodable_hex {
                 S: serde::Serializer,
             {
                 use $crate::Encodable;
-                serializer.serialize_str(&self.consensus_encode_to_hex().map_err(|e| {
-                    serde::ser::Error::custom(format!("encodable serialization failed: {e:#}"))
-                })?)
+                serializer.serialize_str(&self.consensus_encode_to_hex())
             }
         }
     };
@@ -58,13 +51,10 @@ macro_rules! deserialize_as_encodable_hex {
             where
                 D: serde::Deserializer<'de>,
             {
-                $crate::Decodable::consensus_decode_hex(
-                    &String::deserialize(deserializer)?,
-                    &Default::default(),
-                )
-                .map_err(|e| {
-                    serde::de::Error::custom(format!("decodable deserialization failed: {e:#}"))
-                })
+                let hex = String::deserialize(deserializer)?;
+                let bytes = ::fedimint_core::hex::decode(&hex).map_err(serde::de::Error::custom)?;
+                <Self as $crate::Decodable>::consensus_decode_whole(&bytes)
+                    .map_err(serde::de::Error::custom)
             }
         }
     };

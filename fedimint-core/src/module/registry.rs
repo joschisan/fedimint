@@ -158,9 +158,3 @@ impl<M: std::fmt::Debug, State> ModuleRegistry<M, State> {
     }
 }
 
-/// Collection of decoders belonging to modules.
-///
-/// After the static wire-type migration this registry carries no module
-/// dispatch state; it's retained as a parameter on `Decodable`/`Encodable` for
-/// API stability, but always instantiated empty.
-pub type ModuleDecoderRegistry = ModuleRegistry<(), ()>;

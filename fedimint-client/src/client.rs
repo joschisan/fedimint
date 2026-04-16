@@ -25,7 +25,6 @@ use fedimint_core::config::{ClientConfig, FederationId, JsonClientConfig};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::encoding::Encodable as _;
 use fedimint_core::invite_code::InviteCode;
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::util::{BoxStream, FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{
@@ -114,7 +113,6 @@ impl LnFlavor {
 /// and resource freeing of the [`Client`].
 pub struct Client {
     config: tokio::sync::RwLock<ClientConfig>,
-    decoders: ModuleDecoderRegistry,
     connectors: Endpoint,
     db: Database,
     federation_id: FederationId,
@@ -179,16 +177,7 @@ impl Client {
         self.config.read().await.clone()
     }
 
-    /// Returns the core API version that the federation supports
-    ///
-    /// This reads from the cached version stored during client initialization.
-    /// If no cache is available (e.g., during initial setup), returns a default
-    /// version (0, 0).
-    pub fn decoders(&self) -> &ModuleDecoderRegistry {
-        &self.decoders
-    }
-
-    /// Returns the module at the given instance id as `&dyn Any`, or panics
+/// Returns the module at the given instance id as `&dyn Any`, or panics
     /// if the instance id doesn't match the fixed module set.
     fn get_module_any(&self, instance: ModuleInstanceId) -> &(maybe_add_send_sync!(dyn Any)) {
         match instance {
@@ -894,9 +883,6 @@ impl ClientContextIface for Client {
 
     fn api_clone(&self) -> DynGlobalApi {
         Client::api_clone(self)
-    }
-    fn decoders(&self) -> &ModuleDecoderRegistry {
-        Client::decoders(self)
     }
 
     async fn finalize_and_submit_transaction(

@@ -3,7 +3,7 @@ use std::fmt;
 use bitcoin::hashes::{Hash as _, sha256};
 use fedimint_api_client::session_outcome::AcceptedItem;
 use fedimint_api_client::transaction::ConsensusItem;
-use fedimint_core::encoding::{CountWrite, Encodable as _};
+use fedimint_core::encoding::Encodable as _;
 
 /// A newtype for a nice [`fmt::Debug`] of a [`ConsensusItem`]
 pub struct DebugConsensusItem<'ci>(pub &'ci ConsensusItem);
@@ -48,14 +48,9 @@ pub struct DebugConsensusItemCompact<'a>(pub &'a AcceptedItem);
 
 impl fmt::Display for DebugConsensusItemCompact<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut engine = sha256::HashEngine::default();
-        let mut count = CountWrite::from(&mut engine);
-        self.0
-            .consensus_encode(&mut count)
-            .map_err(|_| fmt::Error)?;
-
-        let count = count.count();
-        let hash = *sha256::Hash::from_engine(engine).as_byte_array();
+        let bytes = self.0.consensus_encode_to_vec();
+        let count = bytes.len();
+        let hash = *sha256::Hash::hash(&bytes).as_byte_array();
         f.write_fmt(format_args!(
             "{}; peer={}; len={count}; ",
             hex::encode(&hash[0..12]),

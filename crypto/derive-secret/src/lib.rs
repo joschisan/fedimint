@@ -17,8 +17,7 @@ use std::fmt::Formatter;
 
 use bls12_381::Scalar;
 use fedimint_core::config::FederationId;
-use fedimint_core::encoding::{Decodable, DecodeError, Encodable};
-use fedimint_core::module::registry::ModuleDecoderRegistry;
+use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::secp256k1::{Keypair, Secp256k1, Signing};
 use hkdf::hashes::Sha512;
 use hkdf::{BitcoinHash, Hkdf};
@@ -182,15 +181,15 @@ impl Encodable for DerivableSecret {
 }
 
 impl Decodable for DerivableSecret {
-    fn consensus_decode_partial<R: std::io::Read>(
-        reader: &mut R,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
-        let level_u64 = u64::consensus_decode_partial(reader, modules)?;
-        let level = level_u64
-            .try_into()
-            .map_err(|_| DecodeError::from_str("DerivableSecret level out of range"))?;
-        let prk = <[u8; 64]>::consensus_decode_partial(reader, modules)?;
+    fn consensus_decode<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let level_u64 = u64::consensus_decode(reader)?;
+        let level = level_u64.try_into().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "DerivableSecret level out of range",
+            )
+        })?;
+        let prk = <[u8; 64]>::consensus_decode(reader)?;
 
         Ok(Self {
             level,
@@ -210,8 +209,8 @@ mod tests {
             .child_key(ChildId(2));
 
         let encoded = original.consensus_encode_to_vec();
-        let decoded = DerivableSecret::consensus_decode_whole(&encoded, &Default::default())
-            .expect("decode should succeed");
+        let decoded =
+            DerivableSecret::consensus_decode_whole(&encoded).expect("decode should succeed");
 
         assert_eq!(original.level(), decoded.level());
         assert_eq!(

@@ -124,7 +124,7 @@ fn bench_decode_signature(c: &mut Criterion) {
 
     c.bench_function("signature decoding", |b| {
         b.iter(|| {
-            Signature::consensus_decode_whole(&sig_bytes, &Default::default())
+            Signature::consensus_decode_whole(&sig_bytes)
                 .expect("Decoding works")
         })
     });

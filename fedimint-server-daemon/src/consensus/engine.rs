@@ -283,7 +283,7 @@ impl ConsensusEngine {
                             }
                         }
 
-                        match Vec::<ConsensusItem>::consensus_decode_whole(&bytes, &Default::default()) {
+                        match Vec::<ConsensusItem>::consensus_decode_whole(&bytes) {
                             Ok(items) => {
                                 for item in items {
                                     if let Ok(()) = self.process_consensus_item(

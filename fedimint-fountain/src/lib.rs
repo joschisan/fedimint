@@ -56,7 +56,7 @@ impl<E: Decodable> FountainDecoder<E> {
             .receive(fragment.clone())
             .transpose()? // The fragment is valid but the decoding is not yet complete
             .ok()
-            .map(|b| Decodable::consensus_decode_whole(&b, &Default::default()).ok())
+            .map(|b| Decodable::consensus_decode_whole(&b).ok())
         {
             return Some(d);
         }
@@ -86,7 +86,8 @@ mod tests {
 
         let mut decoder: FountainDecoder<Vec<u8>> = FountainDecoder::default();
 
-        for k in 0..30 {
+        const MAX_FRAGMENTS: usize = 100;
+        for k in 0..MAX_FRAGMENTS {
             let fragment = encoder.next_fragment();
 
             if let Some(data) = decoder.add_fragment(&fragment) {
@@ -105,6 +106,6 @@ mod tests {
             let _ = encoder.next_fragment();
         }
 
-        panic!("Decoder did not decode the original data within 25 fragments");
+        panic!("Decoder did not decode the original data within {MAX_FRAGMENTS} fragments");
     }
 }

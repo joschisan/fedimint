@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective, Scalar};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::{NumPeers, PeerId};
 use group::Curve;
 
@@ -76,10 +75,7 @@ where
     ) -> anyhow::Result<BTreeMap<PeerId, T>> {
         let mut decoded = BTreeMap::new();
         for (k, bytes) in self.exchange_bytes(data.consensus_encode_to_vec()).await? {
-            decoded.insert(
-                k,
-                T::consensus_decode_whole(&bytes, &ModuleDecoderRegistry::default())?,
-            );
+            decoded.insert(k, T::consensus_decode_whole(&bytes)?);
         }
         Ok(decoded)
     }

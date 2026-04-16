@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use anyhow::{Context, ensure};
 
 use crate::encoding::{Decodable, Encodable};
-use crate::module::registry::ModuleDecoderRegistry;
 
 /// Lowercase RFC 4648 Base32hex alphabet (32 characters).
 const RFC4648: [u8; 32] = *b"0123456789abcdefghijklmnopqrstuv";
@@ -81,10 +80,7 @@ pub fn encode_prefixed_bytes(prefix: &str, bytes: &[u8]) -> String {
 }
 
 pub fn decode_prefixed<T: Decodable>(prefix: &str, s: &str) -> anyhow::Result<T> {
-    Ok(T::consensus_decode_whole(
-        &decode_prefixed_bytes(prefix, s)?,
-        &ModuleDecoderRegistry::default(),
-    )?)
+    Ok(T::consensus_decode_whole(&decode_prefixed_bytes(prefix, s)?)?)
 }
 
 pub fn decode_prefixed_bytes(prefix: &str, s: &str) -> anyhow::Result<Vec<u8>> {

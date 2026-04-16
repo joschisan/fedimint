@@ -39,7 +39,6 @@
 extern crate self as fedimint_core;
 
 use std::fmt::{self, Debug};
-use std::io::Error;
 use std::ops::{self, Range};
 use std::str::FromStr;
 
@@ -57,8 +56,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 pub use {bitcoin, borsh, hex, redb, secp256k1};
 
-use crate::encoding::{Decodable, DecodeError, Encodable};
-use crate::module::registry::ModuleDecoderRegistry;
+use crate::encoding::{Decodable, Encodable};
 
 /// Bitcoin amount types
 mod amount;
@@ -527,7 +525,7 @@ impl Iterator for OutPointRangeIter {
 }
 
 impl Encodable for TransactionId {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
+    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         let bytes = &self[..];
         writer.write_all(bytes)?;
         Ok(())
@@ -535,12 +533,9 @@ impl Encodable for TransactionId {
 }
 
 impl Decodable for TransactionId {
-    fn consensus_decode_partial<D: std::io::Read>(
-        d: &mut D,
-        _modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, DecodeError> {
+    fn consensus_decode<R: std::io::Read>(r: &mut R) -> std::io::Result<Self> {
         let mut bytes = [0u8; 32];
-        d.read_exact(&mut bytes).map_err(DecodeError::from_err)?;
+        r.read_exact(&mut bytes)?;
         Ok(Self::from_byte_array(bytes))
     }
 }

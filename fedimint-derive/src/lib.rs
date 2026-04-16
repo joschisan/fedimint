@@ -20,62 +20,223 @@ pub fn derive_encodable(input: TokenStream) -> TokenStream {
         ..
     } = parse_macro_input!(input);
 
-    let encode_inner = match data {
+    let encode_body = match data {
         Data::Struct(DataStruct { fields, .. }) => derive_struct_encode(&fields),
         Data::Enum(DataEnum { variants, .. }) => derive_enum_encode(&ident, &variants),
         Data::Union(_) => error(&ident, "Encodable can't be derived for unions"),
     };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    let output = quote! {
+    quote! {
         impl #impl_generics ::fedimint_core::encoding::Encodable for #ident #ty_generics #where_clause {
-            #[allow(deprecated)]
-            fn consensus_encode<W: std::io::Write>(&self, mut writer: &mut W) -> std::result::Result<(), std::io::Error> {
-                #encode_inner
+            fn consensus_encode<W: ::std::io::Write>(&self, writer: &mut W) -> ::std::io::Result<()> {
+                #encode_body
             }
         }
-    };
-
-    output.into()
+    }
+    .into()
 }
+
+#[proc_macro_derive(Decodable)]
+pub fn derive_decodable(input: TokenStream) -> TokenStream {
+    let DeriveInput {
+        ident,
+        data,
+        generics,
+        ..
+    } = parse_macro_input!(input);
+
+    let decode_body = match data {
+        Data::Struct(DataStruct { fields, .. }) => derive_struct_decode(&ident, &fields),
+        Data::Enum(DataEnum { variants, .. }) => derive_enum_decode(&ident, &variants),
+        Data::Union(_) => error(&ident, "Decodable can't be derived for unions"),
+    };
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
+    quote! {
+        impl #impl_generics ::fedimint_core::encoding::Decodable for #ident #ty_generics #where_clause {
+            fn consensus_decode<R: ::std::io::Read>(reader: &mut R) -> ::std::io::Result<Self> {
+                #decode_body
+            }
+        }
+    }
+    .into()
+}
+
+// ─── Encode ─────────────────────────────────────────────────────────────
 
 fn derive_struct_encode(fields: &Fields) -> TokenStream2 {
     if is_tuple_struct(fields) {
-        // Tuple struct
-        let field_names = fields
+        let idxs = fields
             .iter()
             .enumerate()
-            .map(|(idx, _)| Index::from(idx))
+            .map(|(i, _)| Index::from(i))
             .collect::<Vec<_>>();
         quote! {
-            #(::fedimint_core::encoding::Encodable::consensus_encode(&self.#field_names, writer)?;)*
+            #(::fedimint_core::encoding::Encodable::consensus_encode(&self.#idxs, writer)?;)*
             Ok(())
         }
     } else {
-        // Named struct
-        let field_names = fields
+        let names = fields
             .iter()
-            .map(|field| field.ident.clone().unwrap())
+            .map(|f| f.ident.clone().unwrap())
             .collect::<Vec<_>>();
         quote! {
-            #(::fedimint_core::encoding::Encodable::consensus_encode(&self.#field_names, writer)?;)*
+            #(::fedimint_core::encoding::Encodable::consensus_encode(&self.#names, writer)?;)*
             Ok(())
         }
     }
 }
 
-/// Extracts the u64 index from an attribute if it matches `#[encodable(index =
-/// <u64>)]`.
+fn derive_enum_encode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> TokenStream2 {
+    if variants.is_empty() {
+        return quote! { match *self {} };
+    }
+
+    let arms = variant_indices(variants).into_iter().map(|(idx, variant)| {
+        let vname = variant.ident.clone();
+        let idx_lit = idx;
+
+        if is_tuple_variant(&variant.fields) {
+            let binds = variant
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format_ident!("f{i}"))
+                .collect::<Vec<_>>();
+            quote! {
+                #ident::#vname(#(#binds),*) => {
+                    ::fedimint_core::encoding::Encodable::consensus_encode(&#idx_lit, writer)?;
+                    #(::fedimint_core::encoding::Encodable::consensus_encode(#binds, writer)?;)*
+                }
+            }
+        } else if variant.fields.is_empty() {
+            quote! {
+                #ident::#vname => {
+                    ::fedimint_core::encoding::Encodable::consensus_encode(&#idx_lit, writer)?;
+                }
+            }
+        } else {
+            let names = variant
+                .fields
+                .iter()
+                .map(|f| f.ident.clone().unwrap())
+                .collect::<Vec<_>>();
+            quote! {
+                #ident::#vname { #(#names),* } => {
+                    ::fedimint_core::encoding::Encodable::consensus_encode(&#idx_lit, writer)?;
+                    #(::fedimint_core::encoding::Encodable::consensus_encode(#names, writer)?;)*
+                }
+            }
+        }
+    });
+
+    quote! {
+        match self {
+            #(#arms)*
+        }
+        Ok(())
+    }
+}
+
+// ─── Decode ─────────────────────────────────────────────────────────────
+
+fn derive_struct_decode(ident: &Ident, fields: &Fields) -> TokenStream2 {
+    if is_tuple_struct(fields) {
+        let binds = fields
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format_ident!("f{i}"))
+            .collect::<Vec<_>>();
+        quote! {
+            #(let #binds = ::fedimint_core::encoding::Decodable::consensus_decode(reader)?;)*
+            Ok(#ident(#(#binds),*))
+        }
+    } else if fields.is_empty() {
+        quote! { Ok(#ident {}) }
+    } else {
+        let names = fields
+            .iter()
+            .map(|f| f.ident.clone().unwrap())
+            .collect::<Vec<_>>();
+        quote! {
+            #(let #names = ::fedimint_core::encoding::Decodable::consensus_decode(reader)?;)*
+            Ok(#ident { #(#names),* })
+        }
+    }
+}
+
+fn derive_enum_decode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> TokenStream2 {
+    if variants.is_empty() {
+        return quote! {
+            Err(::std::io::Error::new(
+                ::std::io::ErrorKind::InvalidData,
+                concat!("Uninhabited enum ", stringify!(#ident), " cannot be decoded"),
+            ))
+        };
+    }
+
+    let arms = variant_indices(variants).into_iter().map(|(idx, variant)| {
+        let vname = variant.ident.clone();
+        let idx_lit = idx;
+
+        let construct = if is_tuple_variant(&variant.fields) {
+            let binds = variant
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format_ident!("f{i}"))
+                .collect::<Vec<_>>();
+            quote! {
+                {
+                    #(let #binds = ::fedimint_core::encoding::Decodable::consensus_decode(reader)?;)*
+                    Ok(#ident::#vname(#(#binds),*))
+                }
+            }
+        } else if variant.fields.is_empty() {
+            quote! { Ok(#ident::#vname) }
+        } else {
+            let names = variant
+                .fields
+                .iter()
+                .map(|f| f.ident.clone().unwrap())
+                .collect::<Vec<_>>();
+            quote! {
+                {
+                    #(let #names = ::fedimint_core::encoding::Decodable::consensus_decode(reader)?;)*
+                    Ok(#ident::#vname { #(#names),* })
+                }
+            }
+        };
+
+        quote! { #idx_lit => #construct, }
+    });
+
+    quote! {
+        let variant = <u64 as ::fedimint_core::encoding::Decodable>::consensus_decode(reader)?;
+        match variant {
+            #(#arms)*
+            other => Err(::std::io::Error::new(
+                ::std::io::ErrorKind::InvalidData,
+                format!("Invalid variant {} for {}", other, stringify!(#ident)),
+            )),
+        }
+    }
+}
+
+// ─── Variant indexing ───────────────────────────────────────────────────
+
+/// Extracts the u64 index from `#[encodable(index = N)]` if present.
 fn parse_index_attribute(attributes: &[Attribute]) -> Option<u64> {
     attributes.iter().find_map(|attr| {
         if attr.path().is_ident("encodable") {
             attr.parse_args_with(|input: syn::parse::ParseStream| {
-                input.parse::<syn::Ident>()?.span(); // consume the ident 'index'
-                input.parse::<Token![=]>()?; // consume the '='
+                input.parse::<syn::Ident>()?.span();
+                input.parse::<Token![=]>()?;
                 if let Lit::Int(lit_int) = input.parse::<Lit>()? {
                     lit_int.base10_parse()
                 } else {
-                    Err(input.error("Expected an integer for 'index'"))
+                    Err(input.error("Expected integer for 'index'"))
                 }
             })
             .ok()
@@ -85,127 +246,42 @@ fn parse_index_attribute(attributes: &[Attribute]) -> Option<u64> {
     })
 }
 
-/// Processes all variants in a `Punctuated` list extracting any specified
-/// index.
-fn extract_variants_with_indices(input_variants: Vec<Variant>) -> Vec<(Option<u64>, Variant)> {
-    input_variants
-        .into_iter()
-        .map(|variant| {
-            let index = parse_index_attribute(&variant.attrs);
-            (index, variant)
-        })
-        .collect()
-}
-
 fn variant_indices(variants: &Punctuated<Variant, Comma>) -> Vec<(u64, Variant)> {
-    let variants = variants.into_iter().cloned().collect::<Vec<_>>();
+    let pairs = variants
+        .iter()
+        .cloned()
+        .map(|v| (parse_index_attribute(&v.attrs), v))
+        .collect::<Vec<_>>();
 
-    let attr_indices = extract_variants_with_indices(variants.clone());
-
-    let all_have_index = attr_indices.iter().all(|(idx, _)| idx.is_some());
-    let none_have_index = attr_indices.iter().all(|(idx, _)| idx.is_none());
-
+    let all = pairs.iter().all(|(idx, _)| idx.is_some());
+    let none = pairs.iter().all(|(idx, _)| idx.is_none());
     assert!(
-        all_have_index || none_have_index,
+        all || none,
         "Either all or none of the variants should have an index annotation"
     );
 
-    if all_have_index {
-        attr_indices
+    if all {
+        pairs
             .into_iter()
-            .map(|(idx, variant)| (idx.expect("We made sure everything has an index"), variant))
+            .map(|(idx, v)| (idx.expect("checked above"), v))
             .collect()
     } else {
-        variants
+        pairs
             .into_iter()
             .enumerate()
-            .map(|(idx, variant)| (idx as u64, variant))
+            .map(|(i, (_, v))| (i as u64, v))
             .collect()
     }
 }
 
-fn derive_enum_encode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> TokenStream2 {
-    if variants.is_empty() {
-        return quote! {
-            match *self {}
-        };
-    }
+// ─── Helpers ────────────────────────────────────────────────────────────
 
-    let match_arms = variant_indices(variants)
-        .into_iter()
-        .map(|(variant_idx, variant)| {
-            let variant_ident = variant.ident.clone();
-
-            if is_tuple_struct(&variant.fields) {
-                let variant_fields = variant
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, _)| format_ident!("bound_{}", idx))
-                    .collect::<Vec<_>>();
-                let variant_encode_block =
-                    derive_enum_variant_encode_block(variant_idx, &variant_fields);
-                quote! {
-                    #ident::#variant_ident(#(#variant_fields,)*) => {
-                        #variant_encode_block
-                    }
-                }
-            } else {
-                let variant_fields = variant
-                    .fields
-                    .iter()
-                    .map(|field| field.ident.clone().unwrap())
-                    .collect::<Vec<_>>();
-                let variant_encode_block =
-                    derive_enum_variant_encode_block(variant_idx, &variant_fields);
-                quote! {
-                    #ident::#variant_ident { #(#variant_fields,)*} => {
-                        #variant_encode_block
-                    }
-                }
-            }
-        });
-
-    quote! {
-        match self {
-            #(#match_arms)*
-        }
-        Ok(())
-    }
+fn is_tuple_struct(fields: &Fields) -> bool {
+    fields.iter().any(|f| f.ident.is_none()) && !fields.is_empty()
 }
 
-fn derive_enum_variant_encode_block(idx: u64, fields: &[Ident]) -> TokenStream2 {
-    quote! {
-        ::fedimint_core::encoding::Encodable::consensus_encode(&(#idx), writer)?;
-
-        let mut bytes = Vec::<u8>::new();
-        #(::fedimint_core::encoding::Encodable::consensus_encode(#fields, &mut bytes)?;)*
-
-        ::fedimint_core::encoding::Encodable::consensus_encode(&bytes, writer)?;
-    }
-}
-
-#[proc_macro_derive(Decodable)]
-pub fn derive_decodable(input: TokenStream) -> TokenStream {
-    let DeriveInput { ident, data, .. } = parse_macro_input!(input);
-
-    let decode_inner = match data {
-        Data::Struct(DataStruct { fields, .. }) => derive_struct_decode(&ident, &fields),
-        syn::Data::Enum(DataEnum { variants, .. }) => derive_enum_decode(&ident, &variants),
-        syn::Data::Union(_) => error(&ident, "Encodable can't be derived for unions"),
-    };
-
-    let output = quote! {
-        #[allow(deprecated)]
-        impl ::fedimint_core::encoding::Decodable for #ident {
-            fn consensus_decode_partial_from_finite_reader<D: std::io::Read>(d: &mut D, modules: &::fedimint_core::module::registry::ModuleDecoderRegistry) -> std::result::Result<Self, ::fedimint_core::encoding::DecodeError> {
-                use ::fedimint_core:: anyhow::Context;
-                #decode_inner
-            }
-        }
-    };
-
-    output.into()
+fn is_tuple_variant(fields: &Fields) -> bool {
+    !fields.is_empty() && fields.iter().any(|f| f.ident.is_none())
 }
 
 #[allow(unused_variables, unreachable_code)]
@@ -216,162 +292,4 @@ fn error(ident: &Ident, message: &str) -> TokenStream2 {
     panic!("{message}");
 
     TokenStream2::new()
-}
-
-fn derive_struct_decode(ident: &Ident, fields: &Fields) -> TokenStream2 {
-    let decode_block =
-        derive_tuple_or_named_decode_block(ident, &quote! { #ident }, &quote! { d }, fields);
-
-    quote! {
-        Ok(#decode_block)
-    }
-}
-
-fn derive_enum_decode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> TokenStream2 {
-    if variants.is_empty() {
-        return quote! {
-            Err(::fedimint_core::encoding::DecodeError::new_custom(anyhow::anyhow!("Enum without variants can't be instantiated")))
-        };
-    }
-
-    let variant_match_arms = variant_indices(variants).into_iter()
-        .map(|(variant_idx, variant)| {
-            let variant_ident = variant.ident.clone();
-            let decode_block = derive_tuple_or_named_decode_block(
-                ident,
-                &quote! { #ident::#variant_ident },
-                &quote! { &mut cursor },
-                &variant.fields,
-            );
-
-            // FIXME: make sure we read all bytes
-            quote! {
-                #variant_idx => {
-                    // FIXME: feels like there's a way more elegant way to do this with limited readers
-                    let bytes: Vec<u8> = ::fedimint_core::encoding::Decodable::consensus_decode_partial_from_finite_reader(d, modules)
-                        .context(concat!(
-                            "Decoding bytes of ",
-                            stringify!(#ident)
-                        ))?;
-                    let mut cursor = std::io::Cursor::new(&bytes);
-
-                    let decoded = anyhow::Context::context(
-                        (|| -> anyhow::Result<_> {
-                          Ok(#decode_block)
-                        })(), concat!("Decoding variant ", stringify!(#variant_ident), " (idx: ", #variant_idx, ")"))?;
-
-                    let read_bytes = cursor.position();
-                    let total_bytes = bytes.len() as u64;
-                    if read_bytes != total_bytes {
-                        return Err(::fedimint_core::encoding::DecodeError::new_custom(anyhow::anyhow!(
-                            "Partial read: got {total_bytes} bytes but only read {read_bytes} when decoding {}",
-                            concat!(
-                                stringify!(#ident),
-                                "::",
-                                stringify!(#variant)
-                            )
-                        )));
-                    }
-
-                    decoded
-                }
-            }
-        });
-
-    let unknown_match_arm = quote! {
-        variant => {
-            return Err(::fedimint_core::encoding::DecodeError::new_custom(anyhow::anyhow!("Invalid enum variant {} while decoding {}", variant, stringify!(#ident))));
-        }
-    };
-
-    quote! {
-        let variant = <u64 as ::fedimint_core::encoding::Decodable>::consensus_decode_partial_from_finite_reader(d, modules)
-            .context(concat!(
-                "Decoding enum variant tag of ",
-                stringify!(#ident)
-            ))?;
-
-        let decoded = match variant {
-            #(#variant_match_arms)*
-            #unknown_match_arm
-        };
-        Ok(decoded)
-    }
-}
-
-fn is_tuple_struct(fields: &Fields) -> bool {
-    fields.iter().any(|field| field.ident.is_none())
-}
-
-// TODO: how not to use token stream for constructor, but still support both:
-//   * Enum::Variant
-//   * Struct
-// as idents
-fn derive_tuple_or_named_decode_block(
-    ident: &Ident,
-    constructor: &TokenStream2,
-    reader: &TokenStream2,
-    fields: &Fields,
-) -> TokenStream2 {
-    if is_tuple_struct(fields) {
-        derive_tuple_decode_block(ident, constructor, reader, fields)
-    } else {
-        derive_named_decode_block(ident, constructor, reader, fields)
-    }
-}
-
-fn derive_tuple_decode_block(
-    ident: &Ident,
-    constructor: &TokenStream2,
-    reader: &TokenStream2,
-    fields: &Fields,
-) -> TokenStream2 {
-    let field_names = fields
-        .iter()
-        .enumerate()
-        .map(|(idx, _)| format_ident!("field_{}", idx))
-        .collect::<Vec<_>>();
-    quote! {
-        {
-            #(
-                let #field_names = ::fedimint_core::encoding::Decodable::consensus_decode_partial_from_finite_reader(#reader, modules)
-                    .context(concat!(
-                        "Decoding tuple block ",
-                        stringify!(#ident),
-                        " field ",
-                        stringify!(#field_names),
-                    ))?;
-            )*
-            #constructor(#(#field_names,)*)
-        }
-    }
-}
-
-fn derive_named_decode_block(
-    ident: &Ident,
-    constructor: &TokenStream2,
-    reader: &TokenStream2,
-    fields: &Fields,
-) -> TokenStream2 {
-    let variant_fields = fields
-        .iter()
-        .map(|field| field.ident.clone().unwrap())
-        .collect::<Vec<_>>();
-    quote! {
-        {
-            #(
-                let #variant_fields = ::fedimint_core::encoding::Decodable::consensus_decode_partial_from_finite_reader(#reader, modules)
-                    .context(concat!(
-                        "Decoding named block field: ",
-                        stringify!(#ident),
-                        "{ ... ",
-                        stringify!(#variant_fields),
-                        " ... }",
-                    ))?;
-            )*
-            #constructor{
-                #(#variant_fields,)*
-            }
-        }
-    }
 }

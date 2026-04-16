@@ -103,11 +103,8 @@ macro_rules! consensus_value {
             where
                 Self: 'a,
             {
-                <$ty as $crate::encoding::Decodable>::consensus_decode_whole(
-                    data,
-                    &$crate::module::registry::ModuleDecoderRegistry::default(),
-                )
-                .expect("consensus_decode failed")
+                <$ty as $crate::encoding::Decodable>::consensus_decode_whole(data)
+                    .expect("consensus_decode failed")
             }
 
             fn as_bytes<'a, 'b: 'a>(value: &'a Self) -> ::std::vec::Vec<u8>

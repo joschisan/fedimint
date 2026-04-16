@@ -7,7 +7,6 @@ use fedimint_api_client::transaction::{Transaction, TransactionSubmissionOutcome
 use fedimint_core::TransactionId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::util::backoff_util::custom_backoff;
 use fedimint_core::util::retry;
 use fedimint_eventlog::Event;
@@ -64,7 +63,6 @@ pub enum TxSubmissionStates {
 #[derive(Debug, Clone)]
 pub struct TxSubmissionSmContext {
     pub api: DynGlobalApi,
-    pub decoders: ModuleDecoderRegistry,
     pub client: FinalClientIface,
 }
 
@@ -84,7 +82,6 @@ impl StateMachine for TxSubmissionStatesSM {
                         tx_submission_trigger_rejected(
                             transaction.clone(),
                             ctx.api.clone(),
-                            ctx.decoders.clone(),
                             tx_submitted_sender,
                         ),
                         {
@@ -161,7 +158,6 @@ fn log_tx_event<E: Event + Send>(
 async fn tx_submission_trigger_rejected(
     transaction: Transaction,
     api: DynGlobalApi,
-    decoders: ModuleDecoderRegistry,
     tx_submitted: watch::Sender<bool>,
 ) -> String {
     let txid = transaction.tx_hash();
@@ -173,7 +169,7 @@ async fn tx_submission_trigger_rejected(
             if let TransactionSubmissionOutcome(Err(transaction_error)) = api
                 .submit_transaction(transaction.clone())
                 .await
-                .try_into_inner(&decoders)?
+                .try_into_inner()?
             {
                 Ok(transaction_error.to_string())
             } else {

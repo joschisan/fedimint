@@ -17,7 +17,6 @@ use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::CommonModuleInit;
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{NumPeers, PeerId, fedimint_build_code_version_env, maybe_add_send};
@@ -258,7 +257,6 @@ impl ClientBuilder {
         let (log_event_added_tx, _) = watch::channel(());
 
         let config = config.clone();
-        let decoders = ModuleDecoderRegistry::default();
         let fed_id = config.calculate_federation_id();
         let db = db_no_decoders;
         let peer_urls: BTreeMap<PeerId, SafeUrl> = config
@@ -390,7 +388,6 @@ impl ClientBuilder {
             db.clone(),
             TxSubmissionSmContext {
                 api: api.clone(),
-                decoders: decoders.clone(),
                 client: final_client.clone(),
             },
             task_group.clone(),
@@ -398,7 +395,6 @@ impl ClientBuilder {
 
         let client_inner = Arc::new(Client {
             config: tokio::sync::RwLock::new(config.clone()),
-            decoders,
             db: db.clone(),
             connectors,
             federation_id: fed_id,
