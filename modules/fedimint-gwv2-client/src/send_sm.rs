@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use super::FinalReceiveState;
 use super::events::{SendPaymentStatus, SendPaymentUpdateEvent};
-use crate::{GatewayClientModuleV2, GwV2SmContext};
+use crate::GwV2SmContext;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
@@ -157,52 +157,21 @@ async fn send_payment_sm(
         return Err(Cancelled::Underfunded);
     };
 
-    if let Some(client) = ctx.gateway.is_lnv1_invoice(&invoice).await {
-        let final_state = ctx.gateway.relay_lnv1_swap(client.value(), &invoice).await;
-        return match final_state {
-            Ok(final_receive_state) => match final_receive_state {
-                FinalReceiveState::Rejected => Err(Cancelled::Rejected),
-                FinalReceiveState::Success(preimage) => Ok(PaymentResponse {
-                    preimage,
-                    target_federation: Some(client.value().federation_id()),
-                }),
-                FinalReceiveState::Refunded => Err(Cancelled::Refunded),
-                FinalReceiveState::Failure => Err(Cancelled::Failure),
-            },
-            Err(e) => Err(Cancelled::FinalizationError(e.to_string())),
-        };
-    }
-
     match ctx
         .gateway
-        .is_direct_swap(&invoice)
+        .try_direct_swap(&invoice)
         .await
         .map_err(|e| Cancelled::RegistrationError(e.to_string()))?
     {
-        Some((contract, client)) => {
-            match client
-                .get_first_module::<GatewayClientModuleV2>()
-                .expect("Must have client module")
-                .relay_direct_swap(
-                    contract,
-                    invoice
-                        .amount_milli_satoshis()
-                        .expect("amountless invoices are not supported"),
-                )
-                .await
-            {
-                Ok(final_receive_state) => match final_receive_state {
-                    FinalReceiveState::Rejected => Err(Cancelled::Rejected),
-                    FinalReceiveState::Success(preimage) => Ok(PaymentResponse {
-                        preimage,
-                        target_federation: Some(client.federation_id()),
-                    }),
-                    FinalReceiveState::Refunded => Err(Cancelled::Refunded),
-                    FinalReceiveState::Failure => Err(Cancelled::Failure),
-                },
-                Err(e) => Err(Cancelled::FinalizationError(e.to_string())),
-            }
-        }
+        Some((final_receive_state, target_federation)) => match final_receive_state {
+            FinalReceiveState::Rejected => Err(Cancelled::Rejected),
+            FinalReceiveState::Success(preimage) => Ok(PaymentResponse {
+                preimage,
+                target_federation: Some(target_federation),
+            }),
+            FinalReceiveState::Refunded => Err(Cancelled::Refunded),
+            FinalReceiveState::Failure => Err(Cancelled::Failure),
+        },
         None => {
             let preimage = ctx
                 .gateway

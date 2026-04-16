@@ -2438,7 +2438,6 @@ dependencies = [
  "borsh",
  "erased-serde",
  "fedimint-api-client",
- "fedimint-client",
  "fedimint-client-module",
  "fedimint-core",
  "fedimint-eventlog",

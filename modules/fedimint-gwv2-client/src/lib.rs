@@ -18,7 +18,6 @@ use events::{
     SendPaymentStatus, SendPaymentUpdateEvent,
 };
 use fedimint_api_client::api::DynModuleApi;
-use fedimint_client::ClientHandleArc;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
@@ -29,7 +28,6 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::hex::ToHex;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
 use fedimint_core::secp256k1::Keypair;
-use fedimint_core::util::Spanned;
 use fedimint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send, secp256k1};
 use fedimint_lnv2_common::config::LightningClientConfig;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
@@ -492,18 +490,17 @@ pub trait IGatewayClientV2: Debug + Send + Sync {
     /// Use the gateway's lightning node to complete a payment
     async fn complete_htlc(&self, htlc_response: InterceptPaymentResponse);
 
-    /// Determines if the payment can be completed using a direct swap to
-    /// another federation.
+    /// Try to settle an outgoing payment via a direct swap to another
+    /// federation hosted by the same gateway. If the gateway's connected
+    /// lightning node is the invoice's payee the gateway dispatches the swap
+    /// against the target federation's `GatewayClientModuleV2` and returns
+    /// the final receive state along with the target federation id.
     ///
-    /// A direct swap is determined by checking the gateway's connected
-    /// lightning node against the invoice's payee lightning node. If they
-    /// are the same, then the gateway can use another client to complete
-    /// the payment be swapping ecash instead of a payment over the
-    /// Lightning network.
-    async fn is_direct_swap(
+    /// Returns `Ok(None)` when this is not a direct swap.
+    async fn try_direct_swap(
         &self,
         invoice: &Bolt11Invoice,
-    ) -> anyhow::Result<Option<(IncomingContract, ClientHandleArc)>>;
+    ) -> anyhow::Result<Option<(FinalReceiveState, FederationId)>>;
 
     /// Initiates a payment over the Lightning network.
     async fn pay(
@@ -525,18 +522,6 @@ pub trait IGatewayClientV2: Debug + Send + Sync {
         federation_id: &FederationId,
         amount: u64,
     ) -> anyhow::Result<Amount>;
-
-    /// Check if this invoice was created using LNv1 and if the gateway is
-    /// connected to the target federation.
-    async fn is_lnv1_invoice(&self, invoice: &Bolt11Invoice) -> Option<Spanned<ClientHandleArc>>;
-
-    /// Perform a swap from an LNv2 `OutgoingContract` to an LNv1
-    /// `IncomingContract`
-    async fn relay_lnv1_swap(
-        &self,
-        client: &ClientHandleArc,
-        invoice: &Bolt11Invoice,
-    ) -> anyhow::Result<FinalReceiveState>;
 }
 
 // --- Types shared with fedimint-gateway-daemon ---

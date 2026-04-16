@@ -550,23 +550,36 @@ impl IGatewayClientV2 for AppState {
         }
     }
 
-    async fn is_direct_swap(
+    async fn try_direct_swap(
         &self,
         invoice: &Bolt11Invoice,
-    ) -> anyhow::Result<Option<(IncomingContract, ClientHandleArc)>> {
-        if self.node.node_id() == invoice.get_payee_pub_key() {
-            let (contract, client) = self
-                .get_registered_incoming_contract_and_client_v2(
-                    PaymentImage::Hash(*invoice.payment_hash()),
-                    invoice
-                        .amount_milli_satoshis()
-                        .expect("The amount invoice has been previously checked"),
-                )
-                .await?;
-            Ok(Some((contract, client)))
-        } else {
-            Ok(None)
+    ) -> anyhow::Result<Option<(FinalReceiveState, FederationId)>> {
+        if self.node.node_id() != invoice.get_payee_pub_key() {
+            return Ok(None);
         }
+
+        let (contract, client) = self
+            .get_registered_incoming_contract_and_client_v2(
+                PaymentImage::Hash(*invoice.payment_hash()),
+                invoice
+                    .amount_milli_satoshis()
+                    .expect("The amount invoice has been previously checked"),
+            )
+            .await?;
+
+        let federation_id = client.federation_id();
+        let final_state = client
+            .get_first_module::<GatewayClientModuleV2>()
+            .expect("Must have client module")
+            .relay_direct_swap(
+                contract,
+                invoice
+                    .amount_milli_satoshis()
+                    .expect("amountless invoices are not supported"),
+            )
+            .await?;
+
+        Ok(Some((final_state, federation_id)))
     }
 
     async fn pay(
@@ -639,15 +652,4 @@ impl IGatewayClientV2 for AppState {
             .add_to(amount))
     }
 
-    async fn is_lnv1_invoice(&self, _invoice: &Bolt11Invoice) -> Option<Spanned<ClientHandleArc>> {
-        None
-    }
-
-    async fn relay_lnv1_swap(
-        &self,
-        _client: &ClientHandleArc,
-        _invoice: &Bolt11Invoice,
-    ) -> anyhow::Result<FinalReceiveState> {
-        Err(anyhow!("LNv1 swaps are not supported"))
-    }
 }
