@@ -69,7 +69,6 @@ url = { workspace = true, features = ["serde"] }
 z32 = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-aws-lc-sys = { version = "0.39", features = ["bindgen"] }
 tokio = { workspace = true, features = ["full", "tracing"] }
 tokio-rustls = { workspace = true }
 

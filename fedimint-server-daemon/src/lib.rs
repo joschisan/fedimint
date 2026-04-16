@@ -53,7 +53,9 @@ use tracing::info;
 use crate::config::ConfigGenSettings;
 use crate::config::io::write_server_config;
 use crate::config::setup::SetupApi;
-use crate::p2p::{P2PConnector, P2PMessage, P2PStatusReceivers, ReconnectP2PConnections, p2p_status_channels};
+use crate::p2p::{
+    P2PConnector, P2PMessage, P2PStatusReceivers, ReconnectP2PConnections, p2p_status_channels,
+};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_server(

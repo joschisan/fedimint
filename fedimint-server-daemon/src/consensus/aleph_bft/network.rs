@@ -3,7 +3,6 @@ use bitcoin::hashes::{Hash, sha256};
 use fedimint_api_client::session_outcome::SignedSessionOutcome;
 use fedimint_core::PeerId;
 use fedimint_core::encoding::Encodable;
-use crate::p2p::{ReconnectP2PConnections, Recipient};
 use fedimint_core::secp256k1::schnorr;
 use fedimint_core::util::FmtCompact as _;
 use fedimint_logging::LOG_CONSENSUS;
@@ -14,7 +13,7 @@ use tracing::error;
 use super::super::db::SIGNED_SESSION_OUTCOME;
 use super::data_provider::UnitData;
 use super::keychain::Keychain;
-use crate::p2p::P2PMessage;
+use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Hasher;

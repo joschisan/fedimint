@@ -8,7 +8,6 @@ use fedimint_api_client::session_outcome::{AcceptedItem, SessionOutcome, SignedS
 use fedimint_api_client::transaction::ConsensusItem;
 use fedimint_core::encoding::Decodable;
 use fedimint_core::module::audit::Audit;
-use crate::p2p::{ReconnectP2PConnections, Recipient};
 use fedimint_core::runtime::spawn;
 use fedimint_core::secp256k1::schnorr;
 use fedimint_core::task::{TaskGroup, TaskHandle, sleep};
@@ -34,7 +33,7 @@ use crate::consensus::db::{
 };
 use crate::consensus::debug::DebugConsensusItem;
 use crate::consensus::server::process_transaction_with_server;
-use crate::p2p::P2PMessage;
+use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {

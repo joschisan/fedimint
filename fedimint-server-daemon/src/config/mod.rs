@@ -11,7 +11,6 @@ use fedimint_core::core::ModuleKind;
 use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::{CORE_CONSENSUS_VERSION, CoreConsensusVersion};
-use crate::p2p::{ReconnectP2PConnections, Recipient};
 use fedimint_core::setup_code::PeerSetupCode;
 use fedimint_core::task::sleep;
 use fedimint_core::util::SafeUrl;
@@ -29,8 +28,7 @@ use tokio::select;
 use tracing::{error, info, warn};
 
 use crate::fedimint_core::encoding::Encodable;
-use crate::p2p::P2PStatusReceivers;
-use crate::p2p::P2PMessage;
+use crate::p2p::{P2PMessage, P2PStatusReceivers, Recipient, ReconnectP2PConnections};
 
 pub mod dkg;
 pub mod dkg_g1;

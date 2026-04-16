@@ -5,14 +5,13 @@ use anyhow::{Context, bail, ensure};
 use bls12_381::{G1Projective, Scalar};
 use fedimint_core::bitcoin::hashes::sha256;
 use fedimint_core::encoding::Encodable as _;
-use crate::p2p::{ReconnectP2PConnections, Recipient};
 use fedimint_core::{NumPeers, PeerId};
 use fedimint_server_core::config::{g1, scalar};
 use group::ff::Field;
 use rand::rngs::OsRng;
 use tracing::trace;
 
-use crate::p2p::{DkgMessageG1, P2PMessage};
+use crate::p2p::{DkgMessageG1, P2PMessage, Recipient, ReconnectP2PConnections};
 
 // Implementation of the classic Pedersen DKG for G1.
 

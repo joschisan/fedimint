@@ -1,7 +1,6 @@
-use crate::p2p::ReconnectP2PConnections;
 use fedimint_core::{NumPeers, PeerId};
 
-use crate::p2p::P2PMessage;
+use crate::p2p::{P2PMessage, ReconnectP2PConnections};
 
 /// A handle passed to `ServerModuleInit::distributed_gen`
 ///

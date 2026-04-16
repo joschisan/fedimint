@@ -28,14 +28,8 @@ use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use lightning::types::payment::PaymentHash;
 use rand::rngs::OsRng;
-#[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
-use tikv_jemallocator::Jemalloc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
-
-#[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
 
 /// Command line parameters for starting the gateway.
 #[derive(Parser)]

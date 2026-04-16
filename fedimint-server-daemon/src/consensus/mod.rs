@@ -21,7 +21,6 @@ use fedimint_core::module::{
     ApiAuth, ApiEndpoint, ApiError, ApiMethod, FEDIMINT_API_ALPN, IrohApiRequest,
 };
 use fedimint_core::net::iroh::build_iroh_endpoint;
-use crate::p2p::ReconnectP2PConnections;
 use fedimint_core::task::{TaskGroup, sleep};
 use fedimint_core::util::FmtCompactAnyhow as _;
 use fedimint_logging::{LOG_CONSENSUS, LOG_CORE, LOG_NET_API};
@@ -38,8 +37,7 @@ use tracing::{info, warn};
 use crate::config::ServerConfig;
 use crate::consensus::api::{ConsensusApi, server_endpoints};
 use crate::consensus::engine::ConsensusEngine;
-use crate::p2p::P2PStatusReceivers;
-use crate::p2p::P2PMessage;
+use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
 
 /// How many txs can be stored in memory before blocking the API
 const TRANSACTION_BUFFER: usize = 1000;

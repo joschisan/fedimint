@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use anyhow::Context;
 use async_trait::async_trait;
 use bls12_381::{G1Projective, G2Projective, Scalar};
-use crate::p2p::Recipient;
 use fedimint_core::{NumPeers, PeerId};
 use fedimint_logging::LOG_NET_PEER_DKG;
 use fedimint_server_core::config::PeerHandleOps;
@@ -12,7 +11,7 @@ use tracing::info;
 use super::dkg_g1::run_dkg_g1;
 use super::dkg_g2::run_dkg_g2;
 use super::peer_handle::PeerHandle;
-use crate::p2p::P2PMessage;
+use crate::p2p::{P2PMessage, Recipient};
 
 #[async_trait]
 impl PeerHandleOps for PeerHandle<'_> {

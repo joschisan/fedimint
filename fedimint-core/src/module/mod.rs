@@ -363,4 +363,3 @@ pub trait ModuleCommon {
     type InputError: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
     type OutputError: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
 }
-

@@ -31,13 +31,7 @@ use fedimintd_envs::{
     FM_MAX_REQUESTS_PER_CONNECTION_ENV, FM_UI_PASSWORD_ENV,
 };
 use futures::FutureExt as _;
-#[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
-use tikv_jemallocator::Jemalloc;
 use tracing::{debug, error, info};
-
-#[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
 
 /// Time we will wait before forcefully shutting down tasks on exit.
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);

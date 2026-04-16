@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use bitcoin_hashes::sha256;
-use client_db::{NOTE, RECEIVE_OPERATION, RECOVERY_STATE, RecoveryState};
+use client_db::{RecoveryState, NOTE, RECEIVE_OPERATION, RECOVERY_STATE};
 pub use events::*;
 use fedimint_api_client::api::FederationApi;
 use fedimint_client_module::module::init::{
@@ -41,12 +41,12 @@ use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{ModuleCommon, ModuleInit};
-use fedimint_core::secp256k1::rand::{Rng, thread_rng};
+use fedimint_core::secp256k1::rand::{thread_rng, Rng};
 use fedimint_core::secp256k1::{Keypair, PublicKey};
 use fedimint_core::util::BoxStream;
-use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send};
+use fedimint_core::{apply, async_trait_maybe_send, Amount, PeerId};
 use fedimint_derive_secret::DerivableSecret;
-use fedimint_mintv2_common::config::{MintClientConfig, client_denominations};
+use fedimint_mintv2_common::config::{client_denominations, MintClientConfig};
 use fedimint_mintv2_common::{
     Denomination, MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, RecoveryItem,
 };
@@ -244,17 +244,15 @@ impl ClientModuleInit for MintClientInit {
 
         let filter = issuance::tweak_filter(args.module_root_secret());
 
-        tokio::task::spawn_blocking(move || {
-            loop {
-                let tweak: [u8; 16] = thread_rng().r#gen();
+        tokio::task::spawn_blocking(move || loop {
+            let tweak: [u8; 16] = thread_rng().r#gen();
 
-                if !issuance::check_tweak(tweak, filter) {
-                    continue;
-                }
+            if !issuance::check_tweak(tweak, filter) {
+                continue;
+            }
 
-                if tweak_sender.send_blocking(tweak).is_err() {
-                    return;
-                }
+            if tweak_sender.send_blocking(tweak).is_err() {
+                return;
             }
         });
 
