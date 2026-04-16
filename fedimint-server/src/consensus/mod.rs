@@ -10,13 +10,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::bail;
 use async_channel::Sender;
 use fedimint_api_client::transaction::ConsensusItem;
 use fedimint_core::NumPeers;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::envs::is_running_in_test_env;
-use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::module::{
     ApiAuth, ApiEndpoint, ApiError, ApiMethod, FEDIMINT_API_ALPN, IrohApiRequest,
 };
@@ -69,8 +67,6 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     cfg.validate_config(&cfg.local.identity, &module_init_registry)?;
 
-    let mut modules = BTreeMap::new();
-
     let global_api = DynGlobalApi::new(
         connectors.clone(),
         cfg.consensus
@@ -90,30 +86,100 @@ pub async fn run(
         task_group,
     );
 
-    for (module_id, module_cfg) in &cfg.consensus.modules {
-        match module_init_registry.get(&module_cfg.kind) {
-            Some(module_init) => {
-                info!(target: LOG_CORE, "Initialise module {module_id}...");
+    // Directly instantiate the three canonical server modules from their typed
+    // Init structs — skips the dynamic registry lookup entirely.
+    let server = {
+        use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
+        use fedimint_lnv2_server::LightningInit;
+        use fedimint_mintv2_server::MintInit;
+        use fedimint_server_core::{DynServerModule, ServerModule, ServerModuleInit};
+        use fedimint_server_core::ServerModuleInitArgs;
+        use fedimint_walletv2_server::WalletInit;
 
-                let module = module_init
-                    .init(
-                        NumPeers::from(cfg.consensus.api_endpoints().len()),
-                        cfg.get_module_config(*module_id)?,
-                        db.isolate(format!("module-{module_id}")),
-                        task_group,
-                        cfg.local.identity,
-                        global_api.with_module(*module_id),
-                        bitcoin_rpc_connection.clone(),
-                    )
-                    .await?;
+        let num_peers = NumPeers::from(cfg.consensus.api_endpoints().len());
 
-                modules.insert(*module_id, (module_cfg.kind.clone(), module));
-            }
-            None => bail!("Detected configuration for unsupported module id: {module_id}"),
+        async fn init_one<I>(
+            init: I,
+            instance_id: ModuleInstanceId,
+            cfg: &ServerConfig,
+            db: &Database,
+            task_group: &TaskGroup,
+            num_peers: NumPeers,
+            global_api: &DynGlobalApi,
+            bitcoin_rpc: &ServerBitcoinRpcMonitor,
+        ) -> anyhow::Result<DynServerModule>
+        where
+            I: ServerModuleInit,
+            I::Module: ServerModule + 'static + Sync,
+            fedimint_api_client::wire::Input: From<
+                <<I::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::Input,
+            >,
+            fedimint_api_client::wire::Output: From<
+                <<I::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::Output,
+            >,
+            fedimint_api_client::wire::ModuleConsensusItem: From<
+                <<I::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::ConsensusItem,
+            >,
+            fedimint_api_client::wire::InputError: From<
+                <<I::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::InputError,
+            >,
+            fedimint_api_client::wire::OutputError: From<
+                <<I::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::OutputError,
+            >,
+        {
+            let args = ServerModuleInitArgs::new(
+                cfg.get_module_config(instance_id)?,
+                db.isolate(format!("module-{instance_id}")),
+                task_group.clone(),
+                cfg.local.identity,
+                num_peers,
+                global_api.with_module(instance_id),
+                bitcoin_rpc.clone(),
+            );
+            let module = init.init(&args).await?;
+            Ok(DynServerModule::from(module))
         }
-    }
 
-    let module_registry = ModuleRegistry::from(modules);
+        info!(target: LOG_CORE, "Initialise module {MINT_INSTANCE_ID}...");
+        let mint = init_one(
+            MintInit,
+            MINT_INSTANCE_ID,
+            &cfg,
+            &db,
+            task_group,
+            num_peers,
+            &global_api,
+            &bitcoin_rpc_connection,
+        )
+        .await?;
+        info!(target: LOG_CORE, "Initialise module {LN_INSTANCE_ID}...");
+        let ln = init_one(
+            LightningInit,
+            LN_INSTANCE_ID,
+            &cfg,
+            &db,
+            task_group,
+            num_peers,
+            &global_api,
+            &bitcoin_rpc_connection,
+        )
+        .await?;
+        info!(target: LOG_CORE, "Initialise module {WALLET_INSTANCE_ID}...");
+        let wallet = init_one(
+            WalletInit,
+            WALLET_INSTANCE_ID,
+            &cfg,
+            &db,
+            task_group,
+            num_peers,
+            &global_api,
+            &bitcoin_rpc_connection,
+        )
+        .await?;
+
+        crate::server::Server { mint, ln, wallet }
+    };
+
 
     let client_cfg = cfg.consensus.to_client_config(&module_init_registry)?;
 
@@ -130,8 +196,6 @@ pub async fn run(
         ci_status_senders.insert(peer, ci_sender);
         ci_status_receivers.insert(peer, ci_receiver);
     }
-
-    let server = crate::server::Server::from_registry(&module_registry);
 
     let consensus_api = ConsensusApi {
         cfg: cfg.clone(),
@@ -235,8 +299,6 @@ pub async fn run(
     }
 
     info!(target: LOG_CONSENSUS, "Starting Consensus Engine...");
-
-    drop(module_registry);
 
     ConsensusEngine {
         db,

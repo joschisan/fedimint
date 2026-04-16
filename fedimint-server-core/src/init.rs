@@ -103,6 +103,28 @@ impl<S> ServerModuleInitArgs<S>
 where
     S: ServerModuleInit,
 {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        cfg: ServerModuleConfig,
+        db: V2Database,
+        task_group: TaskGroup,
+        our_peer_id: PeerId,
+        num_peers: NumPeers,
+        module_api: DynModuleApi,
+        server_bitcoin_rpc_monitor: ServerBitcoinRpcMonitor,
+    ) -> Self {
+        Self {
+            cfg,
+            db,
+            task_group,
+            our_peer_id,
+            num_peers,
+            module_api,
+            server_bitcoin_rpc_monitor,
+            _marker: marker::PhantomData,
+        }
+    }
+
     pub fn cfg(&self) -> &ServerModuleConfig {
         &self.cfg
     }

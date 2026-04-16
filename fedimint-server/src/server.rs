@@ -12,7 +12,7 @@ use fedimint_core::module::InputMeta;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::{InPoint, OutPoint, PeerId};
 use fedimint_redb::{ReadTxRef, WriteTransaction, WriteTxRef};
-use fedimint_server_core::{DynServerModule, ServerModuleRegistry};
+use fedimint_server_core::DynServerModule;
 
 #[derive(Clone)]
 pub struct Server {
@@ -22,16 +22,6 @@ pub struct Server {
 }
 
 impl Server {
-    /// Build a `Server` from an existing `ServerModuleRegistry`. Each of the
-    /// three canonical instance ids must be present.
-    pub fn from_registry(modules: &ServerModuleRegistry) -> Self {
-        Self {
-            mint: modules.get_expect(MINT_INSTANCE_ID).clone(),
-            ln: modules.get_expect(LN_INSTANCE_ID).clone(),
-            wallet: modules.get_expect(WALLET_INSTANCE_ID).clone(),
-        }
-    }
-
     fn by_instance_id(&self, id: fedimint_core::core::ModuleInstanceId) -> &DynServerModule {
         match id {
             MINT_INSTANCE_ID => &self.mint,
