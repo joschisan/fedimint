@@ -131,10 +131,13 @@ pub async fn run(
         ci_status_receivers.insert(peer, ci_receiver);
     }
 
+    let server = crate::server::Server::from_registry(&module_registry);
+
     let consensus_api = ConsensusApi {
         cfg: cfg.clone(),
         db: db.clone(),
         modules: module_registry.clone(),
+        server: server.clone(),
         client_cfg: client_cfg.clone(),
         submission_sender: submission_sender.clone(),
         shutdown_sender,
@@ -226,6 +229,7 @@ pub async fn run(
         submission_receiver,
         shutdown_receiver,
         modules: module_registry,
+        server,
         task_group: task_group.clone(),
     }
     .run()

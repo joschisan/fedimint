@@ -1,52 +1,6 @@
-use fedimint_api_client::transaction::{TRANSACTION_OVERFLOW_ERROR, Transaction, TransactionError};
+use fedimint_api_client::transaction::{TRANSACTION_OVERFLOW_ERROR, TransactionError};
+use fedimint_core::Amount;
 use fedimint_core::module::TransactionItemAmounts;
-use fedimint_core::{Amount, InPoint, OutPoint};
-use fedimint_redb::WriteTransaction;
-use fedimint_server_core::ServerModuleRegistry;
-
-pub async fn process_transaction_with_dbtx(
-    modules: ServerModuleRegistry,
-    tx: &WriteTransaction,
-    transaction: &Transaction,
-) -> Result<(), TransactionError> {
-    let mut funding_verifier = FundingVerifier::default();
-    let mut public_keys = Vec::new();
-
-    let txid = transaction.tx_hash();
-
-    for (input, in_idx) in transaction.inputs.iter().zip(0u64..) {
-        let instance_id = input.module_instance_id();
-        let view = tx.isolate(format!("module-{instance_id}"));
-
-        let meta = modules
-            .get_expect(instance_id)
-            .process_input(&view, input, InPoint { txid, in_idx })
-            .await
-            .map_err(TransactionError::Input)?;
-
-        funding_verifier.add_input(meta.amount)?;
-        public_keys.push(meta.pub_key);
-    }
-
-    transaction.validate_signatures(&public_keys)?;
-
-    for (output, out_idx) in transaction.outputs.iter().zip(0u64..) {
-        let instance_id = output.module_instance_id();
-        let view = tx.isolate(format!("module-{instance_id}"));
-
-        let amount = modules
-            .get_expect(instance_id)
-            .process_output(&view, output, OutPoint { txid, out_idx })
-            .await
-            .map_err(TransactionError::Output)?;
-
-        funding_verifier.add_output(amount)?;
-    }
-
-    funding_verifier.verify_funding()?;
-
-    Ok(())
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct FundingVerifier {

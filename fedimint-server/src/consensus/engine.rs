@@ -35,12 +35,13 @@ use crate::consensus::db::{
     ACCEPTED_ITEM, ACCEPTED_TRANSACTION, ALEPH_UNITS, SIGNED_SESSION_OUTCOME,
 };
 use crate::consensus::debug::DebugConsensusItem;
-use crate::consensus::transaction::process_transaction_with_dbtx;
+use crate::server::process_transaction_with_server;
 use crate::p2p::P2PMessage;
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
     pub modules: ServerModuleRegistry,
+    pub server: crate::server::Server,
     pub db: Database,
     pub cfg: ServerConfig,
     pub submission_receiver: Receiver<ConsensusItem>,
@@ -619,14 +620,8 @@ impl ConsensusEngine {
         );
         let mut audit = Audit::default();
 
-        for (module_instance_id, _kind, module) in self.modules.iter_modules() {
-            let _module_audit_timing =
-                TimeReporter::new(format!("audit module {module_instance_id}")).level(Level::TRACE);
-
-            let view = tx.isolate(format!("module-{module_instance_id}"));
-
-            module.audit(&view, &mut audit, module_instance_id).await;
-        }
+        let _audit_timing = TimeReporter::new("audit server".to_string()).level(Level::TRACE);
+        self.server.audit(&tx, &mut audit).await;
 
         assert!(
             audit
@@ -658,8 +653,7 @@ impl ConsensusEngine {
 
                 let view = tx.isolate(format!("module-{instance_id}"));
 
-                self.modules
-                    .get_expect(instance_id)
+                self.server
                     .process_consensus_item(&view, &module_item, peer_id)
                     .await
             }
@@ -680,7 +674,7 @@ impl ConsensusEngine {
                     .map(|o| o.module_instance_id())
                     .collect::<Vec<_>>();
 
-                process_transaction_with_dbtx(self.modules.clone(), tx, &transaction)
+                process_transaction_with_server(&self.server, tx, &transaction)
                     .await
                     .map_err(|error| anyhow!(error.to_string()))?;
 

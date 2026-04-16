@@ -39,7 +39,7 @@ use crate::config::ServerConfig;
 use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG};
 use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION, SIGNED_SESSION_OUTCOME};
 use crate::consensus::engine::get_finished_session_count_static;
-use crate::consensus::transaction::process_transaction_with_dbtx;
+use crate::server::{Server, process_transaction_with_server};
 use crate::net::HasApiContext;
 use crate::net::p2p::P2PStatusReceivers;
 
@@ -51,6 +51,8 @@ pub struct ConsensusApi {
     pub db: Database,
     /// Modules registered with the federation
     pub modules: ServerModuleRegistry,
+    /// Static wire-dispatch handle to the fixed module set
+    pub server: Server,
     /// Cached client config
     pub client_cfg: ClientConfig,
     /// For sending API events to consensus such as transactions
@@ -85,7 +87,7 @@ impl ConsensusApi {
             return Ok(txid);
         }
 
-        process_transaction_with_dbtx(self.modules.clone(), &tx, &transaction)
+        process_transaction_with_server(&self.server, &tx, &transaction)
         .await
         .inspect_err(|err| {
             debug!(target: LOG_NET_API, %txid, err = %err.fmt_compact(), "Transaction rejected");
