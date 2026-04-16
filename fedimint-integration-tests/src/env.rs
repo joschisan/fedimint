@@ -273,7 +273,7 @@ async fn start_fedimintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
 
     let log_file = std::fs::File::create(base.join(format!("fedimintd-{peer_idx}.log")))?;
 
-    Command::new("target-nix/debug/fedimint-server-daemon")
+    Command::new("target/debug/fedimint-server-daemon")
         .env("FM_DATA_DIR", data_dir.to_str().unwrap())
         .env("FM_BITCOIN_NETWORK", "regtest")
         .env(
@@ -311,7 +311,7 @@ async fn start_gatewayd(
 
     let log_file = std::fs::File::create(base.join(format!("{name}.log")))?;
 
-    Command::new("target-nix/debug/fedimint-gateway-daemon")
+    Command::new("target/debug/fedimint-gateway-daemon")
         .env("FM_GATEWAY_DATA_DIR", data_dir.to_str().unwrap())
         .env("FM_GATEWAY_API_BIND", format!("0.0.0.0:{gw_port}"))
         .env("FM_GATEWAY_CLI_BIND", format!("127.0.0.1:{}", gw_port + 1))

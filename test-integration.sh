@@ -43,4 +43,4 @@ docker exec "$CONTAINER_NAME" bitcoin-cli \
     createwallet "" > /dev/null || true
 
 echo "Running integration tests..."
-RUST_LOG="${RUST_LOG:-info}" ./target-nix/debug/fedimint-integration-tests
+RUST_LOG="${RUST_LOG:-info}" ./target/debug/fedimint-integration-tests

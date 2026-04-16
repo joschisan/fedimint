@@ -1,6 +1,2 @@
 # Cargo build directory.
 /target
-/target-nix
-
-# Nix build directory.
-/result
