@@ -80,7 +80,7 @@ pub async fn try_download_client_config(
 
     let api_endpoints = api_endpoints
         .into_iter()
-        .map(|(peer, url)| (peer, url.url))
+        .map(|(peer, endpoint)| (peer, endpoint.node_id))
         .collect();
 
     debug!(target: LOG_CLIENT_NET, "Verifying client config with all peers");

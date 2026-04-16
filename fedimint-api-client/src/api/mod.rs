@@ -5,10 +5,9 @@ use std::fmt::Debug;
 use std::future::pending;
 use std::pin::Pin;
 use std::result;
-use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::anyhow;
 pub use error::{FederationError, OutputOutcomeError};
 use fedimint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
 use fedimint_core::core::ModuleInstanceId;
@@ -20,8 +19,8 @@ use fedimint_core::module::{
 };
 use fedimint_core::runtime::sleep;
 use fedimint_core::task::{MaybeSend, MaybeSync};
+use fedimint_core::util::FmtCompact as _;
 use fedimint_core::util::backoff_util::api_networking_backoff;
-use fedimint_core::util::{FmtCompact as _, SafeUrl};
 use fedimint_core::{NumPeersExt, PeerId, TransactionId, apply, async_trait_maybe_send, util};
 use fedimint_logging::LOG_CLIENT_NET_API;
 use futures::stream::{BoxStream, FuturesUnordered};
@@ -49,9 +48,6 @@ pub enum ServerError {
 
     #[error("Invalid peer id: {peer_id}")]
     InvalidPeerId { peer_id: PeerId },
-
-    #[error("Invalid peer url: {url}")]
-    InvalidPeerUrl { url: SafeUrl, source: anyhow::Error },
 
     #[error("Connection failed: {0}")]
     Connection(anyhow::Error),
@@ -83,7 +79,6 @@ impl ServerError {
         match self {
             ServerError::ResponseDeserialization(_)
             | ServerError::InvalidPeerId { .. }
-            | ServerError::InvalidPeerUrl { .. }
             | ServerError::InvalidResponse(_)
             | ServerError::InvalidRpcId(_)
             | ServerError::InvalidRequest(_)
@@ -471,7 +466,7 @@ impl std::fmt::Debug for DynGlobalApi {
 }
 
 impl DynGlobalApi {
-    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, SafeUrl>) -> Self {
+    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, PublicKey>) -> Self {
         FederationApi::new(endpoint, peers).into()
     }
 }
@@ -484,22 +479,22 @@ impl DynGlobalApi {
 /// read the live connection (or fail) from the current value.
 #[derive(Clone, Debug)]
 pub struct FederationApi {
-    peers: BTreeMap<PeerId, SafeUrl>,
+    peers: BTreeMap<PeerId, PublicKey>,
     peers_keys: BTreeSet<PeerId>,
     module_id: Option<ModuleInstanceId>,
     states: BTreeMap<PeerId, watch::Receiver<Option<PeerState>>>,
 }
 
 impl FederationApi {
-    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, SafeUrl>) -> Self {
+    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, PublicKey>) -> Self {
         let mut states = BTreeMap::new();
 
-        for (peer_id, url) in &peers {
+        for (peer_id, node_id) in &peers {
             let (tx, rx) = watch::channel(None);
             fedimint_core::runtime::spawn("fedimint-api-client-connection", {
                 let endpoint = endpoint.clone();
-                let url = url.clone();
-                async move { connection_task(url, endpoint, tx).await }
+                let node_id = *node_id;
+                async move { connection_task(node_id, endpoint, tx).await }
             });
             states.insert(*peer_id, rx);
         }
@@ -546,14 +541,14 @@ impl FederationApi {
 }
 
 async fn connection_task(
-    url: SafeUrl,
+    node_id: PublicKey,
     endpoint: Endpoint,
     state: watch::Sender<Option<PeerState>>,
 ) {
     let mut backoff = api_networking_backoff();
 
     loop {
-        match connect_iroh(&endpoint, &url).await {
+        match endpoint.connect(node_id, FEDIMINT_API_ALPN).await {
             Ok(conn) => {
                 backoff = api_networking_backoff();
 
@@ -568,24 +563,6 @@ async fn connection_task(
             }
         }
     }
-}
-
-async fn connect_iroh(endpoint: &Endpoint, url: &SafeUrl) -> anyhow::Result<Connection> {
-    let node_id = node_id_from_url(url)?;
-
-    endpoint
-        .connect(node_id, FEDIMINT_API_ALPN)
-        .await
-        .map_err(anyhow::Error::from)
-}
-
-/// Parse a node ID from an iroh:// URL.
-fn node_id_from_url(url: &SafeUrl) -> anyhow::Result<PublicKey> {
-    if url.scheme() != "iroh" {
-        bail!("Unsupported scheme: {}, expected iroh://", url.scheme());
-    }
-    let host = url.host_str().context("Missing host string in Iroh URL")?;
-    PublicKey::from_str(host).context("Failed to parse node id")
 }
 
 // ── Transport trait + iroh impl ─────────────────────────────────────────────

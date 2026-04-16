@@ -38,6 +38,7 @@ fedimint-mintv2-client = { workspace = true }
 fedimint-redb = { workspace = true }
 fedimint-walletv2-client = { workspace = true }
 futures = { workspace = true }
+iroh-base = { workspace = true, default-features = false }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

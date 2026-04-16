@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
 pub use fedimint_core::config::{
-    ClientConfig, ClientModuleConfig, FederationId, GlobalClientConfig, PeerUrl,
+    ClientConfig, ClientModuleConfig, FederationId, GlobalClientConfig, PeerEndpoint,
 };
 use fedimint_core::core::ModuleKind;
 use fedimint_core::envs::is_running_in_test_env;
@@ -167,17 +167,16 @@ pub struct ConfigGenParams {
 }
 
 impl ServerConfigConsensus {
-    pub fn api_endpoints(&self) -> BTreeMap<PeerId, PeerUrl> {
+    pub fn api_endpoints(&self) -> BTreeMap<PeerId, PeerEndpoint> {
         self.iroh_endpoints
             .iter()
             .map(|(peer, endpoints)| {
-                let url = PeerUrl {
+                let endpoint = PeerEndpoint {
                     name: endpoints.name.clone(),
-                    url: SafeUrl::parse(&format!("iroh://{}", endpoints.api_pk))
-                        .expect("Failed to parse iroh url"),
+                    node_id: endpoints.api_pk,
                 };
 
-                (*peer, url)
+                (*peer, endpoint)
             })
             .collect()
     }
@@ -286,9 +285,7 @@ impl ServerConfig {
 
     pub fn get_invite_code(&self) -> InviteCode {
         InviteCode::new(
-            self.consensus.api_endpoints()[&self.local.identity]
-                .url
-                .clone(),
+            self.consensus.api_endpoints()[&self.local.identity].node_id,
             self.local.identity,
             self.calculate_federation_id(),
         )

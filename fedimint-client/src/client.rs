@@ -26,7 +26,7 @@ use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::encoding::Encodable as _;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::task::TaskGroup;
-use fedimint_core::util::{BoxStream, FmtCompactAnyhow as _, SafeUrl};
+use fedimint_core::util::{BoxStream, FmtCompactAnyhow as _};
 use fedimint_core::{
     Amount, PeerId, TransactionId, apply, async_trait_maybe_send, maybe_add_send,
     maybe_add_send_sync,
@@ -762,25 +762,25 @@ impl Client {
         debug!(target: LOG_CLIENT_RECOVERY, "Recovery executor stopped");
     }
 
-    /// Returns a list of guardian API URLs
-    pub async fn get_peer_urls(&self) -> BTreeMap<PeerId, SafeUrl> {
+    /// Returns a list of guardian iroh API node ids
+    pub async fn get_peer_node_ids(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
         self.config()
             .await
             .global
             .api_endpoints
             .iter()
-            .map(|(peer, endpoint)| (*peer, endpoint.url.clone()))
+            .map(|(peer, endpoint)| (*peer, endpoint.node_id))
             .collect()
     }
 
     /// Create an invite code with the api endpoint of the given peer which can
     /// be used to download this client config
     pub async fn invite_code(&self, peer: PeerId) -> Option<InviteCode> {
-        self.get_peer_urls()
+        self.get_peer_node_ids()
             .await
             .into_iter()
-            .find_map(|(peer_id, url)| (peer == peer_id).then_some(url))
-            .map(|peer_url| InviteCode::new(peer_url.clone(), peer, self.federation_id()))
+            .find_map(|(peer_id, node_id)| (peer == peer_id).then_some(node_id))
+            .map(|node_id| InviteCode::new(node_id, peer, self.federation_id()))
     }
 
     /// Returns the guardian public key set from the client config.

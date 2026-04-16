@@ -18,7 +18,7 @@ use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::CommonModuleInit;
 use fedimint_core::task::TaskGroup;
-use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl};
+use fedimint_core::util::FmtCompactAnyhow as _;
 use fedimint_core::{NumPeers, PeerId, fedimint_build_code_version_env, maybe_add_send};
 use fedimint_derive_secret::DerivableSecret;
 use fedimint_gwv2_client::{GatewayClientInitV2, IGatewayClientV2};
@@ -259,13 +259,13 @@ impl ClientBuilder {
         let config = config.clone();
         let fed_id = config.calculate_federation_id();
         let db = db_no_decoders;
-        let peer_urls: BTreeMap<PeerId, SafeUrl> = config
+        let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
             .global
             .api_endpoints
             .iter()
-            .map(|(peer, endpoint)| (*peer, endpoint.url.clone()))
+            .map(|(peer, endpoint)| (*peer, endpoint.node_id))
             .collect();
-        let api: DynGlobalApi = FederationApi::new(connectors.clone(), peer_urls).into();
+        let api: DynGlobalApi = FederationApi::new(connectors.clone(), peer_node_ids).into();
 
         let task_group = TaskGroup::new();
 

@@ -7,12 +7,12 @@ use std::str::FromStr;
 
 use anyhow::ensure;
 use bech32::{Bech32m, Hrp};
+use iroh_base::PublicKey;
 use serde::{Deserialize, Serialize};
 
 use crate::base32::FEDIMINT_PREFIX;
 use crate::config::FederationId;
 use crate::encoding::{Decodable, Encodable};
-use crate::util::SafeUrl;
 use crate::{NumPeersExt, PeerId};
 
 /// Information required for client to join Federation
@@ -55,44 +55,25 @@ impl Decodable for InviteCode {
 }
 
 impl InviteCode {
-    pub fn new(url: SafeUrl, peer: PeerId, federation_id: FederationId) -> Self {
+    pub fn new(node_id: PublicKey, peer: PeerId, federation_id: FederationId) -> Self {
         Self(vec![
-            InviteCodePart::Api { url, peer },
+            InviteCodePart::Api { node_id, peer },
             InviteCodePart::FederationId(federation_id),
         ])
     }
 
-    pub fn from_map(
-        peer_to_url_map: &BTreeMap<PeerId, SafeUrl>,
-        federation_id: FederationId,
-    ) -> Self {
-        let max_size = peer_to_url_map.to_num_peers().max_evil() + 1;
-        let mut code_vec: Vec<InviteCodePart> = peer_to_url_map
-            .iter()
-            .take(max_size)
-            .map(|(peer, url)| InviteCodePart::Api {
-                url: url.clone(),
-                peer: *peer,
-            })
-            .collect();
-
-        code_vec.push(InviteCodePart::FederationId(federation_id));
-
-        Self(code_vec)
-    }
-
-    /// Constructs an [`InviteCode`] which contains as many guardian URLs as
-    /// needed to always be able to join a working federation
+    /// Constructs an [`InviteCode`] which contains as many guardian node ids
+    /// as needed to always be able to join a working federation.
     pub fn new_with_essential_num_guardians(
-        peer_to_url_map: &BTreeMap<PeerId, SafeUrl>,
+        peers: &BTreeMap<PeerId, PublicKey>,
         federation_id: FederationId,
     ) -> Self {
-        let max_size = peer_to_url_map.to_num_peers().max_evil() + 1;
-        let mut code_vec: Vec<InviteCodePart> = peer_to_url_map
+        let max_size = peers.to_num_peers().max_evil() + 1;
+        let mut code_vec: Vec<InviteCodePart> = peers
             .iter()
             .take(max_size)
-            .map(|(peer, url)| InviteCodePart::Api {
-                url: url.clone(),
+            .map(|(peer, node_id)| InviteCodePart::Api {
+                node_id: *node_id,
                 peer: *peer,
             })
             .collect();
@@ -101,19 +82,19 @@ impl InviteCode {
         Self(code_vec)
     }
 
-    /// Returns the API URL of one of the guardians.
-    pub fn url(&self) -> SafeUrl {
+    /// Returns the iroh node id of one of the guardians.
+    pub fn node_id(&self) -> PublicKey {
         self.0
             .iter()
             .find_map(|data| match data {
-                InviteCodePart::Api { url, .. } => Some(url.clone()),
+                InviteCodePart::Api { node_id, .. } => Some(*node_id),
                 _ => None,
             })
             .expect("Ensured by constructor")
     }
 
-    /// Returns the id of the guardian from which we got the API URL, see
-    /// [`InviteCode::url`].
+    /// Returns the id of the guardian whose node id we expose via
+    /// [`InviteCode::node_id`].
     pub fn peer(&self) -> PeerId {
         self.0
             .iter()
@@ -124,12 +105,12 @@ impl InviteCode {
             .expect("Ensured by constructor")
     }
 
-    /// Get all peer URLs in the [`InviteCode`]
-    pub fn peers(&self) -> BTreeMap<PeerId, SafeUrl> {
+    /// Get all peer node ids in the [`InviteCode`].
+    pub fn peers(&self) -> BTreeMap<PeerId, PublicKey> {
         self.0
             .iter()
             .filter_map(|entry| match entry {
-                InviteCodePart::Api { url, peer } => Some((*peer, url.clone())),
+                InviteCodePart::Api { node_id, peer } => Some((*peer, *node_id)),
                 _ => None,
             })
             .collect()
@@ -151,7 +132,6 @@ impl InviteCode {
 /// For extendability [`InviteCode`] consists of parts, where client can ignore
 /// ones they don't understand.
 ///
-/// ones they don't understand Data that can be encoded in the invite code.
 /// Currently we always just use one `Api` and one `FederationId` variant in an
 /// invite code, but more can be added in the future while still keeping the
 /// invite code readable for older clients, which will just ignore the new
@@ -160,9 +140,9 @@ impl InviteCode {
 enum InviteCodePart {
     /// API endpoint of one of the guardians
     Api {
-        /// URL to reach an API that we can download configs from
-        url: SafeUrl,
-        /// Peer id of the host from the Url
+        /// Iroh public key of the peer's API endpoint
+        node_id: PublicKey,
+        /// Peer id of the host from the node id
         peer: PeerId,
     },
 
@@ -171,12 +151,7 @@ enum InviteCodePart {
 }
 
 /// We can represent client invite code as a bech32 string for compactness and
-/// error-checking
-///
-/// Human readable part (HRP) includes the version
-/// ```txt
-/// [ hrp (4 bytes) ] [ id (48 bytes) ] ([ url len (2 bytes) ] [ url bytes (url len bytes) ])+
-/// ```
+/// error-checking.
 const BECH32_HRP: Hrp = Hrp::parse_unchecked("fed1");
 
 impl FromStr for InviteCode {
@@ -229,19 +204,17 @@ impl<'de> Deserialize<'de> for InviteCode {
 mod tests {
     use std::str::FromStr;
 
-    use fedimint_core::PeerId;
-
-    use crate::config::FederationId;
-    use crate::invite_code::InviteCode;
+    use super::*;
 
     #[test]
     fn test_invite_code_to_from_string() {
+        let node_id = PublicKey::from_bytes(&[0x42; 32]).expect("valid public key");
         let parts = vec![
-            crate::invite_code::InviteCodePart::Api {
-                url: "wss://fedimintd.mplsfed.foo/".parse().expect("valid url"),
+            InviteCodePart::Api {
+                node_id,
                 peer: PeerId::new(0),
             },
-            crate::invite_code::InviteCodePart::FederationId(FederationId(
+            InviteCodePart::FederationId(FederationId(
                 bitcoin::hashes::sha256::Hash::from_str(
                     "bea7ff4116f2b1d324c7b5d699cce4ac7408cee41db2c88027e21b76fff3b9f4",
                 )

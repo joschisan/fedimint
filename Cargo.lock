@@ -2150,6 +2150,7 @@ dependencies = [
  "fedimint-redb",
  "fedimint-walletv2-client",
  "futures",
+ "iroh-base",
  "reqwest 0.12.22",
  "serde",
  "serde_json",

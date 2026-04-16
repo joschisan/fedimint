@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::str::FromStr;
 
-use fedimint_core::config::PeerUrl;
 use serde::{Deserialize, Serialize};
 
 use crate::consensus_key;
@@ -135,12 +134,6 @@ impl NumPeersExt for &[PeerId] {
 }
 
 impl NumPeersExt for Vec<PeerId> {
-    fn to_num_peers(&self) -> NumPeers {
-        NumPeers(self.len())
-    }
-}
-
-impl NumPeersExt for Vec<PeerUrl> {
     fn to_num_peers(&self) -> NumPeers {
         NumPeers(self.len())
     }

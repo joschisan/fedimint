@@ -10,7 +10,6 @@ use bitcoin::hashes::{Hash as BitcoinHash, hex, sha256};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::Encodable;
 use fedimint_core::format_hex;
-use fedimint_core::util::SafeUrl;
 use hex::FromHex;
 use secp256k1::PublicKey;
 use serde::de::DeserializeOwned;
@@ -89,9 +88,9 @@ impl JsonWithKind {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub struct PeerUrl {
-    /// The peer's public URL (e.g. `wss://fedimint-server-1:5000`)
-    pub url: SafeUrl,
+pub struct PeerEndpoint {
+    /// The peer's iroh API public key
+    pub node_id: iroh_base::PublicKey,
     /// The peer's name
     pub name: String,
 }
@@ -174,7 +173,7 @@ pub struct JsonClientConfig {
 pub struct GlobalClientConfigV0 {
     /// API endpoints for each federation member
     #[serde(deserialize_with = "de_int_key")]
-    pub api_endpoints: BTreeMap<PeerId, PeerUrl>,
+    pub api_endpoints: BTreeMap<PeerId, PeerEndpoint>,
     /// Core consensus version
     pub consensus_version: CoreConsensusVersion,
     // TODO: make it a String -> serde_json::Value map?
@@ -187,7 +186,7 @@ pub struct GlobalClientConfigV0 {
 pub struct GlobalClientConfig {
     /// API endpoints for each federation member
     #[serde(deserialize_with = "de_int_key")]
-    pub api_endpoints: BTreeMap<PeerId, PeerUrl>,
+    pub api_endpoints: BTreeMap<PeerId, PeerEndpoint>,
     /// Signing session keys for each federation member
     /// Optional for 0.3.x backwards compatibility
     #[serde(default, deserialize_with = "optional_de_int_key")]
