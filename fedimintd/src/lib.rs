@@ -211,7 +211,7 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         State(api): State<DynDashboardApi>,
     ) -> Result<Json<WalletTotalValueResponse>, CliError> {
         let wallet = api
-            .get_module::<Wallet>()
+            .get_module::<Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2"))
             .ok_or_else(|| CliError::internal("Wallet module not found"))?;
         Ok(Json(WalletTotalValueResponse {
             total_value_sats: wallet
@@ -225,7 +225,7 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         State(api): State<DynDashboardApi>,
     ) -> Result<Json<WalletBlockCountResponse>, CliError> {
         let wallet = api
-            .get_module::<Wallet>()
+            .get_module::<Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2"))
             .ok_or_else(|| CliError::internal("Wallet module not found"))?;
         Ok(Json(WalletBlockCountResponse {
             block_count: wallet.consensus_block_count_ui().await,
@@ -236,7 +236,7 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         State(api): State<DynDashboardApi>,
     ) -> Result<Json<WalletFeerateResponse>, CliError> {
         let wallet = api
-            .get_module::<Wallet>()
+            .get_module::<Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2"))
             .ok_or_else(|| CliError::internal("Wallet module not found"))?;
         Ok(Json(WalletFeerateResponse {
             sats_per_vbyte: wallet.consensus_feerate_ui().await,
@@ -247,7 +247,7 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         State(api): State<DynDashboardApi>,
     ) -> Result<Json<Vec<fedimint_walletv2_common::TxInfo>>, CliError> {
         let wallet = api
-            .get_module::<Wallet>()
+            .get_module::<Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2"))
             .ok_or_else(|| CliError::internal("Wallet module not found"))?;
         Ok(Json(wallet.pending_tx_chain_ui().await))
     }
@@ -256,7 +256,7 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         State(api): State<DynDashboardApi>,
     ) -> Result<Json<Vec<fedimint_walletv2_common::TxInfo>>, CliError> {
         let wallet = api
-            .get_module::<Wallet>()
+            .get_module::<Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2"))
             .ok_or_else(|| CliError::internal("Wallet module not found"))?;
         Ok(Json(wallet.tx_chain_ui().await))
     }
@@ -266,7 +266,7 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         Json(payload): Json<Lnv2GatewayRequest>,
     ) -> Result<Json<bool>, CliError> {
         let lnv2 = api
-            .get_module::<Lightning>()
+            .get_module::<Lightning>(fedimint_core::core::ModuleKind::from_static_str("lnv2"))
             .ok_or_else(|| CliError::internal("LNv2 module not found"))?;
         let url: fedimint_core::util::SafeUrl = payload
             .url
@@ -280,7 +280,7 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         Json(payload): Json<Lnv2GatewayRequest>,
     ) -> Result<Json<bool>, CliError> {
         let lnv2 = api
-            .get_module::<Lightning>()
+            .get_module::<Lightning>(fedimint_core::core::ModuleKind::from_static_str("lnv2"))
             .ok_or_else(|| CliError::internal("LNv2 module not found"))?;
         let url: fedimint_core::util::SafeUrl = payload
             .url
@@ -293,7 +293,7 @@ fn dashboard_cli_router(api: fedimint_server_core::dashboard_ui::DynDashboardApi
         State(api): State<DynDashboardApi>,
     ) -> Result<Json<Vec<fedimint_core::util::SafeUrl>>, CliError> {
         let lnv2 = api
-            .get_module::<Lightning>()
+            .get_module::<Lightning>(fedimint_core::core::ModuleKind::from_static_str("lnv2"))
             .ok_or_else(|| CliError::internal("LNv2 module not found"))?;
         Ok(Json(lnv2.gateways_ui().await))
     }

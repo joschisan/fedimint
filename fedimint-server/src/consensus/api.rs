@@ -31,7 +31,6 @@ use fedimint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
 use fedimint_server_core::dashboard_ui::{
     GuardianConfigBackup, IDashboardApi, P2PConnectionStatus, ServerBitcoinRpcStatus,
 };
-use fedimint_server_core::DynServerModule;
 use tokio::sync::watch::{self, Receiver, Sender};
 use tracing::{debug, warn};
 
@@ -39,9 +38,9 @@ use crate::config::ServerConfig;
 use crate::config::io::{CONSENSUS_CONFIG, JSON_EXT, LOCAL_CONFIG, PRIVATE_CONFIG};
 use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION, SIGNED_SESSION_OUTCOME};
 use crate::consensus::engine::get_finished_session_count_static;
-use crate::server::{Server, process_transaction_with_server};
 use crate::net::HasApiContext;
 use crate::net::p2p::P2PStatusReceivers;
+use crate::server::{Server, process_transaction_with_server};
 
 #[derive(Clone)]
 pub struct ConsensusApi {
@@ -212,20 +211,35 @@ impl HasApiContext<ConsensusApi> for ConsensusApi {
 }
 
 #[async_trait]
-impl HasApiContext<DynServerModule> for ConsensusApi {
+impl HasApiContext<fedimint_mintv2_server::Mint> for ConsensusApi {
     async fn context(
         &self,
         _request: &ApiRequestErased,
-        id: Option<ModuleInstanceId>,
-    ) -> &DynServerModule {
-        use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
+        _id: Option<ModuleInstanceId>,
+    ) -> &fedimint_mintv2_server::Mint {
+        &self.server.mint
+    }
+}
 
-        match id.expect("required module id") {
-            MINT_INSTANCE_ID => &self.server.mint,
-            LN_INSTANCE_ID => &self.server.ln,
-            WALLET_INSTANCE_ID => &self.server.wallet,
-            other => panic!("unknown module instance id: {other}"),
-        }
+#[async_trait]
+impl HasApiContext<fedimint_lnv2_server::Lightning> for ConsensusApi {
+    async fn context(
+        &self,
+        _request: &ApiRequestErased,
+        _id: Option<ModuleInstanceId>,
+    ) -> &fedimint_lnv2_server::Lightning {
+        &self.server.ln
+    }
+}
+
+#[async_trait]
+impl HasApiContext<fedimint_walletv2_server::Wallet> for ConsensusApi {
+    async fn context(
+        &self,
+        _request: &ApiRequestErased,
+        _id: Option<ModuleInstanceId>,
+    ) -> &fedimint_walletv2_server::Wallet {
+        &self.server.wallet
     }
 }
 
@@ -301,11 +315,11 @@ impl IDashboardApi for ConsensusApi {
         self.get_guardian_config_backup(guardian_auth)
     }
 
-    fn get_module_by_kind(&self, kind: ModuleKind) -> Option<&DynServerModule> {
+    fn get_module_by_kind(&self, kind: ModuleKind) -> Option<&(dyn std::any::Any + Send + Sync)> {
         match kind.as_str() {
-            "mintv2" => Some(&self.server.mint),
-            "lnv2" => Some(&self.server.ln),
-            "walletv2" => Some(&self.server.wallet),
+            "mintv2" => Some(self.server.mint.as_ref()),
+            "lnv2" => Some(self.server.ln.as_ref()),
+            "walletv2" => Some(self.server.wallet.as_ref()),
             _ => None,
         }
     }

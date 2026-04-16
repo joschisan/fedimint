@@ -22,8 +22,8 @@ bitcoin = { workspace = true }
 borsh = { workspace = true }
 erased-serde = { workspace = true }
 fedimint-core = { workspace = true }
-fedimint-redb = { workspace = true }
 fedimint-logging = { workspace = true }
+fedimint-redb = { workspace = true }
 fedimint-server-core = { workspace = true }
 fedimint-walletv2-common = { workspace = true }
 futures = { workspace = true }

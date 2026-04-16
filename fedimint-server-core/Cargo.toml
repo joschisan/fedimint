@@ -22,8 +22,8 @@ bitcoin = { workspace = true }
 bls12_381 = { workspace = true }
 fedimint-api-client = { workspace = true }
 fedimint-core = { workspace = true }
-fedimint-redb = { workspace = true }
 fedimint-logging = { workspace = true }
+fedimint-redb = { workspace = true }
 futures = { workspace = true }
 group = { workspace = true }
 serde = { workspace = true }

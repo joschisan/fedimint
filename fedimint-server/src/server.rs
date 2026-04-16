@@ -1,55 +1,53 @@
 //! Concrete `Server` container for the fixed module set.
 //!
-//! Holds one module per known kind (mint/ln/wallet) and match-dispatches on
-//! the wire enum variant. Each slot still stores an `Arc<dyn IServerModule>`
-//! so the existing module-init + registry machinery can populate it without
-//! touching downcasts; the wire-level dispatch is static (variant → field),
-//! even though the final trait call is virtual.
+//! Holds typed instances of the three canonical modules and match-dispatches on
+//! the wire enum variant. There is no dyn dispatch: the server-side module
+//! trait (`IServerModule`) has been deleted and replaced with direct calls to
+//! the concrete `ServerModule` impls on `Mint`, `Lightning`, and `Wallet`.
+
+use std::sync::Arc;
 
 use fedimint_api_client::transaction::Transaction;
 use fedimint_api_client::wire::{self, LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
 use fedimint_core::module::InputMeta;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::{InPoint, OutPoint, PeerId};
+use fedimint_lnv2_server::Lightning;
+use fedimint_mintv2_server::Mint;
 use fedimint_redb::{ReadTxRef, WriteTransaction, WriteTxRef};
-use fedimint_server_core::DynServerModule;
+use fedimint_server_core::ServerModule;
+use fedimint_walletv2_server::Wallet;
 
 #[derive(Clone)]
 pub struct Server {
-    pub mint: DynServerModule,
-    pub ln: DynServerModule,
-    pub wallet: DynServerModule,
+    pub mint: Arc<Mint>,
+    pub ln: Arc<Lightning>,
+    pub wallet: Arc<Wallet>,
 }
 
 impl Server {
-    fn by_instance_id(&self, id: fedimint_core::core::ModuleInstanceId) -> &DynServerModule {
-        match id {
-            MINT_INSTANCE_ID => &self.mint,
-            LN_INSTANCE_ID => &self.ln,
-            WALLET_INSTANCE_ID => &self.wallet,
-            other => panic!("unknown module instance id: {other}"),
-        }
-    }
-
-    pub async fn consensus_proposal(
-        &self,
-        dbtx: &ReadTxRef<'_>,
-    ) -> Vec<wire::ModuleConsensusItem> {
+    pub async fn consensus_proposal(&self, dbtx: &ReadTxRef<'_>) -> Vec<wire::ModuleConsensusItem> {
         let mut items = Vec::new();
         items.extend(
             self.mint
-                .consensus_proposal(&dbtx.isolate(format!("module-{MINT_INSTANCE_ID}")), MINT_INSTANCE_ID)
-                .await,
+                .consensus_proposal(&dbtx.isolate(format!("module-{MINT_INSTANCE_ID}")))
+                .await
+                .into_iter()
+                .map(wire::ModuleConsensusItem::Mint),
         );
         items.extend(
             self.ln
-                .consensus_proposal(&dbtx.isolate(format!("module-{LN_INSTANCE_ID}")), LN_INSTANCE_ID)
-                .await,
+                .consensus_proposal(&dbtx.isolate(format!("module-{LN_INSTANCE_ID}")))
+                .await
+                .into_iter()
+                .map(wire::ModuleConsensusItem::Ln),
         );
         items.extend(
             self.wallet
-                .consensus_proposal(&dbtx.isolate(format!("module-{WALLET_INSTANCE_ID}")), WALLET_INSTANCE_ID)
-                .await,
+                .consensus_proposal(&dbtx.isolate(format!("module-{WALLET_INSTANCE_ID}")))
+                .await
+                .into_iter()
+                .map(wire::ModuleConsensusItem::Wallet),
         );
         items
     }
@@ -60,8 +58,23 @@ impl Server {
         item: &wire::ModuleConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()> {
-        let module = self.by_instance_id(item.module_instance_id());
-        module.process_consensus_item(dbtx, item, peer_id).await
+        match item {
+            wire::ModuleConsensusItem::Mint(ci) => {
+                self.mint
+                    .process_consensus_item(dbtx, ci.clone(), peer_id)
+                    .await
+            }
+            wire::ModuleConsensusItem::Ln(ci) => {
+                self.ln
+                    .process_consensus_item(dbtx, ci.clone(), peer_id)
+                    .await
+            }
+            wire::ModuleConsensusItem::Wallet(ci) => {
+                self.wallet
+                    .process_consensus_item(dbtx, ci.clone(), peer_id)
+                    .await
+            }
+        }
     }
 
     pub async fn process_input(
@@ -70,8 +83,23 @@ impl Server {
         input: &wire::Input,
         in_point: InPoint,
     ) -> Result<InputMeta, wire::InputError> {
-        let module = self.by_instance_id(input.module_instance_id());
-        module.process_input(dbtx, input, in_point).await
+        match input {
+            wire::Input::Mint(i) => self
+                .mint
+                .process_input(dbtx, i, in_point)
+                .await
+                .map_err(wire::InputError::Mint),
+            wire::Input::Ln(i) => self
+                .ln
+                .process_input(dbtx, i, in_point)
+                .await
+                .map_err(wire::InputError::Ln),
+            wire::Input::Wallet(i) => self
+                .wallet
+                .process_input(dbtx, i, in_point)
+                .await
+                .map_err(wire::InputError::Wallet),
+        }
     }
 
     pub async fn process_output(
@@ -80,8 +108,23 @@ impl Server {
         output: &wire::Output,
         out_point: OutPoint,
     ) -> Result<fedimint_core::module::TransactionItemAmounts, wire::OutputError> {
-        let module = self.by_instance_id(output.module_instance_id());
-        module.process_output(dbtx, output, out_point).await
+        match output {
+            wire::Output::Mint(o) => self
+                .mint
+                .process_output(dbtx, o, out_point)
+                .await
+                .map_err(wire::OutputError::Mint),
+            wire::Output::Ln(o) => self
+                .ln
+                .process_output(dbtx, o, out_point)
+                .await
+                .map_err(wire::OutputError::Ln),
+            wire::Output::Wallet(o) => self
+                .wallet
+                .process_output(dbtx, o, out_point)
+                .await
+                .map_err(wire::OutputError::Wallet),
+        }
     }
 
     pub async fn audit(&self, dbtx: &WriteTransaction, audit: &mut Audit) {
@@ -112,7 +155,7 @@ impl Server {
 /// Dispatch the inputs and outputs of a transaction to the relevant modules.
 pub async fn process_transaction_with_server(
     server: &Server,
-    tx: &fedimint_redb::WriteTransaction,
+    tx: &WriteTransaction,
     transaction: &Transaction,
 ) -> Result<(), fedimint_api_client::transaction::TransactionError> {
     use fedimint_api_client::transaction::TransactionError;

@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,8 +13,6 @@ use fedimint_core::net::auth::GuardianAuthToken;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{Feerate, PeerId};
 use serde::{Deserialize, Serialize};
-
-use crate::{DynServerModule, ServerModule};
 
 pub type DynDashboardApi = Arc<dyn IDashboardApi + Send + Sync + 'static>;
 
@@ -69,8 +68,12 @@ pub trait IDashboardApi {
         guardian_auth: &GuardianAuthToken,
     ) -> GuardianConfigBackup;
 
-    /// Get reference to a server module instance by module kind
-    fn get_module_by_kind(&self, kind: ModuleKind) -> Option<&DynServerModule>;
+    /// Get reference to a server module instance by module kind.
+    ///
+    /// The returned reference is erased to `&dyn Any`; consumers downcast to
+    /// the concrete typed module (e.g. `fedimint_mintv2_server::Mint`) via
+    /// [`DashboardApiModuleExt::get_module`].
+    fn get_module_by_kind(&self, kind: ModuleKind) -> Option<&(dyn Any + Send + Sync)>;
 
     /// Get the fedimintd version
     async fn fedimintd_version(&self) -> String;
@@ -84,17 +87,18 @@ pub trait IDashboardApi {
     }
 }
 
-/// Extension trait for IDashboardApi providing type-safe module access
+/// Extension trait for IDashboardApi providing type-safe module access.
+///
+/// Consumers provide both the concrete module type `M` and its module kind
+/// (e.g. `"mintv2"`) — the dashboard API looks up the opaque erased pointer
+/// by kind and this downcasts it to the typed reference.
 pub trait DashboardApiModuleExt {
-    /// Get a typed reference to a server module instance by kind
-    fn get_module<M: ServerModule + 'static>(&self) -> Option<&M>;
+    fn get_module<M: 'static>(&self, kind: ModuleKind) -> Option<&M>;
 }
 
 impl DashboardApiModuleExt for DynDashboardApi {
-    fn get_module<M: ServerModule + 'static>(&self) -> Option<&M> {
-        self.get_module_by_kind(M::module_kind())?
-            .as_any()
-            .downcast_ref::<M>()
+    fn get_module<M: 'static>(&self, kind: ModuleKind) -> Option<&M> {
+        self.get_module_by_kind(kind)?.downcast_ref::<M>()
     }
 }
 

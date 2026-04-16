@@ -34,8 +34,8 @@ use crate::consensus::db::{
     ACCEPTED_ITEM, ACCEPTED_TRANSACTION, ALEPH_UNITS, SIGNED_SESSION_OUTCOME,
 };
 use crate::consensus::debug::DebugConsensusItem;
-use crate::server::process_transaction_with_server;
 use crate::p2p::P2PMessage;
+use crate::server::process_transaction_with_server;
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {

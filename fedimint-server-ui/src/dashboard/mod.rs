@@ -113,7 +113,7 @@ async fn dashboard_view(
         }
 
         // Conditionally add Lightning V2 UI if the module is available
-        @if let Some(lightning) = state.api.get_module::<fedimint_lnv2_server::Lightning>() {
+        @if let Some(lightning) = state.api.get_module::<fedimint_lnv2_server::Lightning>(fedimint_core::core::ModuleKind::from_static_str("lnv2")) {
             div class="row gy-4 mt-2" {
                 div class="col-12" {
                     (lnv2::render(lightning).await)
@@ -122,12 +122,12 @@ async fn dashboard_view(
         }
 
         // Conditionally add Wallet V2 UI if the module is available
-        @if let Some(walletv2_module) = state.api.get_module::<fedimint_walletv2_server::Wallet>() {
+        @if let Some(walletv2_module) = state.api.get_module::<fedimint_walletv2_server::Wallet>(fedimint_core::core::ModuleKind::from_static_str("walletv2")) {
             (walletv2::render(walletv2_module).await)
         }
 
         // Conditionally add Mint V2 UI if the module is available
-        @if let Some(mint_module) = state.api.get_module::<fedimint_mintv2_server::Mint>() {
+        @if let Some(mint_module) = state.api.get_module::<fedimint_mintv2_server::Mint>(fedimint_core::core::ModuleKind::from_static_str("mintv2")) {
             div class="row gy-4 mt-2" {
                 div class="col-12" {
                     (mintv2::render(mint_module).await)
@@ -171,7 +171,9 @@ pub fn router(api: DynDashboardApi) -> Router {
 
     // routeradd LNv2 gateway routes if the module exists
     if api
-        .get_module::<fedimint_lnv2_server::Lightning>()
+        .get_module::<fedimint_lnv2_server::Lightning>(
+            fedimint_core::core::ModuleKind::from_static_str("lnv2"),
+        )
         .is_some()
     {
         app = app

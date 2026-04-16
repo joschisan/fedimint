@@ -121,7 +121,9 @@ pub async fn post_add(
 ) -> impl IntoResponse {
     state
         .api
-        .get_module::<fedimint_lnv2_server::Lightning>()
+        .get_module::<fedimint_lnv2_server::Lightning>(
+            fedimint_core::core::ModuleKind::from_static_str("lnv2"),
+        )
         .expect("Route only mounted when Lightning V2 module exists")
         .add_gateway_ui(form.gateway_url)
         .await;
@@ -137,7 +139,9 @@ pub async fn post_remove(
 ) -> impl IntoResponse {
     state
         .api
-        .get_module::<fedimint_lnv2_server::Lightning>()
+        .get_module::<fedimint_lnv2_server::Lightning>(
+            fedimint_core::core::ModuleKind::from_static_str("lnv2"),
+        )
         .expect("Route only mounted when Lightning V2 module exists")
         .remove_gateway_ui(form.gateway_url)
         .await;

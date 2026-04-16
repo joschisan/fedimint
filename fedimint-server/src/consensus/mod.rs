@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use async_channel::Sender;
 use fedimint_api_client::transaction::ConsensusItem;
+use fedimint_api_client::wire;
 use fedimint_core::NumPeers;
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::envs::is_running_in_test_env;
@@ -26,7 +27,7 @@ use fedimint_logging::{LOG_CONSENSUS, LOG_CORE, LOG_NET_API};
 use fedimint_redb::Database;
 use fedimint_server_core::bitcoin_rpc::{DynServerBitcoinRpc, ServerBitcoinRpcMonitor};
 use fedimint_server_core::dashboard_ui::IDashboardApi;
-use fedimint_server_core::{DynGlobalApi, DynServerModule, ServerModuleInitRegistry};
+use fedimint_server_core::{DynGlobalApi, ServerModuleInitRegistry};
 use futures::FutureExt;
 use iroh::Endpoint;
 use iroh::endpoint::{Incoming, RecvStream, SendStream};
@@ -92,8 +93,7 @@ pub async fn run(
         use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
         use fedimint_lnv2_server::LightningInit;
         use fedimint_mintv2_server::MintInit;
-        use fedimint_server_core::{DynServerModule, ServerModule, ServerModuleInit};
-        use fedimint_server_core::ServerModuleInitArgs;
+        use fedimint_server_core::{ServerModuleInit, ServerModuleInitArgs};
         use fedimint_walletv2_server::WalletInit;
 
         let num_peers = NumPeers::from(cfg.consensus.api_endpoints().len());
@@ -107,25 +107,9 @@ pub async fn run(
             num_peers: NumPeers,
             global_api: &DynGlobalApi,
             bitcoin_rpc: &ServerBitcoinRpcMonitor,
-        ) -> anyhow::Result<DynServerModule>
+        ) -> anyhow::Result<I::Module>
         where
             I: ServerModuleInit,
-            I::Module: ServerModule + 'static + Sync,
-            fedimint_api_client::wire::Input: From<
-                <<I::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::Input,
-            >,
-            fedimint_api_client::wire::Output: From<
-                <<I::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::Output,
-            >,
-            fedimint_api_client::wire::ModuleConsensusItem: From<
-                <<I::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::ConsensusItem,
-            >,
-            fedimint_api_client::wire::InputError: From<
-                <<I::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::InputError,
-            >,
-            fedimint_api_client::wire::OutputError: From<
-                <<I::Module as ServerModule>::Common as fedimint_core::module::ModuleCommon>::OutputError,
-            >,
         {
             let args = ServerModuleInitArgs::new(
                 cfg.get_module_config(instance_id)?,
@@ -136,50 +120,54 @@ pub async fn run(
                 global_api.with_module(instance_id),
                 bitcoin_rpc.clone(),
             );
-            let module = init.init(&args).await?;
-            Ok(DynServerModule::from(module))
+            init.init(&args).await
         }
 
         info!(target: LOG_CORE, "Initialise module {MINT_INSTANCE_ID}...");
-        let mint = init_one(
-            MintInit,
-            MINT_INSTANCE_ID,
-            &cfg,
-            &db,
-            task_group,
-            num_peers,
-            &global_api,
-            &bitcoin_rpc_connection,
-        )
-        .await?;
+        let mint = Arc::new(
+            init_one(
+                MintInit,
+                MINT_INSTANCE_ID,
+                &cfg,
+                &db,
+                task_group,
+                num_peers,
+                &global_api,
+                &bitcoin_rpc_connection,
+            )
+            .await?,
+        );
         info!(target: LOG_CORE, "Initialise module {LN_INSTANCE_ID}...");
-        let ln = init_one(
-            LightningInit,
-            LN_INSTANCE_ID,
-            &cfg,
-            &db,
-            task_group,
-            num_peers,
-            &global_api,
-            &bitcoin_rpc_connection,
-        )
-        .await?;
+        let ln = Arc::new(
+            init_one(
+                LightningInit,
+                LN_INSTANCE_ID,
+                &cfg,
+                &db,
+                task_group,
+                num_peers,
+                &global_api,
+                &bitcoin_rpc_connection,
+            )
+            .await?,
+        );
         info!(target: LOG_CORE, "Initialise module {WALLET_INSTANCE_ID}...");
-        let wallet = init_one(
-            WalletInit,
-            WALLET_INSTANCE_ID,
-            &cfg,
-            &db,
-            task_group,
-            num_peers,
-            &global_api,
-            &bitcoin_rpc_connection,
-        )
-        .await?;
+        let wallet = Arc::new(
+            init_one(
+                WalletInit,
+                WALLET_INSTANCE_ID,
+                &cfg,
+                &db,
+                task_group,
+                num_peers,
+                &global_api,
+                &bitcoin_rpc_connection,
+            )
+            .await?,
+        );
 
         crate::server::Server { mint, ln, wallet }
     };
-
 
     let client_cfg = cfg.consensus.to_client_config(&module_init_registry)?;
 
@@ -229,12 +217,14 @@ pub async fn run(
 
     {
         use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
+
         submit_module_ci_proposals(
             task_group,
             db.clone(),
             MINT_INSTANCE_ID,
             ModuleKind::from_static_str("mintv2"),
             server.mint.clone(),
+            wire::ModuleConsensusItem::Mint,
             submission_sender.clone(),
         );
         submit_module_ci_proposals(
@@ -243,6 +233,7 @@ pub async fn run(
             LN_INSTANCE_ID,
             ModuleKind::from_static_str("lnv2"),
             server.ln.clone(),
+            wire::ModuleConsensusItem::Ln,
             submission_sender.clone(),
         );
         submit_module_ci_proposals(
@@ -251,6 +242,7 @@ pub async fn run(
             WALLET_INSTANCE_ID,
             ModuleKind::from_static_str("walletv2"),
             server.wallet.clone(),
+            wire::ModuleConsensusItem::Wallet,
             submission_sender.clone(),
         );
     }
@@ -319,14 +311,19 @@ pub async fn run(
 
 const CONSENSUS_PROPOSAL_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn submit_module_ci_proposals(
+fn submit_module_ci_proposals<M>(
     task_group: &TaskGroup,
     db: Database,
     module_id: ModuleInstanceId,
     kind: ModuleKind,
-    module: DynServerModule,
+    module: Arc<M>,
+    to_wire: fn(
+        <M::Common as fedimint_core::module::ModuleCommon>::ConsensusItem,
+    ) -> wire::ModuleConsensusItem,
     submission_sender: Sender<ConsensusItem>,
-) {
+) where
+    M: fedimint_server_core::ServerModule + Send + Sync + 'static,
+{
     let mut interval = tokio::time::interval(if is_running_in_test_env() {
         Duration::from_millis(100)
     } else {
@@ -341,7 +338,7 @@ fn submit_module_ci_proposals(
                 let view = tx.isolate(format!("module-{module_id}"));
                 let module_consensus_items = tokio::time::timeout(
                     CONSENSUS_PROPOSAL_TIMEOUT,
-                    module.consensus_proposal(&view, module_id),
+                    module.consensus_proposal(&view),
                 )
                 .await;
                 drop(view);
@@ -351,7 +348,7 @@ fn submit_module_ci_proposals(
                     Ok(items) => {
                         for item in items {
                             if submission_sender
-                                .send(ConsensusItem::Module(item))
+                                .send(ConsensusItem::Module(to_wire(item)))
                                 .await
                                 .is_err()
                             {
@@ -413,32 +410,33 @@ async fn run_iroh_api(
     max_connections: usize,
     max_requests_per_connection: usize,
 ) {
+    use fedimint_lnv2_server::Lightning;
+    use fedimint_mintv2_server::Mint;
+    use fedimint_server_core::ServerModule;
+    use fedimint_walletv2_server::Wallet;
+
     let core_api = server_endpoints()
         .into_iter()
         .map(|endpoint| (endpoint.path.to_string(), endpoint))
         .collect::<BTreeMap<String, ApiEndpoint<ConsensusApi>>>();
 
-    let module_api = {
-        use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
+    fn build<M: ServerModule>(module: &M) -> BTreeMap<String, ApiEndpoint<M>> {
+        module
+            .api_endpoints()
+            .into_iter()
+            .map(|endpoint| (endpoint.path.to_string(), endpoint))
+            .collect()
+    }
 
-        let build = |module: &DynServerModule| {
-            module
-                .api_endpoints()
-                .into_iter()
-                .map(|endpoint| (endpoint.path.to_string(), endpoint))
-                .collect::<BTreeMap<String, ApiEndpoint<DynServerModule>>>()
-        };
-
-        BTreeMap::from([
-            (MINT_INSTANCE_ID, build(&consensus_api.server.mint)),
-            (LN_INSTANCE_ID, build(&consensus_api.server.ln)),
-            (WALLET_INSTANCE_ID, build(&consensus_api.server.wallet)),
-        ])
-    };
+    let mint_api = build::<Mint>(&consensus_api.server.mint);
+    let ln_api = build::<Lightning>(&consensus_api.server.ln);
+    let wallet_api = build::<Wallet>(&consensus_api.server.wallet);
 
     let consensus_api = Arc::new(consensus_api);
     let core_api = Arc::new(core_api);
-    let module_api = Arc::new(module_api);
+    let mint_api = Arc::new(mint_api);
+    let ln_api = Arc::new(ln_api);
+    let wallet_api = Arc::new(wallet_api);
     let parallel_connections_limit = Arc::new(Semaphore::new(max_connections));
 
     loop {
@@ -461,7 +459,9 @@ async fn run_iroh_api(
                     handle_incoming(
                         consensus_api.clone(),
                         core_api.clone(),
-                        module_api.clone(),
+                        mint_api.clone(),
+                        ln_api.clone(),
+                        wallet_api.clone(),
                         task_group.clone(),
                         incoming,
                         permit,
@@ -479,10 +479,17 @@ async fn run_iroh_api(
     }
 }
 
+type MintApi = BTreeMap<String, ApiEndpoint<fedimint_mintv2_server::Mint>>;
+type LnApi = BTreeMap<String, ApiEndpoint<fedimint_lnv2_server::Lightning>>;
+type WalletApi = BTreeMap<String, ApiEndpoint<fedimint_walletv2_server::Wallet>>;
+
+#[allow(clippy::too_many_arguments)]
 async fn handle_incoming(
     consensus_api: Arc<ConsensusApi>,
     core_api: Arc<BTreeMap<String, ApiEndpoint<ConsensusApi>>>,
-    module_api: Arc<BTreeMap<ModuleInstanceId, BTreeMap<String, ApiEndpoint<DynServerModule>>>>,
+    mint_api: Arc<MintApi>,
+    ln_api: Arc<LnApi>,
+    wallet_api: Arc<WalletApi>,
     task_group: TaskGroup,
     incoming: Incoming,
     _connection_permit: tokio::sync::OwnedSemaphorePermit,
@@ -511,7 +518,9 @@ async fn handle_incoming(
             handle_request(
                 consensus_api.clone(),
                 core_api.clone(),
-                module_api.clone(),
+                mint_api.clone(),
+                ln_api.clone(),
+                wallet_api.clone(),
                 send_stream,
                 recv_stream,
                 permit,
@@ -525,10 +534,13 @@ async fn handle_incoming(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_request(
     consensus_api: Arc<ConsensusApi>,
     core_api: Arc<BTreeMap<String, ApiEndpoint<ConsensusApi>>>,
-    module_api: Arc<BTreeMap<ModuleInstanceId, BTreeMap<String, ApiEndpoint<DynServerModule>>>>,
+    mint_api: Arc<MintApi>,
+    ln_api: Arc<LnApi>,
+    wallet_api: Arc<WalletApi>,
     mut send_stream: SendStream,
     mut recv_stream: RecvStream,
     _request_permit: tokio::sync::OwnedSemaphorePermit,
@@ -537,7 +549,15 @@ async fn handle_request(
 
     let request = serde_json::from_slice::<IrohApiRequest>(&request)?;
 
-    let response = await_response(consensus_api, core_api, module_api, request).await;
+    let response = await_response(
+        consensus_api,
+        core_api,
+        mint_api,
+        ln_api,
+        wallet_api,
+        request,
+    )
+    .await;
 
     let response = serde_json::to_vec(&response)?;
 
@@ -551,29 +571,42 @@ async fn handle_request(
 async fn await_response(
     consensus_api: Arc<ConsensusApi>,
     core_api: Arc<BTreeMap<String, ApiEndpoint<ConsensusApi>>>,
-    module_api: Arc<BTreeMap<ModuleInstanceId, BTreeMap<String, ApiEndpoint<DynServerModule>>>>,
+    mint_api: Arc<MintApi>,
+    ln_api: Arc<LnApi>,
+    wallet_api: Arc<WalletApi>,
     request: IrohApiRequest,
 ) -> Result<Value, ApiError> {
+    use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
+
     match request.method {
         ApiMethod::Core(method) => {
             let endpoint = core_api.get(&method).ok_or(ApiError::not_found(method))?;
-
             let state = consensus_api.context(&request.request, None).await;
-
             (endpoint.handler)(state, request.request).await
         }
-        ApiMethod::Module(module_id, method) => {
-            let endpoint = module_api
-                .get(&module_id)
-                .ok_or(ApiError::not_found(module_id.to_string()))?
-                .get(&method)
-                .ok_or(ApiError::not_found(method))?;
-
-            let state = consensus_api
-                .context(&request.request, Some(module_id))
-                .await;
-
-            (endpoint.handler)(state, request.request).await
-        }
+        ApiMethod::Module(module_id, method) => match module_id {
+            MINT_INSTANCE_ID => {
+                let endpoint = mint_api.get(&method).ok_or(ApiError::not_found(method))?;
+                let state: &fedimint_mintv2_server::Mint = consensus_api
+                    .context(&request.request, Some(module_id))
+                    .await;
+                (endpoint.handler)(state, request.request).await
+            }
+            LN_INSTANCE_ID => {
+                let endpoint = ln_api.get(&method).ok_or(ApiError::not_found(method))?;
+                let state: &fedimint_lnv2_server::Lightning = consensus_api
+                    .context(&request.request, Some(module_id))
+                    .await;
+                (endpoint.handler)(state, request.request).await
+            }
+            WALLET_INSTANCE_ID => {
+                let endpoint = wallet_api.get(&method).ok_or(ApiError::not_found(method))?;
+                let state: &fedimint_walletv2_server::Wallet = consensus_api
+                    .context(&request.request, Some(module_id))
+                    .await;
+                (endpoint.handler)(state, request.request).await
+            }
+            other => Err(ApiError::not_found(other.to_string())),
+        },
     }
 }
