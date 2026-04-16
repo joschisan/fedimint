@@ -129,6 +129,60 @@ mod txid {
 }
 pub use txid::TransactionId;
 
+impl borsh::BorshSerialize for TransactionId {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        use bitcoin::hashes::Hash as _;
+        writer.write_all(&self.to_byte_array())
+    }
+}
+
+impl borsh::BorshDeserialize for TransactionId {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        use bitcoin::hashes::Hash as _;
+        let mut bytes = [0u8; 32];
+        reader.read_exact(&mut bytes)?;
+        Ok(Self::from_byte_array(bytes))
+    }
+}
+
+impl redb::Value for TransactionId {
+    type SelfType<'a>
+        = TransactionId
+    where
+        Self: 'a;
+    type AsBytes<'a>
+        = [u8; 32]
+    where
+        Self: 'a;
+    fn fixed_width() -> Option<usize> {
+        Some(32)
+    }
+    fn from_bytes<'a>(data: &'a [u8]) -> Self
+    where
+        Self: 'a,
+    {
+        use bitcoin::hashes::Hash as _;
+        let bytes: [u8; 32] = data.try_into().expect("sha256 hash is always 32 bytes");
+        Self::from_byte_array(bytes)
+    }
+    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
+    where
+        Self: 'b,
+    {
+        use bitcoin::hashes::Hash as _;
+        value.to_byte_array()
+    }
+    fn type_name() -> redb::TypeName {
+        redb::TypeName::new("fedimint::TransactionId")
+    }
+}
+
+impl redb::Key for TransactionId {
+    fn compare(data1: &[u8], data2: &[u8]) -> std::cmp::Ordering {
+        data1.cmp(data2)
+    }
+}
+
 /// Bitcoin chain identifier
 ///
 /// This is a newtype wrapper around [`bitcoin::BlockHash`] representing the

@@ -324,6 +324,8 @@ impl ClientConfig {
 )]
 pub struct FederationId(pub sha256::Hash);
 
+crate::redb_sha256_key!(FederationId);
+
 #[derive(
     Debug,
     Copy,

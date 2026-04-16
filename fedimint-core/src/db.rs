@@ -276,6 +276,88 @@ macro_rules! redb_newtype_key {
     };
 }
 
+/// Implement borsh + `redb::Key` + `redb::Value` for a 32-byte sha256 newtype.
+///
+/// ```ignore
+/// pub struct FederationId(pub bitcoin::hashes::sha256::Hash);
+/// redb_sha256_key!(FederationId);
+/// ```
+///
+/// The newtype must be `struct Foo(pub sha256::Hash)` — expands to manual
+/// borsh impls (32 raw bytes, no length prefix) plus redb Key/Value with
+/// byte-lex compare.
+#[macro_export]
+macro_rules! redb_sha256_key {
+    ($ty:ty) => {
+        impl $crate::borsh::BorshSerialize for $ty {
+            fn serialize<W: $crate::borsh::io::Write>(
+                &self,
+                writer: &mut W,
+            ) -> $crate::borsh::io::Result<()> {
+                use $crate::bitcoin::hashes::Hash as _;
+                writer.write_all(&self.0.to_byte_array())
+            }
+        }
+
+        impl $crate::borsh::BorshDeserialize for $ty {
+            fn deserialize_reader<R: $crate::borsh::io::Read>(
+                reader: &mut R,
+            ) -> $crate::borsh::io::Result<Self> {
+                use $crate::bitcoin::hashes::Hash as _;
+                let mut bytes = [0u8; 32];
+                reader.read_exact(&mut bytes)?;
+                Ok(Self(
+                    $crate::bitcoin::hashes::sha256::Hash::from_byte_array(bytes),
+                ))
+            }
+        }
+
+        impl $crate::redb::Value for $ty {
+            type SelfType<'a>
+                = $ty
+            where
+                Self: 'a;
+
+            type AsBytes<'a>
+                = [u8; 32]
+            where
+                Self: 'a;
+
+            fn fixed_width() -> Option<usize> {
+                Some(32)
+            }
+
+            fn from_bytes<'a>(data: &'a [u8]) -> Self
+            where
+                Self: 'a,
+            {
+                use $crate::bitcoin::hashes::Hash as _;
+                let bytes: [u8; 32] =
+                    data.try_into().expect("sha256 hash is always 32 bytes");
+                Self($crate::bitcoin::hashes::sha256::Hash::from_byte_array(bytes))
+            }
+
+            fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
+            where
+                Self: 'b,
+            {
+                use $crate::bitcoin::hashes::Hash as _;
+                value.0.to_byte_array()
+            }
+
+            fn type_name() -> $crate::redb::TypeName {
+                $crate::redb::TypeName::new(concat!("fedimint::", stringify!($ty)))
+            }
+        }
+
+        impl $crate::redb::Key for $ty {
+            fn compare(data1: &[u8], data2: &[u8]) -> ::std::cmp::Ordering {
+                data1.cmp(data2)
+            }
+        }
+    };
+}
+
 // ─── NativeTableDef: redb-native typed table reference ───────────────────
 //
 // Parallel to `TableDef<K, V>`, but `K`/`V` are redb types
