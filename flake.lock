@@ -127,36 +127,21 @@
     },
     "crane_2": {
       "locked": {
-        "lastModified": 1758758545,
-        "narHash": "sha256-NU5WaEdfwF6i8faJ2Yh+jcK9vVFrofLcwlD/mP65JrI=",
+        "lastModified": 1771121070,
+        "narHash": "sha256-aIlv7FRXF9q70DNJPI237dEDAznSKaXmL5lfK/Id/bI=",
         "owner": "ipetkov",
         "repo": "crane",
-        "rev": "95d528a5f54eaba0d12102249ce42f4d01f4e364",
+        "rev": "a2812c19f1ed2e5ed5ce2ef7109798b575c180e1",
         "type": "github"
       },
       "original": {
         "owner": "ipetkov",
-        "ref": "v0.21.1",
+        "ref": "v0.23.1",
         "repo": "crane",
         "type": "github"
       }
     },
     "crane_3": {
-      "locked": {
-        "lastModified": 1755993354,
-        "narHash": "sha256-FCRRAzSaL/+umLIm3RU3O/+fJ2ssaPHseI2SSFL8yZU=",
-        "owner": "ipetkov",
-        "repo": "crane",
-        "rev": "25bd41b24426c7734278c2ff02e53258851db914",
-        "type": "github"
-      },
-      "original": {
-        "owner": "ipetkov",
-        "repo": "crane",
-        "type": "github"
-      }
-    },
-    "crane_4": {
       "locked": {
         "lastModified": 1774313767,
         "narHash": "sha256-hy0XTQND6avzGEUFrJtYBBpFa/POiiaGBr2vpU6Y9tY=",
@@ -427,21 +412,20 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "systems": "systems_8",
-        "wild": "wild"
+        "systems": "systems_8"
       },
       "locked": {
-        "lastModified": 1771881150,
-        "narHash": "sha256-e9zEGIZ0bUUjHW/uFeQYSN2/nTriuI3+WtdvFhyGnZ0=",
+        "lastModified": 1771959411,
+        "narHash": "sha256-klo6EjxtQfCoVwcNhJfUag4tf+u4Z+qhC7BqvzqAqHM=",
         "owner": "dpc",
         "repo": "flakebox",
-        "rev": "09d74b0ecac2214a57887f80f2730f2399418067",
+        "rev": "d4f37f5d9508b85cd020e3f7d3aa966725457a61",
         "type": "github"
       },
       "original": {
         "owner": "dpc",
         "repo": "flakebox",
-        "rev": "09d74b0ecac2214a57887f80f2730f2399418067",
+        "rev": "d4f37f5d9508b85cd020e3f7d3aa966725457a61",
         "type": "github"
       }
     },
@@ -575,7 +559,7 @@
         "flakebox": "flakebox_2",
         "nixpkgs": "nixpkgs_4",
         "nixpkgs-unstable": "nixpkgs-unstable",
-        "wild": "wild_2"
+        "wild": "wild"
       }
     },
     "rust-analyzer-src": {
@@ -753,29 +737,6 @@
     "wild": {
       "inputs": {
         "crane": "crane_3",
-        "nixpkgs": [
-          "flakebox",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1762215977,
-        "narHash": "sha256-x0IZuWjj0LRMj4pu2FVaD8SENm/UVtE1e4rl0EOZZZM=",
-        "owner": "davidlattimore",
-        "repo": "wild",
-        "rev": "7daaf0c89f7b4b9c9ded36e7b3c72aa6512537a1",
-        "type": "github"
-      },
-      "original": {
-        "owner": "davidlattimore",
-        "ref": "0.7.0",
-        "repo": "wild",
-        "type": "github"
-      }
-    },
-    "wild_2": {
-      "inputs": {
-        "crane": "crane_4",
         "nixpkgs": [
           "nixpkgs"
         ]
