@@ -144,13 +144,18 @@ impl ConsensusApi {
         // reference `migrate_to_redb_2` branch.
         let tx = self.db.begin_write().await;
 
+        use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
+
         let mut audit = Audit::default();
-        let mut module_instance_id_to_kind: HashMap<ModuleInstanceId, String> = HashMap::new();
-        for (module_instance_id, kind, module) in self.modules.iter_modules() {
-            module_instance_id_to_kind.insert(module_instance_id, kind.as_str().to_string());
-            let view = tx.isolate(format!("module-{module_instance_id}"));
-            module.audit(&view, &mut audit, module_instance_id).await;
-        }
+        self.server.audit(&tx, &mut audit).await;
+
+        let module_instance_id_to_kind: HashMap<ModuleInstanceId, String> = [
+            (MINT_INSTANCE_ID, "mintv2".to_string()),
+            (LN_INSTANCE_ID, "lnv2".to_string()),
+            (WALLET_INSTANCE_ID, "walletv2".to_string()),
+        ]
+        .into();
+
         Ok(AuditSummary::from_audit(
             &audit,
             &module_instance_id_to_kind,
@@ -215,7 +220,14 @@ impl HasApiContext<DynServerModule> for ConsensusApi {
         _request: &ApiRequestErased,
         id: Option<ModuleInstanceId>,
     ) -> &DynServerModule {
-        self.modules.get_expect(id.expect("required module id"))
+        use fedimint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
+
+        match id.expect("required module id") {
+            MINT_INSTANCE_ID => &self.server.mint,
+            LN_INSTANCE_ID => &self.server.ln,
+            WALLET_INSTANCE_ID => &self.server.wallet,
+            other => panic!("unknown module instance id: {other}"),
+        }
     }
 }
 
@@ -292,15 +304,12 @@ impl IDashboardApi for ConsensusApi {
     }
 
     fn get_module_by_kind(&self, kind: ModuleKind) -> Option<&DynServerModule> {
-        self.modules
-            .iter_modules()
-            .find_map(|(_, module_kind, module)| {
-                if *module_kind == kind {
-                    Some(module)
-                } else {
-                    None
-                }
-            })
+        match kind.as_str() {
+            "mintv2" => Some(&self.server.mint),
+            "lnv2" => Some(&self.server.ln),
+            "walletv2" => Some(&self.server.wallet),
+            _ => None,
+        }
     }
 
     async fn fedimintd_version(&self) -> String {
