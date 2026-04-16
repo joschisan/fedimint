@@ -18,7 +18,6 @@ use std::sync::Arc;
 use fedimint_api_client::wire;
 use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
 use fedimint_core::module::audit::Audit;
-use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
 use fedimint_core::module::{
     ApiEndpoint, ApiRequestErased, CommonModuleInit, InputMeta, ModuleCommon, ModuleInit,
     TransactionItemAmounts,
@@ -347,19 +346,3 @@ where
     }
 }
 
-/// Collection of server modules
-pub type ServerModuleRegistry = ModuleRegistry<DynServerModule>;
-
-pub trait ServerModuleRegistryExt {
-    fn decoder_registry(&self) -> ModuleDecoderRegistry;
-}
-
-impl ServerModuleRegistryExt for ServerModuleRegistry {
-    /// Generate a `ModuleDecoderRegistry` from this `ModuleRegistry`
-    fn decoder_registry(&self) -> ModuleDecoderRegistry {
-        // TODO: cache decoders
-        self.iter_modules()
-            .map(|(id, kind, module)| (id, kind.clone(), module.decoder()))
-            .collect::<ModuleDecoderRegistry>()
-    }
-}
