@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
@@ -37,6 +38,7 @@ use iroh_base::ticket::NodeTicket;
 use iroh_next::Watcher as _;
 use reqwest::{Method, StatusCode};
 use serde_json::Value;
+use tokio::sync::watch;
 use tracing::{debug, trace, warn};
 
 use super::{DynGuaridianConnection, IGuardianConnection, ServerError, ServerResult};
@@ -53,6 +55,12 @@ pub(crate) struct IrohConnector {
     /// This is useful for testing, or forcing non-default network
     /// connectivity.
     connection_overrides: BTreeMap<NodeId, NodeAddr>,
+
+    /// Registry-owned signal bumped whenever any per-connection monitoring
+    /// task observes a transport-level path change (e.g. iroh relay →
+    /// direct). Consumers of [`crate::ConnectorRegistry`] subscribe via
+    /// [`crate::ConnectorRegistry::connectivity_change_notifier`].
+    path_change: Arc<watch::Sender<u64>>,
 }
 
 impl fmt::Debug for IrohConnector {
@@ -72,10 +80,13 @@ impl IrohConnector {
         iroh_dns: Option<SafeUrl>,
         iroh_enable_dht: bool,
         iroh_enable_next: bool,
+        path_change: Arc<watch::Sender<u64>>,
     ) -> anyhow::Result<Self> {
         const FM_IROH_CONNECT_OVERRIDES_ENV: &str = "FM_IROH_CONNECT_OVERRIDES";
         const FM_GW_IROH_CONNECT_OVERRIDES_ENV: &str = "FM_GW_IROH_CONNECT_OVERRIDES";
-        let mut s = Self::new_no_overrides(iroh_dns, iroh_enable_dht, iroh_enable_next).await?;
+        let mut s =
+            Self::new_no_overrides(iroh_dns, iroh_enable_dht, iroh_enable_next, path_change)
+                .await?;
 
         for (k, v) in parse_kv_list_from_env::<_, NodeTicket>(FM_IROH_CONNECT_OVERRIDES_ENV)? {
             s = s.with_connection_override(k, v.into());
@@ -93,6 +104,7 @@ impl IrohConnector {
         iroh_dns: Option<SafeUrl>,
         iroh_enable_dht: bool,
         iroh_enable_next: bool,
+        path_change: Arc<watch::Sender<u64>>,
     ) -> anyhow::Result<Self> {
         let endpoint_stable = Box::pin({
             let iroh_dns = iroh_dns.clone();
@@ -204,6 +216,7 @@ impl IrohConnector {
             stable: endpoint_stable,
             next: endpoint_next,
             connection_overrides: BTreeMap::new(),
+            path_change,
         })
     }
 
@@ -318,7 +331,11 @@ impl crate::Connector for IrohConnector {
                 .await?;
 
             #[cfg(not(target_family = "wasm"))]
-            Self::spawn_connection_monitoring_stable(&self.stable, node_id);
+            Self::spawn_connection_monitoring_stable(
+                &self.stable,
+                node_id,
+                self.path_change.clone(),
+            );
 
             Ok(IGatewayConnection::into_dyn(conn))
         } else {
@@ -345,7 +362,11 @@ impl crate::Connector for IrohConnector {
 
 impl IrohConnector {
     #[cfg(not(target_family = "wasm"))]
-    fn spawn_connection_monitoring_stable(endpoint: &Endpoint, node_id: NodeId) {
+    fn spawn_connection_monitoring_stable(
+        endpoint: &Endpoint,
+        node_id: NodeId,
+        path_change: Arc<watch::Sender<u64>>,
+    ) {
         if let Ok(mut conn_type_watcher) = endpoint.conn_type(node_id) {
             #[allow(clippy::let_underscore_future)]
             let _ = spawn("iroh connection (stable)", async move {
@@ -354,6 +375,7 @@ impl IrohConnector {
                 }
                 while let Ok(event) = conn_type_watcher.updated().await {
                     debug!(target: LOG_NET_IROH, %node_id, type = %event, "Connection type (changed)");
+                    path_change.send_modify(|c| *c = c.wrapping_add(1));
                 }
             });
         }
@@ -363,6 +385,7 @@ impl IrohConnector {
     fn spawn_connection_monitoring_next(
         endpoint: &iroh_next::Endpoint,
         node_addr: &iroh_next::NodeAddr,
+        path_change: Arc<watch::Sender<u64>>,
     ) {
         if let Some(mut conn_type_watcher) = endpoint.conn_type(node_addr.node_id) {
             let node_id = node_addr.node_id;
@@ -373,6 +396,7 @@ impl IrohConnector {
                 }
                 while let Ok(event) = conn_type_watcher.updated().await {
                     debug!(target: LOG_NET_IROH, node_id = %node_id, %event, "Connection type changed");
+                    path_change.send_modify(|c| *c = c.wrapping_add(1));
                 }
             });
         }
@@ -393,7 +417,11 @@ impl IrohConnector {
 
                 #[cfg(not(target_family = "wasm"))]
                 if conn.is_ok() {
-                    Self::spawn_connection_monitoring_stable(&self.stable, node_id);
+                    Self::spawn_connection_monitoring_stable(
+                        &self.stable,
+                        node_id,
+                        self.path_change.clone(),
+                    );
                 }
                 conn
             }
@@ -424,7 +452,11 @@ impl IrohConnector {
 
                 #[cfg(not(target_family = "wasm"))]
                 if conn.is_ok() {
-                    Self::spawn_connection_monitoring_next(&endpoint_next, &node_addr);
+                    Self::spawn_connection_monitoring_next(
+                        &endpoint_next,
+                        &node_addr,
+                        self.path_change.clone(),
+                    );
                 }
 
                 conn

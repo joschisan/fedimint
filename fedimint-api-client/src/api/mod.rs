@@ -104,19 +104,18 @@ pub trait IRawFederationApi: Debug + MaybeSend + MaybeSync {
 
     /// Returns a stream of connection status for each peer.
     ///
-    /// The stream emits a new value whenever the set of active connections in
-    /// the pool changes. Each peer's entry is [`PeerStatus::Disconnected`] if
-    /// there is no active pooled connection, or [`PeerStatus::Connected`]
-    /// carrying the current [`fedimint_connectors::Connectivity`] otherwise.
-    /// If the pool reports the peer as active but the underlying connector no
-    /// longer has a known path for it (a disconnection racing the pool
-    /// update), the peer is reported as [`PeerStatus::Disconnected`] — the
-    /// next emission will confirm.
+    /// The stream emits a new value whenever either the set of active
+    /// connections in the pool changes, or a connector observes a
+    /// transport-level path change on an existing connection (e.g. an iroh
+    /// connection upgrading from relay to direct).
     ///
-    /// Note: the stream does not tick on transport-level path changes (for
-    /// example iroh hole-punching from relay to direct) on an existing
-    /// connection — the carried [`fedimint_connectors::Connectivity`] only
-    /// refreshes when the pool membership itself changes.
+    /// Each peer's entry is [`PeerStatus::Disconnected`] if there is no
+    /// active pooled connection, or [`PeerStatus::Connected`] carrying the
+    /// current [`fedimint_connectors::Connectivity`] otherwise. If the pool
+    /// reports the peer as active but the underlying connector no longer
+    /// has a known path for it (a disconnection racing the pool update),
+    /// the peer is reported as [`PeerStatus::Disconnected`] — the next
+    /// emission will confirm.
     fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, PeerStatus>>;
     /// Wait for some connections being initialized
     ///
@@ -786,9 +785,21 @@ impl IRawFederationApi for FederationApi {
     fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, PeerStatus>> {
         let peers = self.peers.clone();
         let pool = self.connection_pool.clone();
+        let active_rx = self.connection_pool.get_active_connection_receiver();
 
-        WatchStream::new(self.connection_pool.get_active_connection_receiver())
-            .map(move |active_urls| {
+        // Tick on either (a) a change to the set of active pooled
+        // connections, or (b) a transport-level path change reported by
+        // the underlying connectors (e.g. iroh relay → direct). Both
+        // streams emit their current value immediately on subscription,
+        // so consumers see a snapshot right away.
+        let membership_ticks = WatchStream::new(active_rx.clone()).map(|_| ());
+        let path_change_ticks =
+            WatchStream::new(self.connection_pool.connectivity_change_notifier()).map(|_| ());
+        let ticks = futures::stream::select(membership_ticks, path_change_ticks);
+
+        ticks
+            .map(move |()| {
+                let active_urls = active_rx.borrow().clone();
                 peers
                     .iter()
                     .map(|(peer_id, url)| {
