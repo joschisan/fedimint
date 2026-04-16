@@ -135,17 +135,12 @@ pub async fn run(
         }
     };
 
-    let decoders = module_init_registry.decoders_strict(
-        cfg.consensus
-            .modules
-            .iter()
-            .map(|(id, config)| (*id, &config.kind)),
-    )?;
-
-    // Make module decoders available to the P2P layer so that frames carrying
-    // DynModuleConsensusItem (e.g. SignedSessionOutcome) can be decoded.
+    // Make an (empty) module decoder registry available to the P2P layer.
+    // With the static wire-type migration the registry carries no module
+    // dispatch state, but we still plumb it through to preserve the shape of
+    // `Decodable`/`Encodable`.
     p2p_decoders
-        .set(decoders)
+        .set(fedimint_core::module::registry::ModuleDecoderRegistry::default())
         .expect("p2p decoders were already set");
 
     info!(target: LOG_CONSENSUS, "Starting consensus...");

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::anyhow;
 
 pub use crate::core::ModuleInstanceId;
-use crate::core::{Decoder, ModuleKind};
+use crate::core::ModuleKind;
 
 /// Module Registry hold module-specific data `M` by the `ModuleInstanceId`
 #[derive(Debug)]
@@ -158,34 +158,9 @@ impl<M: std::fmt::Debug, State> ModuleRegistry<M, State> {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum DecodingMode {
-    /// Reject unknown module instance ids
-    #[default]
-    Reject,
-    /// Fallback to decoding unknown module instance ids as
-    /// [`crate::core::DynUnknown`]
-    Fallback,
-}
-
-/// Collection of decoders belonging to modules, typically obtained from a
-/// `ModuleRegistry`
-pub type ModuleDecoderRegistry = ModuleRegistry<Decoder, DecodingMode>;
-
-impl ModuleDecoderRegistry {
-    pub fn with_fallback(self) -> Self {
-        Self {
-            state: DecodingMode::Fallback,
-            ..self
-        }
-    }
-
-    pub fn decoding_mode(&self) -> DecodingMode {
-        self.state
-    }
-
-    /// Panic if the [`Self::decoding_mode`] is not `Reject`
-    pub fn assert_reject_mode(&self) {
-        assert_eq!(self.state, DecodingMode::Reject);
-    }
-}
+/// Collection of decoders belonging to modules.
+///
+/// After the static wire-type migration this registry carries no module
+/// dispatch state; it's retained as a parameter on `Decodable`/`Encodable` for
+/// API stability, but always instantiated empty.
+pub type ModuleDecoderRegistry = ModuleRegistry<(), ()>;

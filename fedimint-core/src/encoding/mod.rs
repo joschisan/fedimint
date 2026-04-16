@@ -17,7 +17,6 @@ mod iroh;
 mod secp256k1;
 
 use std::borrow::Cow;
-use std::cmp;
 use std::fmt::{Debug, Formatter};
 use std::io::{self, Error, Read, Write};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -27,10 +26,8 @@ use bitcoin::hashes::sha256;
 pub use fedimint_derive::{Decodable, Encodable};
 use hex::{FromHex, ToHex};
 use lightning::util::ser::BigSize;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::core::ModuleInstanceId;
 use crate::module::registry::ModuleDecoderRegistry;
 use crate::util::SafeUrl;
 
@@ -632,181 +629,6 @@ impl Decodable for Cow<'static, str> {
         modules: &ModuleDecoderRegistry,
     ) -> Result<Self, DecodeError> {
         Ok(Cow::Owned(String::consensus_decode_partial(d, modules)?))
-    }
-}
-
-/// A type that decodes `module_instance_id`-prefixed `T`s even
-/// when corresponding `Decoder` is not available.
-///
-/// All dyn-module types are encoded as:
-///
-/// ```norust
-/// module_instance_id | len_u64 | data
-/// ```
-///
-/// So clients that don't have a corresponding module, can read
-/// the `len_u64` and skip the amount of data specified in it.
-///
-/// This type makes it more convenient. It's possible to attempt
-/// to retry decoding after more modules become available by using
-/// [`DynRawFallback::redecode_raw`].
-///
-/// Notably this struct does not ignore any errors. It only skips
-/// decoding when the module decoder is not available.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DynRawFallback<T> {
-    Raw {
-        module_instance_id: ModuleInstanceId,
-        #[serde(with = "::fedimint_core::encoding::as_hex")]
-        raw: Vec<u8>,
-    },
-    Decoded(T),
-}
-
-impl<T> cmp::PartialEq for DynRawFallback<T>
-where
-    T: cmp::PartialEq + Encodable,
-{
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Raw {
-                    module_instance_id: mid_self,
-                    raw: raw_self,
-                },
-                Self::Raw {
-                    module_instance_id: mid_other,
-                    raw: raw_other,
-                },
-            ) => mid_self.eq(mid_other) && raw_self.eq(raw_other),
-            (r @ Self::Raw { .. }, d @ Self::Decoded(_))
-            | (d @ Self::Decoded(_), r @ Self::Raw { .. }) => {
-                r.consensus_encode_to_vec() == d.consensus_encode_to_vec()
-            }
-            (Self::Decoded(s), Self::Decoded(o)) => s == o,
-        }
-    }
-}
-
-impl<T> cmp::Eq for DynRawFallback<T> where T: cmp::Eq + Encodable {}
-
-impl<T> DynRawFallback<T>
-where
-    T: Decodable + 'static,
-{
-    /// Get the decoded `T` or `None` if not decoded yet
-    pub fn decoded(self) -> Option<T> {
-        match self {
-            Self::Raw { .. } => None,
-            Self::Decoded(v) => Some(v),
-        }
-    }
-
-    /// Convert into the decoded `T` and panic if not decoded yet
-    pub fn expect_decoded(self) -> T {
-        match self {
-            Self::Raw { .. } => {
-                panic!("Expected decoded value. Possibly `redecode_raw` call is missing.")
-            }
-            Self::Decoded(v) => v,
-        }
-    }
-
-    /// Get the decoded `T` and panic if not decoded yet
-    pub fn expect_decoded_ref(&self) -> &T {
-        match self {
-            Self::Raw { .. } => {
-                panic!("Expected decoded value. Possibly `redecode_raw` call is missing.")
-            }
-            Self::Decoded(v) => v,
-        }
-    }
-
-    /// Attempt to re-decode raw values with new set of of `modules`
-    ///
-    /// In certain contexts it might be necessary to try again with
-    /// a new set of modules.
-    pub fn redecode_raw(
-        self,
-        decoders: &ModuleDecoderRegistry,
-    ) -> Result<Self, crate::encoding::DecodeError> {
-        Ok(match self {
-            Self::Raw {
-                module_instance_id,
-                raw,
-            } => match decoders.get(module_instance_id) {
-                Some(decoder) => Self::Decoded(decoder.decode_complete(
-                    &mut &raw[..],
-                    raw.len() as u64,
-                    module_instance_id,
-                    decoders,
-                )?),
-                None => Self::Raw {
-                    module_instance_id,
-                    raw,
-                },
-            },
-            Self::Decoded(v) => Self::Decoded(v),
-        })
-    }
-}
-
-impl<T> From<T> for DynRawFallback<T> {
-    fn from(value: T) -> Self {
-        Self::Decoded(value)
-    }
-}
-
-impl<T> Decodable for DynRawFallback<T>
-where
-    T: Decodable + 'static,
-{
-    fn consensus_decode_partial_from_finite_reader<R: std::io::Read>(
-        reader: &mut R,
-        decoders: &ModuleDecoderRegistry,
-    ) -> Result<Self, crate::encoding::DecodeError> {
-        let module_instance_id =
-            fedimint_core::core::ModuleInstanceId::consensus_decode_partial_from_finite_reader(
-                reader, decoders,
-            )?;
-        Ok(match decoders.get(module_instance_id) {
-            Some(decoder) => {
-                let total_len_u64 =
-                    u64::consensus_decode_partial_from_finite_reader(reader, decoders)?;
-                Self::Decoded(decoder.decode_complete(
-                    reader,
-                    total_len_u64,
-                    module_instance_id,
-                    decoders,
-                )?)
-            }
-            None => {
-                // since the decoder is not available, just read the raw data
-                Self::Raw {
-                    module_instance_id,
-                    raw: Vec::consensus_decode_partial_from_finite_reader(reader, decoders)?,
-                }
-            }
-        })
-    }
-}
-
-impl<T> Encodable for DynRawFallback<T>
-where
-    T: Encodable,
-{
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        match self {
-            Self::Raw {
-                module_instance_id,
-                raw,
-            } => {
-                module_instance_id.consensus_encode(writer)?;
-                raw.consensus_encode(writer)?;
-                Ok(())
-            }
-            Self::Decoded(v) => v.consensus_encode(writer),
-        }
     }
 }
 

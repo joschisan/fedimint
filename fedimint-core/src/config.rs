@@ -8,24 +8,19 @@ use anyhow::{Context, format_err};
 use bitcoin::hashes::sha256::HashEngine;
 use bitcoin::hashes::{Hash as BitcoinHash, hex, sha256};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
-use fedimint_core::encoding::{DynRawFallback, Encodable};
+use fedimint_core::encoding::Encodable;
 use fedimint_core::module::registry::ModuleRegistry;
 use fedimint_core::util::SafeUrl;
 use fedimint_core::{ModuleDecoderRegistry, format_hex};
-use fedimint_logging::LOG_CORE;
 use hex::FromHex;
 use secp256k1::PublicKey;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
-use tracing::warn;
 
-use crate::core::DynClientConfig;
 use crate::encoding::Decodable;
-use crate::module::{
-    CoreConsensusVersion, DynCommonModuleInit, IDynCommonModuleInit, ModuleConsensusVersion,
-};
-use crate::{PeerId, maybe_add_send_sync, secp256k1};
+use crate::module::{CoreConsensusVersion, ModuleConsensusVersion};
+use crate::{PeerId, secp256k1};
 
 // TODO: make configurable
 /// This limits the RAM consumption of a AlephBFT Unit to roughly 50kB
@@ -219,29 +214,6 @@ impl GlobalClientConfig {
 }
 
 impl ClientConfig {
-    /// See [`DynRawFallback::redecode_raw`].
-    pub fn redecode_raw(
-        self,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, crate::encoding::DecodeError> {
-        Ok(Self {
-            modules: self
-                .modules
-                .into_iter()
-                .map(|(module_id, v)| {
-                    // Assuming this isn't running in any hot path it's better to have the debug
-                    // info than saving one allocation
-                    let kind = v.kind.clone();
-
-                    v.redecode_raw(modules)
-                        .context(format!("redecode_raw: instance: {module_id}, kind: {kind}"))
-                        .map(|v| (module_id, v))
-                })
-                .collect::<Result<_, _>>()?,
-            ..self
-        })
-    }
-
     pub fn calculate_federation_id(&self) -> FederationId {
         self.global.calculate_federation_id()
     }
@@ -274,10 +246,8 @@ impl ClientConfig {
     }
 
     /// Converts a consensus-encoded client config struct to a client config
-    /// struct that when encoded as JSON shows the fields of module configs
-    /// instead of a consensus-encoded hex string.
-    ///
-    /// In case of unknown module the config value is a hex string.
+    /// struct that when encoded as JSON exposes the module's kind and an
+    /// opaque hex-encoded config blob.
     pub fn to_json(&self) -> JsonClientConfig {
         JsonClientConfig {
             global: self.global.clone(),
@@ -287,13 +257,9 @@ impl ClientConfig {
                 .map(|(&module_instance_id, module_config)| {
                     let module_config_json = JsonWithKind {
                         kind: module_config.kind.clone(),
-                        value: module_config.config
-                            .clone()
-                            .decoded()
-                            .and_then(|dyn_cfg| dyn_cfg.to_json())
-                            .unwrap_or_else(|| json!({
-                            "unknown_module_hex": module_config.config.consensus_encode_to_hex()
-                        })),
+                        value: json!({
+                            "config_hex": module_config.config.consensus_encode_to_hex(),
+                        }),
                     };
                     (module_instance_id, module_config_json)
                 })
@@ -422,10 +388,10 @@ impl ClientConfig {
         sha256::Hash::from_engine(engine)
     }
 
-    pub fn get_module<T: Decodable + 'static>(&self, id: ModuleInstanceId) -> anyhow::Result<&T> {
+    pub fn get_module<T: Decodable + 'static>(&self, id: ModuleInstanceId) -> anyhow::Result<T> {
         self.modules.get(&id).map_or_else(
             || Err(format_err!("Client config for module id {id} not found")),
-            |client_cfg| client_cfg.cast(),
+            ClientModuleConfig::cast,
         )
     }
 
@@ -447,7 +413,7 @@ impl ClientConfig {
     pub fn get_first_module_by_kind<T: Decodable + 'static>(
         &self,
         kind: impl Into<ModuleKind>,
-    ) -> anyhow::Result<(ModuleInstanceId, &T)> {
+    ) -> anyhow::Result<(ModuleInstanceId, T)> {
         let kind: ModuleKind = kind.into();
         let Some((id, module_cfg)) = self.modules.iter().find(|(_, v)| v.is_kind(&kind)) else {
             anyhow::bail!("Module kind {kind} not found")
@@ -484,47 +450,19 @@ impl<M> Default for ModuleInitRegistry<M> {
     }
 }
 
-pub type CommonModuleInitRegistry = ModuleInitRegistry<DynCommonModuleInit>;
-
-impl<M> From<Vec<M>> for ModuleInitRegistry<M>
-where
-    M: AsRef<dyn IDynCommonModuleInit + Send + Sync + 'static>,
-{
-    fn from(value: Vec<M>) -> Self {
-        Self(
-            value
-                .into_iter()
-                .map(|i| (i.as_ref().module_kind(), i))
-                .collect::<BTreeMap<_, _>>(),
-        )
-    }
-}
-
-impl<M> FromIterator<M> for ModuleInitRegistry<M>
-where
-    M: AsRef<maybe_add_send_sync!(dyn IDynCommonModuleInit + 'static)>,
-{
-    fn from_iter<T: IntoIterator<Item = M>>(iter: T) -> Self {
-        Self(
-            iter.into_iter()
-                .map(|i| (i.as_ref().module_kind(), i))
-                .collect::<BTreeMap<_, _>>(),
-        )
-    }
-}
-
 impl<M> ModuleInitRegistry<M> {
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Attach a module init impl. `kind` uniquely identifies the module.
     pub fn attach<T>(&mut self, r#gen: T)
     where
-        T: Into<M> + 'static + Send + Sync,
-        M: AsRef<dyn IDynCommonModuleInit + 'static + Send + Sync>,
+        T: Into<M>,
+        M: ModuleKinded,
     {
         let r#gen: M = r#gen.into();
-        let kind = r#gen.as_ref().module_kind();
+        let kind = r#gen.module_kind();
         assert!(
             self.0.insert(kind.clone(), r#gen).is_none(),
             "Can't insert module of same kind twice: {kind}"
@@ -540,54 +478,10 @@ impl<M> ModuleInitRegistry<M> {
     }
 }
 
-impl<M> ModuleInitRegistry<M>
-where
-    M: AsRef<dyn IDynCommonModuleInit + Send + Sync + 'static>,
-{
-    #[deprecated(
-        note = "You probably want `available_decoders` to support missing module kinds. If you really want a strict behavior, use `decoders_strict`"
-    )]
-    pub fn decoders<'a>(
-        &self,
-        modules: impl Iterator<Item = (ModuleInstanceId, &'a ModuleKind)>,
-    ) -> anyhow::Result<ModuleDecoderRegistry> {
-        self.decoders_strict(modules)
-    }
-
-    /// Get decoders for `modules` and fail if any is unsupported
-    pub fn decoders_strict<'a>(
-        &self,
-        modules: impl Iterator<Item = (ModuleInstanceId, &'a ModuleKind)>,
-    ) -> anyhow::Result<ModuleDecoderRegistry> {
-        let mut decoders = BTreeMap::new();
-        for (id, kind) in modules {
-            let Some(init) = self.0.get(kind) else {
-                anyhow::bail!(
-                    "Detected configuration for unsupported module id: {id}, kind: {kind}"
-                )
-            };
-
-            decoders.insert(id, (kind.clone(), init.as_ref().decoder()));
-        }
-        Ok(ModuleDecoderRegistry::from(decoders))
-    }
-
-    /// Get decoders for `modules` and skip unsupported ones
-    pub fn available_decoders<'a>(
-        &self,
-        modules: impl Iterator<Item = (ModuleInstanceId, &'a ModuleKind)>,
-    ) -> anyhow::Result<ModuleDecoderRegistry> {
-        let mut decoders = BTreeMap::new();
-        for (id, kind) in modules {
-            let Some(init) = self.0.get(kind) else {
-                warn!(target: LOG_CORE, "Unsupported module id: {id}, kind: {kind}");
-                continue;
-            };
-
-            decoders.insert(id, (kind.clone(), init.as_ref().decoder()));
-        }
-        Ok(ModuleDecoderRegistry::from(decoders))
-    }
+/// Trait for types attached to a [`ModuleInitRegistry`] that expose their
+/// [`ModuleKind`].
+pub trait ModuleKinded {
+    fn module_kind(&self) -> ModuleKind;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
@@ -600,20 +494,20 @@ pub struct ServerModuleConsensusConfig {
 
 /// Config for the client-side of a particular Federation module
 ///
-/// Since modules are (tbd.) pluggable into Federations,
-/// it needs to be some form of an abstract type-erased-like
-/// value.
+/// The inner `config` payload is a consensus-encoded blob of the module's
+/// typed `ClientConfig`. Callers who know the module kind can decode it via
+/// [`ClientModuleConfig::cast`].
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ClientModuleConfig {
     pub kind: ModuleKind,
     pub version: ModuleConsensusVersion,
-    #[serde(with = "::fedimint_core::encoding::as_hex")]
-    pub config: DynRawFallback<DynClientConfig>,
+    #[serde(with = "::hex::serde")]
+    pub config: Vec<u8>,
 }
 
 impl ClientModuleConfig {
-    pub fn from_typed<T: fedimint_core::core::ClientConfig>(
-        module_instance_id: ModuleInstanceId,
+    pub fn from_typed<T: Encodable>(
+        _module_instance_id: ModuleInstanceId,
         kind: ModuleKind,
         version: ModuleConsensusVersion,
         value: T,
@@ -621,18 +515,7 @@ impl ClientModuleConfig {
         Ok(Self {
             kind,
             version,
-            config: fedimint_core::core::DynClientConfig::from_typed(module_instance_id, value)
-                .into(),
-        })
-    }
-
-    pub fn redecode_raw(
-        self,
-        modules: &ModuleDecoderRegistry,
-    ) -> Result<Self, crate::encoding::DecodeError> {
-        Ok(Self {
-            config: self.config.redecode_raw(modules)?,
-            ..self
+            config: value.consensus_encode_to_vec(),
         })
     }
 
@@ -643,18 +526,16 @@ impl ClientModuleConfig {
     pub fn kind(&self) -> &ModuleKind {
         &self.kind
     }
-}
 
-impl ClientModuleConfig {
-    pub fn cast<T>(&self) -> anyhow::Result<&T>
+    /// Decode the inner config bytes into a typed value `T`.
+    pub fn cast<T>(&self) -> anyhow::Result<T>
     where
-        T: 'static,
+        T: Decodable + 'static,
     {
-        self.config
-            .expect_decoded_ref()
-            .as_any()
-            .downcast_ref::<T>()
-            .context("can't convert client module config to desired type")
+        Ok(T::consensus_decode_whole(
+            &self.config,
+            &ModuleDecoderRegistry::default(),
+        )?)
     }
 }
 

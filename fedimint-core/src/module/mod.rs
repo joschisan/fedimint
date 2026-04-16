@@ -23,23 +23,18 @@ use std::error::Error;
 use std::fmt::{self, Debug, Formatter};
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use fedimint_logging::LOG_NET_API;
 use futures::Future;
 use jsonrpsee_core::JsonValue;
-use registry::ModuleRegistry;
 use serde::{Deserialize, Serialize};
 use tracing::Instrument;
 
 // TODO: Make this module public and remove theDkgPeerMessage`pub use` below
 mod version;
 pub use self::version::*;
-use crate::core::{
-    ClientConfig, Decoder, DecoderBuilder, Input, InputError, ModuleConsensusItem,
-    ModuleInstanceId, ModuleKind, Output, OutputError, OutputOutcome,
-};
+use crate::core::ModuleInstanceId;
 use crate::encoding::{Decodable, DecodeError, Encodable};
 use crate::fmt_utils::AbbreviateHexBytes;
 use crate::task::MaybeSend;
@@ -376,98 +371,29 @@ impl ApiEndpoint<()> {
     }
 }
 
-/// Operations common to Server and Client side module gen dyn newtypes
-///
-/// Due to conflict of `impl Trait for T` for both `ServerModuleInit` and
-/// `ClientModuleInit`, we can't really have a `ICommonModuleInit`, so to unify
-/// them in `ModuleInitRegistry` we move the common functionality to be an
-/// interface over their dyn newtype wrappers. A bit weird, but works.
-pub trait IDynCommonModuleInit: Debug {
-    fn decoder(&self) -> Decoder;
-
-    fn module_kind(&self) -> ModuleKind;
-
-    fn to_dyn_common(&self) -> DynCommonModuleInit;
-}
-
 /// Trait implemented by every `*ModuleInit` (server or client side)
 pub trait ModuleInit: Debug + Clone + Send + Sync + 'static {
     type Common: CommonModuleInit;
-}
-
-impl<T> IDynCommonModuleInit for T
-where
-    T: ModuleInit,
-{
-    fn decoder(&self) -> Decoder {
-        T::Common::decoder()
-    }
-
-    fn module_kind(&self) -> ModuleKind {
-        T::Common::KIND
-    }
-
-    fn to_dyn_common(&self) -> DynCommonModuleInit {
-        DynCommonModuleInit::from_inner(Arc::new(self.clone()))
-    }
-}
-
-dyn_newtype_define!(
-    #[derive(Clone)]
-    pub DynCommonModuleInit(Arc<IDynCommonModuleInit>)
-);
-
-impl AsRef<maybe_add_send_sync!(dyn IDynCommonModuleInit + 'static)> for DynCommonModuleInit {
-    fn as_ref(&self) -> &(maybe_add_send_sync!(dyn IDynCommonModuleInit + 'static)) {
-        self.inner.as_ref()
-    }
-}
-
-impl DynCommonModuleInit {
-    pub fn from_inner(
-        inner: Arc<maybe_add_send_sync!(dyn IDynCommonModuleInit + 'static)>,
-    ) -> Self {
-        Self { inner }
-    }
 }
 
 /// Logic and constant common between server side and client side modules
 #[apply(async_trait_maybe_send!)]
 pub trait CommonModuleInit: Debug + Sized {
     const CONSENSUS_VERSION: ModuleConsensusVersion;
-    const KIND: ModuleKind;
+    const KIND: crate::core::ModuleKind;
 
-    type ClientConfig: ClientConfig;
-
-    fn decoder() -> Decoder;
+    type ClientConfig: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
 }
 
 /// Module associated types required by both client and server
 pub trait ModuleCommon {
-    type ClientConfig: ClientConfig;
-    type Input: Input;
-    type Output: Output;
-    type OutputOutcome: OutputOutcome;
-    type ConsensusItem: ModuleConsensusItem;
-    type InputError: InputError;
-    type OutputError: OutputError;
-
-    fn decoder_builder() -> DecoderBuilder {
-        let mut decoder_builder = Decoder::builder();
-        decoder_builder.with_decodable_type::<Self::ClientConfig>();
-        decoder_builder.with_decodable_type::<Self::Input>();
-        decoder_builder.with_decodable_type::<Self::Output>();
-        decoder_builder.with_decodable_type::<Self::OutputOutcome>();
-        decoder_builder.with_decodable_type::<Self::ConsensusItem>();
-        decoder_builder.with_decodable_type::<Self::InputError>();
-        decoder_builder.with_decodable_type::<Self::OutputError>();
-
-        decoder_builder
-    }
-
-    fn decoder() -> Decoder {
-        Self::decoder_builder().build()
-    }
+    type ClientConfig: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
+    type Input: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
+    type Output: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
+    type OutputOutcome: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
+    type ConsensusItem: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
+    type InputError: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
+    type OutputError: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
 }
 
 /// Creates a struct that can be used to make our module-decodable structs
@@ -511,34 +437,6 @@ impl<T: Encodable + Decodable> From<&T> for SerdeModuleEncoding<T> {
 impl<T: Encodable + Decodable + 'static> SerdeModuleEncoding<T> {
     pub fn try_into_inner(&self, modules: &ModuleDecoderRegistry) -> Result<T, DecodeError> {
         Decodable::consensus_decode_whole(&self.0, modules)
-    }
-
-    /// In cases where we know exactly which module kind we expect but don't
-    /// have access to all decoders this function can be used instead.
-    ///
-    /// Note that it just assumes the decoded module instance id to be valid
-    /// since it cannot validate against the decoder registry. The lack of
-    /// access to a decoder registry also makes decoding structs impossible that
-    /// themselves contain module dyn-types (e.g. a module output containing a
-    /// fedimint transaction).
-    pub fn try_into_inner_known_module_kind(&self, decoder: &Decoder) -> Result<T, DecodeError> {
-        let mut reader = std::io::Cursor::new(&self.0);
-        let module_instance = ModuleInstanceId::consensus_decode_partial(
-            &mut reader,
-            &ModuleDecoderRegistry::default(),
-        )?;
-
-        let total_len =
-            u64::consensus_decode_partial(&mut reader, &ModuleDecoderRegistry::default())?;
-
-        // No recursive module decoding is supported since we give an empty decoder
-        // registry to the decode function
-        decoder.decode_complete(
-            &mut reader,
-            total_len,
-            module_instance,
-            &ModuleRegistry::default(),
-        )
     }
 }
 
@@ -584,33 +482,5 @@ impl<T: Encodable + Decodable> From<&T> for SerdeModuleEncodingBase64<T> {
 impl<T: Encodable + Decodable + 'static> SerdeModuleEncodingBase64<T> {
     pub fn try_into_inner(&self, modules: &ModuleDecoderRegistry) -> Result<T, DecodeError> {
         Decodable::consensus_decode_whole(&self.0, modules)
-    }
-
-    /// In cases where we know exactly which module kind we expect but don't
-    /// have access to all decoders this function can be used instead.
-    ///
-    /// Note that it just assumes the decoded module instance id to be valid
-    /// since it cannot validate against the decoder registry. The lack of
-    /// access to a decoder registry also makes decoding structs impossible that
-    /// themselves contain module dyn-types (e.g. a module output containing a
-    /// fedimint transaction).
-    pub fn try_into_inner_known_module_kind(&self, decoder: &Decoder) -> Result<T, DecodeError> {
-        let mut reader = std::io::Cursor::new(&self.0);
-        let module_instance = ModuleInstanceId::consensus_decode_partial(
-            &mut reader,
-            &ModuleDecoderRegistry::default(),
-        )?;
-
-        let total_len =
-            u64::consensus_decode_partial(&mut reader, &ModuleDecoderRegistry::default())?;
-
-        // No recursive module decoding is supported since we give an empty decoder
-        // registry to the decode function
-        decoder.decode_complete(
-            &mut reader,
-            total_len,
-            module_instance,
-            &ModuleRegistry::default(),
-        )
     }
 }

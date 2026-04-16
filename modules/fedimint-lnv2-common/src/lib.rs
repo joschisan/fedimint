@@ -19,9 +19,9 @@ pub mod tweak;
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
 use config::LightningClientConfig;
-use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
+use fedimint_core::core::ModuleKind;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
+use fedimint_core::module::{CommonModuleInit, ModuleConsensusVersion};
 use fedimint_core::{
     Amount, OutPoint, extensible_associated_module_type, plugin_types_trait_impl_common,
 };
@@ -153,10 +153,6 @@ impl CommonModuleInit for LightningCommonInit {
     const KIND: ModuleKind = KIND;
 
     type ClientConfig = LightningClientConfig;
-
-    fn decoder() -> Decoder {
-        LightningModuleTypes::decoder()
-    }
 }
 
 pub struct LightningModuleTypes;

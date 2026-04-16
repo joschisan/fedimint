@@ -8,7 +8,7 @@ use anyhow::bail;
 use bitcoin::secp256k1::PublicKey;
 use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_core::config::ClientConfig;
-use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind, OperationId};
+use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
@@ -414,10 +414,6 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
 
     /// Common module types shared between client and server
     type Common: ModuleCommon;
-
-    fn decoder() -> Decoder {
-        Self::Common::decoder_builder().build()
-    }
 
     fn kind() -> ModuleKind {
         <<<Self as ClientModule>::Init as ModuleInit>::Common as CommonModuleInit>::KIND

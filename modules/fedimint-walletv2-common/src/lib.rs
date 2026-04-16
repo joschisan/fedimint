@@ -12,9 +12,9 @@ use bitcoin::hashes::{Hash, hash160, sha256};
 use bitcoin::key::TapTweak;
 use bitcoin::{Address, PubkeyHash, ScriptBuf, ScriptHash, Txid, WPubkeyHash, WScriptHash};
 use config::WalletClientConfig;
-use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
+use fedimint_core::core::ModuleKind;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
+use fedimint_core::module::{CommonModuleInit, ModuleConsensusVersion};
 use fedimint_core::{
     NumPeersExt, PeerId, extensible_associated_module_type, plugin_types_trait_impl_common,
 };
@@ -115,10 +115,6 @@ impl CommonModuleInit for WalletCommonInit {
     const KIND: ModuleKind = KIND;
 
     type ClientConfig = WalletClientConfig;
-
-    fn decoder() -> Decoder {
-        WalletModuleTypes::decoder()
-    }
 }
 
 pub struct WalletModuleTypes;

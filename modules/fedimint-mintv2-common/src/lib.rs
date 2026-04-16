@@ -10,9 +10,9 @@ use std::hash::Hash;
 
 use bitcoin_hashes::hash160;
 use config::MintClientConfig;
-use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
+use fedimint_core::core::ModuleKind;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
+use fedimint_core::module::{CommonModuleInit, ModuleConsensusVersion};
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::{extensible_associated_module_type, plugin_types_trait_impl_common, Amount};
 use serde::{Deserialize, Serialize};
@@ -101,10 +101,6 @@ impl CommonModuleInit for MintCommonInit {
     const KIND: ModuleKind = KIND;
 
     type ClientConfig = MintClientConfig;
-
-    fn decoder() -> Decoder {
-        MintModuleTypes::decoder_builder().build()
-    }
 }
 
 extensible_associated_module_type!(MintInput, MintInputV0);

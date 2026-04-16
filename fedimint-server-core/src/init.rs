@@ -2,6 +2,7 @@
 #![allow(clippy::pedantic)]
 
 use std::collections::BTreeSet;
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::{any, marker};
 
@@ -9,16 +10,15 @@ use bitcoin::Network;
 pub use fedimint_api_client::api::DynGlobalApi;
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_core::config::{
-    ClientModuleConfig, CommonModuleInitRegistry, ModuleInitRegistry, ServerModuleConfig,
+    ClientModuleConfig, ModuleInitRegistry, ModuleKinded, ServerModuleConfig,
     ServerModuleConsensusConfig,
 };
 use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::module::{
-    CommonModuleInit, CoreConsensusVersion, IDynCommonModuleInit, ModuleConsensusVersion,
-    ModuleInit,
+    CommonModuleInit, CoreConsensusVersion, ModuleConsensusVersion, ModuleInit,
 };
 use fedimint_core::task::TaskGroup;
-use fedimint_core::{NumPeers, PeerId, apply, async_trait_maybe_send, dyn_newtype_define};
+use fedimint_core::{NumPeers, PeerId, apply, async_trait_maybe_send};
 use fedimint_redb::Database as V2Database;
 
 use crate::ServerModule;
@@ -46,8 +46,8 @@ pub struct ConfigGenModuleArgs {
 /// module-specific `ServerModuleInit` impls (`MintInit`, `LightningInit`,
 /// `WalletInit`). The dyn registry is retained only for DKG-time operations.
 #[apply(async_trait_maybe_send!)]
-pub trait IServerModuleInit: IDynCommonModuleInit {
-    fn as_common(&self) -> &(dyn IDynCommonModuleInit + Send + Sync + 'static);
+pub trait IServerModuleInit: Debug + Send + Sync + 'static {
+    fn module_kind(&self) -> ModuleKind;
 
     async fn distributed_gen(
         &self,
@@ -191,8 +191,8 @@ impl<T> IServerModuleInit for T
 where
     T: ServerModuleInit + 'static + Sync,
 {
-    fn as_common(&self) -> &(dyn IDynCommonModuleInit + Send + Sync + 'static) {
-        self
+    fn module_kind(&self) -> ModuleKind {
+        <Self as ServerModuleInit>::kind()
     }
 
     async fn distributed_gen(
@@ -221,29 +221,43 @@ where
     }
 }
 
-dyn_newtype_define!(
-    #[derive(Clone)]
-    pub DynServerModuleInit(Arc<IServerModuleInit>)
-);
+#[derive(Clone, Debug)]
+pub struct DynServerModuleInit {
+    inner: Arc<dyn IServerModuleInit>,
+}
 
-impl AsRef<dyn IDynCommonModuleInit + Send + Sync + 'static> for DynServerModuleInit {
-    fn as_ref(&self) -> &(dyn IDynCommonModuleInit + Send + Sync + 'static) {
-        self.inner.as_common()
+impl ModuleKinded for DynServerModuleInit {
+    fn module_kind(&self) -> ModuleKind {
+        self.inner.module_kind()
+    }
+}
+
+impl<T> From<T> for DynServerModuleInit
+where
+    T: IServerModuleInit,
+{
+    fn from(value: T) -> Self {
+        Self {
+            inner: Arc::new(value),
+        }
+    }
+}
+
+impl std::ops::Deref for DynServerModuleInit {
+    type Target = dyn IServerModuleInit;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.inner
     }
 }
 
 pub type ServerModuleInitRegistry = ModuleInitRegistry<DynServerModuleInit>;
 
 pub trait ServerModuleInitRegistryExt {
-    fn to_common(&self) -> CommonModuleInitRegistry;
     fn default_modules(&self) -> BTreeSet<ModuleKind>;
 }
 
 impl ServerModuleInitRegistryExt for ServerModuleInitRegistry {
-    fn to_common(&self) -> CommonModuleInitRegistry {
-        self.iter().map(|(_k, v)| v.to_dyn_common()).collect()
-    }
-
     fn default_modules(&self) -> BTreeSet<ModuleKind> {
         self.iter().map(|(kind, _init)| kind.clone()).collect()
     }

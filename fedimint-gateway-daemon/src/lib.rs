@@ -165,7 +165,7 @@ impl AppState {
         }
 
         if let Some(cfg) = lnv2_cfg {
-            let ln_cfg: &fedimint_lnv2_common::config::LightningClientConfig = cfg.cast()?;
+            let ln_cfg: fedimint_lnv2_common::config::LightningClientConfig = cfg.cast()?;
 
             if ln_cfg.network != network {
                 crit!(

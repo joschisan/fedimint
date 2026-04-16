@@ -13,7 +13,7 @@ pub mod setup_ui;
 
 use std::fmt::Debug;
 
-use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
+use fedimint_core::core::{ModuleInstanceId, ModuleKind};
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
     ApiEndpoint, CommonModuleInit, InputMeta, ModuleCommon, ModuleInit, TransactionItemAmounts,
@@ -32,18 +32,6 @@ pub trait ServerModule: Debug + Sized {
         // Note: All modules should define kinds as &'static str, so this doesn't
         // allocate
         <Self::Init as ModuleInit>::Common::KIND
-    }
-
-    /// Returns a decoder for the following associated types of this module:
-    /// * `ClientConfig`
-    /// * `Input`
-    /// * `Output`
-    /// * `OutputOutcome`
-    /// * `ConsensusItem`
-    /// * `InputError`
-    /// * `OutputError`
-    fn decoder() -> Decoder {
-        Self::Common::decoder_builder().build()
     }
 
     /// This module's contribution to the next consensus proposal. This method

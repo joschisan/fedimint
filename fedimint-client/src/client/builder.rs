@@ -14,7 +14,7 @@ use fedimint_client_module::module::{ClientModule, FinalClientIface};
 use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use fedimint_client_module::transaction::TxSubmissionSmContext;
 use fedimint_core::config::{ClientConfig, FederationId};
-use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
+use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::CommonModuleInit;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -23,11 +23,11 @@ use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{NumPeers, PeerId, fedimint_build_code_version_env, maybe_add_send};
 use fedimint_derive_secret::DerivableSecret;
 use fedimint_gwv2_client::{GatewayClientInitV2, IGatewayClientV2};
-use fedimint_lnv2_client::{LightningClientInit, LightningClientModule};
+use fedimint_lnv2_client::LightningClientInit;
 use fedimint_logging::LOG_CLIENT;
-use fedimint_mintv2_client::{MintClientInit, MintClientModule};
+use fedimint_mintv2_client::MintClientInit;
 use fedimint_redb::Database;
-use fedimint_walletv2_client::{WalletClientInit, WalletClientModule};
+use fedimint_walletv2_client::WalletClientInit;
 use tokio::sync::watch;
 use tracing::{debug, trace, warn};
 
@@ -257,8 +257,8 @@ impl ClientBuilder {
         );
         let (log_event_added_tx, _) = watch::channel(());
 
-        let decoders = static_decoders();
-        let config = Self::config_decoded(config, &decoders)?;
+        let config = config.clone();
+        let decoders = ModuleDecoderRegistry::default();
         let fed_id = config.calculate_federation_id();
         let db = db_no_decoders;
         let peer_urls: BTreeMap<PeerId, SafeUrl> = config
@@ -456,13 +456,6 @@ impl ClientBuilder {
             })
     }
 
-    fn config_decoded(
-        config: &ClientConfig,
-        decoders: &ModuleDecoderRegistry,
-    ) -> Result<ClientConfig, fedimint_core::encoding::DecodeError> {
-        config.clone().redecode_raw(decoders)
-    }
-
     /// Re-derive client's `root_secret` using the federation ID. This
     /// eliminates the possibility of having the same client `root_secret`
     /// across multiple federations.
@@ -513,7 +506,7 @@ async fn init_or_recover<I: ClientModuleInit>(
             panic!("Module config for {kind_str} missing at instance {module_instance_id}")
         });
 
-    let typed_cfg: &<<I as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig =
+    let typed_cfg: <<I as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig =
         module_config.cast()?;
 
     if init_state.does_require_recovery() {
@@ -655,33 +648,6 @@ where
     module_recoveries.insert(module_instance_id, recover_fut);
     module_recovery_progress_receivers.insert(module_instance_id, progress_rx);
     Ok(())
-}
-
-/// Build the fixed decoder registry for the three canonical modules.
-fn static_decoders() -> ModuleDecoderRegistry {
-    let mut modules: BTreeMap<ModuleInstanceId, (ModuleKind, Decoder)> = BTreeMap::new();
-    modules.insert(
-        wire::MINT_INSTANCE_ID,
-        (
-            ModuleKind::from_static_str("mintv2"),
-            MintClientModule::decoder(),
-        ),
-    );
-    modules.insert(
-        wire::LN_INSTANCE_ID,
-        (
-            ModuleKind::from_static_str("lnv2"),
-            LightningClientModule::decoder(),
-        ),
-    );
-    modules.insert(
-        wire::WALLET_INSTANCE_ID,
-        (
-            ModuleKind::from_static_str("walletv2"),
-            WalletClientModule::decoder(),
-        ),
-    );
-    ModuleDecoderRegistry::from(modules)
 }
 
 /// An intermediate step before Client joining or recovering

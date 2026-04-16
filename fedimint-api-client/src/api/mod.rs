@@ -11,7 +11,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, anyhow, bail};
 pub use error::{FederationError, OutputOutcomeError};
 use fedimint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
-use fedimint_core::core::{Decoder, DynOutputOutcome, ModuleInstanceId, OutputOutcome};
+use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };
@@ -22,9 +22,7 @@ use fedimint_core::runtime::sleep;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::backoff_util::api_networking_backoff;
 use fedimint_core::util::{FmtCompact as _, SafeUrl};
-use fedimint_core::{
-    NumPeersExt, PeerId, TransactionId, apply, async_trait_maybe_send, dyn_newtype_define, util,
-};
+use fedimint_core::{NumPeersExt, PeerId, TransactionId, apply, async_trait_maybe_send, util};
 use fedimint_logging::LOG_CLIENT_NET_API;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{Future, StreamExt};
@@ -117,7 +115,6 @@ enum PeerState {
 }
 
 pub type FederationResult<T> = Result<T, FederationError>;
-pub type SerdeOutputOutcome = SerdeModuleEncoding<DynOutputOutcome>;
 
 pub type OutputOutcomeResult<O> = result::Result<O, OutputOutcomeError>;
 
@@ -417,41 +414,66 @@ pub trait FederationApiExt: IRawFederationApi {
 #[apply(async_trait_maybe_send!)]
 impl<T: ?Sized> FederationApiExt for T where T: IRawFederationApi {}
 
-dyn_newtype_define! {
-    #[derive(Clone)]
-    pub DynModuleApi(Arc<IRawFederationApi>)
+#[derive(Clone)]
+pub struct DynModuleApi {
+    inner: Arc<dyn IRawFederationApi + Send + Sync + 'static>,
 }
 
-dyn_newtype_define! {
-    #[derive(Clone)]
-    pub DynGlobalApi(Arc<IRawFederationApi>)
+impl std::ops::Deref for DynModuleApi {
+    type Target = dyn IRawFederationApi + Send + Sync + 'static;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.inner
+    }
+}
+
+impl<I> From<I> for DynModuleApi
+where
+    I: IRawFederationApi + Send + Sync + 'static,
+{
+    fn from(i: I) -> Self {
+        Self { inner: Arc::new(i) }
+    }
+}
+
+impl std::fmt::Debug for DynModuleApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.inner, f)
+    }
+}
+
+#[derive(Clone)]
+pub struct DynGlobalApi {
+    inner: Arc<dyn IRawFederationApi + Send + Sync + 'static>,
+}
+
+impl std::ops::Deref for DynGlobalApi {
+    type Target = dyn IRawFederationApi + Send + Sync + 'static;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.inner
+    }
+}
+
+impl<I> From<I> for DynGlobalApi
+where
+    I: IRawFederationApi + Send + Sync + 'static,
+{
+    fn from(i: I) -> Self {
+        Self { inner: Arc::new(i) }
+    }
+}
+
+impl std::fmt::Debug for DynGlobalApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.inner, f)
+    }
 }
 
 impl DynGlobalApi {
     pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, SafeUrl>) -> Self {
         FederationApi::new(endpoint, peers).into()
     }
-}
-
-pub fn deserialize_outcome<R>(
-    outcome: &SerdeOutputOutcome,
-    module_decoder: &Decoder,
-) -> OutputOutcomeResult<R>
-where
-    R: OutputOutcome + MaybeSend,
-{
-    let dyn_outcome = outcome
-        .try_into_inner_known_module_kind(module_decoder)
-        .map_err(|e| OutputOutcomeError::ResponseDeserialization(e.into()))?;
-
-    let source_instance = dyn_outcome.module_instance_id();
-
-    dyn_outcome.as_any().downcast_ref().cloned().ok_or_else(|| {
-        let target_type = std::any::type_name::<R>();
-        OutputOutcomeError::ResponseDeserialization(anyhow!(
-            "Could not downcast output outcome with instance id {source_instance} to {target_type}"
-        ))
-    })
 }
 
 /// Federation API client
