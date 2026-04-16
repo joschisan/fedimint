@@ -358,6 +358,63 @@ macro_rules! redb_sha256_key {
     };
 }
 
+/// Implement `redb::Key` + `redb::Value` for any borsh-serializable type.
+///
+/// ```ignore
+/// #[derive(borsh::BorshSerialize, borsh::BorshDeserialize, Debug)]
+/// pub struct MyKey(pub u64, pub u64);
+/// borsh_key!(MyKey);
+/// ```
+///
+/// The type must already implement `borsh::BorshSerialize` +
+/// `borsh::BorshDeserialize` + `Debug`. Serialization goes through borsh;
+/// `compare` is byte-lex (fine for set-style lookup tables where we never
+/// range over a semantic ordering of K).
+#[macro_export]
+macro_rules! borsh_key {
+    ($ty:ty) => {
+        impl $crate::redb::Value for $ty {
+            type SelfType<'a>
+                = $ty
+            where
+                Self: 'a;
+
+            type AsBytes<'a>
+                = ::std::vec::Vec<u8>
+            where
+                Self: 'a;
+
+            fn fixed_width() -> Option<usize> {
+                None
+            }
+
+            fn from_bytes<'a>(data: &'a [u8]) -> Self
+            where
+                Self: 'a,
+            {
+                $crate::borsh::from_slice(data).expect("borsh decode failed")
+            }
+
+            fn as_bytes<'a, 'b: 'a>(value: &'a Self) -> ::std::vec::Vec<u8>
+            where
+                Self: 'b,
+            {
+                $crate::borsh::to_vec(value).expect("borsh encode can't fail")
+            }
+
+            fn type_name() -> $crate::redb::TypeName {
+                $crate::redb::TypeName::new(concat!("fedimint::", stringify!($ty)))
+            }
+        }
+
+        impl $crate::redb::Key for $ty {
+            fn compare(data1: &[u8], data2: &[u8]) -> ::std::cmp::Ordering {
+                data1.cmp(data2)
+            }
+        }
+    };
+}
+
 // ─── NativeTableDef: redb-native typed table reference ───────────────────
 //
 // Parallel to `TableDef<K, V>`, but `K`/`V` are redb types

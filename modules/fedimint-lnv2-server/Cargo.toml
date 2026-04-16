@@ -14,6 +14,7 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bls12_381 = { workspace = true }
+borsh = { workspace = true }
 erased-serde = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-redb = { workspace = true }

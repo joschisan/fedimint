@@ -24,6 +24,7 @@ async-trait = { workspace = true }
 axum = { workspace = true, features = ["json"] }
 bitcoin = { workspace = true }
 bon = { workspace = true }
+borsh = { workspace = true }
 clap = { workspace = true }
 erased-serde = { workspace = true }
 esplora-client = { workspace = true }
