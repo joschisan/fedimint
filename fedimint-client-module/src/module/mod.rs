@@ -10,13 +10,12 @@ use fedimint_api_client::api::{DynGlobalApi, DynModuleApi};
 use fedimint_core::config::ClientConfig;
 use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::invite_code::InviteCode;
-use fedimint_core::module::registry::{ModuleDecoderRegistry, ModuleRegistry};
+use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::util::{BoxFuture, BoxStream};
 use fedimint_core::{
-    Amount, PeerId, TransactionId, apply, async_trait_maybe_send, dyn_newtype_define,
-    maybe_add_send_sync,
+    Amount, PeerId, TransactionId, apply, async_trait_maybe_send, maybe_add_send_sync,
 };
 use fedimint_eventlog::{Event, EventLogId, PersistedLogEntry};
 use fedimint_logging::LOG_CLIENT;
@@ -25,9 +24,7 @@ use tokio::sync::watch;
 use tracing::warn;
 
 use self::init::ClientModuleInit;
-use crate::transaction::{
-    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
-};
+use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
 
 /// Return type of [`ClientModule::create_final_inputs_and_outputs`]. The
 /// primary module contributes inputs/outputs to balance a partial
@@ -55,18 +52,8 @@ pub type SpawnSms = Box<
     ),
 >;
 
-/// Same as [`FinalContribution`] but with type-erased inputs/outputs, for
-/// the dyn pipeline.
-pub struct DynFinalContribution {
-    pub inputs: Vec<crate::transaction::ClientInput>,
-    pub outputs: Vec<crate::transaction::ClientOutput>,
-    pub spawn_sms: SpawnSms,
-}
-
 pub mod init;
 pub mod recovery;
-
-pub type ClientModuleRegistry = ModuleRegistry<DynClientModule>;
 
 /// A fedimint-client interface exposed to client modules
 ///
@@ -78,7 +65,10 @@ pub type ClientModuleRegistry = ModuleRegistry<DynClientModule>;
 /// understanding of what functionality of the Client the modules get access to.
 #[apply(async_trait_maybe_send!)]
 pub trait ClientContextIface: MaybeSend + MaybeSync {
-    fn get_module(&self, instance: ModuleInstanceId) -> &maybe_add_send_sync!(dyn IClientModule);
+    /// Return the module at `instance` as `&dyn Any` so the caller can
+    /// downcast to the concrete module type. Panics if no module is mounted
+    /// at the given instance id.
+    fn get_module(&self, instance: ModuleInstanceId) -> &(maybe_add_send_sync!(dyn Any));
     fn api_clone(&self) -> DynGlobalApi;
     fn decoders(&self) -> &ModuleDecoderRegistry;
     async fn finalize_and_submit_transaction(
@@ -198,7 +188,6 @@ where
     fn deref(&self) -> &Self::Target {
         self.client
             .get_module(self.module_instance_id)
-            .as_any()
             .downcast_ref::<M>()
             .unwrap_or_else(|| panic!("Module is not of type {}", std::any::type_name::<M>()))
     }
@@ -581,150 +570,6 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
     /// this should be done on per-module basis, to avoid mistakes.
     async fn leave(&self, _dbtx: &WriteTxRef<'_>) -> anyhow::Result<()> {
         bail!("Unable to determine if safe to leave the federation: Not implemented")
-    }
-}
-
-/// Type-erased version of [`ClientModule`]
-#[apply(async_trait_maybe_send!)]
-pub trait IClientModule: Debug {
-    fn as_any(&self) -> &(maybe_add_send_sync!(dyn std::any::Any));
-
-    fn decoder(&self) -> Decoder;
-
-    async fn start(&self);
-
-    fn input_fee(&self, amount: Amount, input: &fedimint_api_client::wire::Input)
-    -> Option<Amount>;
-
-    fn output_fee(
-        &self,
-        amount: Amount,
-        output: &fedimint_api_client::wire::Output,
-    ) -> Option<Amount>;
-
-    fn supports_being_primary(&self) -> bool;
-
-    async fn create_final_inputs_and_outputs(
-        &self,
-        module_instance: ModuleInstanceId,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        input_amount: Amount,
-        output_amount: Amount,
-    ) -> anyhow::Result<DynFinalContribution>;
-
-    async fn get_balance(&self, module_instance: ModuleInstanceId, dbtx: &WriteTxRef<'_>)
-    -> Amount;
-
-    async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()>;
-}
-
-#[apply(async_trait_maybe_send!)]
-impl<T> IClientModule for T
-where
-    T: ClientModule,
-    fedimint_api_client::wire::Input: From<<<T as ClientModule>::Common as ModuleCommon>::Input>,
-    fedimint_api_client::wire::Output: From<<<T as ClientModule>::Common as ModuleCommon>::Output>,
-{
-    fn as_any(&self) -> &(maybe_add_send_sync!(dyn Any)) {
-        self
-    }
-
-    fn decoder(&self) -> Decoder {
-        T::decoder()
-    }
-
-    async fn start(&self) {
-        <T as ClientModule>::start(self).await;
-    }
-
-    fn input_fee(
-        &self,
-        amount: Amount,
-        input: &fedimint_api_client::wire::Input,
-    ) -> Option<Amount> {
-        <T as ClientModule>::input_fee(
-            self,
-            amount,
-            input
-                .as_any_inner()
-                .downcast_ref()
-                .expect("Dispatched to correct module"),
-        )
-    }
-
-    fn output_fee(
-        &self,
-        amount: Amount,
-        output: &fedimint_api_client::wire::Output,
-    ) -> Option<Amount> {
-        <T as ClientModule>::output_fee(
-            self,
-            amount,
-            output
-                .as_any_inner()
-                .downcast_ref()
-                .expect("Dispatched to correct module"),
-        )
-    }
-
-    fn supports_being_primary(&self) -> bool {
-        <T as ClientModule>::supports_being_primary(self)
-    }
-
-    async fn create_final_inputs_and_outputs(
-        &self,
-        module_instance: ModuleInstanceId,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        input_amount: Amount,
-        output_amount: Amount,
-    ) -> anyhow::Result<DynFinalContribution> {
-        let FinalContribution {
-            inputs,
-            outputs,
-            spawn_sms,
-        } = <T as ClientModule>::create_final_inputs_and_outputs(
-            self,
-            &dbtx.isolate(format!("module-{module_instance}")),
-            operation_id,
-            input_amount,
-            output_amount,
-        )
-        .await?;
-
-        let inputs = inputs.into_iter().map(ClientInput::into_wire).collect();
-        let outputs = outputs.into_iter().map(ClientOutput::into_wire).collect();
-
-        Ok(DynFinalContribution {
-            inputs,
-            outputs,
-            spawn_sms,
-        })
-    }
-
-    async fn get_balance(
-        &self,
-        module_instance: ModuleInstanceId,
-        dbtx: &WriteTxRef<'_>,
-    ) -> Amount {
-        <T as ClientModule>::get_balance(self, &dbtx.isolate(format!("module-{module_instance}")))
-            .await
-    }
-
-    async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()> {
-        <T as ClientModule>::subscribe_balance_changes(self).await
-    }
-}
-
-dyn_newtype_define!(
-    #[derive(Clone)]
-    pub DynClientModule(Arc<IClientModule>)
-);
-
-impl AsRef<maybe_add_send_sync!(dyn IClientModule + 'static)> for DynClientModule {
-    fn as_ref(&self) -> &maybe_add_send_sync!(dyn IClientModule + 'static) {
-        self.inner.as_ref()
     }
 }
 

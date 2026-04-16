@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
-use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::{Client, ClientBuilder, RootSecret};
 use fedimint_client_module::secret::RootSecretStrategy;
 use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::invite_code::InviteCode;
-use fedimint_gwv2_client::GatewayClientInitV2;
 use fedimint_redb::Database;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
@@ -18,17 +16,12 @@ use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
 pub struct GatewayClientFactory {
     db: Database,
     mnemonic: Mnemonic,
-    registry: ClientModuleInitRegistry,
     connectors: Endpoint,
 }
 
 impl GatewayClientFactory {
     /// Initialize a new factory, storing the mnemonic entropy in the database.
-    pub async fn init(
-        db: Database,
-        mnemonic: Mnemonic,
-        registry: ClientModuleInitRegistry,
-    ) -> anyhow::Result<Self> {
+    pub async fn init(db: Database, mnemonic: Mnemonic) -> anyhow::Result<Self> {
         let dbtx = db.begin_write().await;
         assert!(
             dbtx.as_ref()
@@ -43,15 +36,11 @@ impl GatewayClientFactory {
             connectors: endpoint,
             db,
             mnemonic,
-            registry,
         })
     }
 
     /// Try to load an existing factory from the database.
-    pub async fn try_load(
-        db: Database,
-        registry: ClientModuleInitRegistry,
-    ) -> anyhow::Result<Option<Self>> {
+    pub async fn try_load(db: Database) -> anyhow::Result<Option<Self>> {
         let entropy = db.begin_read().await.as_ref().get(&ROOT_ENTROPY, &());
 
         match entropy {
@@ -65,7 +54,6 @@ impl GatewayClientFactory {
                     connectors: endpoint,
                     db,
                     mnemonic,
-                    registry,
                 }))
             }
             None => Ok(None),
@@ -87,13 +75,10 @@ impl GatewayClientFactory {
     }
 
     async fn client_builder(&self, gateway: Arc<AppState>) -> anyhow::Result<ClientBuilder> {
-        let mut registry = self.registry.clone();
-        registry.attach(GatewayClientInitV2 { gateway });
-
         let mut builder = Client::builder()
             .await
             .map_err(|e| anyhow::anyhow!("Client creation error: {e}"))?;
-        builder.with_module_inits(registry);
+        builder.with_gateway_ln(gateway);
         Ok(builder)
     }
 

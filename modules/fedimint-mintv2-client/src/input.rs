@@ -1,4 +1,4 @@
-use fedimint_client::transaction::{ClientInput, ClientInputBundle};
+use fedimint_client_module::transaction::{ClientInput, ClientInputBundle};
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_client_module::module::OutPointRange;
 use fedimint_core::TransactionId;

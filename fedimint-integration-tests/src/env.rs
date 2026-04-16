@@ -242,10 +242,7 @@ async fn build_client(
 
     let db = fedimint_redb::Database::open(db_dir.join("database.redb")).await?;
 
-    let mut builder = Client::builder().await?;
-    builder.with_module(fedimint_mintv2_client::MintClientInit);
-    builder.with_module(fedimint_walletv2_client::WalletClientInit);
-    builder.with_module(fedimint_lnv2_client::LightningClientInit::default());
+    let builder = Client::builder().await?;
 
     let connectors = endpoint;
 

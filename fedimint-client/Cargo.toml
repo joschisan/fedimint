@@ -31,8 +31,13 @@ fedimint-client-module = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-derive-secret = { workspace = true }
 fedimint-eventlog = { workspace = true }
+fedimint-gwv2-client = { workspace = true }
+fedimint-lnv2-client = { workspace = true }
+fedimint-lnv2-common = { workspace = true }
 fedimint-logging = { workspace = true }
+fedimint-mintv2-client = { workspace = true }
 fedimint-redb = { workspace = true }
+fedimint-walletv2-client = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

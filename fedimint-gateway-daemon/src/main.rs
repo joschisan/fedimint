@@ -17,7 +17,6 @@ use bitcoin::Network;
 use bitcoin::hashes::{Hash as _, sha256};
 use clap::{ArgGroup, Parser};
 use fedimint_bip39::Bip39RootSecretStrategy;
-use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
@@ -27,8 +26,6 @@ use fedimint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
-use fedimint_mintv2_client::MintClientInit;
-use fedimint_walletv2_client::WalletClientInit;
 use lightning::types::payment::PaymentHash;
 use rand::rngs::OsRng;
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
@@ -140,19 +137,12 @@ fn main() -> anyhow::Result<()> {
         runtime.block_on(fedimint_redb::Database::open(opts.data_dir.join(DB_FILE)))?;
 
     // 3. Load or init client factory (mnemonic)
-    let mut registry = ClientModuleInitRegistry::new();
-    registry.attach(MintClientInit);
-    registry.attach(WalletClientInit);
-
-    let client_factory = match runtime.block_on(GatewayClientFactory::try_load(
-        gateway_db.clone(),
-        registry.clone(),
-    ))? {
+    let client_factory = match runtime.block_on(GatewayClientFactory::try_load(gateway_db.clone()))?
+    {
         Some(factory) => factory,
         None => runtime.block_on(GatewayClientFactory::init(
             gateway_db.clone(),
             Bip39RootSecretStrategy::<12>::random(&mut OsRng),
-            registry,
         ))?,
     };
 

@@ -28,12 +28,12 @@ use bitcoin_hashes::sha256;
 use client_db::{NOTE, RECEIVE_OPERATION, RECOVERY_STATE, RecoveryState};
 pub use events::*;
 use fedimint_api_client::api::{DynModuleApi, FederationApiExt as _};
-use fedimint_client::module::ClientModule;
-use fedimint_client::transaction::{
-    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
-};
 use fedimint_client_module::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
+};
+use fedimint_client_module::module::ClientModule;
+use fedimint_client_module::transaction::{
+    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
 use fedimint_client_module::module::recovery::RecoveryProgress;
 use fedimint_client_module::module::{ClientContext, IdxRange, OutPointRange};

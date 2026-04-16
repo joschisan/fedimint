@@ -34,7 +34,6 @@ bls12_381 = { workspace = true }
 borsh = { workspace = true }
 erased-serde = { workspace = true }
 fedimint-api-client = { workspace = true }
-fedimint-client = { workspace = true }
 fedimint-client-module = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-derive-secret = { workspace = true }

@@ -4,35 +4,41 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use bitcoin::key::Secp256k1;
+use fedimint_api_client::Endpoint;
 use fedimint_api_client::api::{DynGlobalApi, FederationApi};
-use fedimint_api_client::{Endpoint, download_from_invite_code};
+use fedimint_api_client::{download_from_invite_code, wire};
 use fedimint_client_module::ModuleRecoveryStarted;
 use fedimint_client_module::executor::ModuleExecutor;
+use fedimint_client_module::module::ClientModule;
+use fedimint_client_module::module::FinalClientIface;
 use fedimint_client_module::module::init::ClientModuleInit;
 use fedimint_client_module::module::recovery::RecoveryProgress;
-use fedimint_client_module::module::{ClientModuleRegistry, FinalClientIface};
 use fedimint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use fedimint_client_module::transaction::TxSubmissionSmContext;
-use fedimint_core::config::{ClientConfig, FederationId, ModuleInitRegistry};
-use fedimint_core::core::ModuleInstanceId;
+use fedimint_core::config::{ClientConfig, FederationId};
+use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
 use fedimint_core::invite_code::InviteCode;
+use fedimint_core::module::CommonModuleInit;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::task::TaskGroup;
 use fedimint_core::util::{FmtCompactAnyhow as _, SafeUrl};
 use fedimint_core::{NumPeers, PeerId, fedimint_build_code_version_env, maybe_add_send};
 use fedimint_derive_secret::DerivableSecret;
+use fedimint_gwv2_client::{GatewayClientInitV2, IGatewayClientV2};
+use fedimint_lnv2_client::{LightningClientInit, LightningClientModule};
 use fedimint_logging::LOG_CLIENT;
+use fedimint_mintv2_client::{MintClientInit, MintClientModule};
 use fedimint_redb::Database;
+use fedimint_walletv2_client::{WalletClientInit, WalletClientModule};
 use tokio::sync::watch;
 use tracing::{debug, trace, warn};
 
 use super::handle::ClientHandle;
-use super::{Client, client_decoders};
+use super::{Client, LnFlavor};
 use crate::db::{
     self, CLIENT_CONFIG, CLIENT_INIT_STATE, CLIENT_MODULE_RECOVERY, ClientModuleRecovery,
     ClientModuleRecoveryState, InitMode, InitState,
 };
-use crate::module_init::ClientModuleInitRegistry;
 
 /// The type of root secret hashing
 ///
@@ -80,9 +86,22 @@ impl RootSecret {
     }
 }
 
+/// Choice of LN-module client flavor mounted on the built [`Client`].
+///
+/// Regular applications get `Regular`; the gateway daemon supplies `Gateway`
+/// via [`ClientBuilder::with_gateway_ln`]. The two are mutually exclusive
+/// because the federation-side lnv2 module at instance id `1` accepts only
+/// one client-side wrapper.
+pub enum LnInit {
+    Regular(LightningClientInit),
+    Gateway(GatewayClientInitV2),
+}
+
 /// Used to configure, assemble and build [`Client`]
 pub struct ClientBuilder {
-    module_inits: ClientModuleInitRegistry,
+    mint_init: MintClientInit,
+    wallet_init: WalletClientInit,
+    ln_init: LnInit,
     stopped: bool,
 }
 
@@ -95,27 +114,23 @@ impl ClientBuilder {
         );
 
         ClientBuilder {
-            module_inits: ModuleInitRegistry::new(),
+            mint_init: MintClientInit,
+            wallet_init: WalletClientInit,
+            ln_init: LnInit::Regular(LightningClientInit::default()),
             stopped: false,
         }
     }
 
-    /// Replace module generator registry entirely
-    pub fn with_module_inits(&mut self, module_inits: ClientModuleInitRegistry) {
-        self.module_inits = module_inits;
+    /// Configure the regular lightning client flavor with a specific init
+    /// (e.g. to override the gateway connection).
+    pub fn with_lightning_init(&mut self, init: LightningClientInit) {
+        self.ln_init = LnInit::Regular(init);
     }
 
-    /// Make module generator available when reading the config
-    pub fn with_module<M: ClientModuleInit>(&mut self, module_init: M)
-    where
-        fedimint_api_client::wire::Input: From<
-            <<<M as ClientModuleInit>::Module as fedimint_client_module::ClientModule>::Common as fedimint_core::module::ModuleCommon>::Input,
-        >,
-        fedimint_api_client::wire::Output: From<
-            <<<M as ClientModuleInit>::Module as fedimint_client_module::ClientModule>::Common as fedimint_core::module::ModuleCommon>::Output,
-        >,
-    {
-        self.module_inits.attach(module_init);
+    /// Mount the gateway lightning flavor. Used by the gateway daemon in
+    /// place of the regular lightning module.
+    pub fn with_gateway_ln(&mut self, gateway: Arc<dyn IGatewayClientV2>) {
+        self.ln_init = LnInit::Gateway(GatewayClientInitV2 { gateway });
     }
 
     pub fn stopped(&mut self) {
@@ -244,7 +259,7 @@ impl ClientBuilder {
         );
         let (log_event_added_tx, _) = watch::channel(());
 
-        let decoders = self.decoders(config);
+        let decoders = static_decoders();
         let config = Self::config_decoded(config, &decoders)?;
         let fed_id = config.calculate_federation_id();
         db_no_decoders.set_decoders(decoders.clone());
@@ -261,6 +276,11 @@ impl ClientBuilder {
 
         let init_state = Self::load_init_state(&db).await;
 
+        let final_client = FinalClientIface::default();
+
+        let root_secret = Self::federation_root_secret(&pre_root_secret, &config);
+        let num_peers = NumPeers::from(config.global.api_endpoints.len());
+
         let mut module_recoveries: BTreeMap<
             ModuleInstanceId,
             Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
@@ -270,149 +290,89 @@ impl ClientBuilder {
             watch::Receiver<RecoveryProgress>,
         > = BTreeMap::new();
 
-        let final_client = FinalClientIface::default();
+        let mint = init_or_recover(
+            &self.mint_init,
+            wire::MINT_INSTANCE_ID,
+            "mintv2",
+            &config,
+            &db,
+            &api,
+            &connectors,
+            &task_group,
+            &root_secret,
+            final_client.clone(),
+            fed_id,
+            num_peers,
+            &init_state,
+            &log_event_added_tx,
+            &mut module_recoveries,
+            &mut module_recovery_progress_receivers,
+        )
+        .await?;
 
-        let root_secret = Self::federation_root_secret(&pre_root_secret, &config);
+        let wallet = init_or_recover(
+            &self.wallet_init,
+            wire::WALLET_INSTANCE_ID,
+            "walletv2",
+            &config,
+            &db,
+            &api,
+            &connectors,
+            &task_group,
+            &root_secret,
+            final_client.clone(),
+            fed_id,
+            num_peers,
+            &init_state,
+            &log_event_added_tx,
+            &mut module_recoveries,
+            &mut module_recovery_progress_receivers,
+        )
+        .await?;
 
-        let modules = {
-            let mut modules = ClientModuleRegistry::default();
-            for (module_instance_id, module_config) in config.modules.clone() {
-                let kind = module_config.kind().clone();
-                let Some(module_init) = self.module_inits.get(&kind).cloned() else {
-                    debug!(
-                        target: LOG_CLIENT,
-                        kind=%kind,
-                        instance_id=%module_instance_id,
-                        "Module kind of instance not found in module gens, skipping");
-                    continue;
-                };
-
-                // since the exact logic of when to start recovery is a bit gnarly,
-                // the recovery call is extracted here.
-                let start_module_recover_fn = |progress: RecoveryProgress| {
-                    let module_config = module_config.clone();
-                    let num_peers = NumPeers::from(config.global.api_endpoints.len());
-                    let db = db.clone();
-                    let kind = kind.clone();
-                    let api = api.clone();
-                    let root_secret = root_secret.clone();
-                    let final_client = final_client.clone();
-                    let (progress_tx, progress_rx) = tokio::sync::watch::channel(progress);
-                    let task_group = task_group.clone();
-                    let module_init = module_init.clone();
-                    (
-                        Box::pin(async move {
-                            module_init
-                                    .recover(
-                                        final_client.clone(),
-                                        fed_id,
-                                        num_peers,
-                                        module_config.clone(),
-                                        db.clone(),
-                                        module_instance_id,
-                                        root_secret.derive_module_secret(module_instance_id),
-                                        api.clone(),
-                                        progress_tx,
-                                        task_group,
-                                    )
-                                    .await
-                                    .inspect_err(|err| {
-                                        warn!(
-                                            target: LOG_CLIENT,
-                                            module_id = module_instance_id, %kind, err = %err.fmt_compact_anyhow(), "Module failed to recover"
-                                        );
-                                    })
-                        }),
-                        progress_rx,
-                    )
-                };
-
-                let recovery = if init_state.does_require_recovery() {
-                    let existing_recovery_state = db.begin_read().await.as_ref().get(
-                        &CLIENT_MODULE_RECOVERY,
-                        &ClientModuleRecovery { module_instance_id },
-                    );
-                    match existing_recovery_state {
-                        Some(module_recovery_state) => {
-                            if module_recovery_state.is_done() {
-                                debug!(
-                                    id = %module_instance_id,
-                                    %kind, "Module recovery already complete"
-                                );
-                                None
-                            } else {
-                                debug!(
-                                    id = %module_instance_id,
-                                    %kind,
-                                    progress = %module_recovery_state.progress,
-                                    "Starting module recovery with an existing progress"
-                                );
-                                Some(start_module_recover_fn(module_recovery_state.progress))
-                            }
-                        }
-                        _ => {
-                            let progress = RecoveryProgress::none();
-                            let dbtx = db.begin_write().await;
-                            let tx = dbtx.as_ref();
-                            fedimint_eventlog::log_event(
-                                &tx,
-                                log_event_added_tx.clone(),
-                                None,
-                                None,
-                                ModuleRecoveryStarted::new(module_instance_id),
-                            );
-                            tx.insert(
-                                &CLIENT_MODULE_RECOVERY,
-                                &ClientModuleRecovery { module_instance_id },
-                                &ClientModuleRecoveryState { progress },
-                            );
-
-                            dbtx.commit().await;
-
-                            debug!(
-                                id = %module_instance_id,
-                                %kind, "Starting new module recovery"
-                            );
-                            Some(start_module_recover_fn(progress))
-                        }
-                    }
-                } else {
-                    None
-                };
-
-                match recovery {
-                    Some((recovery, recovery_progress_rx)) => {
-                        module_recoveries.insert(module_instance_id, recovery);
-                        module_recovery_progress_receivers
-                            .insert(module_instance_id, recovery_progress_rx);
-                    }
-                    _ => {
-                        let module = module_init
-                            .init(
-                                final_client.clone(),
-                                fed_id,
-                                config.global.api_endpoints.len(),
-                                module_config,
-                                db.clone(),
-                                module_instance_id,
-                                // This is a divergence from the legacy client, where the child
-                                // secret keys were derived using
-                                // *module kind*-specific derivation paths.
-                                // Since the new client has to support multiple, segregated modules
-                                // of the same kind we have to use
-                                // the instance id instead.
-                                root_secret.derive_module_secret(module_instance_id),
-                                api.clone(),
-                                task_group.clone(),
-                                connectors.clone(),
-                            )
-                            .await?;
-
-                        modules.register_module(module_instance_id, kind, module);
-                    }
-                }
-            }
-            modules
+        let ln = match self.ln_init {
+            LnInit::Regular(init) => LnFlavor::Regular(
+                init_or_recover(
+                    &init,
+                    wire::LN_INSTANCE_ID,
+                    "lnv2",
+                    &config,
+                    &db,
+                    &api,
+                    &connectors,
+                    &task_group,
+                    &root_secret,
+                    final_client.clone(),
+                    fed_id,
+                    num_peers,
+                    &init_state,
+                    &log_event_added_tx,
+                    &mut module_recoveries,
+                    &mut module_recovery_progress_receivers,
+                )
+                .await?,
+            ),
+            LnInit::Gateway(init) => LnFlavor::Gateway(
+                init_or_recover(
+                    &init,
+                    wire::LN_INSTANCE_ID,
+                    "lnv2",
+                    &config,
+                    &db,
+                    &api,
+                    &connectors,
+                    &task_group,
+                    &root_secret,
+                    final_client.clone(),
+                    fed_id,
+                    num_peers,
+                    &init_state,
+                    &log_event_added_tx,
+                    &mut module_recoveries,
+                    &mut module_recovery_progress_receivers,
+                )
+                .await?,
+            ),
         };
 
         if init_state.is_pending() && module_recoveries.is_empty() {
@@ -421,11 +381,6 @@ impl ClientBuilder {
                 .insert(&CLIENT_INIT_STATE, &(), &init_state.into_complete());
             dbtx.commit().await;
         }
-
-        let primary_module = modules
-            .iter_modules()
-            .find(|(_id, _kind, module)| module.supports_being_primary())
-            .map(|(id, _kind, _module)| id);
 
         let recovery_receiver_init_val = module_recovery_progress_receivers
             .iter()
@@ -451,8 +406,9 @@ impl ClientBuilder {
             connectors,
             federation_id: fed_id,
             federation_config_meta: config.global.meta,
-            primary_module,
-            modules,
+            mint,
+            wallet,
+            ln,
             log_event_added_tx,
             tx_submission_executor,
             api,
@@ -472,9 +428,9 @@ impl ClientBuilder {
         // Module `start` is called *after* `final_client.set` so that any
         // per-module executors spawned here can safely resolve the weak
         // client reference from their transition contexts.
-        for (_, _, module) in client_arc.modules.iter_modules() {
-            module.start().await;
-        }
+        client_arc.mint.start().await;
+        client_arc.wallet.start().await;
+        client_arc.ln.start().await;
 
         if !module_recoveries.is_empty() {
             client_arc.spawn_module_recoveries_task(
@@ -503,18 +459,6 @@ impl ClientBuilder {
             })
     }
 
-    fn decoders(&self, config: &ClientConfig) -> ModuleDecoderRegistry {
-        let decoders = client_decoders(
-            &self.module_inits,
-            config
-                .modules
-                .iter()
-                .map(|(module_instance, module_config)| (*module_instance, module_config.kind())),
-        );
-
-        decoders
-    }
-
     fn config_decoded(
         config: &ClientConfig,
         decoders: &ModuleDecoderRegistry,
@@ -531,6 +475,214 @@ impl ClientBuilder {
     ) -> DerivableSecret {
         pre_root_secret.federation_key(&config.global.calculate_federation_id())
     }
+}
+
+/// Run init (or spawn recovery if the database indicates recovery is
+/// required). Returns an `Arc` of the typed module on success; on recovery
+/// the future is stashed into `module_recoveries` and this returns — but we
+/// still need a module instance to store in `Client`, so recovery paths
+/// currently require running init after recovery finishes. For now we always
+/// run init; recovery is scheduled to run in parallel on the task group.
+#[allow(clippy::too_many_arguments)]
+async fn init_or_recover<I: ClientModuleInit>(
+    init: &I,
+    module_instance_id: ModuleInstanceId,
+    kind_str: &'static str,
+    config: &ClientConfig,
+    db: &Database,
+    api: &DynGlobalApi,
+    connectors: &Endpoint,
+    task_group: &TaskGroup,
+    root_secret: &DerivableSecret,
+    final_client: FinalClientIface,
+    fed_id: FederationId,
+    num_peers: NumPeers,
+    init_state: &InitState,
+    log_event_added_tx: &watch::Sender<()>,
+    module_recoveries: &mut BTreeMap<
+        ModuleInstanceId,
+        Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
+    >,
+    module_recovery_progress_receivers: &mut BTreeMap<
+        ModuleInstanceId,
+        watch::Receiver<RecoveryProgress>,
+    >,
+) -> anyhow::Result<Arc<<I as ClientModuleInit>::Module>> {
+    let module_config = config
+        .modules
+        .get(&module_instance_id)
+        .cloned()
+        .unwrap_or_else(|| panic!("Module config for {kind_str} missing at instance {module_instance_id}"));
+
+    let typed_cfg: &<<I as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig =
+        module_config.cast()?;
+
+    if init_state.does_require_recovery() {
+        schedule_recovery(
+            init,
+            module_instance_id,
+            kind_str,
+            typed_cfg.clone(),
+            db,
+            api,
+            task_group,
+            root_secret,
+            final_client.clone(),
+            fed_id,
+            num_peers,
+            log_event_added_tx,
+            module_recoveries,
+            module_recovery_progress_receivers,
+        )
+        .await?;
+    }
+
+    let module_db = db.isolate(format!("module-{module_instance_id}"));
+    let args = fedimint_client_module::module::init::ClientModuleInitArgs {
+        federation_id: fed_id,
+        peer_num: num_peers.total(),
+        cfg: typed_cfg.clone(),
+        db: module_db.clone(),
+        module_root_secret: root_secret.derive_module_secret(module_instance_id),
+        api: api.clone(),
+        module_api: api.with_module(module_instance_id),
+        context: fedimint_client_module::module::ClientContext::new(
+            final_client,
+            module_instance_id,
+            module_db,
+        ),
+        task_group: task_group.clone(),
+        connector_registry: connectors.clone(),
+    };
+
+    Ok(Arc::new(<I as ClientModuleInit>::init(init, &args).await?))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn schedule_recovery<I: ClientModuleInit>(
+    init: &I,
+    module_instance_id: ModuleInstanceId,
+    kind_str: &'static str,
+    cfg: <<I as fedimint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
+    db: &Database,
+    api: &DynGlobalApi,
+    task_group: &TaskGroup,
+    root_secret: &DerivableSecret,
+    final_client: FinalClientIface,
+    fed_id: FederationId,
+    num_peers: NumPeers,
+    log_event_added_tx: &watch::Sender<()>,
+    module_recoveries: &mut BTreeMap<
+        ModuleInstanceId,
+        Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
+    >,
+    module_recovery_progress_receivers: &mut BTreeMap<
+        ModuleInstanceId,
+        watch::Receiver<RecoveryProgress>,
+    >,
+) -> anyhow::Result<()>
+where
+    I: Clone,
+{
+    let existing_recovery_state = db.begin_read().await.as_ref().get(
+        &CLIENT_MODULE_RECOVERY,
+        &ClientModuleRecovery { module_instance_id },
+    );
+
+    let progress = match existing_recovery_state {
+        Some(state) if state.is_done() => {
+            debug!(id = %module_instance_id, kind = %kind_str, "Module recovery already complete");
+            return Ok(());
+        }
+        Some(state) => state.progress,
+        None => {
+            let progress = RecoveryProgress::none();
+            let dbtx = db.begin_write().await;
+            let tx = dbtx.as_ref();
+            fedimint_eventlog::log_event(
+                &tx,
+                log_event_added_tx.clone(),
+                None,
+                None,
+                ModuleRecoveryStarted::new(module_instance_id),
+            );
+            tx.insert(
+                &CLIENT_MODULE_RECOVERY,
+                &ClientModuleRecovery { module_instance_id },
+                &ClientModuleRecoveryState { progress },
+            );
+            dbtx.commit().await;
+            progress
+        }
+    };
+
+    let (progress_tx, progress_rx) = tokio::sync::watch::channel(progress);
+    let module_db = db.isolate(format!("module-{module_instance_id}"));
+    let module_api = api.with_module(module_instance_id);
+    let init_clone = init.clone();
+    let api_clone = api.clone();
+    let task_group_clone = task_group.clone();
+    let root_secret_clone = root_secret.clone();
+    let final_client_clone = final_client.clone();
+
+    let recover_fut = Box::pin(async move {
+        let args = fedimint_client_module::module::init::ClientModuleRecoverArgs {
+            federation_id: fed_id,
+            num_peers,
+            cfg: cfg.clone(),
+            db: module_db.clone(),
+            module_root_secret: root_secret_clone.derive_module_secret(module_instance_id),
+            api: api_clone,
+            module_api,
+            context: fedimint_client_module::module::ClientContext::new(
+                final_client_clone,
+                module_instance_id,
+                module_db,
+            ),
+            progress_tx,
+            task_group: task_group_clone,
+        };
+        <I as ClientModuleInit>::recover(&init_clone, &args)
+            .await
+            .inspect_err(|err| {
+                warn!(
+                    target: LOG_CLIENT,
+                    module_id = module_instance_id, kind = %kind_str,
+                    err = %err.fmt_compact_anyhow(), "Module failed to recover"
+                );
+            })
+    });
+
+    module_recoveries.insert(module_instance_id, recover_fut);
+    module_recovery_progress_receivers.insert(module_instance_id, progress_rx);
+    Ok(())
+}
+
+/// Build the fixed decoder registry for the three canonical modules.
+fn static_decoders() -> ModuleDecoderRegistry {
+    let mut modules: BTreeMap<ModuleInstanceId, (ModuleKind, Decoder)> = BTreeMap::new();
+    modules.insert(
+        wire::MINT_INSTANCE_ID,
+        (
+            ModuleKind::from_static_str("mintv2"),
+            MintClientModule::decoder(),
+        ),
+    );
+    modules.insert(
+        wire::LN_INSTANCE_ID,
+        (
+            ModuleKind::from_static_str("lnv2"),
+            LightningClientModule::decoder(),
+        ),
+    );
+    modules.insert(
+        wire::WALLET_INSTANCE_ID,
+        (
+            ModuleKind::from_static_str("walletv2"),
+            WalletClientModule::decoder(),
+        ),
+    );
+    ModuleDecoderRegistry::from(modules)
 }
 
 /// An intermediate step before Client joining or recovering
@@ -550,83 +702,6 @@ impl ClientPreview {
     }
 
     /// Join a new Federation
-    ///
-    /// When a user wants to connect to a new federation this function fetches
-    /// the federation config and initializes the client database. If a user
-    /// already joined the federation in the past and has a preexisting database
-    /// use [`ClientBuilder::open`] instead.
-    ///
-    /// **Warning**: Calling `join` with a `root_secret` key that was used
-    /// previous to `join` a Federation will lead to all sorts of malfunctions
-    /// including likely loss of funds.
-    ///
-    /// This should be generally called only if the `root_secret` key is known
-    /// not to have been used before (e.g. just randomly generated). For keys
-    /// that might have been previous used (e.g. provided by the user),
-    /// it's safer to call [`Self::recover`] which will attempt to recover
-    /// client module states for the Federation.
-    ///
-    /// A typical "join federation" flow would look as follows:
-    /// ```no_run
-    /// # use std::str::FromStr;
-    /// # use fedimint_core::invite_code::InviteCode;
-    /// # use fedimint_core::config::ClientConfig;
-    /// # use fedimint_derive_secret::DerivableSecret;
-    /// # use fedimint_client::{Client, ClientBuilder, RootSecret};
-    /// # use fedimint_api_client::Endpoint;
-    /// # use fedimint_core::db::Database;
-    /// # use fedimint_core::config::META_FEDERATION_NAME_KEY;
-    /// #
-    /// # #[tokio::main]
-    /// # async fn main() -> anyhow::Result<()> {
-    /// # let root_secret: DerivableSecret = unimplemented!();
-    /// // Create a root secret, e.g. via fedimint-bip39, see also:
-    /// // https://github.com/fedimint/fedimint/blob/master/docs/secret_derivation.md
-    /// // let root_secret = …;
-    ///
-    /// // Get invite code from user
-    /// let invite_code = InviteCode::from_str("fed11qgqpw9thwvaz7te3xgmjuvpwxqhrzw3jxumrvvf0qqqjpetvlg8glnpvzcufhffgzhv8m75f7y34ryk7suamh8x7zetly8h0v9v0rm")
-    ///     .expect("Invalid invite code");
-    ///
-    /// // Tell the user the federation name, bitcoin network
-    /// // (e.g. from wallet module config), and other details
-    /// // that are typically contained in the federation's
-    /// // meta fields.
-    ///
-    /// // let network = config.get_first_module_by_kind::<WalletClientConfig>("wallet")
-    /// //     .expect("Module not found")
-    /// //     .network;
-    ///
-    /// // Open the client's database, using the federation ID
-    /// // as the DB name is a common pattern:
-    ///
-    /// // let db_path = format!("./path/to/db/{}", config.federation_id());
-    /// // let db = RedbDatabase::open(db_path).expect("error opening DB");
-    /// # let db: Database = unimplemented!();
-    /// # let connectors: Endpoint = unimplemented!();
-    ///
-    /// let preview = Client::builder().await
-    ///     // Mount the modules the client should support:
-    ///     // .with_module(LightningClientInit)
-    ///     // .with_module(MintClientInit)
-    ///     // .with_module(WalletClientInit::default())
-    ///      .expect("Error building client")
-    ///      .preview(connectors, &invite_code).await?;
-    ///
-    /// println!(
-    ///     "The federation name is: {}",
-    ///     preview.config().meta::<String>(META_FEDERATION_NAME_KEY)
-    ///         .expect("Could not decode name field")
-    ///         .expect("Name isn't set")
-    /// );
-    ///
-    /// let client = preview
-    ///     .join(db, RootSecret::StandardDoubleDerive(root_secret))
-    ///     .await
-    ///     .expect("Error joining federation");
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn join(
         self,
         db_no_decoders: Database,
@@ -634,8 +709,7 @@ impl ClientPreview {
     ) -> anyhow::Result<ClientHandle> {
         let pre_root_secret = pre_root_secret.to_inner(self.config.calculate_federation_id());
 
-        let client = self
-            .inner
+        self.inner
             .init(
                 self.connectors,
                 db_no_decoders,
@@ -643,22 +717,10 @@ impl ClientPreview {
                 self.config,
                 InitMode::Fresh,
             )
-            .await?;
-
-        Ok(client)
+            .await
     }
 
-    /// Join a (possibly) previous joined Federation
-    ///
-    /// Unlike [`Self::join`], `recover` will run client module
-    /// recovery for each client module attempting to recover any previous
-    /// module state.
-    ///
-    /// Recovery process takes time during which each recovering client module
-    /// will not be available for use.
-    ///
-    /// Calling `recovery` with a `root_secret` that was not actually previous
-    /// used in a given Federation is safe.
+    /// Join a (possibly) previous joined Federation, with module recovery.
     pub async fn recover(
         self,
         db_no_decoders: Database,
@@ -666,8 +728,7 @@ impl ClientPreview {
     ) -> anyhow::Result<ClientHandle> {
         let pre_root_secret = pre_root_secret.to_inner(self.config.calculate_federation_id());
 
-        let client = self
-            .inner
+        self.inner
             .init(
                 self.connectors,
                 db_no_decoders,
@@ -675,8 +736,6 @@ impl ClientPreview {
                 self.config,
                 InitMode::Recover,
             )
-            .await?;
-
-        Ok(client)
+            .await
     }
 }

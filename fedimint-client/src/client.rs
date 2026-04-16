@@ -1,29 +1,29 @@
+use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
 use std::fmt::{self, Formatter};
-use std::future::{Future, pending};
+use std::future::Future;
 use std::ops::Range;
 use std::pin::Pin;
+use std::sync::Arc;
 
-use anyhow::{Context as _, anyhow, bail, format_err};
+use anyhow::{Context as _, bail};
 use bitcoin::key::Secp256k1;
 use bitcoin::key::rand::thread_rng;
 use bitcoin::secp256k1::{self, PublicKey};
 use fedimint_api_client::Endpoint;
 use fedimint_api_client::api::{DynGlobalApi, IRawFederationApi};
 use fedimint_api_client::transaction::Transaction;
+use fedimint_api_client::wire;
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::recovery::RecoveryProgress;
-use fedimint_client_module::module::{
-    ClientContextIface, ClientModule, ClientModuleRegistry, DynClientModule, IClientModule,
-    IdxRange, OutPointRange,
-};
+use fedimint_client_module::module::{ClientContextIface, ClientModule, IdxRange, OutPointRange};
 use fedimint_client_module::transaction::{
     TransactionBuilder, TxSubmissionStates, TxSubmissionStatesSM,
 };
 use fedimint_client_module::{
     ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
 };
-use fedimint_core::config::{ClientConfig, FederationId, JsonClientConfig, ModuleInitRegistry};
+use fedimint_core::config::{ClientConfig, FederationId, JsonClientConfig};
 use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::encoding::Encodable as _;
 use fedimint_core::invite_code::InviteCode;
@@ -35,8 +35,12 @@ use fedimint_core::{
     maybe_add_send_sync,
 };
 use fedimint_eventlog::{Event, EventKind, EventLogId, PersistedLogEntry};
+use fedimint_gwv2_client::GatewayClientModuleV2;
+use fedimint_lnv2_client::LightningClientModule;
 use fedimint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
+use fedimint_mintv2_client::MintClientModule;
 use fedimint_redb::{Database, WriteTxRef};
+use fedimint_walletv2_client::WalletClientModule;
 use futures::{Stream, StreamExt as _};
 use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
@@ -46,10 +50,56 @@ use crate::ClientBuilder;
 use crate::db::{
     CLIENT_CONFIG, CLIENT_MODULE_RECOVERY, ClientModuleRecovery, ClientModuleRecoveryState,
 };
-use crate::module_init::{DynClientModuleInit, IClientModuleInit};
 
 pub(crate) mod builder;
 pub(crate) mod handle;
+
+/// Lightning-module flavor mounted on a client. Regular federation clients
+/// use `Regular`, while the gateway daemon mounts `Gateway`. The two variants
+/// share `Common = LightningModuleTypes` on the federation, so they are
+/// mutually exclusive at instance id `1`.
+pub enum LnFlavor {
+    Regular(Arc<LightningClientModule>),
+    Gateway(Arc<GatewayClientModuleV2>),
+}
+
+impl LnFlavor {
+    fn as_any(&self) -> &(maybe_add_send_sync!(dyn Any)) {
+        match self {
+            LnFlavor::Regular(m) => &**m,
+            LnFlavor::Gateway(m) => &**m,
+        }
+    }
+
+    fn input_fee(
+        &self,
+        amount: Amount,
+        input: &fedimint_lnv2_common::LightningInput,
+    ) -> Option<Amount> {
+        match self {
+            LnFlavor::Regular(m) => m.input_fee(amount, input),
+            LnFlavor::Gateway(m) => m.input_fee(amount, input),
+        }
+    }
+
+    fn output_fee(
+        &self,
+        amount: Amount,
+        output: &fedimint_lnv2_common::LightningOutput,
+    ) -> Option<Amount> {
+        match self {
+            LnFlavor::Regular(m) => m.output_fee(amount, output),
+            LnFlavor::Gateway(m) => m.output_fee(amount, output),
+        }
+    }
+
+    async fn start(&self) {
+        match self {
+            LnFlavor::Regular(m) => m.start().await,
+            LnFlavor::Gateway(m) => m.start().await,
+        }
+    }
+}
 
 /// Main client type
 ///
@@ -71,8 +121,9 @@ pub struct Client {
     db: Database,
     federation_id: FederationId,
     federation_config_meta: BTreeMap<String, String>,
-    primary_module: Option<ModuleInstanceId>,
-    pub(crate) modules: ClientModuleRegistry,
+    pub(crate) mint: Arc<MintClientModule>,
+    pub(crate) wallet: Arc<WalletClientModule>,
+    pub(crate) ln: LnFlavor,
     tx_submission_executor: ModuleExecutor<TxSubmissionStatesSM>,
     pub(crate) api: DynGlobalApi,
     secp_ctx: Secp256k1<secp256k1::All>,
@@ -139,21 +190,15 @@ impl Client {
         &self.decoders
     }
 
-    /// Returns a reference to the module, panics if not found
-    fn get_module(&self, instance: ModuleInstanceId) -> &maybe_add_send_sync!(dyn IClientModule) {
-        self.try_get_module(instance)
-            .expect("Module instance not found")
-    }
-
-    fn try_get_module(
-        &self,
-        instance: ModuleInstanceId,
-    ) -> Option<&maybe_add_send_sync!(dyn IClientModule)> {
-        Some(self.modules.get(instance)?.as_ref())
-    }
-
-    pub fn has_module(&self, instance: ModuleInstanceId) -> bool {
-        self.modules.get(instance).is_some()
+    /// Returns the module at the given instance id as `&dyn Any`, or panics
+    /// if the instance id doesn't match the fixed module set.
+    fn get_module_any(&self, instance: ModuleInstanceId) -> &(maybe_add_send_sync!(dyn Any)) {
+        match instance {
+            wire::MINT_INSTANCE_ID => &*self.mint,
+            wire::LN_INSTANCE_ID => self.ln.as_any(),
+            wire::WALLET_INSTANCE_ID => &*self.wallet,
+            _ => panic!("Module instance {instance} not found"),
+        }
     }
 
     /// Returns the input amount and output amount of a transaction
@@ -168,9 +213,12 @@ impl Client {
         let mut fee_amount = Amount::ZERO;
 
         for input in builder.inputs() {
-            let module = self.get_module(input.input.module_instance_id());
-
-            let item_fee = module.input_fee(input.amount, &input.input).expect(
+            let item_fee = match &input.input {
+                wire::Input::Mint(i) => self.mint.input_fee(input.amount, i),
+                wire::Input::Ln(i) => self.ln.input_fee(input.amount, i),
+                wire::Input::Wallet(i) => self.wallet.input_fee(input.amount, i),
+            }
+            .expect(
                 "We only build transactions with input versions that are supported by the module",
             );
 
@@ -179,9 +227,12 @@ impl Client {
         }
 
         for output in builder.outputs() {
-            let module = self.get_module(output.output.module_instance_id());
-
-            let item_fee = module.output_fee(output.amount, &output.output).expect(
+            let item_fee = match &output.output {
+                wire::Output::Mint(o) => self.mint.output_fee(output.amount, o),
+                wire::Output::Ln(o) => self.ln.output_fee(output.amount, o),
+                wire::Output::Wallet(o) => self.wallet.output_fee(output.amount, o),
+            }
+            .expect(
                 "We only build transactions with output versions that are supported by the module",
             );
 
@@ -227,14 +278,10 @@ impl Client {
         let mut primary_output_end = primary_output_start;
 
         if in_amount != out_amount {
-            let (module_id, module) = self
-                .primary_module()
-                .ok_or_else(|| anyhow!("No primary module to balance a partial transaction"))?;
-
-            let contribution = module
+            let contribution = self
+                .mint
                 .create_final_inputs_and_outputs(
-                    module_id,
-                    dbtx,
+                    &dbtx.isolate(format!("module-{}", wire::MINT_INSTANCE_ID)),
                     operation_id,
                     in_amount,
                     out_amount,
@@ -244,11 +291,22 @@ impl Client {
             primary_input_end = primary_input_start + contribution.inputs.len() as u64;
             primary_output_end = primary_output_start + contribution.outputs.len() as u64;
 
+            let wire_inputs = contribution
+                .inputs
+                .into_iter()
+                .map(fedimint_client_module::transaction::ClientInput::into_wire)
+                .collect();
+            let wire_outputs = contribution
+                .outputs
+                .into_iter()
+                .map(fedimint_client_module::transaction::ClientOutput::into_wire)
+                .collect();
+
             partial_transaction = partial_transaction.with_inputs(
-                fedimint_client_module::transaction::ClientInputBundle::new(contribution.inputs),
+                fedimint_client_module::transaction::ClientInputBundle::new(wire_inputs),
             );
             partial_transaction = partial_transaction.with_outputs(
-                fedimint_client_module::transaction::ClientOutputBundle::new(contribution.outputs),
+                fedimint_client_module::transaction::ClientOutputBundle::new(wire_outputs),
             );
             spawn_sms = Some(contribution.spawn_sms);
         }
@@ -397,20 +455,39 @@ impl Client {
         unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
-    /// Returns a reference to a typed module client instance by kind
+    /// Returns a typed module client instance by type. Uses `TypeId` dispatch
+    /// over the fixed module set (`MintClientModule` / `WalletClientModule` /
+    /// `LightningClientModule` / `GatewayClientModuleV2`).
     pub fn get_first_module<M: ClientModule>(
         &'_ self,
     ) -> anyhow::Result<ClientModuleInstance<'_, M>> {
-        let module_kind = M::kind();
-        let id = self
-            .get_first_instance(&module_kind)
-            .ok_or_else(|| format_err!("No modules found of kind {module_kind}"))?;
-        let module: &M = self
-            .try_get_module(id)
-            .ok_or_else(|| format_err!("Unknown module instance {id}"))?
-            .as_any()
+        let tid = TypeId::of::<M>();
+        let (module_any, id): (&(maybe_add_send_sync!(dyn Any)), ModuleInstanceId) =
+            if tid == TypeId::of::<MintClientModule>() {
+                (&*self.mint, wire::MINT_INSTANCE_ID)
+            } else if tid == TypeId::of::<WalletClientModule>() {
+                (&*self.wallet, wire::WALLET_INSTANCE_ID)
+            } else if tid == TypeId::of::<LightningClientModule>() {
+                match &self.ln {
+                    LnFlavor::Regular(m) => (&**m, wire::LN_INSTANCE_ID),
+                    LnFlavor::Gateway(_) => {
+                        bail!("LightningClientModule is not mounted on this client")
+                    }
+                }
+            } else if tid == TypeId::of::<GatewayClientModuleV2>() {
+                match &self.ln {
+                    LnFlavor::Gateway(m) => (&**m, wire::LN_INSTANCE_ID),
+                    LnFlavor::Regular(_) => {
+                        bail!("GatewayClientModuleV2 is not mounted on this client")
+                    }
+                }
+            } else {
+                bail!("No modules found of kind {}", M::kind());
+            };
+
+        let module: &M = module_any
             .downcast_ref::<M>()
-            .ok_or_else(|| format_err!("Module is not of type {}", std::any::type_name::<M>()))?;
+            .expect("TypeId of M was just matched");
         let db = self.db().isolate(format!("module-{id}"));
         Ok(ClientModuleInstance {
             id,
@@ -420,28 +497,12 @@ impl Client {
         })
     }
 
-    pub fn get_module_client_dyn(
-        &self,
-        instance_id: ModuleInstanceId,
-    ) -> anyhow::Result<&maybe_add_send_sync!(dyn IClientModule)> {
-        self.try_get_module(instance_id)
-            .ok_or(anyhow!("Unknown module instance {}", instance_id))
-    }
-
     pub fn db(&self) -> &Database {
         &self.db
     }
 
     pub fn endpoints(&self) -> &Endpoint {
         &self.connectors
-    }
-
-    /// Returns the instance id of the first module of the given kind.
-    pub fn get_first_instance(&self, module_kind: &ModuleKind) -> Option<ModuleInstanceId> {
-        self.modules
-            .iter_modules()
-            .find(|(_, kind, _module)| *kind == module_kind)
-            .map(|(instance_id, _, _)| instance_id)
     }
 
     /// Returns the config of the client in JSON format.
@@ -454,46 +515,30 @@ impl Client {
     }
 
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {
-        let (id, module) = self
-            .primary_module()
-            .ok_or_else(|| anyhow!("Primary module not available"))?;
         let dbtx = self.db().begin_write().await;
-        Ok(module.get_balance(id, &dbtx.as_ref()).await)
+        Ok(self
+            .mint
+            .get_balance(&dbtx.as_ref().isolate(format!("module-{}", wire::MINT_INSTANCE_ID)))
+            .await)
     }
 
     /// Returns a stream that yields the current client balance every time it
     /// changes.
     pub async fn subscribe_balance_changes(&self) -> BoxStream<'static, Amount> {
-        let primary_module_things =
-            if let Some((primary_module_id, primary_module)) = self.primary_module() {
-                let balance_changes = primary_module.subscribe_balance_changes().await;
-                let initial_balance = self.get_balance().await.expect("Primary is present");
-
-                Some((
-                    primary_module_id,
-                    primary_module.clone(),
-                    balance_changes,
-                    initial_balance,
-                ))
-            } else {
-                None
-            };
+        let mut balance_changes = self.mint.subscribe_balance_changes().await;
+        let initial_balance = self.get_balance().await.expect("Primary is present");
+        let mint = self.mint.clone();
         let db = self.db().clone();
 
         Box::pin(async_stream::stream! {
-            let Some((primary_module_id, primary_module, mut balance_changes, initial_balance)) = primary_module_things else {
-                // If there is no primary module, there will not be one until client is
-                // restarted
-                pending().await
-            };
-
-
             yield initial_balance;
             let mut prev_balance = initial_balance;
             while let Some(()) = balance_changes.next().await {
                 let dbtx = db.begin_write().await;
-                let balance = primary_module
-                    .get_balance(primary_module_id, &dbtx.as_ref())
+                let balance = mint
+                    .get_balance(
+                        &dbtx.as_ref().isolate(format!("module-{}", wire::MINT_INSTANCE_ID)),
+                    )
                     .await;
 
                 // Deduplicate in case modules cannot always tell if the balance actually changed
@@ -580,11 +625,12 @@ impl Client {
     ) {
         let db = self.db.clone();
         let log_event_added_tx = self.log_event_added_tx.clone();
-        let module_kinds: BTreeMap<ModuleInstanceId, String> = self
-            .modules
-            .iter_modules_id_kind()
-            .map(|(id, kind)| (id, kind.to_string()))
-            .collect();
+        let module_kinds: BTreeMap<ModuleInstanceId, String> = [
+            (wire::MINT_INSTANCE_ID, "mintv2".to_string()),
+            (wire::LN_INSTANCE_ID, "lnv2".to_string()),
+            (wire::WALLET_INSTANCE_ID, "walletv2".to_string()),
+        ]
+        .into();
         let task_group = self.task_group.clone();
         self.task_group
             .spawn("module recoveries", |_task_handle| async move {
@@ -836,23 +882,12 @@ impl Client {
             operation_id,
         ))
     }
-
-    /// Returns the primary module, if any
-    pub fn primary_module(&self) -> Option<(ModuleInstanceId, &DynClientModule)> {
-        self.primary_module
-            .map(|id| (id, self.modules.get_expect(id)))
-    }
-
-    /// Returns the primary module, panicking if none is available
-    pub fn primary_module_for_btc(&self) -> (ModuleInstanceId, &DynClientModule) {
-        self.primary_module().expect("No primary module available")
-    }
 }
 
 #[apply(async_trait_maybe_send!)]
 impl ClientContextIface for Client {
-    fn get_module(&self, instance: ModuleInstanceId) -> &maybe_add_send_sync!(dyn IClientModule) {
-        Client::get_module(self, instance)
+    fn get_module(&self, instance: ModuleInstanceId) -> &(maybe_add_send_sync!(dyn Any)) {
+        Client::get_module_any(self, instance)
     }
 
     fn api_clone(&self) -> DynGlobalApi {
@@ -933,26 +968,4 @@ impl fmt::Debug for Client {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Client")
     }
-}
-
-pub fn client_decoders<'a>(
-    registry: &ModuleInitRegistry<DynClientModuleInit>,
-    module_kinds: impl Iterator<Item = (ModuleInstanceId, &'a ModuleKind)>,
-) -> ModuleDecoderRegistry {
-    let mut modules = BTreeMap::new();
-    for (id, kind) in module_kinds {
-        let Some(init) = registry.get(kind) else {
-            debug!("Detected configuration for unsupported module id: {id}, kind: {kind}");
-            continue;
-        };
-
-        modules.insert(
-            id,
-            (
-                kind.clone(),
-                IClientModuleInit::decoder(AsRef::<dyn IClientModuleInit + 'static>::as_ref(init)),
-            ),
-        );
-    }
-    ModuleDecoderRegistry::from(modules)
 }

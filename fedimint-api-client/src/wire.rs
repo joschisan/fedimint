@@ -1,6 +1,5 @@
 //! Static wire enums for the fixed module set: mintv2 + lnv2 + walletv2.
 
-use std::any::Any;
 use std::fmt;
 
 use fedimint_core::core::ModuleInstanceId;
@@ -37,17 +36,6 @@ impl Input {
             Self::Mint(_) => MINT_INSTANCE_ID,
             Self::Ln(_) => LN_INSTANCE_ID,
             Self::Wallet(_) => WALLET_INSTANCE_ID,
-        }
-    }
-
-    /// Returns the inner variant payload as `&dyn Any`, for downcasting in
-    /// generic dispatch code (e.g. `IServerModule`/`IClientModule` blanket
-    /// impls).
-    pub fn as_any_inner(&self) -> &dyn Any {
-        match self {
-            Self::Mint(v) => v,
-            Self::Ln(v) => v,
-            Self::Wallet(v) => v,
         }
     }
 }
@@ -93,16 +81,6 @@ impl Output {
             Self::Mint(_) => MINT_INSTANCE_ID,
             Self::Ln(_) => LN_INSTANCE_ID,
             Self::Wallet(_) => WALLET_INSTANCE_ID,
-        }
-    }
-
-    /// Returns the inner variant payload as `&dyn Any`, for downcasting in
-    /// generic dispatch code.
-    pub fn as_any_inner(&self) -> &dyn Any {
-        match self {
-            Self::Mint(v) => v,
-            Self::Ln(v) => v,
-            Self::Wallet(v) => v,
         }
     }
 }
@@ -156,16 +134,6 @@ impl ModuleConsensusItem {
             Self::Mint(_) => "mintv2",
             Self::Ln(_) => "lnv2",
             Self::Wallet(_) => "walletv2",
-        }
-    }
-
-    /// Returns the inner variant payload as `&dyn Any`, for downcasting in
-    /// generic dispatch code.
-    pub fn as_any_inner(&self) -> &dyn Any {
-        match self {
-            Self::Mint(v) => v,
-            Self::Ln(v) => v,
-            Self::Wallet(v) => v,
         }
     }
 }

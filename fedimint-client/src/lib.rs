@@ -81,10 +81,9 @@ mod client;
 /// Database keys used by the client
 pub mod db;
 
-pub mod module_init;
-
 pub use client::Client;
-pub use client::builder::{ClientBuilder, ClientPreview, RootSecret};
+pub use client::LnFlavor;
+pub use client::builder::{ClientBuilder, ClientPreview, LnInit, RootSecret};
 pub use client::handle::{ClientHandle, ClientHandleArc};
 pub use fedimint_client_module as module;
 /// Re-exporting of everything from `fedimint_client_module`

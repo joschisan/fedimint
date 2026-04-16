@@ -14,15 +14,13 @@
 use std::ops::{self};
 
 use fedimint_api_client::api::DynModuleApi;
-pub use fedimint_core::core::{IInput, IOutput, ModuleInstanceId, ModuleKind, OperationId};
-use fedimint_core::{PeerId, TransactionId, maybe_add_send_sync};
+pub use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
+use fedimint_core::{PeerId, TransactionId};
 use fedimint_eventlog::{Event, EventKind};
 use fedimint_redb::Database;
 use serde::{Deserialize, Serialize};
-use transaction::{ClientInputBundle, ClientOutput};
 
 pub use crate::module::ClientModule;
-use crate::transaction::{ClientInput, ClientOutputBundle};
 
 /// Environment variables
 pub mod envs;
@@ -90,17 +88,6 @@ impl Event for ModuleRecoveryCompleted {
     const MODULE: Option<ModuleKind> = None;
     const KIND: EventKind = EventKind::from_static("module-recovery-completed");
 }
-
-pub type InstancelessDynClientInput = ClientInput<Box<maybe_add_send_sync!(dyn IInput + 'static)>>;
-
-pub type InstancelessDynClientInputBundle =
-    ClientInputBundle<Box<maybe_add_send_sync!(dyn IInput + 'static)>>;
-
-pub type InstancelessDynClientOutput =
-    ClientOutput<Box<maybe_add_send_sync!(dyn IOutput + 'static)>>;
-
-pub type InstancelessDynClientOutputBundle =
-    ClientOutputBundle<Box<maybe_add_send_sync!(dyn IOutput + 'static)>>;
 
 /// Resources particular to a module instance
 pub struct ClientModuleInstance<'m, M: ClientModule> {

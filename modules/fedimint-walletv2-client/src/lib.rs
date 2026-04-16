@@ -22,12 +22,12 @@ use bitcoin::{Address, ScriptBuf};
 use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
 use events::{ReceivePaymentEvent, SendPaymentEvent};
 use fedimint_api_client::api::{DynModuleApi, FederationResult};
-use fedimint_client::transaction::{
-    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
-};
 use fedimint_client_module::executor::ModuleExecutor;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client_module::module::{ClientContext, ClientModule};
+use fedimint_client_module::transaction::{
+    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
+};
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::Encodable;
 use fedimint_core::module::{ModuleCommon, ModuleInit};
