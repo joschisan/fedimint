@@ -47,10 +47,7 @@ impl Transaction {
         Self::tx_hash_from_parts(&self.inputs, &self.outputs)
     }
 
-    pub fn tx_hash_from_parts(
-        inputs: &[wire::Input],
-        outputs: &[wire::Output],
-    ) -> TransactionId {
+    pub fn tx_hash_from_parts(inputs: &[wire::Input], outputs: &[wire::Output]) -> TransactionId {
         let mut engine = TransactionId::engine();
         inputs
             .consensus_encode(&mut engine)

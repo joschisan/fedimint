@@ -3,12 +3,12 @@ use std::collections::BTreeMap;
 use anyhow::ensure;
 use fedimint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use fedimint_client_module::module::OutPointRange;
+use fedimint_core::PeerId;
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::PeerId;
-use fedimint_mintv2_common::{verify_note, Denomination};
+use fedimint_mintv2_common::{Denomination, verify_note};
 use fedimint_redb::WriteTxRef;
-use tbs::{aggregate_signature_shares, BlindedSignatureShare, PublicKeyShare};
+use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use crate::api::MintV2ModuleApi;
 use crate::client_db::NOTE;
