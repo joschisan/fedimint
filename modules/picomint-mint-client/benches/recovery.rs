@@ -1,4 +1,4 @@
-use picomint_core::encoding::Encodable;
+use picomint_encoding::Encodable;
 use picomint_derive_secret::DerivableSecret;
 use picomint_mint_client::issuance;
 use picomint_mint_common::Denomination;

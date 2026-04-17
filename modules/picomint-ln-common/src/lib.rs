@@ -21,7 +21,7 @@ use bitcoin::secp256k1::schnorr::Signature;
 use config::LightningConfigConsensus;
 pub use gateway_connection::GatewayApi;
 use picomint_core::core::ModuleKind;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
 use picomint_core::{Amount, OutPoint, plugin_types_trait_impl_common};
 mod gateway_connection;

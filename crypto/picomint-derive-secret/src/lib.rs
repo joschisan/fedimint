@@ -19,7 +19,7 @@ use bls12_381::Scalar;
 use hkdf::hashes::Sha512;
 use hkdf::{BitcoinHash, Hkdf};
 use picomint_core::config::FederationId;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::{Keypair, Secp256k1, Signing};
 use ring::aead;
 

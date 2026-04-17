@@ -1,4 +1,4 @@
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::PublicKey;
 use picomint_core::{table, OutPoint};
 use picomint_mint_common::{Denomination, RecoveryItem};

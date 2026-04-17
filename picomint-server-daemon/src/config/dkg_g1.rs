@@ -5,7 +5,7 @@ use anyhow::{Context, bail, ensure};
 use bls12_381::{G1Projective, Scalar};
 use group::ff::Field;
 use picomint_core::bitcoin::hashes::sha256;
-use picomint_core::encoding::Encodable as _;
+use picomint_encoding::Encodable as _;
 use picomint_core::{NumPeers, PeerId};
 use picomint_server_core::config::{g1, scalar};
 use rand::rngs::OsRng;

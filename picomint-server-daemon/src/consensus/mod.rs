@@ -19,7 +19,7 @@ use picomint_api_client::transaction::ConsensusItem;
 use picomint_api_client::wire;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::module::{ApiAuth, ApiError, ApiMethod, IrohApiRequest, ModuleCommon};
 use picomint_core::task::{TaskGroup, sleep};

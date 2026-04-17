@@ -11,7 +11,7 @@ use std::hash::Hash;
 use bitcoin_hashes::hash160;
 use config::MintConfigConsensus;
 use picomint_core::core::ModuleKind;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
 use picomint_core::secp256k1::PublicKey;
 use picomint_core::{plugin_types_trait_impl_common, Amount};

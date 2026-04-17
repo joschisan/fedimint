@@ -24,6 +24,7 @@ path = "benches/tbs.rs"
 [dependencies]
 bls12_381 = { workspace = true }
 picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
 group = { workspace = true }
 hex = { workspace = true }
 rand = { workspace = true }

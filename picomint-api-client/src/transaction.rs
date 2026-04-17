@@ -7,7 +7,7 @@
 use std::fmt;
 
 use bitcoin::hashes::Hash;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::{Amount, TransactionId};
 use thiserror::Error;
 

@@ -1,5 +1,5 @@
 use picomint_core::core::OperationId;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::PublicKey;
 use picomint_core::table;
 use picomint_core::util::SafeUrl;

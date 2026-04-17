@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 mod version;
 pub use self::version::*;
 use crate::Amount;
-use crate::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputMeta {

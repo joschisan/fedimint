@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Context, ensure};
 
-use crate::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 
 /// Lowercase RFC 4648 Base32hex alphabet (32 characters).
 const RFC4648: [u8; 32] = *b"0123456789abcdefghijklmnopqrstuv";

@@ -9,7 +9,7 @@ use hex::FromHex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use crate::format_hex;
 
 // TODO: make configurable

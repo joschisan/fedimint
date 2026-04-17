@@ -12,7 +12,7 @@ use clap::Parser;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::base32::{PICOMINT_PREFIX, decode_prefixed};
 use picomint_core::config::FederationId;
-use picomint_core::encoding::Encodable;
+use picomint_encoding::Encodable;
 use picomint_core::secp256k1::Scalar;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;

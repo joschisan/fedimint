@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::base32::PICOMINT_PREFIX;
 use crate::config::FederationId;
-use crate::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use crate::{NumPeersExt, PeerId};
 
 /// Information required for client to join Federation

@@ -40,7 +40,7 @@ use picomint_client_module::transaction::{
 use picomint_core::base32::{self, PICOMINT_PREFIX};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::{ModuleCommon, ModuleInit};
 use picomint_core::secp256k1::rand::{thread_rng, Rng};
 use picomint_core::secp256k1::{Keypair, PublicKey};

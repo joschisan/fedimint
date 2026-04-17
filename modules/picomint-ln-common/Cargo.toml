@@ -19,6 +19,7 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 bitcoin = { workspace = true }
 picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
 lightning-invoice = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }

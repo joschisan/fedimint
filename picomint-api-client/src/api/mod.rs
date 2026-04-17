@@ -12,7 +12,7 @@ use futures::{Future, StreamExt};
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };

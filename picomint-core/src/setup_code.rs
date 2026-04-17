@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]
 /// Connection information sent between peers in order to start config gen

@@ -7,7 +7,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 
 use bitcoin::hashes::{Hash, sha256};
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use rand::RngCore;
 use serde::{Deserialize, Deserializer, Serialize};
 

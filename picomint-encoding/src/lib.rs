@@ -13,12 +13,14 @@
 //! trigger a giant allocation — the actual `Vec` only grows as the reader
 //! yields bytes.
 
-pub mod as_base64;
-pub mod as_hex;
-mod bls12_381;
-pub mod btc;
+// Allow the derive macros to reference `::picomint_encoding::...` within
+// this crate's own tests.
+extern crate self as picomint_encoding;
+
+mod bitcoin;
+mod bls;
 mod iroh;
-mod secp256k1;
+mod secp;
 
 use std::any::TypeId;
 use std::borrow::Cow;
@@ -26,11 +28,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 
-use bitcoin::hashes::sha256;
+use ::bitcoin::hashes::sha256;
 use hex::ToHex as _;
 pub use picomint_derive::{Decodable, Encodable};
-
-use crate::util::SafeUrl;
 
 /// Types that can encode themselves to a byte stream.
 pub trait Encodable {
@@ -52,7 +52,7 @@ pub trait Encodable {
     /// Hash the consensus encoding with `H`.
     fn consensus_hash<H>(&self) -> H
     where
-        H: bitcoin::hashes::Hash,
+        H: ::bitcoin::hashes::Hash,
         H::Engine: Write,
     {
         let mut engine = H::engine();
@@ -85,7 +85,7 @@ pub trait Decodable: Sized {
     }
 }
 
-fn invalid_data(msg: impl Into<String>) -> io::Error {
+pub(crate) fn invalid_data(msg: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg.into())
 }
 
@@ -282,22 +282,6 @@ impl Encodable for Cow<'static, str> {
 impl Decodable for Cow<'static, str> {
     fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
         Ok(Cow::Owned(String::consensus_decode(r)?))
-    }
-}
-
-// ─── SafeUrl ────────────────────────────────────────────────────────────
-
-impl Encodable for SafeUrl {
-    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        self.to_string().consensus_encode(w)
-    }
-}
-
-impl Decodable for SafeUrl {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        String::consensus_decode(r)?
-            .parse()
-            .map_err(|e: url::ParseError| invalid_data(format!("invalid SafeUrl: {e}")))
     }
 }
 

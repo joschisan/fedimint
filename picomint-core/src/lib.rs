@@ -53,7 +53,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 pub use {bitcoin, hex, redb, secp256k1};
 
-use crate::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 
 /// Bitcoin amount types
 mod amount;
@@ -65,8 +65,6 @@ pub mod config;
 pub mod core;
 /// Database handling
 pub mod db;
-/// Consensus encoding
-pub mod encoding;
 pub mod endpoint_constants;
 /// Common environment variables
 pub mod envs;

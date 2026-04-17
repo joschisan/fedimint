@@ -6,7 +6,7 @@
 
 use bitcoin::hashes::sha256;
 use picomint_core::OutPointRange;
-use picomint_core::encoding::Encodable as _;
+use picomint_encoding::Encodable as _;
 use picomint_core::module::ApiError;
 use picomint_mint_common::RecoveryItem;
 use picomint_redb::ReadTransaction;

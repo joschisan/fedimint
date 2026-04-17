@@ -5,7 +5,7 @@ use picomint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use picomint_client_module::transaction::{ClientInput, ClientInputBundle};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::util::SafeUrl;
 use picomint_core::util::backoff_util::api_networking_backoff;
 use picomint_core::{OutPoint, crit, secp256k1, util};

@@ -24,7 +24,7 @@ use tokio::select;
 use tracing::{error, info, warn};
 
 use crate::p2p::{P2PMessage, P2PStatusReceivers, Recipient, ReconnectP2PConnections};
-use crate::picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 
 pub mod db;
 pub mod dkg;

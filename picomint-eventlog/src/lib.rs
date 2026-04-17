@@ -13,7 +13,7 @@ use std::str::FromStr;
 use futures::Stream;
 use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::db::NativeTableDef;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::redb::ReadableTable as _;
 use picomint_core::{consensus_key, consensus_value};
 use picomint_redb::{Database, WriteTxRef};

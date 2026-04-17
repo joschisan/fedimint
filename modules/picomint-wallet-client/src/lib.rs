@@ -29,7 +29,7 @@ use picomint_client_module::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
 use picomint_core::core::OperationId;
-use picomint_core::encoding::Encodable;
+use picomint_encoding::Encodable;
 use picomint_core::module::{ModuleCommon, ModuleInit};
 use picomint_core::task::{TaskGroup, block_in_place, sleep};
 use picomint_core::{Amount, OutPoint, TransactionId};

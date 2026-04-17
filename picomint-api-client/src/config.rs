@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::Context;
 use picomint_core::PeerId;
 use picomint_core::config::{FederationId, META_FEDERATION_NAME_KEY, PeerEndpoint};
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::CoreConsensusVersion;
 use picomint_core::secp256k1::PublicKey;
 use picomint_ln_common::config::LightningConfigConsensus;

@@ -11,7 +11,7 @@ use group::ff::Field;
 use group::{Curve, Group};
 use hex::encode;
 use picomint_core::bitcoin::hashes::sha256;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::{BitcoinHash, bls12_381_serde};
 use rand::SeedableRng;
 use rand::rngs::OsRng;

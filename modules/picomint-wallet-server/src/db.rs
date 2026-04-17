@@ -1,5 +1,5 @@
 use bitcoin::{TxOut, Txid};
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::{PeerId, table};
 use picomint_wallet_common::TxInfo;
 use secp256k1::ecdsa::Signature;

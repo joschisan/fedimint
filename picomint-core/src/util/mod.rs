@@ -149,6 +149,20 @@ pub struct SafeUrl(Url);
 
 crate::consensus_key!(SafeUrl);
 
+impl picomint_encoding::Encodable for SafeUrl {
+    fn consensus_encode<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+        self.to_string().consensus_encode(w)
+    }
+}
+
+impl picomint_encoding::Decodable for SafeUrl {
+    fn consensus_decode<R: std::io::Read>(r: &mut R) -> std::io::Result<Self> {
+        String::consensus_decode(r)?.parse().map_err(|e: url::ParseError| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("invalid SafeUrl: {e}"))
+        })
+    }
+}
+
 impl SafeUrl {
     pub fn parse(url_str: &str) -> Result<Self, ParseError> {
         Url::parse(url_str).map(SafeUrl)

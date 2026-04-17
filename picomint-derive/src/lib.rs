@@ -28,7 +28,7 @@ pub fn derive_encodable(input: TokenStream) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     quote! {
-        impl #impl_generics ::picomint_core::encoding::Encodable for #ident #ty_generics #where_clause {
+        impl #impl_generics ::picomint_encoding::Encodable for #ident #ty_generics #where_clause {
             fn consensus_encode<W: ::std::io::Write>(&self, writer: &mut W) -> ::std::io::Result<()> {
                 #encode_body
             }
@@ -54,7 +54,7 @@ pub fn derive_decodable(input: TokenStream) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     quote! {
-        impl #impl_generics ::picomint_core::encoding::Decodable for #ident #ty_generics #where_clause {
+        impl #impl_generics ::picomint_encoding::Decodable for #ident #ty_generics #where_clause {
             fn consensus_decode<R: ::std::io::Read>(reader: &mut R) -> ::std::io::Result<Self> {
                 #decode_body
             }
@@ -73,7 +73,7 @@ fn derive_struct_encode(fields: &Fields) -> TokenStream2 {
             .map(|(i, _)| Index::from(i))
             .collect::<Vec<_>>();
         quote! {
-            #(::picomint_core::encoding::Encodable::consensus_encode(&self.#idxs, writer)?;)*
+            #(::picomint_encoding::Encodable::consensus_encode(&self.#idxs, writer)?;)*
             Ok(())
         }
     } else {
@@ -82,7 +82,7 @@ fn derive_struct_encode(fields: &Fields) -> TokenStream2 {
             .map(|f| f.ident.clone().unwrap())
             .collect::<Vec<_>>();
         quote! {
-            #(::picomint_core::encoding::Encodable::consensus_encode(&self.#names, writer)?;)*
+            #(::picomint_encoding::Encodable::consensus_encode(&self.#names, writer)?;)*
             Ok(())
         }
     }
@@ -106,14 +106,14 @@ fn derive_enum_encode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> T
                 .collect::<Vec<_>>();
             quote! {
                 #ident::#vname(#(#binds),*) => {
-                    ::picomint_core::encoding::Encodable::consensus_encode(&#idx_lit, writer)?;
-                    #(::picomint_core::encoding::Encodable::consensus_encode(#binds, writer)?;)*
+                    ::picomint_encoding::Encodable::consensus_encode(&#idx_lit, writer)?;
+                    #(::picomint_encoding::Encodable::consensus_encode(#binds, writer)?;)*
                 }
             }
         } else if variant.fields.is_empty() {
             quote! {
                 #ident::#vname => {
-                    ::picomint_core::encoding::Encodable::consensus_encode(&#idx_lit, writer)?;
+                    ::picomint_encoding::Encodable::consensus_encode(&#idx_lit, writer)?;
                 }
             }
         } else {
@@ -124,8 +124,8 @@ fn derive_enum_encode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> T
                 .collect::<Vec<_>>();
             quote! {
                 #ident::#vname { #(#names),* } => {
-                    ::picomint_core::encoding::Encodable::consensus_encode(&#idx_lit, writer)?;
-                    #(::picomint_core::encoding::Encodable::consensus_encode(#names, writer)?;)*
+                    ::picomint_encoding::Encodable::consensus_encode(&#idx_lit, writer)?;
+                    #(::picomint_encoding::Encodable::consensus_encode(#names, writer)?;)*
                 }
             }
         }
@@ -149,7 +149,7 @@ fn derive_struct_decode(ident: &Ident, fields: &Fields) -> TokenStream2 {
             .map(|(i, _)| format_ident!("f{i}"))
             .collect::<Vec<_>>();
         quote! {
-            #(let #binds = ::picomint_core::encoding::Decodable::consensus_decode(reader)?;)*
+            #(let #binds = ::picomint_encoding::Decodable::consensus_decode(reader)?;)*
             Ok(#ident(#(#binds),*))
         }
     } else if fields.is_empty() {
@@ -160,7 +160,7 @@ fn derive_struct_decode(ident: &Ident, fields: &Fields) -> TokenStream2 {
             .map(|f| f.ident.clone().unwrap())
             .collect::<Vec<_>>();
         quote! {
-            #(let #names = ::picomint_core::encoding::Decodable::consensus_decode(reader)?;)*
+            #(let #names = ::picomint_encoding::Decodable::consensus_decode(reader)?;)*
             Ok(#ident { #(#names),* })
         }
     }
@@ -189,7 +189,7 @@ fn derive_enum_decode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> T
                 .collect::<Vec<_>>();
             quote! {
                 {
-                    #(let #binds = ::picomint_core::encoding::Decodable::consensus_decode(reader)?;)*
+                    #(let #binds = ::picomint_encoding::Decodable::consensus_decode(reader)?;)*
                     Ok(#ident::#vname(#(#binds),*))
                 }
             }
@@ -203,7 +203,7 @@ fn derive_enum_decode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> T
                 .collect::<Vec<_>>();
             quote! {
                 {
-                    #(let #names = ::picomint_core::encoding::Decodable::consensus_decode(reader)?;)*
+                    #(let #names = ::picomint_encoding::Decodable::consensus_decode(reader)?;)*
                     Ok(#ident::#vname { #(#names),* })
                 }
             }
@@ -213,7 +213,7 @@ fn derive_enum_decode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> T
     });
 
     quote! {
-        let variant = <u64 as ::picomint_core::encoding::Decodable>::consensus_decode(reader)?;
+        let variant = <u64 as ::picomint_encoding::Decodable>::consensus_decode(reader)?;
         match variant {
             #(#arms)*
             other => Err(::std::io::Error::new(

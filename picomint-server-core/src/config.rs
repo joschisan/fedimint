@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective, Scalar};
 use group::Curve;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::{NumPeers, PeerId};
 
 pub fn g1(scalar: &Scalar) -> G1Projective {

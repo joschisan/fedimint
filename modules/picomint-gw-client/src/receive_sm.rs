@@ -7,7 +7,7 @@ use picomint_api_client::query::FilterMapThreshold;
 use picomint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use picomint_client_module::transaction::{ClientInput, ClientInputBundle};
 use picomint_core::core::OperationId;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::ApiRequestErased;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};

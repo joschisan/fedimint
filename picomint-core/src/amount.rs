@@ -6,7 +6,7 @@ use bitcoin::Denomination;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 
 pub const SATS_PER_BITCOIN: u64 = 100_000_000;
 

@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 
 pub use bip39::{Language, Mnemonic};
 use picomint_client::secret::RootSecretStrategy;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_derive_secret::DerivableSecret;
 use rand::{CryptoRng, RngCore};
 

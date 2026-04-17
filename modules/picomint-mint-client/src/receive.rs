@@ -1,6 +1,6 @@
 use picomint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use picomint_core::core::OperationId;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::TransactionId;
 use picomint_redb::WriteTxRef;
 

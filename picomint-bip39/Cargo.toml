@@ -17,7 +17,7 @@ path = "./src/lib.rs"
 [dependencies]
 bip39 = { workspace = true, features = ["rand"] }
 picomint-client = { workspace = true }
-picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
 picomint-derive-secret = { workspace = true }
 rand = { workspace = true }
 

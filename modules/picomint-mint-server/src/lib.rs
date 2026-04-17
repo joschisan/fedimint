@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use anyhow::ensure;
 use picomint_core::core::ModuleKind;
-use picomint_core::encoding::Encodable;
+use picomint_encoding::Encodable;
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::{Amount, InPoint, OutPoint, PeerId};

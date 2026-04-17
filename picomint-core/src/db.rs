@@ -48,7 +48,7 @@ macro_rules! consensus_value {
             where
                 Self: 'a,
             {
-                <$ty as $crate::encoding::Decodable>::consensus_decode_exact(data)
+                <$ty as ::picomint_encoding::Decodable>::consensus_decode_exact(data)
                     .expect("consensus_decode failed")
             }
 
@@ -56,7 +56,7 @@ macro_rules! consensus_value {
             where
                 Self: 'b,
             {
-                <$ty as $crate::encoding::Encodable>::consensus_encode_to_vec(value)
+                <$ty as ::picomint_encoding::Encodable>::consensus_encode_to_vec(value)
             }
 
             fn type_name() -> $crate::redb::TypeName {

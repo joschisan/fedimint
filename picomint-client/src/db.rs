@@ -1,7 +1,7 @@
 use picomint_api_client::config::ConsensusConfig;
 use picomint_client_module::module::recovery::RecoveryProgress;
 use picomint_core::core::ModuleKind;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::table;
 use serde::Serialize;
 

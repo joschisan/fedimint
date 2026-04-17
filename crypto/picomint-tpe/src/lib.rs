@@ -8,7 +8,7 @@ use bls12_381::{G1Projective, G2Projective, Scalar, pairing};
 use group::ff::Field;
 use group::{Curve, Group};
 use picomint_core::bls12_381_serde;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use rand_chacha::ChaChaRng;
 use rand_chacha::rand_core::SeedableRng;
 use serde::{Deserialize, Serialize};

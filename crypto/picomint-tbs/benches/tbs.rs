@@ -4,7 +4,7 @@ use bls12_381::{G2Projective, Scalar};
 use criterion::{Criterion, criterion_group, criterion_main};
 use group::Curve;
 use group::ff::Field;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use rand::rngs::OsRng;
 use tbs::{
     AggregatePublicKey, BlindedSignatureShare, BlindingKey, Message, PublicKeyShare,

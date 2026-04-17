@@ -5,7 +5,7 @@ use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::schnorr::Signature;
 use lightning_invoice::{Bolt11Invoice, RoutingFees};
 use picomint_core::config::FederationId;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, OutPoint};
 use reqwest::Method;

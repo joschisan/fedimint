@@ -1,0 +1,30 @@
+[package]
+authors = { workspace = true }
+description = "Consensus-critical binary encoding for picomint wire types."
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-encoding"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "picomint_encoding"
+path = "src/lib.rs"
+
+[dependencies]
+bitcoin = { workspace = true }
+bitcoin-io = { workspace = true }
+bls12_381 = { workspace = true }
+group = { workspace = true }
+hex = { workspace = true }
+iroh-base = { workspace = true, default-features = false, features = ["key"] }
+lightning-invoice = { workspace = true }
+picomint-derive = { workspace = true }
+secp256k1 = { workspace = true, features = ["global-context"] }
+
+[dev-dependencies]
+rand = { workspace = true }
+
+[lints]
+workspace = true

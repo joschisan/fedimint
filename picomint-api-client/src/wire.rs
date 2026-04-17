@@ -3,7 +3,7 @@
 use std::fmt;
 
 use picomint_core::core::ModuleKind;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_ln_common::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError,

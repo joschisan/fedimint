@@ -6,7 +6,7 @@ use picomint_api_client::api::FederationApi;
 use picomint_api_client::transaction::{Transaction, TransactionSubmissionOutcome};
 use picomint_core::TransactionId;
 use picomint_core::core::OperationId;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::util::backoff_util::custom_backoff;
 use picomint_core::util::retry;
 use picomint_eventlog::Event;

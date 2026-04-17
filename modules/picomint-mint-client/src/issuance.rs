@@ -1,5 +1,5 @@
 use bitcoin_hashes::{hash160, sha256, Hash};
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::rand::Rng;
 use picomint_core::secp256k1::{Keypair, PublicKey, SECP256K1};
 use picomint_derive_secret::{ChildId, DerivableSecret};

@@ -14,7 +14,7 @@ use bitcoin::{Address, PubkeyHash, ScriptBuf, ScriptHash, Txid, WPubkeyHash, WSc
 use config::WalletConfigConsensus;
 use miniscript::descriptor::Wsh;
 use picomint_core::core::ModuleKind;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
 use picomint_core::{NumPeersExt, PeerId, plugin_types_trait_impl_common};
 use secp256k1::ecdsa::Signature;

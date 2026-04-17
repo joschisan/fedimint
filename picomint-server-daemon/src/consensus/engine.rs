@@ -6,7 +6,7 @@ use anyhow::{anyhow, bail};
 use async_channel::Receiver;
 use picomint_api_client::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_api_client::transaction::ConsensusItem;
-use picomint_core::encoding::Decodable;
+use picomint_encoding::Decodable;
 use picomint_core::module::audit::Audit;
 use picomint_core::runtime::spawn;
 use picomint_core::secp256k1::schnorr;

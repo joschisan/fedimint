@@ -31,6 +31,7 @@ bitcoin_hashes = { workspace = true }
 picomint-api-client = { workspace = true }
 picomint-client-module = { workspace = true }
 picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
 picomint-derive-secret = { workspace = true }
 picomint-eventlog = { workspace = true }
 picomint-mint-common = { workspace = true }

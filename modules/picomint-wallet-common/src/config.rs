@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::{Amount, PeerId, weight_to_vbytes};
 use secp256k1::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};

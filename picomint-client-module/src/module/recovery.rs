@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug};
 
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
 /// Progress of the recovery

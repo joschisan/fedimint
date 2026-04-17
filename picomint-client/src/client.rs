@@ -25,7 +25,7 @@ use picomint_client_module::{
 };
 use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleKind, OperationId};
-use picomint_core::encoding::Encodable as _;
+use picomint_encoding::Encodable as _;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::{BoxStream, FmtCompactAnyhow as _};

@@ -18,6 +18,7 @@ path = "src/lib.rs"
 bitcoin_hashes = { workspace = true }
 bls12_381 = { workspace = true }
 picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
 group = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }

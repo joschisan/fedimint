@@ -2,7 +2,7 @@ use picomint_client_module::executor::{StateMachine, StateTransition as SmStateT
 use picomint_client_module::module::OutPointRange;
 use picomint_client_module::transaction::{ClientInput, ClientInputBundle};
 use picomint_core::core::OperationId;
-use picomint_core::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::TransactionId;
 use picomint_mint_common::MintInput;
 use picomint_redb::WriteTxRef;

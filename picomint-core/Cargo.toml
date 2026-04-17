@@ -21,23 +21,20 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 backon = { workspace = true }
-base64 = { workspace = true }
 bech32 = { workspace = true }
 bitcoin = { workspace = true }
-bitcoin-io = { workspace = true }
 bitcoin-units = { workspace = true }
 bls12_381 = { workspace = true }
 picomint-derive = { workspace = true }
+picomint-encoding = { workspace = true }
 picomint-logging = { workspace = true }
 futures = { workspace = true }
-group = { workspace = true }
 hex = { workspace = true, features = ["serde"] }
 iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false }
 itertools = { workspace = true }
 jsonrpsee-core = { workspace = true, features = ["client"] }
 lightning = { workspace = true }
-lightning-invoice = { workspace = true, features = ["serde"] }
 lightning-types = { workspace = true }
 n0-future = { workspace = true }
 rand = { workspace = true }

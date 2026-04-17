@@ -32,7 +32,7 @@
 //! consensus versioning.
 use serde::{Deserialize, Serialize};
 
-use crate::encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable};
 
 /// Consensus version of a core server
 ///

@@ -25,7 +25,7 @@ use picomint_client_module::module::{ClientContext, ClientModule};
 use picomint_client_module::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::encoding::Encodable;
+use picomint_encoding::Encodable;
 use picomint_core::module::{ModuleCommon, ModuleInit};
 use picomint_core::secp256k1::SECP256K1;
 use picomint_core::task::TaskGroup;

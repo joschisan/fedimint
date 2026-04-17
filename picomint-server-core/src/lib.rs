@@ -94,7 +94,7 @@ macro_rules! handler {
                 .map_err(|e| ::picomint_core::module::ApiError::bad_request(e.to_string()))?;
             let resp = rpc::$func($self, param).await?;
             ::std::result::Result::Ok(
-                ::picomint_core::encoding::Encodable::consensus_encode_to_vec(&resp),
+                ::picomint_encoding::Encodable::consensus_encode_to_vec(&resp),
             )
         }
     };
