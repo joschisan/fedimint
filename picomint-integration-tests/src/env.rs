@@ -16,7 +16,8 @@ use picomint_client::{Client, ClientHandleArc, RootSecret};
 use picomint_core::Amount;
 use picomint_core::invite_code::InviteCode;
 use picomint_wallet_client::WalletClientModule;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
+use tokio::sync::Mutex;
 use tokio::task::block_in_place;
 use tracing::info;
 
@@ -50,6 +51,8 @@ pub struct TestEnv {
     pub gw_public: String,
     pub endpoint: Endpoint,
     pub client_counter: AtomicU64,
+    /// One per guardian, indexed by peer id. `None` once we've killed it.
+    pub guardian_processes: Mutex<Vec<Option<Child>>>,
 }
 
 impl TestEnv {
@@ -67,8 +70,10 @@ impl TestEnv {
             .require_network(bitcoin::Network::Regtest)?;
         bitcoind.generate_to_address(101, &funding_addr)?;
 
+        let mut guardian_processes = Vec::with_capacity(NUM_GUARDIANS);
         for i in 0..NUM_GUARDIANS {
-            runtime.block_on(start_picomintd(base, i))?;
+            let child = runtime.block_on(start_picomintd(base, i))?;
+            guardian_processes.push(Some(child));
         }
 
         info!("Running DKG...");
@@ -132,9 +137,33 @@ impl TestEnv {
                 gw_public,
                 endpoint,
                 client_counter,
+                guardian_processes: Mutex::new(guardian_processes),
             },
             client_send,
         ))
+    }
+
+    /// SIGKILL a single guardian process and delete its data directory,
+    /// simulating a total disk loss. Use `restart_guardian` to bring it
+    /// back up against an empty data dir.
+    pub async fn wipe_guardian(&self, peer_idx: usize) -> anyhow::Result<()> {
+        let mut procs = self.guardian_processes.lock().await;
+        if let Some(mut child) = procs[peer_idx].take() {
+            child.kill().await?;
+            child.wait().await?;
+        }
+        drop(procs);
+
+        let data_dir = self.data_dir.join(format!("picomintd-{peer_idx}"));
+        tokio::fs::remove_dir_all(&data_dir).await?;
+        Ok(())
+    }
+
+    /// Spawn a fresh daemon for `peer_idx` against its existing data dir.
+    pub async fn restart_guardian(&self, peer_idx: usize) -> anyhow::Result<()> {
+        let child = start_picomintd(&self.data_dir, peer_idx).await?;
+        self.guardian_processes.lock().await[peer_idx] = Some(child);
+        Ok(())
     }
 
     fn connect_bitcoind(
@@ -243,15 +272,18 @@ async fn build_client(
     Ok(client)
 }
 
-async fn start_picomintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
+async fn start_picomintd(base: &Path, peer_idx: usize) -> anyhow::Result<Child> {
     let p2p_port = GUARDIAN_BASE_PORT + (peer_idx as u16 * PORTS_PER_GUARDIAN);
 
     let data_dir = base.join(format!("picomintd-{peer_idx}"));
     tokio::fs::create_dir_all(&data_dir).await?;
 
-    let log_file = std::fs::File::create(base.join(format!("picomintd-{peer_idx}.log")))?;
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(base.join(format!("picomintd-{peer_idx}.log")))?;
 
-    Command::new("target/debug/picomint-server-daemon")
+    let child = Command::new("target/debug/picomint-server-daemon")
         .env("IN_TEST_ENV", "1")
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("BITCOIN_NETWORK", "regtest")
@@ -265,7 +297,7 @@ async fn start_picomintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
         .context(format!("Failed to start picomintd-{peer_idx}"))?;
 
     info!("Started picomintd-{peer_idx} on port {p2p_port}");
-    Ok(())
+    Ok(child)
 }
 
 async fn start_gatewayd(base: &Path, name: &str, gw_port: u16, ln_port: u16) -> anyhow::Result<()> {

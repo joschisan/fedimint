@@ -48,9 +48,9 @@ pub use picomint_server_core as core;
 use tokio::net::TcpListener;
 use tracing::info;
 
-use crate::config::ConfigGenSettings;
 use crate::config::db::{load_server_config, store_server_config};
 use crate::config::setup::SetupApi;
+use crate::config::{ConfigGenSettings, SetupResult};
 use crate::p2p::{
     P2PConnector, P2PMessage, P2PStatusReceivers, ReconnectP2PConnections, p2p_status_channels,
 };
@@ -141,9 +141,9 @@ pub async fn run_config_gen(
 )> {
     info!(target: LOG_CONSENSUS, "Starting config gen");
 
-    let (cgp_sender, mut cgp_receiver) = tokio::sync::mpsc::channel(1);
+    let (setup_sender, mut setup_receiver) = tokio::sync::mpsc::channel(1);
 
-    let setup_api = Arc::new(SetupApi::new(settings.clone(), cgp_sender));
+    let setup_api = Arc::new(SetupApi::new(settings.clone(), setup_sender));
 
     let ui_task_group = TaskGroup::new();
 
@@ -172,10 +172,10 @@ pub async fn run_config_gen(
         cli::run_cli(&data_dir, cli_state, handle).await;
     });
 
-    let cg_params = cgp_receiver
+    let setup_result = setup_receiver
         .recv()
         .await
-        .expect("Config gen params receiver closed unexpectedly");
+        .expect("Setup result receiver closed unexpectedly");
 
     ui_task_group
         .shutdown_join_all(None)
@@ -187,35 +187,69 @@ pub async fn run_config_gen(
         .await
         .context("Failed to shutdown CLI server after config gen")?;
 
-    let connector = P2PConnector::new(
-        cg_params.iroh_sk.clone(),
-        settings.p2p_addr,
-        cg_params
-            .iroh_endpoints()
-            .iter()
-            .map(|(peer, endpoints)| (*peer, endpoints.node_id))
-            .collect(),
-    )
-    .await?;
+    match setup_result {
+        SetupResult::Dkg(cg_params) => {
+            let connector = P2PConnector::new(
+                cg_params.iroh_sk.clone(),
+                settings.p2p_addr,
+                cg_params
+                    .iroh_endpoints()
+                    .iter()
+                    .map(|(peer, endpoints)| (*peer, endpoints.node_id))
+                    .collect(),
+            )
+            .await?;
 
-    let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
+            let (p2p_status_senders, p2p_status_receivers) =
+                p2p_status_channels(connector.peers());
 
-    let connections = ReconnectP2PConnections::<P2PMessage>::new(
-        cg_params.identity,
-        connector,
-        task_group,
-        p2p_status_senders,
-        foreign_conn_tx,
-    );
+            let connections = ReconnectP2PConnections::<P2PMessage>::new(
+                cg_params.identity,
+                connector,
+                task_group,
+                p2p_status_senders,
+                foreign_conn_tx,
+            );
 
-    let cfg = ServerConfig::distributed_gen(
-        &cg_params,
-        connections.clone(),
-        p2p_status_receivers.clone(),
-    )
-    .await?;
+            let cfg = ServerConfig::distributed_gen(
+                &cg_params,
+                connections.clone(),
+                p2p_status_receivers.clone(),
+            )
+            .await?;
 
-    store_server_config(&db, &cfg).await;
+            store_server_config(&db, &cfg).await;
 
-    Ok((cfg, connections, p2p_status_receivers))
+            Ok((cfg, connections, p2p_status_receivers))
+        }
+        SetupResult::Restored(cfg) => {
+            let cfg = *cfg;
+
+            let connector = P2PConnector::new(
+                cfg.private.iroh_sk.clone(),
+                settings.p2p_addr,
+                cfg.consensus
+                    .iroh_endpoints
+                    .iter()
+                    .map(|(peer, endpoints)| (*peer, endpoints.node_id))
+                    .collect(),
+            )
+            .await?;
+
+            let (p2p_status_senders, p2p_status_receivers) =
+                p2p_status_channels(connector.peers());
+
+            let connections = ReconnectP2PConnections::<P2PMessage>::new(
+                cfg.private.identity,
+                connector,
+                task_group,
+                p2p_status_senders,
+                foreign_conn_tx,
+            );
+
+            store_server_config(&db, &cfg).await;
+
+            Ok((cfg, connections, p2p_status_receivers))
+        }
+    }
 }

@@ -12,7 +12,7 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
-use crate::config::{ConfigGenParams, ConfigGenSettings};
+use crate::config::{ConfigGenParams, ConfigGenSettings, ServerConfig, SetupResult};
 
 /// Connection information sent between peers in order to start config gen.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]
@@ -81,12 +81,12 @@ pub struct SetupApi {
     settings: ConfigGenSettings,
     /// In-memory state machine
     state: Arc<Mutex<SetupState>>,
-    /// Triggers the distributed key generation
-    sender: Sender<ConfigGenParams>,
+    /// Signals the setup loop with either DKG params or a restored config
+    sender: Sender<SetupResult>,
 }
 
 impl SetupApi {
-    pub fn new(settings: ConfigGenSettings, sender: Sender<ConfigGenParams>) -> Self {
+    pub fn new(settings: ConfigGenSettings, sender: Sender<SetupResult>) -> Self {
         Self {
             settings,
             state: Arc::new(Mutex::new(SetupState::default())),
@@ -293,9 +293,21 @@ impl SetupApi {
         };
 
         self.sender
-            .send(params)
+            .send(SetupResult::Dkg(params))
             .await
             .context("Failed to send config gen params")?;
+
+        Ok(())
+    }
+
+    pub async fn restore_config(&self, cfg: ServerConfig) -> anyhow::Result<()> {
+        cfg.validate_config(&cfg.private.identity)
+            .context("Restored config failed validation")?;
+
+        self.sender
+            .send(SetupResult::Restored(Box::new(cfg)))
+            .await
+            .context("Failed to send restored config")?;
 
         Ok(())
     }

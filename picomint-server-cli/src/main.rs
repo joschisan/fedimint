@@ -12,10 +12,11 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_server_cli_core::{
-    CLI_SOCKET_FILENAME, LnGatewayRequest, ROUTE_AUDIT, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
-    ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT,
-    ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
-    ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SETUP_ADD_PEER,
+    CLI_SOCKET_FILENAME, LnGatewayRequest, ROUTE_AUDIT, ROUTE_CONFIG, ROUTE_INVITE,
+    ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
+    ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
+    ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
+    ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RESTORE,
     ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest,
     SetupSetLocalParamsRequest,
 };
@@ -46,6 +47,10 @@ enum Commands {
     Invite,
     /// Show federation audit summary
     Audit,
+    /// Dump full server config as JSON (use `> config.json` to save)
+    Config,
+    /// Number of consensus sessions this guardian has finalized
+    SessionCount,
     /// Module admin commands
     #[command(subcommand)]
     Module(ModuleCommands),
@@ -73,6 +78,11 @@ enum SetupCommands {
     },
     /// Start distributed key generation
     StartDkg,
+    /// Restore guardian config from a config file (skips DKG)
+    Restore {
+        /// Path to a `config.json` previously produced by `config`
+        path: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -191,6 +201,8 @@ async fn main() -> Result<()> {
     let result = match cli.command {
         Commands::Invite => request(data_dir, ROUTE_INVITE, ()).await?,
         Commands::Audit => request(data_dir, ROUTE_AUDIT, ()).await?,
+        Commands::Config => request(data_dir, ROUTE_CONFIG, ()).await?,
+        Commands::SessionCount => request(data_dir, ROUTE_SESSION_COUNT, ()).await?,
         Commands::Setup(cmd) => match cmd {
             SetupCommands::Status => request(data_dir, ROUTE_SETUP_STATUS, ()).await?,
             SetupCommands::SetLocalParams {
@@ -218,6 +230,13 @@ async fn main() -> Result<()> {
                 .await?
             }
             SetupCommands::StartDkg => request(data_dir, ROUTE_SETUP_START_DKG, ()).await?,
+            SetupCommands::Restore { path } => {
+                let bytes = std::fs::read(&path)?;
+
+                let cfg: Value = serde_json::from_slice(&bytes)?;
+
+                request(data_dir, ROUTE_SETUP_RESTORE, cfg).await?
+            }
         },
         Commands::Module(cmd) => match cmd {
             ModuleCommands::Wallet(cmd) => match cmd {

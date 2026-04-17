@@ -12,7 +12,6 @@ pub const CLI_SOCKET_FILENAME: &str = "cli.sock";
 pub enum SetupStatus {
     AwaitingLocalParams,
     SharingConnectionCodes,
-    ConsensusIsRunning,
 }
 
 // Setup routes
@@ -20,10 +19,13 @@ pub const ROUTE_SETUP_STATUS: &str = "/setup/status";
 pub const ROUTE_SETUP_SET_LOCAL_PARAMS: &str = "/setup/set-local-params";
 pub const ROUTE_SETUP_ADD_PEER: &str = "/setup/add-peer";
 pub const ROUTE_SETUP_START_DKG: &str = "/setup/start-dkg";
+pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
 
 // Dashboard routes
 pub const ROUTE_INVITE: &str = "/invite";
 pub const ROUTE_AUDIT: &str = "/audit";
+pub const ROUTE_CONFIG: &str = "/config";
+pub const ROUTE_SESSION_COUNT: &str = "/session-count";
 
 // Module routes
 pub const ROUTE_MODULE_WALLET_TOTAL_VALUE: &str = "/module/wallet/total-value";

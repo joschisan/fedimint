@@ -2,6 +2,7 @@ mod cli;
 mod env;
 mod ln;
 mod mint;
+mod restore;
 mod wallet;
 
 use std::sync::Arc;
@@ -37,6 +38,9 @@ fn main() -> anyhow::Result<()> {
     info!("Shutting down the primary test client!");
 
     runtime.block_on(client_send.task_group().clone().shutdown_join_all(None))?;
+
+    info!("Running guardian backup/restore test...");
+    runtime.block_on(restore::run_test(&env))?;
 
     info!("All integration tests passed!");
 

@@ -8,12 +8,13 @@ use axum::response::IntoResponse;
 use axum::routing::post;
 use picomint_core::task::TaskHandle;
 use picomint_server_cli_core::{
-    CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG,
-    ROUTE_SETUP_STATUS, SetupAddPeerRequest, SetupAddPeerResponse, SetupSetLocalParamsRequest,
-    SetupSetLocalParamsResponse, SetupStatus,
+    CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RESTORE, ROUTE_SETUP_SET_LOCAL_PARAMS,
+    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest, SetupAddPeerResponse,
+    SetupSetLocalParamsRequest, SetupSetLocalParamsResponse, SetupStatus,
 };
 use tokio::net::UnixListener;
 
+use crate::config::ServerConfig;
 use crate::config::setup::SetupApi;
 pub type DynSetupApi = Arc<SetupApi>;
 
@@ -71,6 +72,7 @@ pub async fn run_cli(data_dir: &Path, state: CliState, handle: TaskHandle) {
         .route(ROUTE_SETUP_SET_LOCAL_PARAMS, post(setup_set_local_params))
         .route(ROUTE_SETUP_ADD_PEER, post(setup_add_peer))
         .route(ROUTE_SETUP_START_DKG, post(setup_start_dkg))
+        .route(ROUTE_SETUP_RESTORE, post(setup_restore))
         .with_state(state)
         .into_make_service();
 
@@ -86,13 +88,25 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     use axum::Json;
     use axum::routing::post;
     use picomint_server_cli_core::{
-        AuditResponse, InviteResponse, LnGatewayRequest, ROUTE_AUDIT, ROUTE_INVITE,
+        AuditResponse, InviteResponse, LnGatewayRequest, ROUTE_AUDIT, ROUTE_CONFIG, ROUTE_INVITE,
         ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
         ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
         ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
-        ROUTE_MODULE_WALLET_TX_CHAIN, WalletBlockCountResponse, WalletFeerateResponse,
-        WalletTotalValueResponse,
+        ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, WalletBlockCountResponse,
+        WalletFeerateResponse, WalletTotalValueResponse,
     };
+
+    async fn config(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<ServerConfig>, CliError> {
+        Ok(Json(api.cfg.clone()))
+    }
+
+    async fn session_count(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<u64>, CliError> {
+        Ok(Json(api.session_count().await))
+    }
 
     async fn invite(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
@@ -182,6 +196,8 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     Router::new()
         .route(ROUTE_INVITE, post(invite))
         .route(ROUTE_AUDIT, post(audit))
+        .route(ROUTE_CONFIG, post(config))
+        .route(ROUTE_SESSION_COUNT, post(session_count))
         .route(ROUTE_MODULE_WALLET_TOTAL_VALUE, post(wallet_total_value))
         .route(ROUTE_MODULE_WALLET_BLOCK_COUNT, post(wallet_block_count))
         .route(ROUTE_MODULE_WALLET_FEERATE, post(wallet_feerate))
@@ -256,6 +272,19 @@ async fn setup_start_dkg(State(state): State<CliState>) -> Result<Json<()>, CliE
     state
         .setup_api
         .start_dkg()
+        .await
+        .map_err(CliError::internal)?;
+
+    Ok(Json(()))
+}
+
+async fn setup_restore(
+    State(state): State<CliState>,
+    Json(cfg): Json<ServerConfig>,
+) -> Result<Json<()>, CliError> {
+    state
+        .setup_api
+        .restore_config(cfg)
         .await
         .map_err(CliError::internal)?;
 

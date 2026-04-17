@@ -177,6 +177,22 @@ pub fn picomintd_setup_start_dkg(data_dir: &Path) -> Result<Value> {
         .run_cli::<Value>()
 }
 
+pub fn picomintd_setup_restore(data_dir: &Path, config_path: &Path) -> Result<Value> {
+    server_cmd(data_dir)
+        .arg("setup")
+        .arg("restore")
+        .arg(config_path)
+        .run_cli::<Value>()
+}
+
+pub fn picomintd_config(data_dir: &Path) -> Result<Value> {
+    server_cmd(data_dir).arg("config").run_cli::<Value>()
+}
+
+pub fn picomintd_session_count(data_dir: &Path) -> Result<u64> {
+    server_cmd(data_dir).arg("session-count").run_cli::<u64>()
+}
+
 pub fn picomintd_ln_gateway_add(data_dir: &Path, gateway: &str) -> Result<bool> {
     server_cmd(data_dir)
         .arg("module")
