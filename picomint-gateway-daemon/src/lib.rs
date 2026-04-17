@@ -43,7 +43,6 @@ use picomint_core::invite_code::InviteCode;
 use picomint_core::secp256k1::PublicKey;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::time::duration_since_epoch;
-use picomint_core::util::FmtCompact;
 use picomint_core::{Amount, PeerId};
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_gw_client::{
@@ -475,7 +474,7 @@ impl IGatewayClientV2 for AppState {
                 warn!(
                     target: LOG_GATEWAY,
                     payment_hash = %ph_hex_str,
-                    err = %err.fmt_compact(),
+                    err = %err,
                     "Failed to claim LDK payment",
                 );
             }
@@ -489,7 +488,7 @@ impl IGatewayClientV2 for AppState {
                 warn!(
                     target: LOG_GATEWAY,
                     payment_hash = %ph_hex_str,
-                    err = %err.fmt_compact(),
+                    err = %err,
                     "Failed to unwind LDK payment",
                 );
             }

@@ -20,7 +20,7 @@ use lightning::types::payment::PaymentHash;
 use picomint_bip39::Bip39RootSecretStrategy;
 use picomint_client::secret::RootSecretStrategy;
 use picomint_core::Amount;
-use picomint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
+use picomint_core::util::{SafeUrl};
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
 use picomint_gw_client::GatewayClientModuleV2;
@@ -251,7 +251,7 @@ async fn process_ldk_events(state: AppState, handle: picomint_core::task::TaskHa
         if let Err(e) = state.node.event_handled() {
             warn!(
                 target: LOG_LIGHTNING,
-                err = %e.fmt_compact(),
+                err = %e,
                 "Failed to mark event handled",
             );
         }
@@ -290,7 +290,7 @@ async fn handle_lightning_payment(state: &AppState, payment_hash: [u8; 32], amou
     {
         warn!(
             target: LOG_GATEWAY,
-            err = %err.fmt_compact(),
+            err = %err,
             "Error failing unmatched HTLC",
         );
     }
@@ -315,7 +315,7 @@ async fn try_handle_lightning_payment_ln(
         .relay_incoming_htlc(hash, 0, 0, contract, amount_msat)
         .await
     {
-        warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Error relaying incoming lightning payment");
+        warn!(target: LOG_GATEWAY, err = %format_args!("{err:#}"), "Error relaying incoming lightning payment");
 
         if let Err(err) = state
             .node
@@ -324,7 +324,7 @@ async fn try_handle_lightning_payment_ln(
         {
             warn!(
                 target: LOG_GATEWAY,
-                err = %err.fmt_compact(),
+                err = %err,
                 "Error failing HTLC after relay error",
             );
         }

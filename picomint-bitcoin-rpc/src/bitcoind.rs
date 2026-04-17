@@ -5,7 +5,7 @@ use bitcoincore_rpc::bitcoincore_rpc_json::EstimateMode;
 use bitcoincore_rpc::jsonrpc::Error::Rpc;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use picomint_core::runtime::block_in_place;
-use picomint_core::util::{FmtCompact as _, SafeUrl};
+use picomint_core::util::{SafeUrl};
 use picomint_core::{ChainId, Feerate};
 use picomint_logging::{LOG_BITCOIND_CORE, LOG_SERVER};
 use tracing::info;
@@ -75,7 +75,7 @@ impl BitcoindClient {
             // https://github.com/bitcoin/bitcoin/blob/daa56f7f665183bcce3df146f143be37f33c123e/src/rpc/protocol.h#L48
             Err(JsonRpc(Rpc(e))) if e.code == -27 => (),
             Err(e) => {
-                info!(target: LOG_BITCOIND_CORE, e = %e.fmt_compact(), "Error broadcasting transaction")
+                info!(target: LOG_BITCOIND_CORE, e = %e, "Error broadcasting transaction")
             }
             Ok(_) => (),
         }

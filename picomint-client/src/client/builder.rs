@@ -19,7 +19,6 @@ use picomint_core::core::ModuleKind;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::CommonModuleInit;
 use picomint_core::task::TaskGroup;
-use picomint_core::util::FmtCompactAnyhow as _;
 use picomint_core::{NumPeers, PeerId};
 use picomint_derive_secret::DerivableSecret;
 use picomint_gw_client::{GatewayClientInitV2, IGatewayClientV2};
@@ -641,7 +640,7 @@ where
                 warn!(
                     target: LOG_CLIENT,
                     kind = %kind,
-                    err = %err.fmt_compact_anyhow(), "Module failed to recover"
+                    err = %format_args!("{err:#}"), "Module failed to recover"
                 );
             })
     });

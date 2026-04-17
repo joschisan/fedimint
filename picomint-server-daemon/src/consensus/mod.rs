@@ -23,7 +23,6 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::module::{ApiAuth, ApiError, ApiMethod, IrohApiRequest, ModuleCommon};
 use picomint_core::task::{TaskGroup, sleep};
-use picomint_core::util::FmtCompactAnyhow as _;
 use picomint_logging::{LOG_CONSENSUS, LOG_CORE, LOG_NET_API};
 use picomint_redb::Database;
 use picomint_server_core::ServerModule;
@@ -296,7 +295,7 @@ async fn run_iroh_api(
             handle_incoming(consensus_api.clone(), task_group.clone(), connection, permit)
                 .then(|result| async {
                     if let Err(err) = result {
-                        warn!(target: LOG_NET_API, err = %err.fmt_compact_anyhow(), "Failed to handle iroh connection");
+                        warn!(target: LOG_NET_API, err = %format_args!("{err:#}"), "Failed to handle iroh connection");
                     }
                 }),
         );
@@ -331,7 +330,7 @@ async fn handle_incoming(
             handle_request(consensus_api.clone(), send_stream, recv_stream, permit).then(
                 |result| async {
                     if let Err(err) = result {
-                        warn!(target: LOG_NET_API, err = %err.fmt_compact_anyhow(), "Failed to handle iroh request");
+                        warn!(target: LOG_NET_API, err = %format_args!("{err:#}"), "Failed to handle iroh request");
                     }
                 },
             ),

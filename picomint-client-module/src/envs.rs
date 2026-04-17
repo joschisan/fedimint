@@ -5,13 +5,12 @@ use tracing::warn;
 
 pub const DISCOVER_API_VERSION_TIMEOUT_ENV: &str = "DISCOVER_API_VERSION_TIMEOUT";
 pub fn get_discover_api_version_timeout() -> Duration {
-    use picomint_core::util::FmtCompact as _;
 
     if let Ok(s) = std::env::var(DISCOVER_API_VERSION_TIMEOUT_ENV) {
         match FromStr::from_str(&s) {
             Ok(secs) => return Duration::from_secs(secs),
             Err(err) => warn!(
-                err = %err.fmt_compact(),
+                err = %err,
                 var = DISCOVER_API_VERSION_TIMEOUT_ENV,
                 "Could not parse env variable"
             ),

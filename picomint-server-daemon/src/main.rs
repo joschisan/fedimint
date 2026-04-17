@@ -14,7 +14,7 @@ use clap::{ArgGroup, Parser};
 use futures::FutureExt as _;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
 use picomint_core::task::TaskGroup;
-use picomint_core::util::{FmtCompactAnyhow as _, SafeUrl};
+use picomint_core::util::{SafeUrl};
 use picomint_logging::{LOG_CORE, TracingSetup};
 use picomint_server_daemon::config::ConfigGenSettings;
 use picomint_server_daemon::{DB_FILE, run_server};
@@ -147,7 +147,7 @@ async fn main() -> anyhow::Result<Infallible> {
         run_server(settings, db, task_group, bitcoin_backend, data_dir)
             .await
             .unwrap_or_else(|err| {
-                panic!("Main task returned error: {}", err.fmt_compact_anyhow())
+                panic!("Main task returned error: {err:#}")
             });
     });
 
@@ -163,7 +163,7 @@ async fn main() -> anyhow::Result<Infallible> {
     debug!(target: LOG_CORE, "Terminating main task");
 
     if let Err(err) = root_task_group.join_all(Some(SHUTDOWN_TIMEOUT)).await {
-        error!(target: LOG_CORE, err = %err.fmt_compact_anyhow(), "Error while shutting down task group");
+        error!(target: LOG_CORE, err = %format_args!("{err:#}"), "Error while shutting down task group");
     }
 
     debug!(target: LOG_CORE, "Shutdown complete");

@@ -3,7 +3,6 @@ use std::fmt::{self, Debug, Display};
 
 use picomint_core::PeerId;
 use picomint_core::module::ApiRequestErased;
-use picomint_core::util::FmtCompactAnyhow as _;
 use picomint_logging::LOG_CLIENT_NET_API;
 use thiserror::Error;
 use tracing::warn;
@@ -91,7 +90,7 @@ impl FederationError {
     pub fn report_if_unusual(&self, context: &str) {
         if let Some(error) = self.general.as_ref() {
             // Any general federation errors are unusual
-            warn!(target: LOG_CLIENT_NET_API, err = %error.fmt_compact_anyhow(), %context, "General FederationError");
+            warn!(target: LOG_CLIENT_NET_API, err = %format_args!("{error:#}"), %context, "General FederationError");
         }
         for (peer_id, e) in &self.peer_errors {
             e.report_if_unusual(*peer_id, context);

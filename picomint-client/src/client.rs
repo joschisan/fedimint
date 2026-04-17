@@ -28,7 +28,7 @@ use picomint_core::core::{ModuleKind, OperationId};
 use picomint_encoding::Encodable as _;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
-use picomint_core::util::{BoxStream, FmtCompactAnyhow as _};
+use picomint_core::util::BoxStream;
 use picomint_core::{Amount, PeerId, TransactionId};
 use picomint_eventlog::{EventLogId, PersistedLogEntry};
 use picomint_gw_client::GatewayClientModuleV2;
@@ -634,7 +634,7 @@ impl Client {
                         Err(err) => {
                             warn!(
                                 target: LOG_CLIENT,
-                                err = %err.fmt_compact_anyhow(),
+                                err = %format_args!("{err:#}"),
                                 kind = %kind,
                                 "Module recovery failed"
                             );

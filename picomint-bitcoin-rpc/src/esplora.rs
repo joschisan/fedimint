@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use anyhow::Context;
 use bitcoin::{BlockHash, Transaction};
-use picomint_core::util::{FmtCompact, SafeUrl};
+use picomint_core::util::{SafeUrl};
 use picomint_core::{ChainId, Feerate};
 use picomint_logging::{LOG_BITCOIND_ESPLORA, LOG_SERVER};
 use tracing::info;
@@ -70,7 +70,7 @@ impl EsploraClient {
 
     pub async fn submit_transaction(&self, transaction: Transaction) {
         let _ = self.client.broadcast(&transaction).await.map_err(|err| {
-            info!(target: LOG_BITCOIND_ESPLORA, err = %err.fmt_compact(), "Error broadcasting transaction");
+            info!(target: LOG_BITCOIND_ESPLORA, err = %err, "Error broadcasting transaction");
         });
     }
 

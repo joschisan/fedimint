@@ -19,7 +19,6 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::PICOMINT_ALPN;
 use picomint_core::task::{TaskGroup, sleep};
 use picomint_core::util::backoff_util::{FibonacciBackoff, api_networking_backoff};
-use picomint_core::util::FmtCompactAnyhow;
 use picomint_core::{PeerId, secp256k1};
 use picomint_logging::{LOG_CONSENSUS, LOG_NET_PEER};
 use picomint_server_core::P2PConnectionStatus;
@@ -286,7 +285,7 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
                         }
                     }
                     Err(err) => {
-                        warn!(target: LOG_NET_PEER, our_id = %identity, err = %err.fmt_compact_anyhow(), "Error while opening incoming connection");
+                        warn!(target: LOG_NET_PEER, our_id = %identity, err = %format_args!("{err:#}"), "Error while opening incoming connection");
                     }
                 }
             }

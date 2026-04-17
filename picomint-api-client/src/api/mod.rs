@@ -20,7 +20,6 @@ use picomint_core::module::{
     ApiError, ApiMethod, ApiRequestErased, IrohApiRequest, PICOMINT_ALPN,
 };
 use picomint_core::runtime::sleep;
-use picomint_core::util::FmtCompact as _;
 use picomint_core::util::backoff_util::api_networking_backoff;
 use picomint_core::{NumPeersExt, PeerId, TransactionId, util};
 use picomint_logging::LOG_CLIENT_NET_API;
@@ -400,7 +399,7 @@ impl FederationApi {
                                         .await
                                         .inspect_err(|err| {
                                             if err.is_unusual() {
-                                                debug!(target: LOG_CLIENT_NET_API, err = %err.fmt_compact(), "Unusual peer error");
+                                                debug!(target: LOG_CLIENT_NET_API, err = %err, "Unusual peer error");
                                             }
                                         })
                                         .map_err(|e| anyhow!(e.to_string()))

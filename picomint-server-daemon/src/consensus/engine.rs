@@ -11,7 +11,6 @@ use picomint_core::module::audit::Audit;
 use picomint_core::runtime::spawn;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::task::{TaskGroup, TaskHandle, sleep};
-use picomint_core::util::{FmtCompact as _, FmtCompactAnyhow as _};
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_redb::{Database, ReadTransaction, WriteTransaction};
 use rand::Rng;
@@ -276,7 +275,7 @@ impl ConsensusEngine {
                                     self.ord_latency_sender.send_replace(Some(latency));
                                 }
                                 Err(err) => {
-                                    debug!(target: LOG_CONSENSUS, err = %err.fmt_compact(), "Missing submission timestamp. This is normal in recovery");
+                                    debug!(target: LOG_CONSENSUS, err = %err, "Missing submission timestamp. This is normal in recovery");
                                 }
                             }
                         }
@@ -299,7 +298,7 @@ impl ConsensusEngine {
                                     target: LOG_CONSENSUS,
                                     session_index,
                                     peer = %ordered_unit.creator,
-                                    err = %err.fmt_compact(),
+                                    err = %err,
                                     "Failed to decode consensus items from peer"
                                 );
                             }
@@ -587,7 +586,7 @@ impl ConsensusEngine {
                     target: LOG_CONSENSUS,
                     %peer,
                     item = ?DebugConsensusItem(&item),
-                    err = %err.fmt_compact_anyhow(),
+                    err = %format_args!("{err:#}"),
                     "Rejected consensus item"
                 );
             })?;

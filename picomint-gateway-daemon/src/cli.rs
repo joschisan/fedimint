@@ -15,7 +15,6 @@ use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription,
 use picomint_core::BitcoinAmountOrAll;
 use picomint_core::base32::{self, PICOMINT_PREFIX};
 use picomint_core::task::TaskHandle;
-use picomint_core::util::FmtCompact;
 use picomint_gateway_cli_core::{
     ChannelInfo, FederationBalanceRequest, FederationBalanceResponse, FederationConfigRequest,
     FederationConfigResponse, FederationInviteResponse, FederationJoinRequest,
@@ -255,7 +254,7 @@ async fn ldk_channel_close(
                 Err(err) => {
                     error!(
                         pubkey = %payload.pubkey,
-                        err = %err.fmt_compact(),
+                        err = %err,
                         "Could not force close channel",
                     );
                 }
@@ -269,7 +268,7 @@ async fn ldk_channel_close(
                 Err(err) => {
                     error!(
                         pubkey = %payload.pubkey,
-                        err = %err.fmt_compact(),
+                        err = %err,
                         "Could not close channel",
                     );
                 }

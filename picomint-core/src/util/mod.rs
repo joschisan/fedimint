@@ -8,7 +8,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::LazyLock;
-use std::{error, fmt, fs, io};
+use std::{fs, io};
 
 use anyhow::format_err;
 use futures::StreamExt;
@@ -17,70 +17,6 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, warn};
 use url::{Host, ParseError, Url};
-
-// ─── Error formatting helpers (inlined from picomint-util-error) ─────────
-
-/// A wrapper with [`fmt::Display`] for any `E: Error` that prints the full
-/// chain of causes.
-pub struct FmtErrorCompact<'e, E>(pub &'e E);
-
-impl<E> fmt::Display for FmtErrorCompact<'_, E>
-where
-    E: error::Error,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let mut source_opt: Option<&dyn std::error::Error> = Some(self.0);
-        while source_opt.is_some() {
-            let source = source_opt.take().expect("Just checked");
-            f.write_fmt(format_args!("{source}"))?;
-            source_opt = source.source();
-            if source_opt.is_some() {
-                f.write_str(": ")?;
-            }
-        }
-        Ok(())
-    }
-}
-
-/// A wrapper with [`fmt::Display`] for [`anyhow::Error`] that prints the full
-/// chain of causes.
-pub struct FmtCompactErrorAnyhow<'e>(pub &'e anyhow::Error);
-
-impl fmt::Display for FmtCompactErrorAnyhow<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        // https://docs.rs/anyhow/latest/anyhow/struct.Error.html#display-representations
-        f.write_fmt(format_args!("{:#}", self.0))
-    }
-}
-
-pub trait FmtCompact<'a> {
-    type Report: fmt::Display + 'a;
-    fn fmt_compact(self) -> Self::Report;
-}
-
-pub trait FmtCompactAnyhow<'a> {
-    type Report: fmt::Display + 'a;
-    fn fmt_compact_anyhow(self) -> Self::Report;
-}
-
-impl<'e, E> FmtCompact<'e> for &'e E
-where
-    E: error::Error,
-{
-    type Report = FmtErrorCompact<'e, E>;
-
-    fn fmt_compact(self) -> Self::Report {
-        FmtErrorCompact(self)
-    }
-}
-
-impl<'e> FmtCompactAnyhow<'e> for &'e anyhow::Error {
-    type Report = FmtCompactErrorAnyhow<'e>;
-
-    fn fmt_compact_anyhow(self) -> Self::Report {
-        FmtCompactErrorAnyhow(self)
-    }
-}
 
 use crate::envs::{DEBUG_SHOW_SECRETS_ENV, is_env_var_set};
 use crate::runtime;
@@ -397,7 +333,7 @@ where
                     // run closure op_fn again
                     debug!(
                         target: LOG_CORE,
-                        err = %err.fmt_compact_anyhow(),
+                        err = %format_args!("{err:#}"),
                         %attempts,
                         interval = interval.as_secs(),
                         "{} failed, retrying",
@@ -407,7 +343,7 @@ where
                 } else {
                     warn!(
                         target: LOG_CORE,
-                        err = %err.fmt_compact_anyhow(),
+                        err = %format_args!("{err:#}"),
                         %attempts,
                         "{} failed",
                         op_name,

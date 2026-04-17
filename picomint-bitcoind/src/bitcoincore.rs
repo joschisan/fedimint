@@ -3,7 +3,7 @@ use bitcoincore_rpc::json::ImportDescriptors;
 use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
 use bitcoincore_rpc::{Auth, Error as RpcError, RpcApi};
 use picomint_core::task::block_in_place;
-use picomint_core::util::{FmtCompact, SafeUrl};
+use picomint_core::util::{SafeUrl};
 use picomint_logging::LOG_BITCOIND_CORE;
 use tracing::{debug, warn};
 
@@ -70,7 +70,7 @@ impl BitcoindClient {
 impl IBitcoindRpc for BitcoindClient {
     async fn get_tx_block_height(&self, txid: &Txid) -> anyhow::Result<Option<u64>> {
         let info = block_in_place(|| self.client.get_transaction(txid, Some(true)))
-            .map_err(|err| warn!(target: LOG_BITCOIND_CORE, err = %err.fmt_compact(), "Unable to get transaction"));
+            .map_err(|err| warn!(target: LOG_BITCOIND_CORE, err = %err, "Unable to get transaction"));
         let height = match info.ok().and_then(|info| info.info.blockhash) {
             None => None,
             Some(hash) => Some(block_in_place(|| self.client.get_block_header_info(&hash))?.height),

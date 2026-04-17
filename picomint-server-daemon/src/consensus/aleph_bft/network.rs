@@ -5,7 +5,6 @@ use picomint_api_client::session_outcome::SignedSessionOutcome;
 use picomint_core::PeerId;
 use picomint_encoding::Encodable;
 use picomint_core::secp256k1::schnorr;
-use picomint_core::util::FmtCompact as _;
 use picomint_logging::LOG_CONSENSUS;
 use picomint_redb::Database;
 use tracing::error;
@@ -95,7 +94,7 @@ impl aleph_bft::Network<NetworkData> for Network {
                             error!(
                                 target: LOG_CONSENSUS,
                                 %peer_id,
-                                err = %err.fmt_compact(),
+                                err = %err,
                                 "Failed to decode Aleph BFT network data"
                             );
                         }

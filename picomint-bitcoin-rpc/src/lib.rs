@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Result, ensure};
 use picomint_core::bitcoin::{Block, BlockHash, Network, Transaction};
 use picomint_core::task::TaskGroup;
-use picomint_core::util::{FmtCompactAnyhow as _, SafeUrl};
+use picomint_core::util::{SafeUrl};
 use picomint_core::{ChainId, Feerate};
 use picomint_logging::LOG_SERVER;
 use tokio::sync::watch;
@@ -152,7 +152,7 @@ impl BitcoinRpcMonitor {
                     Err(err) => {
                         warn!(
                             target: LOG_SERVER,
-                            err = %err.fmt_compact_anyhow(),
+                            err = %format_args!("{err:#}"),
                             "Bitcoin status update failed"
                         );
                         status_sender.send_replace(None);

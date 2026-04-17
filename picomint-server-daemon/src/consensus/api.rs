@@ -17,7 +17,6 @@ use picomint_server_core::handler;
 
 use crate::consensus::rpc;
 use picomint_core::task::TaskGroup;
-use picomint_core::util::FmtCompact;
 use picomint_core::{PeerId, TransactionId};
 use picomint_logging::LOG_NET_API;
 use picomint_redb::{Database, ReadTransaction};
@@ -73,7 +72,7 @@ impl ConsensusApi {
         process_transaction_with_server(&self.server, &tx, &transaction)
             .await
             .inspect_err(|err| {
-                debug!(target: LOG_NET_API, %txid, err = %err.fmt_compact(), "Transaction rejected");
+                debug!(target: LOG_NET_API, %txid, err = %err, "Transaction rejected");
             })?;
 
         drop(tx);
@@ -83,7 +82,7 @@ impl ConsensusApi {
             .send(ConsensusItem::Transaction(transaction.clone()))
             .await
             .inspect_err(|err| {
-                warn!(target: LOG_NET_API, %txid, err = %err.fmt_compact(), "Unable to submit the tx into consensus");
+                warn!(target: LOG_NET_API, %txid, err = %err, "Unable to submit the tx into consensus");
             });
 
         Ok(txid)

@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use picomint_core::runtime;
-use picomint_core::util::FmtCompactAnyhow as _;
 use picomint_logging::LOG_CLIENT;
 use tracing::{debug, warn};
 
@@ -66,7 +65,7 @@ impl Drop for ClientHandle {
                     .shutdown_join_all(Some(Duration::from_secs(30)))
                     .await
                 {
-                    warn!(target: LOG_CLIENT, err = %err.fmt_compact_anyhow(), "Error waiting for client task group to shut down");
+                    warn!(target: LOG_CLIENT, err = %format_args!("{err:#}"), "Error waiting for client task group to shut down");
                 }
             });
         });
