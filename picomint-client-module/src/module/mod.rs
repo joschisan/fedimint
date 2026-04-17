@@ -6,7 +6,7 @@ use std::{marker, ops};
 
 use anyhow::bail;
 use bitcoin::secp256k1::PublicKey;
-use picomint_api_client::api::FederationApi;
+use picomint_api_client::api::{ApiScope, FederationApi};
 use picomint_api_client::config::ConsensusConfig;
 use picomint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
@@ -144,6 +144,7 @@ impl fmt::Debug for FinalClientIface {
 pub struct ClientContext<M> {
     client: FinalClientIface,
     module_instance_id: ModuleInstanceId,
+    api_scope: ApiScope,
     module_db: Database,
     _marker: marker::PhantomData<M>,
 }
@@ -154,6 +155,7 @@ impl<M> Clone for ClientContext<M> {
             client: self.client.clone(),
             module_db: self.module_db.clone(),
             module_instance_id: self.module_instance_id,
+            api_scope: self.api_scope,
             _marker: marker::PhantomData,
         }
     }
@@ -196,11 +198,13 @@ where
     pub fn new(
         client: FinalClientIface,
         module_instance_id: ModuleInstanceId,
+        api_scope: ApiScope,
         module_db: Database,
     ) -> Self {
         Self {
             client,
             module_instance_id,
+            api_scope,
             module_db,
             _marker: marker::PhantomData,
         }
@@ -232,7 +236,7 @@ where
 
     /// Get a reference to a module Api handle
     pub fn module_api(&self) -> FederationApi {
-        self.global_api().with_module(self.module_instance_id)
+        self.global_api().with_scope(self.api_scope)
     }
 
     /// Lift a typed [`ClientOutputBundle`] into a wire-level one.

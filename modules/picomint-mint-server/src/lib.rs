@@ -5,6 +5,7 @@
 #![allow(clippy::similar_names)]
 
 mod db;
+mod rpc;
 
 use std::collections::BTreeMap;
 
@@ -12,9 +13,7 @@ use anyhow::ensure;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::encoding::Encodable;
 use picomint_core::module::audit::Audit;
-use picomint_core::module::{
-    api_endpoint, ApiEndpoint, ApiError, InputMeta, TransactionItemAmounts,
-};
+use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::{Amount, InPoint, OutPoint, PeerId};
 use picomint_mint_common::config::{
     consensus_denominations, MintConfig, MintConfigConsensus, MintConfigPrivate,
@@ -29,8 +28,8 @@ use picomint_mint_common::{
 };
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use picomint_server_core::config::{eval_poly_g2, PeerHandleOps};
-use picomint_server_core::ServerModule;
-use tbs::{derive_pk_share, AggregatePublicKey, BlindedSignatureShare, PublicKeyShare};
+use picomint_server_core::{handler, ServerModule};
+use tbs::{derive_pk_share, AggregatePublicKey, PublicKeyShare};
 use threshold_crypto::group::Curve;
 
 use crate::db::{
@@ -245,98 +244,27 @@ impl ServerModule for Mint {
         audit.add_items(module_instance_id, items);
     }
 
-    fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
-        vec![
-            api_endpoint! {
-                SIGNATURE_SHARES_ENDPOINT,
-                async |module: &Mint, range: picomint_core::OutPointRange| -> Vec<BlindedSignatureShare> {
-                    let db = module.db.clone();
-
-                    let tx = db
-                        .wait_key_check(&BLINDED_SIGNATURE_SHARE, &range.start_out_point(), std::convert::identity)
-                        .await.1;
-
-                    Ok(get_signature_shares(&tx, range))
-                }
-            },
-            api_endpoint! {
-                SIGNATURE_SHARES_RECOVERY_ENDPOINT,
-                async |module: &Mint, messages: Vec<tbs::BlindedMessage>| -> Vec<BlindedSignatureShare> {
-                    let db = module.db.clone();
-                    let tx = db.begin_read().await;
-                    get_signature_shares_recovery(&tx, messages)
-                }
-            },
-            api_endpoint! {
-                RECOVERY_SLICE_ENDPOINT,
-                async |module: &Mint, range: (u64, u64)| -> Vec<RecoveryItem> {
-                    let db = module.db.clone();
-                    let tx = db.begin_read().await;
-                    Ok(get_recovery_slice(&tx, range))
-                }
-            },
-            api_endpoint! {
-                RECOVERY_SLICE_HASH_ENDPOINT,
-                async |module: &Mint, range: (u64, u64)| -> bitcoin::hashes::sha256::Hash {
-                    let db = module.db.clone();
-                    let tx = db.begin_read().await;
-                    Ok(get_recovery_slice(&tx, range).consensus_hash())
-                }
-            },
-            api_endpoint! {
-                RECOVERY_COUNT_ENDPOINT,
-                async |module: &Mint, _params: ()| -> u64 {
-                    let db = module.db.clone();
-                    let tx = db.begin_read().await;
-                    Ok(get_recovery_count(&tx))
-                }
-            },
-        ]
+    async fn handle_api(
+        &self,
+        method: &str,
+        req: ApiRequestErased,
+    ) -> Result<Vec<u8>, ApiError> {
+        match method {
+            SIGNATURE_SHARES_ENDPOINT => handler!(signature_shares, self, req).await,
+            SIGNATURE_SHARES_RECOVERY_ENDPOINT => {
+                handler!(signature_shares_recovery, self, req).await
+            }
+            RECOVERY_SLICE_ENDPOINT => handler!(recovery_slice, self, req).await,
+            RECOVERY_SLICE_HASH_ENDPOINT => handler!(recovery_slice_hash, self, req).await,
+            RECOVERY_COUNT_ENDPOINT => handler!(recovery_count, self, req).await,
+            other => Err(ApiError::not_found(other.to_string())),
+        }
     }
 }
 
-fn get_signature_shares(
-    tx: &picomint_redb::ReadTransaction,
-    range: picomint_core::OutPointRange,
-) -> Vec<BlindedSignatureShare> {
-    tx.range(
-        &BLINDED_SIGNATURE_SHARE,
-        range.start_out_point()..range.end_out_point(),
-    )
-    .into_iter()
-    .map(|(_, v)| v)
-    .collect()
-}
-
-fn get_signature_shares_recovery(
-    tx: &picomint_redb::ReadTransaction,
-    messages: Vec<tbs::BlindedMessage>,
-) -> Result<Vec<BlindedSignatureShare>, ApiError> {
-    let mut shares = Vec::new();
-
-    for message in messages {
-        let share =
-            tx.get(&BLINDED_SIGNATURE_SHARE_RECOVERY, &message)
-                .ok_or(ApiError::bad_request(
-                    "No blinded signature share found".to_string(),
-                ))?;
-
-        shares.push(share);
-    }
-
-    Ok(shares)
-}
-
-fn get_recovery_count(dbtx: &impl picomint_redb::DbRead) -> u64 {
+pub(crate) fn get_recovery_count(dbtx: &impl picomint_redb::DbRead) -> u64 {
     dbtx.iter(&RECOVERY_ITEM)
         .into_iter()
         .next_back()
         .map_or(0, |(idx, _)| idx + 1)
-}
-
-fn get_recovery_slice(tx: &picomint_redb::ReadTransaction, range: (u64, u64)) -> Vec<RecoveryItem> {
-    tx.range(&RECOVERY_ITEM, range.0..range.1)
-        .into_iter()
-        .map(|(_, v)| v)
-        .collect()
 }

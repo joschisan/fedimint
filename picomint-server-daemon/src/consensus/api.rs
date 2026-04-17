@@ -5,9 +5,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use picomint_api_client::config::ConsensusConfig;
-use picomint_api_client::transaction::{
-    ConsensusItem, Transaction, TransactionError, TransactionSubmissionOutcome,
-};
+use picomint_api_client::transaction::{ConsensusItem, Transaction, TransactionError};
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::endpoint_constants::{
@@ -15,7 +13,10 @@ use picomint_core::endpoint_constants::{
     SUBMIT_TRANSACTION_ENDPOINT,
 };
 use picomint_core::module::audit::{Audit, AuditSummary};
-use picomint_core::module::{ApiAuth, ApiEndpoint, api_endpoint};
+use picomint_core::module::{ApiAuth, ApiError, ApiRequestErased};
+use picomint_server_core::handler;
+
+use crate::consensus::rpc;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::FmtCompact;
 use picomint_core::{PeerId, TransactionId};
@@ -126,35 +127,18 @@ impl ConsensusApi {
     }
 }
 
-pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
-    vec![
-        api_endpoint! {
-            SUBMIT_TRANSACTION_ENDPOINT,
-            async |picomint: &ConsensusApi, transaction: Transaction| -> TransactionSubmissionOutcome {
-                // we return an inner error if and only if the submitted transaction is
-                // invalid and will be rejected if we were to submit it to consensus
-                Ok(TransactionSubmissionOutcome(picomint.submit_transaction(transaction).await))
-            }
-        },
-        api_endpoint! {
-            AWAIT_TRANSACTION_ENDPOINT,
-            async |picomint: &ConsensusApi, tx_hash: TransactionId| -> TransactionId {
-                picomint.await_transaction(tx_hash).await;
-
-                Ok(tx_hash)
-            }
-        },
-        api_endpoint! {
-            CLIENT_CONFIG_ENDPOINT,
-            async |picomint: &ConsensusApi, _v: ()| -> ConsensusConfig {
-                Ok(picomint.client_cfg.clone())
-            }
-        },
-        api_endpoint! {
-            LIVENESS_ENDPOINT,
-            async |_picomint: &ConsensusApi, _v: ()| -> () {
-                Ok(())
-            }
-        },
-    ]
+impl ConsensusApi {
+    pub async fn handle_api(
+        &self,
+        method: &str,
+        req: ApiRequestErased,
+    ) -> Result<Vec<u8>, ApiError> {
+        match method {
+            SUBMIT_TRANSACTION_ENDPOINT => handler!(submit_transaction, self, req).await,
+            AWAIT_TRANSACTION_ENDPOINT => handler!(await_transaction, self, req).await,
+            CLIENT_CONFIG_ENDPOINT => handler!(client_config, self, req).await,
+            LIVENESS_ENDPOINT => handler!(liveness, self, req).await,
+            other => Err(ApiError::not_found(other.to_string())),
+        }
+    }
 }

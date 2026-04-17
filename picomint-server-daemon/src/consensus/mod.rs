@@ -3,6 +3,7 @@ pub mod api;
 pub mod db;
 pub mod debug;
 pub mod engine;
+mod rpc;
 pub mod server;
 pub mod transaction;
 
@@ -11,7 +12,6 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_channel::Sender;
 use futures::FutureExt;
 use iroh::Endpoint;
 use iroh::endpoint::{Incoming, RecvStream, SendStream};
@@ -22,7 +22,7 @@ use picomint_core::NumPeers;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::module::{
-    ApiAuth, ApiEndpoint, ApiError, ApiMethod, IrohApiRequest, PICOMINT_API_ALPN,
+    ApiAuth, ApiError, ApiMethod, IrohApiRequest, ModuleCommon, PICOMINT_API_ALPN,
 };
 use picomint_core::net::iroh::build_iroh_endpoint;
 use picomint_core::task::{TaskGroup, sleep};
@@ -35,7 +35,7 @@ use tokio::sync::{Semaphore, watch};
 use tracing::{info, warn};
 
 use crate::config::ServerConfig;
-use crate::consensus::api::{ConsensusApi, server_endpoints};
+use crate::consensus::api::ConsensusApi;
 use crate::consensus::engine::ConsensusEngine;
 use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
 
@@ -149,27 +149,27 @@ pub async fn run(
 
     submit_module_ci_proposals(
         task_group,
-        db.clone(),
-        "mint".to_string(),
+        "mint",
         consensus_api.server.mint.clone(),
+        db.clone(),
+        submission_sender.clone(),
         wire::ModuleConsensusItem::Mint,
-        submission_sender.clone(),
     );
     submit_module_ci_proposals(
         task_group,
-        db.clone(),
-        "ln".to_string(),
+        "ln",
         consensus_api.server.ln.clone(),
-        wire::ModuleConsensusItem::Ln,
+        db.clone(),
         submission_sender.clone(),
+        wire::ModuleConsensusItem::Ln,
     );
     submit_module_ci_proposals(
         task_group,
-        db.clone(),
-        "wallet".to_string(),
+        "wallet",
         consensus_api.server.wallet.clone(),
-        wire::ModuleConsensusItem::Wallet,
+        db.clone(),
         submission_sender.clone(),
+        wire::ModuleConsensusItem::Wallet,
     );
 
     let ui_service = crate::ui::dashboard::router(consensus_api.clone()).into_make_service();
@@ -239,62 +239,41 @@ const CONSENSUS_PROPOSAL_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn submit_module_ci_proposals<M>(
     task_group: &TaskGroup,
-    db: Database,
-    namespace: String,
+    namespace: &'static str,
     module: Arc<M>,
-    to_wire: fn(
-        <M::Common as picomint_core::module::ModuleCommon>::ConsensusItem,
-    ) -> wire::ModuleConsensusItem,
-    submission_sender: Sender<ConsensusItem>,
+    db: Database,
+    submission_sender: async_channel::Sender<ConsensusItem>,
+    wrap: fn(<M::Common as ModuleCommon>::ConsensusItem) -> wire::ModuleConsensusItem,
 ) where
     M: ServerModule + Send + Sync + 'static,
 {
-    let mut interval = tokio::time::interval(if is_running_in_test_env() {
-        Duration::from_millis(100)
-    } else {
-        Duration::from_secs(1)
-    });
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
 
-    let namespace_clone = namespace.clone();
     task_group.spawn(
-        format!("citem_proposals_{namespace_clone}"),
+        format!("citem_proposals_{namespace}"),
         move |task_handle| async move {
             while !task_handle.is_shutting_down() {
                 let tx = db.begin_read().await;
-                let view = tx.isolate(namespace.clone());
-                let module_consensus_items = tokio::time::timeout(
+                let view = tx.isolate(namespace.to_string());
+                match tokio::time::timeout(
                     CONSENSUS_PROPOSAL_TIMEOUT,
                     module.consensus_proposal(&view),
                 )
-                .await;
-                drop(view);
-                drop(tx);
-
-                match module_consensus_items {
+                .await
+                {
                     Ok(items) => {
                         for item in items {
-                            if submission_sender
-                                .send(ConsensusItem::Module(to_wire(item)))
-                                .await
-                                .is_err()
-                            {
-                                warn!(
-                                    target: LOG_CONSENSUS,
-                                    %namespace,
-                                    "Unable to submit module consensus item proposal via channel"
-                                );
-                            }
+                            let _ = submission_sender
+                                .send(ConsensusItem::Module(wrap(item)))
+                                .await;
                         }
                     }
-                    Err(..) => {
-                        warn!(
-                            target: LOG_CONSENSUS,
-                            %namespace,
-                            "Module failed to propose consensus items on time"
-                        );
-                    }
+                    Err(_) => warn!(
+                        target: LOG_CONSENSUS,
+                        namespace,
+                        "Module failed to propose consensus items on time",
+                    ),
                 }
-
                 interval.tick().await;
             }
         },
@@ -335,31 +314,6 @@ async fn run_iroh_api(
     max_connections: usize,
     max_requests_per_connection: usize,
 ) {
-    use picomint_ln_server::Lightning;
-    use picomint_mint_server::Mint;
-    use picomint_wallet_server::Wallet;
-
-    let core_api = server_endpoints()
-        .into_iter()
-        .map(|endpoint| (endpoint.path.to_string(), endpoint))
-        .collect::<BTreeMap<String, ApiEndpoint<ConsensusApi>>>();
-
-    fn build<M: ServerModule>(module: &M) -> BTreeMap<String, ApiEndpoint<M>> {
-        module
-            .api_endpoints()
-            .into_iter()
-            .map(|endpoint| (endpoint.path.to_string(), endpoint))
-            .collect()
-    }
-
-    let mint_api = build::<Mint>(&consensus_api.server.mint);
-    let ln_api = build::<Lightning>(&consensus_api.server.ln);
-    let wallet_api = build::<Wallet>(&consensus_api.server.wallet);
-
-    let core_api = Arc::new(core_api);
-    let mint_api = Arc::new(mint_api);
-    let ln_api = Arc::new(ln_api);
-    let wallet_api = Arc::new(wallet_api);
     let parallel_connections_limit = Arc::new(Semaphore::new(max_connections));
 
     loop {
@@ -381,10 +335,6 @@ async fn run_iroh_api(
                     "handle-iroh-connection",
                     handle_incoming(
                         consensus_api.clone(),
-                        core_api.clone(),
-                        mint_api.clone(),
-                        ln_api.clone(),
-                        wallet_api.clone(),
                         task_group.clone(),
                         incoming,
                         permit,
@@ -402,17 +352,8 @@ async fn run_iroh_api(
     }
 }
 
-type MintApi = BTreeMap<String, ApiEndpoint<picomint_mint_server::Mint>>;
-type LnApi = BTreeMap<String, ApiEndpoint<picomint_ln_server::Lightning>>;
-type WalletApi = BTreeMap<String, ApiEndpoint<picomint_wallet_server::Wallet>>;
-
-#[allow(clippy::too_many_arguments)]
 async fn handle_incoming(
     consensus_api: Arc<ConsensusApi>,
-    core_api: Arc<BTreeMap<String, ApiEndpoint<ConsensusApi>>>,
-    mint_api: Arc<MintApi>,
-    ln_api: Arc<LnApi>,
-    wallet_api: Arc<WalletApi>,
     task_group: TaskGroup,
     incoming: Incoming,
     _connection_permit: tokio::sync::OwnedSemaphorePermit,
@@ -438,88 +379,60 @@ async fn handle_incoming(
             .expect("semaphore should not be closed");
         task_group.spawn_cancellable_silent(
             "handle-iroh-request",
-            handle_request(
-                consensus_api.clone(),
-                core_api.clone(),
-                mint_api.clone(),
-                ln_api.clone(),
-                wallet_api.clone(),
-                send_stream,
-                recv_stream,
-                permit,
-            )
-            .then(|result| async {
-                if let Err(err) = result {
-                    warn!(target: LOG_NET_API, err = %err.fmt_compact_anyhow(), "Failed to handle iroh request");
-                }
-            }),
+            handle_request(consensus_api.clone(), send_stream, recv_stream, permit).then(
+                |result| async {
+                    if let Err(err) = result {
+                        warn!(target: LOG_NET_API, err = %err.fmt_compact_anyhow(), "Failed to handle iroh request");
+                    }
+                },
+            ),
         );
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_request(
     consensus_api: Arc<ConsensusApi>,
-    core_api: Arc<BTreeMap<String, ApiEndpoint<ConsensusApi>>>,
-    mint_api: Arc<MintApi>,
-    ln_api: Arc<LnApi>,
-    wallet_api: Arc<WalletApi>,
     mut send_stream: SendStream,
     mut recv_stream: RecvStream,
     _request_permit: tokio::sync::OwnedSemaphorePermit,
 ) -> anyhow::Result<()> {
     let request = recv_stream.read_to_end(100_000).await?;
-
     let request = IrohApiRequest::consensus_decode_exact(&request)?;
 
-    let response = await_response(
-        consensus_api,
-        core_api,
-        mint_api,
-        ln_api,
-        wallet_api,
-        request,
-    )
-    .await;
-
+    let response = dispatch(consensus_api, request).await;
     let response = response.consensus_encode_to_vec();
 
     send_stream.write_all(&response).await?;
-
     send_stream.finish()?;
-
     Ok(())
 }
 
-async fn await_response(
+async fn dispatch(
     consensus_api: Arc<ConsensusApi>,
-    core_api: Arc<BTreeMap<String, ApiEndpoint<ConsensusApi>>>,
-    mint_api: Arc<MintApi>,
-    ln_api: Arc<LnApi>,
-    wallet_api: Arc<WalletApi>,
     request: IrohApiRequest,
 ) -> Result<Vec<u8>, ApiError> {
-    use picomint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
-
     match request.method {
-        ApiMethod::Core(method) => {
-            let endpoint = core_api.get(&method).ok_or(ApiError::not_found(method))?;
-            (endpoint.handler)(&consensus_api, request.request).await
+        ApiMethod::Core(method) => consensus_api.handle_api(&method, request.request).await,
+        ApiMethod::Mint(method) => {
+            consensus_api
+                .server
+                .mint
+                .handle_api(&method, request.request)
+                .await
         }
-        ApiMethod::Module(module_id, method) => match module_id {
-            MINT_INSTANCE_ID => {
-                let endpoint = mint_api.get(&method).ok_or(ApiError::not_found(method))?;
-                (endpoint.handler)(&consensus_api.server.mint, request.request).await
-            }
-            LN_INSTANCE_ID => {
-                let endpoint = ln_api.get(&method).ok_or(ApiError::not_found(method))?;
-                (endpoint.handler)(&consensus_api.server.ln, request.request).await
-            }
-            WALLET_INSTANCE_ID => {
-                let endpoint = wallet_api.get(&method).ok_or(ApiError::not_found(method))?;
-                (endpoint.handler)(&consensus_api.server.wallet, request.request).await
-            }
-            other => Err(ApiError::not_found(other.to_string())),
-        },
+        ApiMethod::Ln(method) => {
+            consensus_api
+                .server
+                .ln
+                .handle_api(&method, request.request)
+                .await
+        }
+        ApiMethod::Wallet(method) => {
+            consensus_api
+                .server
+                .wallet
+                .handle_api(&method, request.request)
+                .await
+        }
     }
 }

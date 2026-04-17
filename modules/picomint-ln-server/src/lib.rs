@@ -5,8 +5,7 @@
 pub use picomint_ln_common as common;
 
 mod db;
-
-use std::time::Duration;
+mod rpc;
 
 use anyhow::{Context, ensure};
 use group::Curve;
@@ -14,31 +13,27 @@ use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::bitcoin::Network;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::module::audit::Audit;
-use picomint_core::module::{
-    ApiEndpoint, ApiError, InputMeta, TransactionItemAmounts, api_endpoint,
-};
-use picomint_core::task::timeout;
+use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_ln_common::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
-use picomint_ln_common::contracts::IncomingContract;
 use picomint_ln_common::endpoint_constants::{
     AWAIT_INCOMING_CONTRACT_ENDPOINT, AWAIT_INCOMING_CONTRACTS_ENDPOINT, AWAIT_PREIMAGE_ENDPOINT,
     CONSENSUS_BLOCK_COUNT_ENDPOINT, DECRYPTION_KEY_SHARE_ENDPOINT, GATEWAYS_ENDPOINT,
     OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
 };
 use picomint_ln_common::{
-    ContractId, LightningConsensusItem, LightningInput, LightningInputError, LightningModuleTypes,
+    LightningConsensusItem, LightningInput, LightningInputError, LightningModuleTypes,
     LightningOutput, LightningOutputError, OutgoingWitness,
 };
 use picomint_logging::LOG_MODULE_LN;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
-use picomint_server_core::ServerModule;
 use picomint_server_core::config::{PeerHandleOps, eval_poly_g1};
-use tpe::{DecryptionKeyShare, PublicKeyShare, SecretKeyShare};
+use picomint_server_core::{handler, ServerModule};
+use tpe::{PublicKeyShare, SecretKeyShare};
 use tracing::trace;
 
 use crate::db::{
@@ -318,75 +313,23 @@ impl ServerModule for Lightning {
         );
     }
 
-    fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
-        vec![
-            api_endpoint! {
-                CONSENSUS_BLOCK_COUNT_ENDPOINT,
-                async |module: &Lightning, _params : () | -> u64 {
-                    let db = module.db.clone();
-                    let tx = db.begin_read().await;
-
-                    Ok(module.consensus_block_count(&tx))
-                }
-            },
-            api_endpoint! {
-                AWAIT_INCOMING_CONTRACT_ENDPOINT,
-                async |module: &Lightning, params: (ContractId, u64) | -> Option<OutPoint> {
-                    let db = module.db.clone();
-
-                    Ok(module.await_incoming_contract(db, params.0, params.1).await)
-                }
-            },
-            api_endpoint! {
-                AWAIT_PREIMAGE_ENDPOINT,
-                async |module: &Lightning, params: (OutPoint, u64)| -> Option<[u8; 32]> {
-                    let db = module.db.clone();
-
-                    Ok(module.await_preimage(db, params.0, params.1).await)
-                }
-            },
-            api_endpoint! {
-                DECRYPTION_KEY_SHARE_ENDPOINT,
-                async |module: &Lightning, params: OutPoint| -> DecryptionKeyShare {
-                    let share = module
-                        .db
-                        .begin_read()
-                        .await
-                        .get(&DECRYPTION_KEY_SHARE, &params)
-                        .ok_or(ApiError::bad_request("No decryption key share found".to_string()))?;
-
-                    Ok(share)
-                }
-            },
-            api_endpoint! {
-                OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
-                async |module: &Lightning, outpoint: OutPoint| -> Option<(ContractId, u64)> {
-                    let db = module.db.clone();
-
-                    Ok(module.outgoing_contract_expiration(db, outpoint).await)
-                }
-            },
-            api_endpoint! {
-                AWAIT_INCOMING_CONTRACTS_ENDPOINT,
-                async |module: &Lightning, params: (u64, u64)| -> (Vec<IncomingContract>, u64) {
-                    let db = module.db.clone();
-
-                    if params.1 == 0 {
-                        return Err(ApiError::bad_request("Batch size must be greater than 0".to_string()));
-                    }
-
-                    Ok(module.await_incoming_contracts(db, params.0, params.1).await)
-                }
-            },
-            api_endpoint! {
-                GATEWAYS_ENDPOINT,
-                async |module: &Lightning, _params : () | -> Vec<SafeUrl> {
-                    let db = module.db.clone();
-
-                    Ok(Lightning::gateways(db).await)
-                }
-            },
-        ]
+    async fn handle_api(
+        &self,
+        method: &str,
+        req: ApiRequestErased,
+    ) -> Result<Vec<u8>, ApiError> {
+        match method {
+            CONSENSUS_BLOCK_COUNT_ENDPOINT => handler!(consensus_block_count, self, req).await,
+            AWAIT_INCOMING_CONTRACT_ENDPOINT => handler!(await_incoming_contract, self, req).await,
+            AWAIT_PREIMAGE_ENDPOINT => handler!(await_preimage, self, req).await,
+            DECRYPTION_KEY_SHARE_ENDPOINT => handler!(decryption_key_share, self, req).await,
+            OUTGOING_CONTRACT_EXPIRATION_ENDPOINT => {
+                handler!(outgoing_contract_expiration, self, req).await
+            }
+            AWAIT_INCOMING_CONTRACTS_ENDPOINT => handler!(await_incoming_contracts, self, req).await,
+            GATEWAYS_ENDPOINT => handler!(gateways, self, req).await,
+            other => Err(ApiError::not_found(other.to_string())),
+        }
     }
 }
 
@@ -398,7 +341,7 @@ impl Lightning {
             .context("Block count not available yet")
     }
 
-    fn consensus_block_count(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
+    pub(crate) fn consensus_block_count(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut counts = dbtx
@@ -420,7 +363,7 @@ impl Lightning {
         counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    fn consensus_unix_time(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
+    pub(crate) fn consensus_unix_time(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut times = dbtx
@@ -438,130 +381,6 @@ impl Lightning {
         times.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    async fn await_incoming_contract(
-        &self,
-        db: Database,
-        contract_id: ContractId,
-        expiration: u64,
-    ) -> Option<OutPoint> {
-        loop {
-            // Wait for the contract to appear, or time out periodically to check
-            // expiration.
-            let wait = db.wait_key(&INCOMING_CONTRACT_OUTPOINT, &contract_id);
-
-            if let Ok((outpoint, _tx)) = timeout(Duration::from_secs(10), wait).await {
-                return Some(outpoint);
-            }
-
-            // Timed out; check whether the contract arrived or has expired.
-            let tx = db.begin_read().await;
-
-            if let Some(outpoint) = tx.get(&INCOMING_CONTRACT_OUTPOINT, &contract_id) {
-                return Some(outpoint);
-            }
-
-            if expiration <= self.consensus_unix_time(&tx) {
-                return None;
-            }
-        }
-    }
-
-    async fn await_preimage(
-        &self,
-        db: Database,
-        outpoint: OutPoint,
-        expiration: u64,
-    ) -> Option<[u8; 32]> {
-        loop {
-            let wait = db.wait_key(&PREIMAGE, &outpoint);
-
-            if let Ok((preimage, _tx)) = timeout(Duration::from_secs(10), wait).await {
-                return Some(preimage);
-            }
-
-            let tx = db.begin_read().await;
-
-            if let Some(preimage) = tx.get(&PREIMAGE, &outpoint) {
-                return Some(preimage);
-            }
-
-            if expiration <= self.consensus_block_count(&tx) {
-                return None;
-            }
-        }
-    }
-
-    async fn outgoing_contract_expiration(
-        &self,
-        db: Database,
-        outpoint: OutPoint,
-    ) -> Option<(ContractId, u64)> {
-        let tx = db.begin_read().await;
-
-        let contract = tx.get(&OUTGOING_CONTRACT, &outpoint)?;
-
-        let consensus_block_count = self.consensus_block_count(&tx);
-
-        let expiration = contract.expiration.saturating_sub(consensus_block_count);
-
-        Some((contract.contract_id(), expiration))
-    }
-
-    async fn await_incoming_contracts(
-        &self,
-        db: Database,
-        start: u64,
-        n: u64,
-    ) -> (Vec<IncomingContract>, u64) {
-        let filter = |next_index: Option<u64>| next_index.filter(|i| *i > start);
-
-        let (mut next_index, tx) = db
-            .wait_key_check(&INCOMING_CONTRACT_STREAM_INDEX, &(), filter)
-            .await;
-
-        let mut contracts = Vec::new();
-
-        for (key, contract) in tx
-            .range(&INCOMING_CONTRACT_STREAM, start..u64::MAX)
-            .into_iter()
-            .take(n as usize)
-        {
-            contracts.push(contract);
-            next_index = key + 1;
-        }
-
-        (contracts, next_index)
-    }
-
-    async fn add_gateway(db: Database, gateway: SafeUrl) -> bool {
-        let tx = db.begin_write().await;
-
-        let is_new_entry = tx.insert(&GATEWAY, &gateway, &()).is_none();
-
-        tx.commit().await;
-
-        is_new_entry
-    }
-
-    async fn remove_gateway(db: Database, gateway: SafeUrl) -> bool {
-        let tx = db.begin_write().await;
-
-        let entry_existed = tx.remove(&GATEWAY, &gateway).is_some();
-
-        tx.commit().await;
-
-        entry_existed
-    }
-
-    async fn gateways(db: Database) -> Vec<SafeUrl> {
-        db.begin_read()
-            .await
-            .iter(&GATEWAY)
-            .into_iter()
-            .map(|(url, ())| url)
-            .collect()
-    }
-
     pub async fn consensus_block_count_ui(&self) -> u64 {
         self.consensus_block_count(&self.db.begin_read().await)
     }
@@ -571,14 +390,26 @@ impl Lightning {
     }
 
     pub async fn add_gateway_ui(&self, gateway: SafeUrl) -> bool {
-        Self::add_gateway(self.db.clone(), gateway).await
+        let tx = self.db.begin_write().await;
+        let is_new_entry = tx.insert(&GATEWAY, &gateway, &()).is_none();
+        tx.commit().await;
+        is_new_entry
     }
 
     pub async fn remove_gateway_ui(&self, gateway: SafeUrl) -> bool {
-        Self::remove_gateway(self.db.clone(), gateway).await
+        let tx = self.db.begin_write().await;
+        let entry_existed = tx.remove(&GATEWAY, &gateway).is_some();
+        tx.commit().await;
+        entry_existed
     }
 
     pub async fn gateways_ui(&self) -> Vec<SafeUrl> {
-        Self::gateways(self.db.clone()).await
+        self.db
+            .begin_read()
+            .await
+            .iter(&GATEWAY)
+            .into_iter()
+            .map(|(url, ())| url)
+            .collect()
     }
 }

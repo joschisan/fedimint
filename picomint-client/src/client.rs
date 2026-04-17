@@ -10,7 +10,7 @@ use anyhow::{Context as _, bail};
 use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1::{self, PublicKey};
 use futures::{Stream, StreamExt as _};
-use picomint_api_client::api::FederationApi;
+use picomint_api_client::api::{ApiScope, FederationApi};
 use picomint_api_client::config::ConsensusConfig;
 use picomint_api_client::transaction::Transaction;
 use picomint_api_client::{Endpoint, wire};
@@ -457,21 +457,21 @@ impl Client {
         &'_ self,
     ) -> anyhow::Result<ClientModuleInstance<'_, M>> {
         let tid = TypeId::of::<M>();
-        let (module_any, id): (&(dyn Any + Send + Sync), ModuleInstanceId) =
+        let (module_any, id, scope): (&(dyn Any + Send + Sync), ModuleInstanceId, ApiScope) =
             if tid == TypeId::of::<MintClientModule>() {
-                (&*self.mint, wire::MINT_INSTANCE_ID)
+                (&*self.mint, wire::MINT_INSTANCE_ID, ApiScope::Mint)
             } else if tid == TypeId::of::<WalletClientModule>() {
-                (&*self.wallet, wire::WALLET_INSTANCE_ID)
+                (&*self.wallet, wire::WALLET_INSTANCE_ID, ApiScope::Wallet)
             } else if tid == TypeId::of::<LightningClientModule>() {
                 match &self.ln {
-                    LnFlavor::Regular(m) => (&**m, wire::LN_INSTANCE_ID),
+                    LnFlavor::Regular(m) => (&**m, wire::LN_INSTANCE_ID, ApiScope::Ln),
                     LnFlavor::Gateway(_) => {
                         bail!("LightningClientModule is not mounted on this client")
                     }
                 }
             } else if tid == TypeId::of::<GatewayClientModuleV2>() {
                 match &self.ln {
-                    LnFlavor::Gateway(m) => (&**m, wire::LN_INSTANCE_ID),
+                    LnFlavor::Gateway(m) => (&**m, wire::LN_INSTANCE_ID, ApiScope::Ln),
                     LnFlavor::Regular(_) => {
                         bail!("GatewayClientModuleV2 is not mounted on this client")
                     }
@@ -487,7 +487,7 @@ impl Client {
         Ok(ClientModuleInstance {
             id,
             db,
-            api: self.api().with_module(id),
+            api: self.api().with_scope(scope),
             module,
         })
     }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use bitcoin::key::Secp256k1;
-use picomint_api_client::api::FederationApi;
+use picomint_api_client::api::{ApiScope, FederationApi};
 use picomint_api_client::config::ConsensusConfig;
 use picomint_api_client::{Endpoint, download_from_invite_code, wire};
 use picomint_client_module::ModuleRecoveryStarted;
@@ -282,6 +282,7 @@ impl ClientBuilder {
         let mint = init_or_recover(
             &self.mint_init,
             wire::MINT_INSTANCE_ID,
+            ApiScope::Mint,
             "mint",
             config.mint.clone(),
             &db,
@@ -302,6 +303,7 @@ impl ClientBuilder {
         let wallet = init_or_recover(
             &self.wallet_init,
             wire::WALLET_INSTANCE_ID,
+            ApiScope::Wallet,
             "wallet",
             config.wallet.clone(),
             &db,
@@ -324,6 +326,7 @@ impl ClientBuilder {
                 init_or_recover(
                     &init,
                     wire::LN_INSTANCE_ID,
+                    ApiScope::Ln,
                     "ln",
                     config.ln.clone(),
                     &db,
@@ -345,6 +348,7 @@ impl ClientBuilder {
                 init_or_recover(
                     &init,
                     wire::LN_INSTANCE_ID,
+                    ApiScope::Ln,
                     "ln",
                     config.ln.clone(),
                     &db,
@@ -467,6 +471,7 @@ impl ClientBuilder {
 async fn init_or_recover<I: ClientModuleInit>(
     init: &I,
     module_instance_id: ModuleInstanceId,
+    api_scope: ApiScope,
     kind_str: &'static str,
     typed_cfg: <<I as picomint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     db: &Database,
@@ -492,6 +497,7 @@ async fn init_or_recover<I: ClientModuleInit>(
         schedule_recovery(
             init,
             module_instance_id,
+            api_scope,
             kind_str,
             typed_cfg.clone(),
             db,
@@ -516,10 +522,11 @@ async fn init_or_recover<I: ClientModuleInit>(
         db: module_db.clone(),
         module_root_secret: root_secret.derive_module_secret(module_instance_id),
         api: api.clone(),
-        module_api: api.with_module(module_instance_id),
+        module_api: api.with_scope(api_scope),
         context: picomint_client_module::module::ClientContext::new(
             final_client,
             module_instance_id,
+            api_scope,
             module_db,
         ),
         task_group: task_group.clone(),
@@ -533,6 +540,7 @@ async fn init_or_recover<I: ClientModuleInit>(
 async fn schedule_recovery<I: ClientModuleInit>(
     init: &I,
     module_instance_id: ModuleInstanceId,
+    api_scope: ApiScope,
     kind_str: &'static str,
     cfg: <<I as picomint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     db: &Database,
@@ -589,7 +597,7 @@ where
 
     let (progress_tx, progress_rx) = tokio::sync::watch::channel(progress);
     let module_db = db.isolate(format!("module-{module_instance_id}"));
-    let module_api = api.with_module(module_instance_id);
+    let module_api = api.with_scope(api_scope);
     let init_clone = init.clone();
     let api_clone = api.clone();
     let task_group_clone = task_group.clone();
@@ -608,6 +616,7 @@ where
             context: picomint_client_module::module::ClientContext::new(
                 final_client_clone,
                 module_instance_id,
+                api_scope,
                 module_db,
             ),
             progress_tx,

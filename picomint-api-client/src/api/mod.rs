@@ -12,7 +12,6 @@ use futures::{Future, StreamExt};
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
-use picomint_core::core::ModuleInstanceId;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
@@ -114,10 +113,20 @@ pub type FederationResult<T> = Result<T, FederationError>;
 /// [`PeerState`] on a watch channel; requests wait for the first transition
 /// out of `None` and read the live connection (or fail) from the current
 /// value.
+/// Which of the three static modules this API handle is scoped to, if any.
+/// Determines which [`ApiMethod`] variant requests are wrapped in.
+#[derive(Clone, Copy, Debug)]
+pub enum ApiScope {
+    Core,
+    Mint,
+    Ln,
+    Wallet,
+}
+
 #[derive(Clone, Debug)]
 pub struct FederationApi {
     peers: BTreeSet<PeerId>,
-    module_id: Option<ModuleInstanceId>,
+    scope: ApiScope,
     states: BTreeMap<PeerId, watch::Receiver<Option<PeerState>>>,
 }
 
@@ -137,7 +146,7 @@ impl FederationApi {
 
         Self {
             peers: peers.keys().copied().collect(),
-            module_id: None,
+            scope: ApiScope::Core,
             states,
         }
     }
@@ -148,11 +157,11 @@ impl FederationApi {
     }
 
     /// Return a clone of this API scoped to a specific module, so subsequent
-    /// calls dispatch to `ApiMethod::Module(module_id, ...)`.
-    pub fn with_module(&self, id: ModuleInstanceId) -> FederationApi {
+    /// calls wrap in the matching [`ApiMethod`] variant.
+    pub fn with_scope(&self, scope: ApiScope) -> FederationApi {
         FederationApi {
             peers: self.peers.clone(),
-            module_id: Some(id),
+            scope,
             states: self.states.clone(),
         }
     }
@@ -184,9 +193,11 @@ impl FederationApi {
         method: &str,
         params: &ApiRequestErased,
     ) -> ServerResult<Vec<u8>> {
-        let method = match self.module_id {
-            Some(module_id) => ApiMethod::Module(module_id, method.to_string()),
-            None => ApiMethod::Core(method.to_string()),
+        let method = match self.scope {
+            ApiScope::Core => ApiMethod::Core(method.to_string()),
+            ApiScope::Mint => ApiMethod::Mint(method.to_string()),
+            ApiScope::Ln => ApiMethod::Ln(method.to_string()),
+            ApiScope::Wallet => ApiMethod::Wallet(method.to_string()),
         };
 
         trace!(target: LOG_CLIENT_NET_API, %peer_id, %method, "Api request");

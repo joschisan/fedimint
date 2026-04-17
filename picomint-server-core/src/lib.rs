@@ -4,12 +4,7 @@
 //! the three concrete server-side module implementations
 //! (`picomint-mint-server`, `picomint-ln-server`,
 //! `picomint-wallet-server`). It defines the `ServerModule` trait (which each
-//! module implements), the Bitcoin RPC abstraction consumed by modules, and the
-//! DKG-time `PeerHandleOps` trait.
-//!
-//! It intentionally does not know anything about the dashboard / setup UI or
-//! the dynamic module registry — after the minimint rip those live inside
-//! `picomint-server-daemon` alongside the single known module set.
+//! module implements) and the DKG-time `PeerHandleOps` trait.
 
 pub mod config;
 
@@ -17,7 +12,9 @@ use std::fmt::Debug;
 
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::module::audit::Audit;
-use picomint_core::module::{ApiEndpoint, InputMeta, ModuleCommon, TransactionItemAmounts};
+use picomint_core::module::{
+    ApiError, ApiRequestErased, InputMeta, ModuleCommon, TransactionItemAmounts,
+};
 use picomint_core::{InPoint, OutPoint, PeerId};
 use picomint_redb::{ReadTxRef, WriteTxRef};
 use serde::{Deserialize, Serialize};
@@ -34,23 +31,17 @@ pub struct P2PConnectionStatus {
 pub trait ServerModule: Debug + Sized {
     type Common: ModuleCommon;
 
-    /// This module's contribution to the next consensus proposal. This method
-    /// is only guaranteed to be called once every few seconds. Consensus items
-    /// are not meant to be latency critical; do not create them as
-    /// a response to a processed transaction. Only use consensus items to
-    /// establish consensus on a value that is required to verify
-    /// transactions, like unix time, block heights and feerates, and model all
-    /// other state changes trough transactions.
+    /// This module's contribution to the next consensus proposal. Only called
+    /// once every few seconds; consensus items are not meant to be latency
+    /// critical.
     async fn consensus_proposal(
         &self,
         dbtx: &ReadTxRef<'_>,
     ) -> Vec<<Self::Common as ModuleCommon>::ConsensusItem>;
 
-    /// This function is called once for every consensus item. The function
-    /// should return Ok if and only if the consensus item changes
-    /// the system state. *Therefore this method should return an error in case
-    /// of merely redundant consensus items such that they will be purged from
-    /// the history of the federation.*
+    /// Process a single consensus item. Return `Ok` only if it changes state;
+    /// return an error for merely redundant items so they get purged from
+    /// federation history.
     async fn process_consensus_item(
         &self,
         dbtx: &WriteTxRef<'_>,
@@ -58,10 +49,7 @@ pub trait ServerModule: Debug + Sized {
         peer_id: PeerId,
     ) -> anyhow::Result<()>;
 
-    /// Try to spend a transaction input. On success all necessary updates will
-    /// be part of the database transaction. On failure (e.g. double spend)
-    /// the database transaction is rolled back and the operation will take
-    /// no effect.
+    /// Try to spend a transaction input. On failure the dbtx is rolled back.
     async fn process_input(
         &self,
         dbtx: &WriteTxRef<'_>,
@@ -69,14 +57,7 @@ pub trait ServerModule: Debug + Sized {
         in_point: InPoint,
     ) -> Result<InputMeta, <Self::Common as ModuleCommon>::InputError>;
 
-    /// Try to create an output (e.g. issue notes, peg-out BTC, …). On success
-    /// all necessary updates to the database will be part of the database
-    /// transaction. On failure (e.g. double spend) the database transaction
-    /// is rolled back and the operation will take no effect.
-    ///
-    /// The supplied `out_point` identifies the operation (e.g. a peg-out or
-    /// note issuance) and can be used to retrieve its outcome later using
-    /// module-specific API endpoints.
+    /// Try to create an output.
     async fn process_output(
         &self,
         dbtx: &WriteTxRef<'_>,
@@ -84,11 +65,7 @@ pub trait ServerModule: Debug + Sized {
         out_point: OutPoint,
     ) -> Result<TransactionItemAmounts, <Self::Common as ModuleCommon>::OutputError>;
 
-    /// Queries the database and returns all assets and liabilities of the
-    /// module.
-    ///
-    /// Summing over all modules, if liabilities > assets then an error has
-    /// occurred in the database and consensus should halt.
+    /// Sum assets and liabilities of the module into the audit accumulator.
     async fn audit(
         &self,
         dbtx: &WriteTxRef<'_>,
@@ -96,9 +73,35 @@ pub trait ServerModule: Debug + Sized {
         module_instance_id: ModuleInstanceId,
     );
 
-    /// Returns a list of custom API endpoints defined by the module. These are
-    /// made available both to users as well as to other modules. They thus
-    /// should be deterministic, only dependant on their input and the
-    /// current epoch.
-    fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>>;
+    /// Dispatch a client API request to this module. Decode the request
+    /// params, run the matching handler, and return the consensus-encoded
+    /// response. Unknown methods return `ApiError::not_found`.
+    async fn handle_api(
+        &self,
+        method: &str,
+        req: ApiRequestErased,
+    ) -> Result<Vec<u8>, ApiError>;
+}
+
+/// Dispatch helper for [`ServerModule::handle_api`] arms.
+///
+/// `handler!(fn_name, self, req).await` expands to an `async` block that
+/// decodes `req` into the parameter type of `rpc::fn_name`, calls
+/// `rpc::fn_name(self, param).await`, and consensus-encodes the response.
+/// Each module is expected to have a `mod rpc` submodule with one
+/// `async fn name(module: &Self, param: P) -> Result<R, ApiError>` per
+/// endpoint. Mirrors the puncture-style dispatch pattern.
+#[macro_export]
+macro_rules! handler {
+    ($func:ident, $self:expr, $req:expr) => {
+        async move {
+            let param = $req
+                .to_typed()
+                .map_err(|e| ::picomint_core::module::ApiError::bad_request(e.to_string()))?;
+            let resp = rpc::$func($self, param).await?;
+            ::std::result::Result::Ok(
+                ::picomint_core::encoding::Encodable::consensus_encode_to_vec(&resp),
+            )
+        }
+    };
 }

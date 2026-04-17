@@ -11,6 +11,7 @@
 #![allow(clippy::too_many_lines)]
 
 pub mod db;
+mod rpc;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -32,14 +33,14 @@ use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::audit::Audit;
-use picomint_core::module::{ApiEndpoint, InputMeta, TransactionItemAmounts, api_endpoint};
+use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::task::TaskGroup;
 use picomint_core::task::sleep;
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId, util};
 use picomint_logging::LOG_MODULE_WALLET;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
-use picomint_server_core::ServerModule;
 use picomint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
+use picomint_server_core::{handler, ServerModule};
 pub use picomint_wallet_common as common;
 use picomint_wallet_common::config::{WalletConfig, WalletConfigPrivate};
 use picomint_wallet_common::endpoint_constants::{
@@ -504,97 +505,23 @@ impl ServerModule for Wallet {
         audit.add_items(module_instance_id, items);
     }
 
-    fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
-        vec![
-            api_endpoint! {
-                CONSENSUS_BLOCK_COUNT_ENDPOINT,
-                async |module: &Wallet, _params: ()| -> u64 {
-                    let db = module.db.clone();
-                    let dbtx = db.begin_write().await;
-                    let result = module.consensus_block_count(&dbtx.as_ref());
-                    dbtx.commit().await;
-                    Ok(result)
-                }
-            },
-            api_endpoint! {
-                CONSENSUS_FEERATE_ENDPOINT,
-                async |module: &Wallet, _params: ()| -> Option<u64> {
-                    let db = module.db.clone();
-                    let dbtx = db.begin_write().await;
-                    let result = module.consensus_feerate(&dbtx.as_ref());
-                    dbtx.commit().await;
-                    Ok(result)
-                }
-            },
-            api_endpoint! {
-                FEDERATION_WALLET_ENDPOINT,
-                async |module: &Wallet, _params: ()| -> Option<FederationWallet> {
-                    let db = module.db.clone();
-                    let tx = db.begin_read().await;
-                    Ok(tx.get(&FEDERATION_WALLET, &()))
-                }
-            },
-            api_endpoint! {
-                SEND_FEE_ENDPOINT,
-                async |module: &Wallet, _params: ()| -> Option<Amount> {
-                    let db = module.db.clone();
-                    let dbtx = db.begin_write().await;
-                    let result = module.send_fee(&dbtx.as_ref());
-                    dbtx.commit().await;
-                    Ok(result)
-                }
-            },
-            api_endpoint! {
-                RECEIVE_FEE_ENDPOINT,
-                async |module: &Wallet, _params: ()| -> Option<Amount> {
-                    let db = module.db.clone();
-                    let dbtx = db.begin_write().await;
-                    let result = module.receive_fee(&dbtx.as_ref());
-                    dbtx.commit().await;
-                    Ok(result)
-                }
-            },
-            api_endpoint! {
-                TRANSACTION_ID_ENDPOINT,
-                async |module: &Wallet, params: OutPoint| -> Option<Txid> {
-                    let db = module.db.clone();
-                    let dbtx = db.begin_write().await;
-                    let result = module.tx_id(&dbtx.as_ref(), params);
-                    dbtx.commit().await;
-                    Ok(result)
-                }
-            },
-            api_endpoint! {
-                OUTPUT_INFO_SLICE_ENDPOINT,
-                async |module: &Wallet, params: (u64, u64)| -> Vec<OutputInfo> {
-                    let db = module.db.clone();
-                    let dbtx = db.begin_write().await;
-                    let result = module.get_outputs(&dbtx.as_ref(), params.0, params.1);
-                    dbtx.commit().await;
-                    Ok(result)
-                }
-            },
-            api_endpoint! {
-                PENDING_TRANSACTION_CHAIN_ENDPOINT,
-                async |module: &Wallet, _params: ()| -> Vec<TxInfo> {
-                    let db = module.db.clone();
-                    let dbtx = db.begin_write().await;
-                    let result = module.pending_tx_chain(&dbtx.as_ref());
-                    dbtx.commit().await;
-                    Ok(result)
-                }
-            },
-            api_endpoint! {
-                TRANSACTION_CHAIN_ENDPOINT,
-                async |module: &Wallet, _params: ()| -> Vec<TxInfo> {
-                    let db = module.db.clone();
-                    let dbtx = db.begin_write().await;
-                    let result = module.tx_chain(&dbtx.as_ref());
-                    dbtx.commit().await;
-                    Ok(result)
-                }
-            },
-        ]
+    async fn handle_api(
+        &self,
+        method: &str,
+        req: ApiRequestErased,
+    ) -> Result<Vec<u8>, ApiError> {
+        match method {
+            CONSENSUS_BLOCK_COUNT_ENDPOINT => handler!(consensus_block_count, self, req).await,
+            CONSENSUS_FEERATE_ENDPOINT => handler!(consensus_feerate, self, req).await,
+            FEDERATION_WALLET_ENDPOINT => handler!(federation_wallet, self, req).await,
+            SEND_FEE_ENDPOINT => handler!(send_fee, self, req).await,
+            RECEIVE_FEE_ENDPOINT => handler!(receive_fee, self, req).await,
+            TRANSACTION_ID_ENDPOINT => handler!(tx_id, self, req).await,
+            OUTPUT_INFO_SLICE_ENDPOINT => handler!(output_info_slice, self, req).await,
+            PENDING_TRANSACTION_CHAIN_ENDPOINT => handler!(pending_tx_chain, self, req).await,
+            TRANSACTION_CHAIN_ENDPOINT => handler!(tx_chain, self, req).await,
+            other => Err(ApiError::not_found(other.to_string())),
+        }
     }
 }
 

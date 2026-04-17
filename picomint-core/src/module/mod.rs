@@ -20,21 +20,13 @@ pub mod audit;
 
 use std::error::Error;
 use std::fmt::{self, Debug, Formatter};
-use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use futures::Future;
-use picomint_logging::LOG_NET_API;
 use serde::{Deserialize, Serialize};
-use tracing::Instrument;
 
-// TODO: Make this module public and remove theDkgPeerMessage`pub use` below
 mod version;
 pub use self::version::*;
 use crate::Amount;
-use crate::core::ModuleInstanceId;
 use crate::encoding::{Decodable, Encodable};
-use crate::util::FmtCompact;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputMeta {
@@ -88,14 +80,18 @@ impl ApiRequestErased {
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum ApiMethod {
     Core(String),
-    Module(ModuleInstanceId, String),
+    Mint(String),
+    Ln(String),
+    Wallet(String),
 }
 
 impl fmt::Display for ApiMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Core(s) => f.write_str(s),
-            Self::Module(module_id, s) => f.write_fmt(format_args!("{module_id}-{s}")),
+            Self::Core(s) => f.write_fmt(format_args!("core/{s}")),
+            Self::Mint(s) => f.write_fmt(format_args!("mint/{s}")),
+            Self::Ln(s) => f.write_fmt(format_args!("ln/{s}")),
+            Self::Wallet(s) => f.write_fmt(format_args!("wallet/{s}")),
         }
     }
 }
@@ -192,138 +188,6 @@ impl ApiError {
 
     pub fn server_error(message: String) -> Self {
         Self::new(500, message)
-    }
-}
-
-#[async_trait::async_trait]
-pub trait TypedApiEndpoint {
-    type State: Sync;
-
-    /// example: /transaction
-    const PATH: &'static str;
-
-    type Param: Decodable + Send;
-    type Response: Encodable;
-
-    async fn handle<'state>(
-        state: &'state Self::State,
-        request: Self::Param,
-    ) -> Result<Self::Response, ApiError>;
-}
-
-/// # Example
-///
-/// ```rust
-/// # use picomint_core::module::{api_endpoint, ApiEndpoint};
-/// struct State;
-///
-/// let _: ApiEndpoint<State> = api_endpoint! {
-///     "/foobar",
-///     async |state: &State, params: ()| -> i32 {
-///         Ok(0)
-///     }
-/// };
-/// ```
-#[macro_export]
-macro_rules! __api_endpoint {
-    (
-        $path:expr_2021,
-        async |$state:ident: &$state_ty:ty, $param:ident: $param_ty:ty| -> $resp_ty:ty $body:block
-    ) => {{
-        struct Endpoint;
-
-        #[::async_trait::async_trait]
-        impl $crate::module::TypedApiEndpoint for Endpoint {
-            #[allow(deprecated)]
-            const PATH: &'static str = $path;
-            type State = $state_ty;
-            type Param = $param_ty;
-            type Response = $resp_ty;
-
-            async fn handle<'state>(
-                $state: &'state Self::State,
-                $param: Self::Param,
-            ) -> ::std::result::Result<Self::Response, $crate::module::ApiError> {
-                $body
-            }
-        }
-
-        $crate::module::ApiEndpoint::from_typed::<Endpoint>()
-    }};
-}
-
-pub use __api_endpoint as api_endpoint;
-
-type HandlerFnReturn<'a> = Pin<Box<dyn Future<Output = Result<Vec<u8>, ApiError>> + 'a + Send>>;
-type HandlerFn<M> =
-    Box<dyn for<'a> Fn(&'a M, ApiRequestErased) -> HandlerFnReturn<'a> + Send + Sync>;
-
-/// Definition of an API endpoint defined by a module `M`.
-pub struct ApiEndpoint<M> {
-    /// Path under which the API endpoint can be reached. It should start with a
-    /// `/` e.g. `/transaction`. E.g. this API endpoint would be reachable
-    /// under `module_module_instance_id_transaction` depending on the
-    /// module name returned by `[FedertionModule::api_base_name]`.
-    pub path: &'static str,
-    /// Handler for the API call that takes the following arguments:
-    ///   * Reference to the module which defined it
-    ///   * Request parameters as consensus-encoded bytes
-    pub handler: HandlerFn<M>,
-}
-
-/// Global request ID used for logging
-static REQ_ID: AtomicU64 = AtomicU64::new(0);
-
-// <()> is used to avoid specify state.
-impl ApiEndpoint<()> {
-    pub fn from_typed<E: TypedApiEndpoint>() -> ApiEndpoint<E::State>
-    where
-        <E as TypedApiEndpoint>::Response: Send,
-        E::Param: Debug,
-        E::Response: Debug,
-    {
-        async fn handle_request<'state, E>(
-            state: &'state E::State,
-            params: E::Param,
-        ) -> Result<E::Response, ApiError>
-        where
-            E: TypedApiEndpoint,
-            E::Param: Debug,
-            E::Response: Debug,
-        {
-            tracing::debug!(target: LOG_NET_API, path = E::PATH, ?params, "received api request");
-            let result = E::handle(state, params).await;
-            match &result {
-                Err(err) => {
-                    tracing::warn!(target: LOG_NET_API, path = E::PATH, err = %err.fmt_compact(), "api request error");
-                }
-                _ => {
-                    tracing::trace!(target: LOG_NET_API, path = E::PATH, "api request complete");
-                }
-            }
-            result
-        }
-
-        ApiEndpoint {
-            path: E::PATH,
-            handler: Box::new(|m, request| {
-                Box::pin(async move {
-                    let params = request
-                        .to_typed::<E::Param>()
-                        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-
-                    let span = tracing::info_span!(
-                        target: LOG_NET_API,
-                        "api_req",
-                        id = REQ_ID.fetch_add(1, Ordering::SeqCst),
-                        method = E::PATH,
-                    );
-                    let ret = handle_request::<E>(m, params).instrument(span).await?;
-
-                    Ok(ret.consensus_encode_to_vec())
-                })
-            }),
-        }
     }
 }
 
