@@ -27,7 +27,6 @@ members = [
     "picomint-server-cli-core",
     "picomint-server-core",
     "picomint-server-daemon",
-    "picomint-util-error",
     "modules/picomint-gw-client",
     "modules/picomint-ln-client",
     "modules/picomint-ln-common",
@@ -133,7 +132,6 @@ picomint-server-cli = { path = "./picomint-server-cli", version = "=0.1.0" }
 picomint-server-cli-core = { path = "./picomint-server-cli-core", version = "=0.1.0" }
 picomint-server-core = { path = "./picomint-server-core", version = "=0.1.0" }
 picomint-server-daemon = { path = "./picomint-server-daemon", version = "=0.1.0" }
-picomint-util-error = { path = "./picomint-util-error", version = "=0.1.0" }
 picomint-wallet-client = { path = "./modules/picomint-wallet-client", version = "=0.1.0" }
 picomint-wallet-common = { path = "./modules/picomint-wallet-common", version = "=0.1.0" }
 picomint-wallet-server = { path = "./modules/picomint-wallet-server", version = "=0.1.0" }

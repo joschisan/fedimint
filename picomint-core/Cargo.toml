@@ -34,7 +34,6 @@ bls12_381 = { workspace = true }
 erased-serde = { workspace = true }
 picomint-derive = { workspace = true }
 picomint-logging = { workspace = true }
-picomint-util-error = { workspace = true }
 futures = { workspace = true }
 group = { workspace = true }
 hex = { workspace = true, features = ["serde"] }

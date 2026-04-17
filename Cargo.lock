@@ -4666,7 +4666,6 @@ dependencies = [
  "n0-future 0.1.3",
  "picomint-derive",
  "picomint-logging",
- "picomint-util-error",
  "rand 0.8.5",
  "redb",
  "scopeguard",
@@ -5230,13 +5229,6 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serde-big-array",
-]
-
-[[package]]
-name = "picomint-util-error"
-version = "0.1.0"
-dependencies = [
- "anyhow",
 ]
 
 [[package]]
