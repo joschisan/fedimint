@@ -15,7 +15,6 @@ use futures::FutureExt as _;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
 use picomint_core::rustls::install_crypto_provider;
 use picomint_core::task::TaskGroup;
-use picomint_core::timing;
 use picomint_core::util::{FmtCompactAnyhow as _, SafeUrl};
 use picomint_logging::{LOG_CORE, TracingSetup};
 use picomint_server_daemon::config::ConfigGenSettings;
@@ -92,8 +91,6 @@ async fn main() -> anyhow::Result<Infallible> {
 
     info!("Starting picomint-server-daemon (version: {picomint_version})");
 
-    let timing_total_runtime = timing::TimeReporter::new("total-runtime").info();
-
     let root_task_group = TaskGroup::new();
 
     let ui_config = match (server_opts.ui_addr, server_opts.ui_password.clone()) {
@@ -169,8 +166,6 @@ async fn main() -> anyhow::Result<Infallible> {
     }
 
     debug!(target: LOG_CORE, "Shutdown complete");
-
-    drop(timing_total_runtime);
 
     std::process::exit(-1);
 }

@@ -1,6 +1,5 @@
 pub mod backoff_util;
 
-use std::convert::Infallible;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::hash::Hash;
@@ -16,7 +15,7 @@ use futures::StreamExt;
 use picomint_logging::LOG_CORE;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
-use tracing::{Instrument, Span, debug, warn};
+use tracing::{debug, warn};
 use url::{Host, ParseError, Url};
 
 // ─── Error formatting helpers (inlined from picomint-util-error) ─────────
@@ -349,81 +348,6 @@ pub async fn write_new_async<P: AsRef<Path>, C: AsRef<[u8]>>(
         .await?
         .write_all(contents.as_ref())
         .await
-}
-
-#[derive(Debug, Clone)]
-pub struct Spanned<T> {
-    value: T,
-    span: Span,
-}
-
-impl<T> Spanned<T> {
-    pub async fn new<F: Future<Output = T>>(span: Span, make: F) -> Self {
-        Self::try_new::<Infallible, _>(span, async { Ok(make.await) })
-            .await
-            .unwrap()
-    }
-
-    pub async fn try_new<E, F: Future<Output = Result<T, E>>>(
-        span: Span,
-        make: F,
-    ) -> Result<Self, E> {
-        let span2 = span.clone();
-        async {
-            Ok(Self {
-                value: make.await?,
-                span: span2,
-            })
-        }
-        .instrument(span)
-        .await
-    }
-
-    pub fn borrow(&self) -> Spanned<&T> {
-        Spanned {
-            value: &self.value,
-            span: self.span.clone(),
-        }
-    }
-
-    pub fn map<U>(self, map: impl Fn(T) -> U) -> Spanned<U> {
-        Spanned {
-            value: map(self.value),
-            span: self.span,
-        }
-    }
-
-    pub fn borrow_mut(&mut self) -> Spanned<&mut T> {
-        Spanned {
-            value: &mut self.value,
-            span: self.span.clone(),
-        }
-    }
-
-    pub fn with_sync<O, F: FnOnce(T) -> O>(self, f: F) -> O {
-        let _g = self.span.enter();
-        f(self.value)
-    }
-
-    pub async fn with<Fut: Future, F: FnOnce(T) -> Fut>(self, f: F) -> Fut::Output {
-        async { f(self.value).await }.instrument(self.span).await
-    }
-
-    pub fn span(&self) -> Span {
-        self.span.clone()
-    }
-
-    pub fn value(&self) -> &T {
-        &self.value
-    }
-
-    pub fn value_mut(&mut self) -> &mut T {
-        &mut self.value
-    }
-
-    pub fn into_value(self) -> T {
-        self.value
-    }
 }
 
 /// Run the supplied closure `op_fn` until it succeeds. Frequency and number of

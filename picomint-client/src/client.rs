@@ -364,7 +364,7 @@ impl Client {
         debug!(
             target: LOG_CLIENT_NET_API,
             %txid,
-            operation_id = %operation_id.fmt_short(),
+            %operation_id,
             ?transaction,
             "Finalized and submitting transaction",
         );

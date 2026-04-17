@@ -37,9 +37,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Encodable, Decodable, PartialOrd, Ord)]
 pub struct OperationId(pub [u8; 32]);
 
-pub struct OperationIdFullFmt<'a>(&'a OperationId);
-pub struct OperationIdShortFmt<'a>(&'a OperationId);
-
 impl OperationId {
     /// Generate random [`OperationId`]
     pub fn new_random() -> Self {
@@ -52,33 +49,17 @@ impl OperationId {
     pub fn from_encodable<E: Encodable>(encodable: &E) -> Self {
         Self(encodable.consensus_hash::<sha256::Hash>().to_byte_array())
     }
-
-    pub fn fmt_short(&'_ self) -> OperationIdShortFmt<'_> {
-        OperationIdShortFmt(self)
-    }
-    pub fn fmt_full(&'_ self) -> OperationIdFullFmt<'_> {
-        OperationIdFullFmt(self)
-    }
 }
 
-impl Display for OperationIdShortFmt<'_> {
+impl Display for OperationId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        picomint_core::format_hex(&self.0.0[0..4], f)?;
-        f.write_str("_")?;
-        picomint_core::format_hex(&self.0.0[28..], f)?;
-        Ok(())
-    }
-}
-
-impl Display for OperationIdFullFmt<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        picomint_core::format_hex(&self.0.0, f)
+        picomint_core::format_hex(&self.0, f)
     }
 }
 
 impl Debug for OperationId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "OperationId({})", self.fmt_short())
+        write!(f, "OperationId({self})")
     }
 }
 
@@ -94,7 +75,7 @@ impl FromStr for OperationId {
 impl Serialize for OperationId {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         if serializer.is_human_readable() {
-            serializer.serialize_str(&self.fmt_full().to_string())
+            serializer.serialize_str(&self.to_string())
         } else {
             serializer.serialize_bytes(&self.0)
         }

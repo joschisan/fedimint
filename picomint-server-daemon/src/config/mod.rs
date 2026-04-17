@@ -12,7 +12,7 @@ use picomint_core::invite_code::InviteCode;
 use picomint_core::module::{ApiAuth, CORE_CONSENSUS_VERSION};
 use picomint_core::setup_code::PeerSetupCode;
 use picomint_core::task::sleep;
-use picomint_core::{NumPeersExt, PeerId, secp256k1, timing};
+use picomint_core::{NumPeersExt, PeerId, secp256k1};
 use picomint_ln_common::config::LightningConfigPrivate;
 use picomint_logging::LOG_NET_PEER_DKG;
 use picomint_mint_common::config::{MintConfig, MintConfigPrivate};
@@ -208,8 +208,6 @@ impl ServerConfig {
         connections: ReconnectP2PConnections<P2PMessage>,
         mut p2p_status_receivers: P2PStatusReceivers,
     ) -> anyhow::Result<Self> {
-        let _timing /* logs on drop */ = timing::TimeReporter::new("distributed-gen").info();
-
         info!(
             target: LOG_NET_PEER_DKG,
             "Waiting for all p2p connections to open..."

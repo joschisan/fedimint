@@ -43,7 +43,7 @@ use picomint_core::invite_code::InviteCode;
 use picomint_core::secp256k1::PublicKey;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::time::duration_since_epoch;
-use picomint_core::util::{FmtCompact, Spanned};
+use picomint_core::util::FmtCompact;
 use picomint_core::{Amount, PeerId};
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_gw_client::{
@@ -59,7 +59,7 @@ use picomint_lnurl::VerifyResponse;
 use picomint_logging::LOG_GATEWAY;
 use picomint_redb::Database;
 use tokio::sync::RwLock;
-use tracing::{error, info_span, warn};
+use tracing::{error, warn};
 
 use crate::db::{
     REGISTERED_INCOMING_CONTRACT, RegisteredIncomingContract as DbRegisteredIncomingContract,
@@ -76,7 +76,7 @@ pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 
 #[derive(Clone)]
 pub struct AppState {
-    pub clients: Arc<RwLock<BTreeMap<FederationId, Spanned<ClientHandleArc>>>>,
+    pub clients: Arc<RwLock<BTreeMap<FederationId, ClientHandleArc>>>,
     pub node: Arc<ldk_node::Node>,
     pub client_factory: GatewayClientFactory,
     pub gateway_db: Database,
@@ -104,7 +104,7 @@ impl AppState {
     pub async fn select_client(
         &self,
         federation_id: FederationId,
-    ) -> Option<Spanned<ClientHandleArc>> {
+    ) -> Option<ClientHandleArc> {
         self.clients.read().await.get(&federation_id).cloned()
     }
 
@@ -116,12 +116,9 @@ impl AppState {
 
         for (federation_id, _config) in federations {
             let gateway = Arc::new(self.clone());
-            let span = info_span!(target: LOG_GATEWAY, "client", %federation_id);
             match self.client_factory.load(&federation_id, gateway).await {
                 Ok(Some(client)) => {
-                    let spanned = Spanned::new(span, async { client }).await;
-                    let fid = spanned.borrow().with_sync(|c| c.federation_id());
-                    clients.insert(fid, spanned);
+                    clients.insert(client.federation_id(), client);
                 }
                 Ok(None) => {
                     warn!(target: LOG_GATEWAY, %federation_id, "Client DB not initialized, skipping");
@@ -172,7 +169,7 @@ impl AppState {
         for (federation_id, client) in clients.iter() {
             infos.push(FederationInfo {
                 federation_id: *federation_id,
-                federation_name: Self::federation_name(client.value()).await,
+                federation_name: Self::federation_name(client).await,
             });
         }
         infos
@@ -183,7 +180,7 @@ impl AppState {
         let clients = self.clients.read().await;
         let mut configs = BTreeMap::new();
         for (federation_id, client) in clients.iter() {
-            let config = client.value().config().await;
+            let config = client.config().await;
             configs.insert(
                 *federation_id,
                 serde_json::to_value(&config).expect("ConsensusConfig is serializable"),
@@ -199,10 +196,10 @@ impl AppState {
         let clients = self.clients.read().await;
         let mut invite_codes = BTreeMap::new();
         for (federation_id, client) in clients.iter() {
-            let config = client.value().config().await;
+            let config = client.config().await;
             let mut fed_codes = BTreeMap::new();
             for (peer_id, endpoints) in &config.iroh_endpoints {
-                if let Some(code) = client.value().invite_code(*peer_id).await {
+                if let Some(code) = client.invite_code(*peer_id).await {
                     fed_codes.insert(*peer_id, (endpoints.name.clone(), code));
                 }
             }
@@ -217,7 +214,7 @@ impl AppState {
     async fn public_key_v2(&self, federation_id: &FederationId) -> Option<PublicKey> {
         self.clients.read().await.get(federation_id).map(|client| {
             client
-                .value()
+                
                 .get_first_module::<GatewayClientModuleV2>()
                 .expect("Must have client module")
                 .keypair
@@ -254,7 +251,7 @@ impl AppState {
         self.select_client(payload.federation_id)
             .await
             .context("Federation not connected")?
-            .value()
+            
             .get_first_module::<GatewayClientModuleV2>()
             .expect("Must have client module")
             .send_payment(payload)
@@ -401,7 +398,7 @@ impl AppState {
             .select_client(registered_contract.federation_id)
             .await
             .ok_or("Not connected to federation".to_string())?
-            .into_value();
+            ;
 
         let operation_id = OperationId::from_encodable(&registered_contract.contract);
 
@@ -456,7 +453,7 @@ impl AppState {
             .select_client(registered_incoming_contract.federation_id)
             .await
             .context("Federation not connected")?
-            .into_value();
+            ;
 
         Ok((registered_incoming_contract.contract, client))
     }

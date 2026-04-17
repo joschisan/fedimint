@@ -40,7 +40,7 @@ use picomint_mint_client::MintClientModule;
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
 use tower_http::cors::CorsLayer;
-use tracing::{debug, error, info, info_span, instrument};
+use tracing::{debug, error, info, instrument};
 
 use crate::AppState;
 
@@ -521,12 +521,7 @@ async fn federation_join(
 
     AppState::check_federation_network(&client, state.network).await?;
 
-    let spanned = picomint_core::util::Spanned::new(
-        info_span!(target: LOG_GATEWAY, "client", %federation_id),
-        async { client },
-    )
-    .await;
-    state.clients.write().await.insert(federation_id, spanned);
+    state.clients.write().await.insert(federation_id, client);
 
     debug!(target: LOG_GATEWAY, %federation_id, "Federation connected");
 
@@ -564,7 +559,7 @@ async fn federation_balance(
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let balance_msat = client
-        .value()
+        
         .get_balance()
         .await
         .map_err(|e| CliError::internal(format!("Failed to read balance: {e}")))?;
@@ -595,7 +590,7 @@ async fn module_mint_send(
         .select_client(payload.federation_id)
         .await
         .ok_or(CliError::bad_request("Federation not connected"))?
-        .into_value();
+        ;
 
     let mint_module = client
         .get_first_module::<MintClientModule>()
@@ -631,7 +626,7 @@ async fn module_mint_receive(
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let mint = client
-        .value()
+        
         .get_first_module::<MintClientModule>()
         .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
     let amount = ecash.amount();
@@ -656,7 +651,7 @@ async fn module_wallet_receive(
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let wallet_module = client
-        .value()
+        
         .get_first_module::<picomint_wallet_client::WalletClientModule>()
         .map_err(|_| CliError::internal("No wallet module found"))?;
 

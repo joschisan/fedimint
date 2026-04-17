@@ -12,12 +12,12 @@ use picomint_core::runtime::spawn;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::task::{TaskGroup, TaskHandle, sleep};
 use picomint_core::util::{FmtCompact as _, FmtCompactAnyhow as _};
-use picomint_core::{NumPeers, NumPeersExt, PeerId, timing};
+use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_redb::{Database, ReadTransaction, WriteTransaction};
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use tokio::sync::watch;
-use tracing::{Level, debug, error, info, instrument, trace};
+use tracing::{debug, error, info, instrument, trace};
 
 use crate::LOG_CONSENSUS;
 use crate::config::ServerConfig;
@@ -551,8 +551,6 @@ impl ConsensusEngine {
         item: ConsensusItem,
         peer: PeerId,
     ) -> anyhow::Result<()> {
-        let _timing /* logs on drop */ = timing::TimeReporter::new("process_consensus_item").level(Level::TRACE);
-
         trace!(
             target: LOG_CONSENSUS,
             %peer,

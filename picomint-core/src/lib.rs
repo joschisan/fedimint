@@ -88,8 +88,6 @@ pub mod setup_code;
 pub mod task;
 /// Time handling, wasm safe functionality
 pub mod time;
-/// Timing helpers
-pub mod timing;
 /// General purpose utilities
 pub mod util;
 
