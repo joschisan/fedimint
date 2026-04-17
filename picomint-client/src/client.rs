@@ -787,11 +787,7 @@ impl Client {
     pub async fn get_guardian_public_keys_blocking(
         &self,
     ) -> BTreeMap<PeerId, picomint_core::secp256k1::PublicKey> {
-        self.config()
-            .await
-            .global
-            .broadcast_public_keys
-            .expect("Guardian public keys must be present in config")
+        self.config().await.global.broadcast_public_keys
     }
 
     pub fn log_event_dbtx<E>(

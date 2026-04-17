@@ -9,7 +9,7 @@ fn test_dcode_meta() {
     let config = ClientConfig {
         global: GlobalClientConfig {
             api_endpoints: BTreeMap::new(),
-            broadcast_public_keys: None,
+            broadcast_public_keys: BTreeMap::new(),
             consensus_version: CoreConsensusVersion { major: 0, minor: 0 },
             meta: vec![
                 ("foo".to_string(), "bar".to_string()),

@@ -41,39 +41,6 @@ impl JsonWithKind {
         Self { kind, value }
     }
 
-    /// Workaround for a serde `flatten` quirk
-    ///
-    /// We serialize config with no fields as: eg. `{ kind: "ln" }`.
-    ///
-    /// When `kind` gets removed and `value` is parsed, it will
-    /// parse as `Value::Object` that is empty.
-    ///
-    /// However empty module structs, like `struct FooConfigLocal;` (unit
-    /// struct), will fail to deserialize with this value, as they expect
-    /// `Value::Null`.
-    ///
-    /// We can turn manually empty object into null, and that's what
-    /// we do in this function. This fixes the deserialization into
-    /// unit type, but in turn breaks deserialization into `struct Foo{}`,
-    /// which is arguably much less common, but valid.
-    ///
-    /// TODO: In the future, we should have a typed and erased versions of
-    /// module construction traits, and then we can try with and
-    /// without the workaround to have both cases working.
-    /// See <https://github.com/picomint/picomint/issues/1303>
-    pub fn with_fixed_empty_value(self) -> Self {
-        if let serde_json::Value::Object(ref o) = self.value
-            && o.is_empty()
-        {
-            return Self {
-                kind: self.kind,
-                value: serde_json::Value::Null,
-            };
-        }
-
-        self
-    }
-
     pub fn value(&self) -> &serde_json::Value {
         &self.value
     }
@@ -127,28 +94,6 @@ where
     Ok(map)
 }
 
-fn optional_de_int_key<'de, D, K, V>(deserializer: D) -> Result<Option<BTreeMap<K, V>>, D::Error>
-where
-    D: Deserializer<'de>,
-    K: Eq + Ord + FromStr,
-    K::Err: Display,
-    V: Deserialize<'de>,
-{
-    let Some(string_map) = <Option<BTreeMap<String, V>>>::deserialize(deserializer)? else {
-        return Ok(None);
-    };
-
-    let map = string_map
-        .into_iter()
-        .map(|(key_str, value)| {
-            let key = K::from_str(&key_str).map_err(serde::de::Error::custom)?;
-            Ok((key, value))
-        })
-        .collect::<Result<BTreeMap<_, _>, _>>()?;
-
-    Ok(Some(map))
-}
-
 /// Client config that cannot be cryptographically verified but is easier to
 /// parse by external tools
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -164,9 +109,8 @@ pub struct GlobalClientConfig {
     #[serde(deserialize_with = "de_int_key")]
     pub api_endpoints: BTreeMap<PeerId, PeerEndpoint>,
     /// Signing session keys for each federation member
-    /// Optional for 0.3.x backwards compatibility
-    #[serde(default, deserialize_with = "optional_de_int_key")]
-    pub broadcast_public_keys: Option<BTreeMap<PeerId, PublicKey>>,
+    #[serde(deserialize_with = "de_int_key")]
+    pub broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
     /// Core consensus version
     pub consensus_version: CoreConsensusVersion,
     // TODO: make it a String -> serde_json::Value map?
