@@ -2,7 +2,6 @@
 
 /// Just-in-time initialization
 pub mod jit;
-pub mod waiter;
 
 use std::future::Future;
 use std::pin::Pin;

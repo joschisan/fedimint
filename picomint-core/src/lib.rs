@@ -68,8 +68,6 @@ pub mod db;
 pub mod endpoint_constants;
 /// Common environment variables
 pub mod envs;
-/// Formatting helpers
-pub mod fmt_utils;
 /// Federation invite code
 pub mod invite_code;
 pub mod log;
