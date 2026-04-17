@@ -4488,12 +4488,16 @@ dependencies = [
  "anyhow",
  "bitcoin",
  "clap",
+ "http-body-util",
+ "hyper 1.6.0",
+ "hyper-util",
  "lightning-invoice",
  "picomint-core",
  "picomint-gateway-cli-core",
- "reqwest 0.12.22",
  "serde",
  "serde_json",
+ "tokio",
+ "tower-service",
 ]
 
 [[package]]
@@ -4626,7 +4630,6 @@ dependencies = [
  "picomint-wallet-client",
  "picomint-wallet-common",
  "rand 0.8.5",
- "reqwest 0.12.22",
  "serde",
  "serde_json",
  "tempfile",
@@ -4848,10 +4851,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "http-body-util",
+ "hyper 1.6.0",
+ "hyper-util",
  "picomint-server-cli-core",
- "reqwest 0.12.22",
  "serde",
  "serde_json",
+ "tokio",
+ "tower-service",
 ]
 
 [[package]]
@@ -5721,7 +5728,6 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
- "futures-channel",
  "futures-core",
  "futures-util",
  "h2 0.4.10",

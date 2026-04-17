@@ -21,7 +21,7 @@ fn main() -> anyhow::Result<()> {
 
     info!("Test environment ready!");
     info!("Invite code: {}", env.invite_code);
-    info!("Gateway: {}", env.gw_addr);
+    info!("Gateway: {}", env.gw_data_dir.display());
 
     info!("Running wallet tests...");
     runtime.block_on(wallet::run_tests(&env, &client_send))?;

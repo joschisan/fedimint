@@ -86,12 +86,12 @@ async fn test_direct_ln_payments(env: &TestEnv) -> anyhow::Result<()> {
             3600,
         )?;
 
-        cli::gatewayd_ldk_invoice_pay(&env.gw_addr, &invoice.to_string())?;
+        cli::gatewayd_ldk_invoice_pay(&env.gw_data_dir, &invoice.to_string())?;
     }
 
     info!("LDK node pays gateway invoice...");
     {
-        let invoice_str = cli::gatewayd_ldk_invoice_create(&env.gw_addr, 1_000_000)?.invoice;
+        let invoice_str = cli::gatewayd_ldk_invoice_create(&env.gw_data_dir, 1_000_000)?.invoice;
         let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
 
         // The freestanding node may need a moment to consider the channel ready
@@ -122,7 +122,8 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
     info!("Testing registration of gateway...");
 
     for peer in 0..NUM_GUARDIANS {
-        assert!(cli::picomintd_ln_gateway_add(peer, &gateway)?);
+        let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
+        assert!(cli::picomintd_ln_gateway_add(&data_dir, &gateway)?);
     }
 
     let listed = ln.list_gateways(None).await?;
@@ -136,7 +137,8 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
     info!("Testing deregistration of gateway...");
 
     for peer in 0..NUM_GUARDIANS {
-        assert!(cli::picomintd_ln_gateway_remove(peer, &gateway)?);
+        let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
+        assert!(cli::picomintd_ln_gateway_remove(&data_dir, &gateway)?);
     }
 
     let listed = ln.list_gateways(None).await?;
@@ -194,7 +196,7 @@ async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Resul
     retry("gateway federation balance", || {
         let fed_id = fed_id.clone();
         async move {
-            let balance = cli::gatewayd_federation_balance(&env.gw_addr, &fed_id)?.balance_msat;
+            let balance = cli::gatewayd_federation_balance(&env.gw_data_dir, &fed_id)?.balance_msat;
             ensure!(balance.msats > 0, "gateway federation balance is zero");
             Ok(())
         }

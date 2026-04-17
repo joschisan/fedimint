@@ -1,6 +1,10 @@
 use picomint_core::module::audit::AuditSummary;
 use serde::{Deserialize, Serialize};
 
+/// Filename of the guardian's admin CLI Unix socket, inside `DATA_DIR`.
+/// The daemon binds and the CLI connects at `{DATA_DIR}/{CLI_SOCKET_FILENAME}`.
+pub const CLI_SOCKET_FILENAME: &str = "cli.sock";
+
 /// Status of the setup flow — mirrors `picomint_server_ui::SetupStatus`
 /// as a CLI-consumed copy so `picomint-server-cli` doesn't need to pull in the
 /// server-ui crate.

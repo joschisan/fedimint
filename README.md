@@ -67,7 +67,7 @@ docker exec picomint-server picomint-server-cli invite
 docker exec picomint-gateway picomint-gateway-cli info
 ```
 
-The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works from inside the container but the port is not reachable from the host or network — **never expose admin ports publicly**.
+The admin CLI speaks over a Unix socket inside `DATA_DIR`, never over TCP. `docker exec` reaches it from inside the container; the host and network cannot.
 
 ## Interfaces
 
@@ -77,15 +77,20 @@ The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works fr
 |------|------------------------------|-----------------|
 | 8080 | Iroh endpoint                | Yes             |
 | 3000 | Web UI (setup + dashboard)   | Localhost only  |
-| 3030 | Admin CLI HTTP API           | **Never**       |
+
+The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
+network exposure. Reach it with `docker exec -it picomint-server
+picomint-server-cli …`.
 
 ### Gateway daemon (`picomint-gateway-daemon`)
 
 | Port | Purpose                      | Safe to expose? |
 |------|------------------------------|-----------------|
 | 8080 | Public API (HTTP)            | Yes             |
-| 3030 | Admin CLI HTTP API           | **Never**       |
 | 9735 | LDK Lightning P2P (BOLT)     | Yes             |
+
+The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — same pattern
+as the server daemon.
 
 ## Configuration reference
 
@@ -102,7 +107,6 @@ The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works fr
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
 | `UI_ADDR`                    | no       |                   | Web UI listen address — unset disables UI  |
 | `UI_PASSWORD`                | if UI    |                   | Web UI password, required when `UI_ADDR` is set |
-| `CLI_PORT`                   | no       | `3030`            | Admin CLI port (always 127.0.0.1)          |
 
 *Either `ESPLORA_URL` or `BITCOIND_URL` must be set, but not both.*
 
@@ -118,7 +122,6 @@ The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works fr
 | `BITCOIND_PASSWORD`        | if RPC   |                   | Bitcoin Core RPC password                   |
 | `API_ADDR`                 | no       | `0.0.0.0:8080`    | Public API listen address                   |
 | `LDK_ADDR`                 | no       | `0.0.0.0:9735`    | LDK Lightning P2P listen address (BOLT)     |
-| `CLI_PORT`                 | no       | `3030`            | Admin CLI port (always 127.0.0.1)           |
 | `ROUTING_FEE_BASE_MSAT`    | no       | `2000`            | Lightning base routing fee (msat)           |
 | `ROUTING_FEE_PPM`          | no       | `3000`            | Lightning routing fee rate (ppm)            |
 | `TRANSACTION_FEE_BASE_MSAT`| no       | `2000`            | Federation transaction base fee (msat)      |

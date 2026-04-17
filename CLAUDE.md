@@ -36,7 +36,7 @@ Picomint is a minimalist fork of Fedimint — two binaries (federation guardian 
 - Each guardian binds exactly one iroh `Endpoint` (one secret key, one node id) for both federation p2p and the public client API; the accept loop demuxes by remote node-id (peer set → P2P path, otherwise → public API path).
 
 ### Admin CLIs
-- Both CLIs are thin HTTP clients. They POST JSON to the daemon's admin port (`CLI_PORT` env, always bound to 127.0.0.1; default `3030`).
+- Both CLIs are thin HTTP-over-Unix-socket clients. They POST JSON to the daemon's admin socket at `{DATA_DIR}/cli.sock` (`CLI_SOCKET_FILENAME` const in each `*-cli-core` crate). No network exposure; `docker exec` is how you reach them in a container deployment.
 - Route constants live in `picomint-server-cli-core` / `picomint-gateway-cli-core`.
 - Shared request/response types also live in the `*-cli-core` crates; daemon handlers live in `picomint-server-daemon/src/cli.rs` and `picomint-gateway-daemon/src/cli.rs`.
 

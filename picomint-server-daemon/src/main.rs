@@ -80,9 +80,6 @@ struct ServerOpts {
     #[arg(long, env = "UI_PASSWORD")]
     ui_password: Option<String>,
 
-    /// Port for the CLI admin API (always binds 127.0.0.1, never public)
-    #[arg(long, env = "CLI_PORT", default_value = "3030")]
-    cli_port: u16,
 }
 
 #[tokio::main]
@@ -146,12 +143,14 @@ async fn main() -> anyhow::Result<Infallible> {
     install_crypto_provider().await;
 
     let task_group = root_task_group.clone();
-    let cli_port = server_opts.cli_port;
+    let data_dir = server_opts.data_dir.clone();
 
     root_task_group.spawn_cancellable("main", async move {
-        run_server(settings, db, task_group, bitcoin_backend, cli_port)
-        .await
-        .unwrap_or_else(|err| panic!("Main task returned error: {}", err.fmt_compact_anyhow()));
+        run_server(settings, db, task_group, bitcoin_backend, data_dir)
+            .await
+            .unwrap_or_else(|err| {
+                panic!("Main task returned error: {}", err.fmt_compact_anyhow())
+            });
     });
 
     let shutdown_future = root_task_group

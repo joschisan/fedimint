@@ -32,7 +32,7 @@ pub mod consensus;
 pub mod p2p;
 pub mod ui;
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Name of the server daemon's database file on disk.
@@ -60,7 +60,7 @@ pub async fn run_server(
     db: Database,
     task_group: TaskGroup,
     bitcoin_rpc: Arc<BitcoinBackend>,
-    cli_port: u16,
+    data_dir: PathBuf,
 ) -> anyhow::Result<()> {
     // Single channel for foreign (non-peer) iroh connections — fed by the
     // p2p accept loop's demux, drained by the consensus-phase api task.
@@ -99,7 +99,7 @@ pub async fn run_server(
                 db.clone(),
                 settings.clone(),
                 &task_group,
-                cli_port,
+                &data_dir,
                 foreign_conn_tx,
             ))
             .await?
@@ -117,7 +117,7 @@ pub async fn run_server(
         &task_group,
         bitcoin_rpc,
         settings.ui_config,
-        cli_port,
+        &data_dir,
     ))
     .await?;
 
@@ -132,7 +132,7 @@ pub async fn run_config_gen(
     db: Database,
     settings: ConfigGenSettings,
     task_group: &TaskGroup,
-    cli_port: u16,
+    data_dir: &Path,
     foreign_conn_tx: async_channel::Sender<iroh::endpoint::Connection>,
 ) -> anyhow::Result<(
     ServerConfig,
@@ -167,9 +167,9 @@ pub async fn run_config_gen(
     let cli_state = cli::CliState {
         setup_api: setup_api.clone(),
     };
-    let cli_bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), cli_port);
+    let data_dir = data_dir.to_owned();
     cli_task_group.spawn("setup-cli", move |handle| async move {
-        cli::run_cli(cli_bind, cli_state, handle).await;
+        cli::run_cli(&data_dir, cli_state, handle).await;
     });
 
     let cg_params = cgp_receiver

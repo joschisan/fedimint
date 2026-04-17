@@ -7,6 +7,10 @@ use picomint_core::invite_code::InviteCode;
 use picomint_core::{Amount, BitcoinAmountOrAll, PeerId, secp256k1};
 use serde::{Deserialize, Serialize};
 
+/// Filename of the gateway's admin CLI Unix socket, inside `DATA_DIR`.
+/// The daemon binds and the CLI connects at `{DATA_DIR}/{CLI_SOCKET_FILENAME}`.
+pub const CLI_SOCKET_FILENAME: &str = "cli.sock";
+
 // Top-level
 pub const ROUTE_INFO: &str = "/info";
 pub const ROUTE_MNEMONIC: &str = "/mnemonic";

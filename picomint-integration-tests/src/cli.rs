@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
@@ -5,10 +6,9 @@ use picomint_gateway_cli_core::{
     FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkInvoiceCreateResponse,
     LdkOnchainReceiveResponse,
 };
+use picomint_server_cli_core::{InviteResponse, SetupStatus};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-
-use crate::env::{GUARDIAN_BASE_PORT, PORTS_PER_GUARDIAN};
 
 trait RunCli {
     fn run_cli<T: DeserializeOwned>(&mut self) -> Result<T>;
@@ -29,18 +29,34 @@ impl RunCli for Command {
     }
 }
 
-pub fn gatewayd_info(gw_addr: &str) -> Result<InfoResponse> {
-    Command::new("target/debug/picomint-gateway-cli")
-        .arg("-a")
-        .arg(gw_addr)
+fn gateway_cmd(gw_data_dir: &Path) -> Command {
+    let mut cmd = Command::new("target/debug/picomint-gateway-cli");
+    cmd.arg("--data-dir").arg(gw_data_dir);
+    cmd
+}
+
+fn server_cmd(data_dir: &Path) -> Command {
+    let mut cmd = Command::new("target/debug/picomint-server-cli");
+    cmd.arg("--data-dir").arg(data_dir);
+    cmd
+}
+
+/// Helper to compute a guardian's data directory from the shared test
+/// temp root, mirroring `env::start_picomintd`'s layout.
+pub fn guardian_data_dir(base: &Path, peer: usize) -> PathBuf {
+    base.join(format!("picomintd-{peer}"))
+}
+
+// ── Gateway CLI wrappers ────────────────────────────────────────────────────
+
+pub fn gatewayd_info(gw_data_dir: &Path) -> Result<InfoResponse> {
+    gateway_cmd(gw_data_dir)
         .arg("info")
         .run_cli::<InfoResponse>()
 }
 
-pub fn gatewayd_federation_join(gw_addr: &str, invite: &str) -> Result<Value> {
-    Command::new("target/debug/picomint-gateway-cli")
-        .arg("-a")
-        .arg(gw_addr)
+pub fn gatewayd_federation_join(gw_data_dir: &Path, invite: &str) -> Result<Value> {
+    gateway_cmd(gw_data_dir)
         .arg("federation")
         .arg("join")
         .arg(invite)
@@ -48,22 +64,18 @@ pub fn gatewayd_federation_join(gw_addr: &str, invite: &str) -> Result<Value> {
 }
 
 pub fn gatewayd_federation_balance(
-    gw_addr: &str,
+    gw_data_dir: &Path,
     fed_id: &str,
 ) -> Result<FederationBalanceResponse> {
-    Command::new("target/debug/picomint-gateway-cli")
-        .arg("-a")
-        .arg(gw_addr)
+    gateway_cmd(gw_data_dir)
         .arg("federation")
         .arg("balance")
         .arg(fed_id)
         .run_cli::<FederationBalanceResponse>()
 }
 
-pub fn gatewayd_ldk_onchain_receive(gw_addr: &str) -> Result<LdkOnchainReceiveResponse> {
-    Command::new("target/debug/picomint-gateway-cli")
-        .arg("-a")
-        .arg(gw_addr)
+pub fn gatewayd_ldk_onchain_receive(gw_data_dir: &Path) -> Result<LdkOnchainReceiveResponse> {
+    gateway_cmd(gw_data_dir)
         .arg("ldk")
         .arg("onchain")
         .arg("receive")
@@ -71,15 +83,13 @@ pub fn gatewayd_ldk_onchain_receive(gw_addr: &str) -> Result<LdkOnchainReceiveRe
 }
 
 pub fn gatewayd_ldk_channel_open(
-    gw_addr: &str,
+    gw_data_dir: &Path,
     node_id: &str,
     ln_addr: &str,
     channel_sats: u64,
     push_sats: u64,
 ) -> Result<Value> {
-    Command::new("target/debug/picomint-gateway-cli")
-        .arg("-a")
-        .arg(gw_addr)
+    gateway_cmd(gw_data_dir)
         .arg("ldk")
         .arg("channel")
         .arg("open")
@@ -91,10 +101,8 @@ pub fn gatewayd_ldk_channel_open(
         .run_cli::<Value>()
 }
 
-pub fn gatewayd_ldk_channel_list(gw_addr: &str) -> Result<LdkChannelListResponse> {
-    Command::new("target/debug/picomint-gateway-cli")
-        .arg("-a")
-        .arg(gw_addr)
+pub fn gatewayd_ldk_channel_list(gw_data_dir: &Path) -> Result<LdkChannelListResponse> {
+    gateway_cmd(gw_data_dir)
         .arg("ldk")
         .arg("channel")
         .arg("list")
@@ -102,12 +110,10 @@ pub fn gatewayd_ldk_channel_list(gw_addr: &str) -> Result<LdkChannelListResponse
 }
 
 pub fn gatewayd_ldk_invoice_create(
-    gw_addr: &str,
+    gw_data_dir: &Path,
     amount_msat: u64,
 ) -> Result<LdkInvoiceCreateResponse> {
-    Command::new("target/debug/picomint-gateway-cli")
-        .arg("-a")
-        .arg(gw_addr)
+    gateway_cmd(gw_data_dir)
         .arg("ldk")
         .arg("invoice")
         .arg("create")
@@ -115,10 +121,8 @@ pub fn gatewayd_ldk_invoice_create(
         .run_cli::<LdkInvoiceCreateResponse>()
 }
 
-pub fn gatewayd_ldk_invoice_pay(gw_addr: &str, invoice: &str) -> Result<Value> {
-    Command::new("target/debug/picomint-gateway-cli")
-        .arg("-a")
-        .arg(gw_addr)
+pub fn gatewayd_ldk_invoice_pay(gw_data_dir: &Path, invoice: &str) -> Result<Value> {
+    gateway_cmd(gw_data_dir)
         .arg("ldk")
         .arg("invoice")
         .arg("pay")
@@ -126,12 +130,55 @@ pub fn gatewayd_ldk_invoice_pay(gw_addr: &str, invoice: &str) -> Result<Value> {
         .run_cli::<Value>()
 }
 
-pub fn picomintd_ln_gateway_add(peer: usize, gateway: &str) -> Result<bool> {
-    let cli_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN) + 4;
+// ── Guardian CLI wrappers ───────────────────────────────────────────────────
 
-    Command::new("target/debug/picomint-server-cli")
-        .arg("-a")
-        .arg(format!("http://127.0.0.1:{cli_port}"))
+pub fn picomintd_invite(data_dir: &Path) -> Result<InviteResponse> {
+    server_cmd(data_dir)
+        .arg("invite")
+        .run_cli::<InviteResponse>()
+}
+
+pub fn picomintd_setup_status(data_dir: &Path) -> Result<SetupStatus> {
+    server_cmd(data_dir)
+        .arg("setup")
+        .arg("status")
+        .run_cli::<SetupStatus>()
+}
+
+pub fn picomintd_setup_set_local_params(
+    data_dir: &Path,
+    name: &str,
+    federation_name: Option<&str>,
+    federation_size: Option<u32>,
+) -> Result<Value> {
+    let mut cmd = server_cmd(data_dir);
+    cmd.arg("setup").arg("set-local-params").arg(name);
+    if let Some(fed_name) = federation_name {
+        cmd.arg("--federation-name").arg(fed_name);
+    }
+    if let Some(size) = federation_size {
+        cmd.arg("--federation-size").arg(size.to_string());
+    }
+    cmd.run_cli::<Value>()
+}
+
+pub fn picomintd_setup_add_peer(data_dir: &Path, setup_code: &str) -> Result<Value> {
+    server_cmd(data_dir)
+        .arg("setup")
+        .arg("add-peer")
+        .arg(setup_code)
+        .run_cli::<Value>()
+}
+
+pub fn picomintd_setup_start_dkg(data_dir: &Path) -> Result<Value> {
+    server_cmd(data_dir)
+        .arg("setup")
+        .arg("start-dkg")
+        .run_cli::<Value>()
+}
+
+pub fn picomintd_ln_gateway_add(data_dir: &Path, gateway: &str) -> Result<bool> {
+    server_cmd(data_dir)
         .arg("module")
         .arg("ln")
         .arg("gateway")
@@ -140,12 +187,8 @@ pub fn picomintd_ln_gateway_add(peer: usize, gateway: &str) -> Result<bool> {
         .run_cli::<bool>()
 }
 
-pub fn picomintd_ln_gateway_remove(peer: usize, gateway: &str) -> Result<bool> {
-    let cli_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN) + 4;
-
-    Command::new("target/debug/picomint-server-cli")
-        .arg("-a")
-        .arg(format!("http://127.0.0.1:{cli_port}"))
+pub fn picomintd_ln_gateway_remove(data_dir: &Path, gateway: &str) -> Result<bool> {
+    server_cmd(data_dir)
         .arg("module")
         .arg("ln")
         .arg("gateway")

@@ -8,7 +8,8 @@ pub mod server;
 pub mod transaction;
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -54,7 +55,7 @@ pub async fn run(
     task_group: &TaskGroup,
     bitcoin_backend: Arc<BitcoinBackend>,
     ui_config: Option<(SocketAddr, ApiAuth)>,
-    cli_port: u16,
+    data_dir: &Path,
 ) -> anyhow::Result<()> {
     cfg.validate_config(&cfg.private.identity)?;
 
@@ -178,10 +179,10 @@ pub async fn run(
     }
 
     {
-        let cli_bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), cli_port);
+        let data_dir = data_dir.to_owned();
         let dashboard_router = crate::cli::dashboard_cli_router(consensus_api.clone());
         task_group.spawn("consensus-cli", move |handle| async move {
-            crate::cli::run_dashboard_cli(cli_bind, dashboard_router, handle).await;
+            crate::cli::run_dashboard_cli(&data_dir, dashboard_router, handle).await;
         });
     }
 

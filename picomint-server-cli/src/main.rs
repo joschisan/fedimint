@@ -1,7 +1,18 @@
-use anyhow::{Context, Result, ensure};
+use std::future::Future;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use anyhow::{Context as _, Result, ensure};
 use clap::{Parser, Subcommand};
+use http_body_util::{BodyExt, Full};
+use hyper::Request;
+use hyper::body::Bytes;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_server_cli_core::{
-    LnGatewayRequest, ROUTE_AUDIT, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
+    CLI_SOCKET_FILENAME, LnGatewayRequest, ROUTE_AUDIT, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
     ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT,
     ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
     ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SETUP_ADD_PEER,
@@ -10,13 +21,17 @@ use picomint_server_cli_core::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use tokio::net::UnixStream;
+use tower_service::Service;
 
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
-    /// Server admin API address
-    #[arg(short, long, default_value = "http://127.0.0.1:3030")]
-    address: String,
+    /// Path to the guardian's data directory (must match the daemon's
+    /// `DATA_DIR`). The CLI finds the admin Unix socket at
+    /// `{DATA_DIR}/cli.sock`.
+    #[arg(long = "data-dir", env = "DATA_DIR")]
+    data_dir: PathBuf,
 
     #[command(subcommand)]
     command: Commands,
@@ -101,25 +116,63 @@ enum LnGatewayCommands {
     List,
 }
 
-fn request<R: Serialize>(addr: &str, route: &str, payload: R) -> Result<Value> {
-    let response = reqwest::blocking::Client::new()
-        .post(format!("{addr}{route}"))
-        .json(&serde_json::to_value(payload)?)
-        .send()
-        .context("Failed to connect to server")?;
+/// Tiny connector that dials a fixed Unix socket path, ignoring the URI
+/// entirely. Plugs into `hyper_util::client::legacy::Client` where a TCP
+/// connector would normally go.
+#[derive(Clone)]
+struct UnixConnector {
+    path: PathBuf,
+}
+
+impl Service<hyper::Uri> for UnixConnector {
+    type Response = TokioIo<UnixStream>;
+    type Error = io::Error;
+    type Future = Pin<Box<dyn Future<Output = io::Result<TokioIo<UnixStream>>> + Send>>;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _: hyper::Uri) -> Self::Future {
+        let path = self.path.clone();
+        Box::pin(async move { UnixStream::connect(path).await.map(TokioIo::new) })
+    }
+}
+
+async fn request<R: Serialize>(data_dir: &Path, route: &str, payload: R) -> Result<Value> {
+    let socket_path = data_dir.join(CLI_SOCKET_FILENAME);
+    let connector = UnixConnector {
+        path: socket_path.clone(),
+    };
+    let client = Client::builder(TokioExecutor::new()).build(connector);
+
+    let body_bytes = serde_json::to_vec(&payload)?;
+    let uri: hyper::Uri = format!("http://localhost{route}").parse()?;
+    let req = Request::post(uri)
+        .header("content-type", "application/json")
+        .body(Full::new(Bytes::from(body_bytes)))?;
+
+    let resp = client.request(req).await.with_context(|| {
+        format!(
+            "Failed to POST {route} to guardian at {}",
+            socket_path.display()
+        )
+    })?;
+
+    let status = resp.status();
+    let resp_bytes = resp.into_body().collect().await?.to_bytes();
 
     ensure!(
-        response.status().is_success(),
+        status.is_success(),
         "API error ({}): {}",
-        response.status().as_u16(),
-        response.text()?
+        status.as_u16(),
+        String::from_utf8_lossy(&resp_bytes)
     );
 
-    let text = response.text()?;
-    if text.trim().is_empty() {
+    if resp_bytes.is_empty() {
         Ok(Value::Null)
     } else {
-        serde_json::from_str(&text).context("Failed to parse response")
+        serde_json::from_slice(&resp_bytes).context("Failed to parse response")
     }
 }
 
@@ -130,56 +183,81 @@ fn print_json(value: &Value) {
     );
 }
 
-fn main() -> Result<()> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let addr = &cli.address;
+    let data_dir = &cli.data_dir;
 
     let result = match cli.command {
-        Commands::Invite => request(addr, ROUTE_INVITE, ())?,
-        Commands::Audit => request(addr, ROUTE_AUDIT, ())?,
+        Commands::Invite => request(data_dir, ROUTE_INVITE, ()).await?,
+        Commands::Audit => request(data_dir, ROUTE_AUDIT, ()).await?,
         Commands::Setup(cmd) => match cmd {
-            SetupCommands::Status => request(addr, ROUTE_SETUP_STATUS, ())?,
+            SetupCommands::Status => request(data_dir, ROUTE_SETUP_STATUS, ()).await?,
             SetupCommands::SetLocalParams {
                 name,
                 federation_name,
                 federation_size,
-            } => request(
-                addr,
-                ROUTE_SETUP_SET_LOCAL_PARAMS,
-                SetupSetLocalParamsRequest {
-                    name,
-                    federation_name,
-                    federation_size,
-                },
-            )?,
-            SetupCommands::AddPeer { setup_code } => request(
-                addr,
-                ROUTE_SETUP_ADD_PEER,
-                SetupAddPeerRequest { setup_code },
-            )?,
-            SetupCommands::StartDkg => request(addr, ROUTE_SETUP_START_DKG, ())?,
+            } => {
+                request(
+                    data_dir,
+                    ROUTE_SETUP_SET_LOCAL_PARAMS,
+                    SetupSetLocalParamsRequest {
+                        name,
+                        federation_name,
+                        federation_size,
+                    },
+                )
+                .await?
+            }
+            SetupCommands::AddPeer { setup_code } => {
+                request(
+                    data_dir,
+                    ROUTE_SETUP_ADD_PEER,
+                    SetupAddPeerRequest { setup_code },
+                )
+                .await?
+            }
+            SetupCommands::StartDkg => request(data_dir, ROUTE_SETUP_START_DKG, ()).await?,
         },
         Commands::Module(cmd) => match cmd {
             ModuleCommands::Wallet(cmd) => match cmd {
-                WalletCommands::TotalValue => request(addr, ROUTE_MODULE_WALLET_TOTAL_VALUE, ())?,
-                WalletCommands::BlockCount => request(addr, ROUTE_MODULE_WALLET_BLOCK_COUNT, ())?,
-                WalletCommands::Feerate => request(addr, ROUTE_MODULE_WALLET_FEERATE, ())?,
-                WalletCommands::PendingTxChain => {
-                    request(addr, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ())?
+                WalletCommands::TotalValue => {
+                    request(data_dir, ROUTE_MODULE_WALLET_TOTAL_VALUE, ()).await?
                 }
-                WalletCommands::TxChain => request(addr, ROUTE_MODULE_WALLET_TX_CHAIN, ())?,
+                WalletCommands::BlockCount => {
+                    request(data_dir, ROUTE_MODULE_WALLET_BLOCK_COUNT, ()).await?
+                }
+                WalletCommands::Feerate => {
+                    request(data_dir, ROUTE_MODULE_WALLET_FEERATE, ()).await?
+                }
+                WalletCommands::PendingTxChain => {
+                    request(data_dir, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ()).await?
+                }
+                WalletCommands::TxChain => {
+                    request(data_dir, ROUTE_MODULE_WALLET_TX_CHAIN, ()).await?
+                }
             },
             ModuleCommands::Ln(cmd) => match cmd {
                 LnCommands::Gateway(cmd) => match cmd {
                     LnGatewayCommands::Add { url } => {
-                        request(addr, ROUTE_MODULE_LN_GATEWAY_ADD, LnGatewayRequest { url })?
+                        request(
+                            data_dir,
+                            ROUTE_MODULE_LN_GATEWAY_ADD,
+                            LnGatewayRequest { url },
+                        )
+                        .await?
                     }
-                    LnGatewayCommands::Remove { url } => request(
-                        addr,
-                        ROUTE_MODULE_LN_GATEWAY_REMOVE,
-                        LnGatewayRequest { url },
-                    )?,
-                    LnGatewayCommands::List => request(addr, ROUTE_MODULE_LN_GATEWAY_LIST, ())?,
+                    LnGatewayCommands::Remove { url } => {
+                        request(
+                            data_dir,
+                            ROUTE_MODULE_LN_GATEWAY_REMOVE,
+                            LnGatewayRequest { url },
+                        )
+                        .await?
+                    }
+                    LnGatewayCommands::List => {
+                        request(data_dir, ROUTE_MODULE_LN_GATEWAY_LIST, ()).await?
+                    }
                 },
             },
         },

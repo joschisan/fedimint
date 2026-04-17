@@ -81,7 +81,7 @@ pub struct AppState {
     pub client_factory: GatewayClientFactory,
     pub gateway_db: Database,
     pub api_addr: SocketAddr,
-    pub cli_bind: SocketAddr,
+    pub data_dir: std::path::PathBuf,
     pub network: Network,
     pub routing_fees: PaymentFee,
     pub transaction_fees: PaymentFee,
@@ -93,7 +93,7 @@ impl std::fmt::Debug for AppState {
         f.debug_struct("AppState")
             .field("gateway_db", &self.gateway_db)
             .field("api_addr", &self.api_addr)
-            .field("cli_bind", &self.cli_bind)
+            .field("data_dir", &self.data_dir)
             .field("node_id", &self.node.node_id())
             .finish_non_exhaustive()
     }

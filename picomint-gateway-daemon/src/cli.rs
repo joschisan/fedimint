@@ -26,7 +26,8 @@ use picomint_gateway_cli_core::{
     LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MintReceiveRequest,
     MintReceiveResponse, MintSendRequest, MintSendResponse, MnemonicResponse, PeerInfo,
     ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
-    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES,
+    CLI_SOCKET_FILENAME, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_INFO,
+    ROUTE_LDK_BALANCES,
     ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
@@ -37,7 +38,7 @@ use picomint_gw_client::Preimage;
 use picomint_logging::LOG_GATEWAY;
 use picomint_mint_client::MintClientModule;
 use reqwest::StatusCode;
-use tokio::net::TcpListener;
+use tokio::net::UnixListener;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, info_span, instrument};
 
@@ -93,9 +94,10 @@ impl From<anyhow::Error> for CliError {
 }
 
 pub async fn run_cli(state: AppState, handle: TaskHandle) {
-    let listener = TcpListener::bind(state.cli_bind)
-        .await
-        .expect("Failed to bind CLI server");
+    let socket_path = state.data_dir.join(CLI_SOCKET_FILENAME);
+    std::fs::remove_file(&socket_path).ok();
+
+    let listener = UnixListener::bind(&socket_path).expect("Failed to bind CLI server");
 
     let router = router()
         .with_state(state)
