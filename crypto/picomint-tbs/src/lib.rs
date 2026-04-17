@@ -11,9 +11,11 @@ use group::ff::Field;
 use group::{Curve, Group};
 use hex::encode;
 use picomint_core::bitcoin::hashes::sha256;
+use picomint_core::BitcoinHash;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::{BitcoinHash, bls12_381_serde};
 use rand::SeedableRng;
+
+mod bls_serde;
 use rand::rngs::OsRng;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
@@ -34,35 +36,35 @@ fn hash_bytes_to_g1(data: &[u8]) -> G1Projective {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct SecretKeyShare(#[serde(with = "bls12_381_serde::scalar")] pub Scalar);
+pub struct SecretKeyShare(#[serde(with = "bls_serde::scalar")] pub Scalar);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct PublicKeyShare(#[serde(with = "bls12_381_serde::g2")] pub G2Affine);
+pub struct PublicKeyShare(#[serde(with = "bls_serde::g2")] pub G2Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct AggregatePublicKey(#[serde(with = "bls12_381_serde::g2")] pub G2Affine);
+pub struct AggregatePublicKey(#[serde(with = "bls_serde::g2")] pub G2Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct Message(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+pub struct Message(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 #[derive(Copy, Clone, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct BlindingKey(#[serde(with = "bls12_381_serde::scalar")] pub Scalar);
+pub struct BlindingKey(#[serde(with = "bls_serde::scalar")] pub Scalar);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct BlindedMessage(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+pub struct BlindedMessage(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 picomint_core::consensus_key!(BlindedMessage);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct BlindedSignatureShare(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+pub struct BlindedSignatureShare(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 picomint_core::consensus_value!(BlindedSignatureShare);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct BlindedSignature(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+pub struct BlindedSignature(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct Signature(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+pub struct Signature(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 macro_rules! point_hash_impl {
     ($type:ty) => {

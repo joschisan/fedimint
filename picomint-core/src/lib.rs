@@ -57,8 +57,6 @@ use picomint_encoding::{Decodable, Encodable};
 
 /// Bitcoin amount types
 mod amount;
-/// Legacy serde encoding for `bls12_381`
-pub mod bls12_381_serde;
 /// Federation configuration
 pub mod config;
 /// Fundamental types

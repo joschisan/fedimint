@@ -7,34 +7,35 @@ pub use bls12_381::{G1Affine, G2Affine};
 use bls12_381::{G1Projective, G2Projective, Scalar, pairing};
 use group::ff::Field;
 use group::{Curve, Group};
-use picomint_core::bls12_381_serde;
 use picomint_encoding::{Decodable, Encodable};
 use rand_chacha::ChaChaRng;
 use rand_chacha::rand_core::SeedableRng;
 use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct SecretKeyShare(#[serde(with = "bls12_381_serde::scalar")] pub Scalar);
+mod bls_serde;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct PublicKeyShare(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+pub struct SecretKeyShare(#[serde(with = "bls_serde::scalar")] pub Scalar);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct AggregatePublicKey(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+pub struct PublicKeyShare(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct DecryptionKeyShare(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+pub struct AggregatePublicKey(#[serde(with = "bls_serde::g1")] pub G1Affine);
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
+pub struct DecryptionKeyShare(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 picomint_core::consensus_value!(DecryptionKeyShare);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct AggregateDecryptionKey(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+pub struct AggregateDecryptionKey(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct EphemeralPublicKey(#[serde(with = "bls12_381_serde::g1")] pub G1Affine);
+pub struct EphemeralPublicKey(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct EphemeralSignature(#[serde(with = "bls12_381_serde::g2")] pub G2Affine);
+pub struct EphemeralSignature(#[serde(with = "bls_serde::g2")] pub G2Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable, Serialize, Deserialize)]
 pub struct CipherText {

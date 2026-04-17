@@ -24,6 +24,7 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 serde = { workspace = true }
 serde-big-array = { workspace = true }
+serdect = { workspace = true }
 
 [lints]
 workspace = true

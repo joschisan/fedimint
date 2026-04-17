@@ -4434,6 +4434,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "serde",
+ "serdect",
  "sha3",
 ]
 
@@ -4450,6 +4451,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serde-big-array",
+ "serdect",
 ]
 
 [[package]]

@@ -30,6 +30,7 @@ hex = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 serde = { workspace = true }
+serdect = { workspace = true }
 sha3 = { workspace = true }
 
 [dev-dependencies]
