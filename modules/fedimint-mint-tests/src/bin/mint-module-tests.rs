@@ -5,12 +5,16 @@ use devimint::federation::Federation;
 use devimint::util::almost_equal;
 use fedimint_logging::LOG_DEVIMINT;
 use rand::Rng;
+use tokio::try_join;
 use tracing::info;
 
 #[derive(Debug, Parser)]
 enum Cmd {
     Restore,
+    /// Mint recovery test. Run with `FM_FORCE_V1_MINT_RECOVERY=1` to force
+    /// V1 (session-based) recovery path.
     RecoveryV1,
+    /// Mint recovery test using default (V2 slice-based) recovery path.
     RecoveryV2,
     Sanity,
 }
@@ -138,132 +142,133 @@ async fn mint_recovery_test() -> anyhow::Result<()> {
         .call(|dev_fed, _process_mgr| async move {
             let fed = dev_fed.fed().await?;
 
-            const PEGIN_SATS: u64 = 100_000;
-
-            info!(target: LOG_DEVIMINT, "### Test mint recovery with backup");
-            {
-                let client = fed.new_joined_client("mint-recovery-backup").await?;
-                fed.pegin_client(PEGIN_SATS, &client).await?;
-
-                let pre_balance = client.balance().await?;
-                info!(target: LOG_DEVIMINT, pre_balance, "Balance before backup");
-                assert!(pre_balance > 0);
-
-                // Upload backup so the federation stores spendable notes
-                cmd!(client, "backup").run().await?;
-
-                // Restore triggers recovery; with V1 this exercises the
-                // finalize_dbtx reissuance codepath
-                let restored = client
-                    .new_restored("mint-restored-with-backup", fed.invite_code()?)
-                    .await?;
-                cmd!(restored, "dev", "wait-complete").out_json().await?;
-
-                let post_balance = restored.balance().await?;
-                info!(target: LOG_DEVIMINT, post_balance, "Balance after recovery with backup");
-                almost_equal(pre_balance, post_balance, 100_000).unwrap();
-            }
-
-            info!(target: LOG_DEVIMINT, "### Test mint recovery without backup");
-            {
-                let client = fed.new_joined_client("mint-recovery-no-backup").await?;
-                fed.pegin_client(PEGIN_SATS, &client).await?;
-
-                let pre_balance = client.balance().await?;
-                assert!(pre_balance > 0);
-
-                // Restore without ever calling backup — recovery from history only
-                let restored = client
-                    .new_restored("mint-restored-no-backup", fed.invite_code()?)
-                    .await?;
-                cmd!(restored, "dev", "wait-complete").out_json().await?;
-
-                let post_balance = restored.balance().await?;
-                info!(target: LOG_DEVIMINT, post_balance, "Balance after recovery without backup");
-                almost_equal(pre_balance, post_balance, 100_000).unwrap();
-            }
-
-            info!(target: LOG_DEVIMINT, "### Test mint recovery after spend+reissue activity");
-            {
-                let client = fed
-                    .new_joined_client("mint-recovery-after-activity")
-                    .await?;
-                fed.pegin_client(PEGIN_SATS, &client).await?;
-
-                // Do several rounds of spend-to-self to churn note denominations
-                for i in 0..3 {
-                    let balance = client.balance().await?;
-                    let spend_amount = balance / 3;
-
-                    let notes = cmd!(client, "spend", spend_amount)
-                        .out_json()
-                        .await?
-                        .get("notes")
-                        .expect("Output didn't contain e-cash notes")
-                        .as_str()
-                        .unwrap()
-                        .to_owned();
-
-                    cmd!(client, "reissue", notes).out_json().await?;
-                    info!(target: LOG_DEVIMINT, i, spend_amount, "Spent and reissued to self");
-                }
-
-                let pre_balance = client.balance().await?;
-                info!(target: LOG_DEVIMINT, pre_balance, "Balance after activity");
-                assert!(pre_balance > 0);
-
-                cmd!(client, "backup").run().await?;
-
-                let restored = client
-                    .new_restored("mint-restored-after-activity", fed.invite_code()?)
-                    .await?;
-                cmd!(restored, "dev", "wait-complete").out_json().await?;
-
-                let post_balance = restored.balance().await?;
-                info!(target: LOG_DEVIMINT, post_balance, "Balance after recovery post-activity");
-                almost_equal(pre_balance, post_balance, 100_000).unwrap();
-            }
-
-            info!(target: LOG_DEVIMINT, "### Test mint recovery with post-backup activity");
-            {
-                let client = fed
-                    .new_joined_client("mint-recovery-post-backup")
-                    .await?;
-                fed.pegin_client(PEGIN_SATS, &client).await?;
-
-                // Backup while we still have the original notes
-                cmd!(client, "backup").run().await?;
-
-                // Spend and reissue after the backup — these note changes
-                // won't be in the backup, only in the federation history
-                let balance = client.balance().await?;
-                let spend_amount = balance / 2;
-                let notes = cmd!(client, "spend", spend_amount)
-                    .out_json()
-                    .await?
-                    .get("notes")
-                    .expect("Output didn't contain e-cash notes")
-                    .as_str()
-                    .unwrap()
-                    .to_owned();
-                cmd!(client, "reissue", notes).out_json().await?;
-
-                let pre_balance = client.balance().await?;
-                info!(target: LOG_DEVIMINT, pre_balance, "Balance after post-backup activity");
-
-                let restored = client
-                    .new_restored("mint-restored-post-backup", fed.invite_code()?)
-                    .await?;
-                cmd!(restored, "dev", "wait-complete").out_json().await?;
-
-                let post_balance = restored.balance().await?;
-                info!(target: LOG_DEVIMINT, post_balance, "Balance after recovery with post-backup activity");
-                almost_equal(pre_balance, post_balance, 100_000).unwrap();
-            }
+            try_join!(
+                test_recovery_with_backup(fed),
+                test_recovery_without_backup(fed),
+                test_recovery_after_activity(fed),
+                test_recovery_with_post_backup_activity(fed),
+            )?;
 
             Ok(())
         })
         .await
+}
+
+const PEGIN_SATS: u64 = 1_000_000;
+
+async fn test_recovery_with_backup(fed: &Federation) -> Result<()> {
+    info!(target: LOG_DEVIMINT, "### Test mint recovery with backup");
+    let client = fed.new_joined_client("mint-recovery-backup").await?;
+    fed.pegin_client(PEGIN_SATS, &client).await?;
+
+    let pre_balance = client.balance().await?;
+    info!(target: LOG_DEVIMINT, pre_balance, "Balance before backup");
+    assert!(pre_balance > 0);
+
+    cmd!(client, "backup").run().await?;
+
+    let restored = client
+        .new_restored("mint-restored-with-backup", fed.invite_code()?)
+        .await?;
+    cmd!(restored, "dev", "wait-complete").out_json().await?;
+
+    let post_balance = restored.balance().await?;
+    info!(target: LOG_DEVIMINT, post_balance, "Balance after recovery with backup");
+    almost_equal(pre_balance, post_balance, 25_000).unwrap();
+    Ok(())
+}
+
+async fn test_recovery_without_backup(fed: &Federation) -> Result<()> {
+    info!(target: LOG_DEVIMINT, "### Test mint recovery without backup");
+    let client = fed.new_joined_client("mint-recovery-no-backup").await?;
+    fed.pegin_client(PEGIN_SATS, &client).await?;
+
+    let pre_balance = client.balance().await?;
+    assert!(pre_balance > 0);
+
+    let restored = client
+        .new_restored("mint-restored-no-backup", fed.invite_code()?)
+        .await?;
+    cmd!(restored, "dev", "wait-complete").out_json().await?;
+
+    let post_balance = restored.balance().await?;
+    info!(target: LOG_DEVIMINT, post_balance, "Balance after recovery without backup");
+    almost_equal(pre_balance, post_balance, 25_000).unwrap();
+    Ok(())
+}
+
+async fn test_recovery_after_activity(fed: &Federation) -> Result<()> {
+    info!(target: LOG_DEVIMINT, "### Test mint recovery after spend+reissue activity");
+    let client = fed
+        .new_joined_client("mint-recovery-after-activity")
+        .await?;
+    fed.pegin_client(PEGIN_SATS, &client).await?;
+
+    for i in 0..3 {
+        let balance = client.balance().await?;
+        let spend_amount = balance / 3;
+
+        let notes = cmd!(client, "spend", spend_amount)
+            .out_json()
+            .await?
+            .get("notes")
+            .expect("Output didn't contain e-cash notes")
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        cmd!(client, "reissue", notes).out_json().await?;
+        info!(target: LOG_DEVIMINT, i, spend_amount, "Spent and reissued to self");
+    }
+
+    let pre_balance = client.balance().await?;
+    info!(target: LOG_DEVIMINT, pre_balance, "Balance after activity");
+    assert!(pre_balance > 0);
+
+    cmd!(client, "backup").run().await?;
+
+    let restored = client
+        .new_restored("mint-restored-after-activity", fed.invite_code()?)
+        .await?;
+    cmd!(restored, "dev", "wait-complete").out_json().await?;
+
+    let post_balance = restored.balance().await?;
+    info!(target: LOG_DEVIMINT, post_balance, "Balance after recovery post-activity");
+    almost_equal(pre_balance, post_balance, 25_000).unwrap();
+    Ok(())
+}
+
+async fn test_recovery_with_post_backup_activity(fed: &Federation) -> Result<()> {
+    info!(target: LOG_DEVIMINT, "### Test mint recovery with post-backup activity");
+    let client = fed.new_joined_client("mint-recovery-post-backup").await?;
+    fed.pegin_client(PEGIN_SATS, &client).await?;
+
+    cmd!(client, "backup").run().await?;
+
+    let balance = client.balance().await?;
+    let spend_amount = balance / 2;
+    let notes = cmd!(client, "spend", spend_amount)
+        .out_json()
+        .await?
+        .get("notes")
+        .expect("Output didn't contain e-cash notes")
+        .as_str()
+        .unwrap()
+        .to_owned();
+    cmd!(client, "reissue", notes).out_json().await?;
+
+    let pre_balance = client.balance().await?;
+    info!(target: LOG_DEVIMINT, pre_balance, "Balance after post-backup activity");
+
+    let restored = client
+        .new_restored("mint-restored-post-backup", fed.invite_code()?)
+        .await?;
+    cmd!(restored, "dev", "wait-complete").out_json().await?;
+
+    let post_balance = restored.balance().await?;
+    info!(target: LOG_DEVIMINT, post_balance, "Balance after recovery with post-backup activity");
+    almost_equal(pre_balance, post_balance, 25_000).unwrap();
+    Ok(())
 }
 
 async fn sanity() -> anyhow::Result<()> {
