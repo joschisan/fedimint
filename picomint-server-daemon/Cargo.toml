@@ -23,7 +23,7 @@ aleph-bft = { workspace = true }
 anyhow = { workspace = true }
 async-channel = { workspace = true }
 async-trait = { workspace = true }
-axum = { workspace = true, features = ["macros"] }
+axum = { workspace = true, features = ["macros", "multipart"] }
 axum-extra = { workspace = true, features = ["cookie", "form"] }
 bitcoin = { workspace = true }
 bls12_381 = { workspace = true }

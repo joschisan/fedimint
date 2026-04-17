@@ -14,7 +14,6 @@ pub fn render(invite_code: &str, session_count: u64) -> Markup {
                         "The invite code will be available once the federation has completed its first consensus session."
                     }
                 } @else {
-                    @let observer_link = format!("https://observer.picomint.org/nostr?check={invite_code}");
                     @let qr_svg = QrCode::new(invite_code)
                         .expect("Failed to generate QR code")
                         .render::<qrcode::render::svg::Color>()
@@ -33,10 +32,6 @@ pub fn render(invite_code: &str, session_count: u64) -> Markup {
 
                     div class="mb-3" {
                         (copiable_text(invite_code))
-                    }
-
-                    a href=(observer_link) target="_blank" class="btn btn-outline-success w-100 py-2" {
-                        "Announce on Nostr"
                     }
                 }
             }

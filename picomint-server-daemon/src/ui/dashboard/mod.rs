@@ -25,6 +25,8 @@ use crate::ui::{
     login_submit_response, single_card_layout,
 };
 
+pub const BACKUP_CONFIG_ROUTE: &str = "/backup_config";
+
 async fn login_form_handler() -> impl IntoResponse {
     Html(single_card_layout("Enter Password", login_form(None)).into_string())
 }
@@ -40,6 +42,24 @@ async fn login_submit(
         state.auth_cookie_value,
         jar,
         input,
+    )
+}
+
+async fn backup_config(
+    State(state): State<UiState<Arc<ConsensusApi>>>,
+    _auth: UserAuth,
+) -> impl IntoResponse {
+    let body = serde_json::to_vec_pretty(&state.api.cfg).expect("ServerConfig is serializable");
+
+    (
+        [
+            ("Content-Type", "application/json"),
+            (
+                "Content-Disposition",
+                "attachment; filename=\"config.json\"",
+            ),
+        ],
+        body,
     )
 }
 
@@ -123,6 +143,7 @@ pub fn router(api: Arc<ConsensusApi>, auth: ApiAuth) -> Router {
     Router::new()
         .route(ROOT_ROUTE, get(dashboard_view))
         .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
+        .route(BACKUP_CONFIG_ROUTE, get(backup_config))
         .route(ln::LN_ADD_ROUTE, post(ln::post_add))
         .route(ln::LN_REMOVE_ROUTE, post(ln::post_remove))
         .with_static_routes()

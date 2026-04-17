@@ -274,6 +274,7 @@ async fn build_client(
 
 async fn start_picomintd(base: &Path, peer_idx: usize) -> anyhow::Result<Child> {
     let p2p_port = GUARDIAN_BASE_PORT + (peer_idx as u16 * PORTS_PER_GUARDIAN);
+    let ui_port = p2p_port + 1;
 
     let data_dir = base.join(format!("picomintd-{peer_idx}"));
     tokio::fs::create_dir_all(&data_dir).await?;
@@ -291,12 +292,14 @@ async fn start_picomintd(base: &Path, peer_idx: usize) -> anyhow::Result<Child> 
         .env("BITCOIND_USERNAME", BTC_RPC_USER)
         .env("BITCOIND_PASSWORD", BTC_RPC_PASS)
         .env("P2P_ADDR", format!("127.0.0.1:{p2p_port}"))
+        .env("UI_ADDR", format!("127.0.0.1:{ui_port}"))
+        .env("UI_PASSWORD", "test")
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()
         .context(format!("Failed to start picomintd-{peer_idx}"))?;
 
-    info!("Started picomintd-{peer_idx} on port {p2p_port}");
+    info!("Started picomintd-{peer_idx} on port {p2p_port} (UI: http://127.0.0.1:{ui_port})");
     Ok(child)
 }
 
