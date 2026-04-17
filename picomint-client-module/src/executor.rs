@@ -17,7 +17,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::future::select_all;
-use picomint_core::redb;
+use picomint_redb::redb;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxFuture;
 use picomint_redb::{Database, WriteTxRef};
@@ -45,8 +45,8 @@ pub trait StateMachine:
     fn transitions(&self, ctx: &Self::Context) -> Vec<StateTransition<Self>>;
 }
 
-fn table<S: StateMachine>() -> picomint_core::db::NativeTableDef<S, ()> {
-    picomint_core::db::NativeTableDef::new(S::TABLE_NAME)
+fn table<S: StateMachine>() -> picomint_redb::NativeTableDef<S, ()> {
+    picomint_redb::NativeTableDef::new(S::TABLE_NAME)
 }
 
 /// Type-erased trigger value. The concrete type is captured inside the

@@ -75,7 +75,7 @@ pub struct SpendableNote {
     pub signature: tbs::Signature,
 }
 
-picomint_core::consensus_key!(SpendableNote);
+picomint_redb::consensus_key!(SpendableNote);
 
 impl SpendableNote {
     pub fn amount(&self) -> Amount {

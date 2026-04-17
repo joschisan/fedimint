@@ -1,7 +1,7 @@
 use picomint_api_client::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::table;
+use picomint_redb::table;
 use picomint_ln_common::contracts::{IncomingContract, PaymentImage};
 
 table!(
@@ -29,4 +29,4 @@ pub struct RegisteredIncomingContract {
     pub contract: IncomingContract,
 }
 
-picomint_core::consensus_value!(RegisteredIncomingContract);
+picomint_redb::consensus_value!(RegisteredIncomingContract);

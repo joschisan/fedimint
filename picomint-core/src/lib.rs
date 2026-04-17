@@ -51,7 +51,7 @@ use lightning_types::features::Bolt11InvoiceFeatures;
 pub use peer_id::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
-pub use {bitcoin, hex, redb, secp256k1};
+pub use {bitcoin, hex, secp256k1};
 
 use picomint_encoding::{Decodable, Encodable};
 
@@ -61,8 +61,6 @@ mod amount;
 pub mod config;
 /// Fundamental types
 pub mod core;
-/// Database handling
-pub mod db;
 pub mod endpoint_constants;
 /// Common environment variables
 pub mod envs;
@@ -362,7 +360,7 @@ impl std::fmt::Display for OutPoint {
     }
 }
 
-crate::consensus_key!(OutPoint);
+picomint_redb::consensus_key!(OutPoint);
 
 /// A contiguous range of input/output indexes
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encodable, Decodable)]

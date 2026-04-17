@@ -1,4 +1,4 @@
-use picomint_core::table;
+use picomint_redb::table;
 
 table!(
     NEXT_OUTPUT_INDEX,

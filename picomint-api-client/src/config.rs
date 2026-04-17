@@ -36,7 +36,7 @@ pub struct ConsensusConfig {
     pub wallet: WalletConfigConsensus,
 }
 
-picomint_core::consensus_value!(ConsensusConfig);
+picomint_redb::consensus_value!(ConsensusConfig);
 
 impl ConsensusConfig {
     pub fn calculate_federation_id(&self) -> FederationId {

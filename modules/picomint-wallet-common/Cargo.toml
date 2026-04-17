@@ -19,6 +19,7 @@ path = "src/lib.rs"
 bitcoin = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
+picomint-redb = { workspace = true }
 miniscript = { workspace = true, features = ["serde"] }
 secp256k1 = { workspace = true }
 serde = { workspace = true }

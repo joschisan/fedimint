@@ -1,6 +1,7 @@
 use bitcoin::{TxOut, Txid};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::{PeerId, table};
+use picomint_core::PeerId;
+use picomint_redb::table;
 use picomint_wallet_common::TxInfo;
 use secp256k1::ecdsa::Signature;
 use serde::Serialize;
@@ -10,20 +11,20 @@ use crate::{FederationTx, FederationWallet};
 #[derive(Clone, Debug, Encodable, Decodable, Serialize)]
 pub struct Output(pub bitcoin::OutPoint, pub TxOut);
 
-picomint_core::consensus_value!(Output);
+picomint_redb::consensus_value!(Output);
 
 /// Newtype wrapper for `bitcoin::Txid` — lets us impl `redb::Key` locally
 /// (orphan rules forbid impling it on the foreign `Txid`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Encodable, Decodable)]
 pub struct TxidKey(pub Txid);
 
-picomint_core::consensus_key!(TxidKey);
+picomint_redb::consensus_key!(TxidKey);
 
 /// Vec of ecdsa signatures — wrapped so we can impl `redb::Value` locally.
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub struct Signatures(pub Vec<Signature>);
 
-picomint_core::consensus_value!(Signatures);
+picomint_redb::consensus_value!(Signatures);
 
 table!(
     OUTPUT,

@@ -99,7 +99,7 @@ impl<'de> Deserialize<'de> for OperationId {
     }
 }
 
-crate::consensus_key!(OperationId);
+picomint_redb::consensus_key!(OperationId);
 
 /// Type of a module in the fixed set.
 ///

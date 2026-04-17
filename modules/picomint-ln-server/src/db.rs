@@ -1,5 +1,6 @@
 use picomint_core::util::SafeUrl;
-use picomint_core::{OutPoint, PeerId, table};
+use picomint_core::{OutPoint, PeerId};
+use picomint_redb::table;
 use picomint_ln_common::ContractId;
 use picomint_ln_common::contracts::{IncomingContract, OutgoingContract};
 use tpe::DecryptionKeyShare;

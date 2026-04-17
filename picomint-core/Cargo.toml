@@ -28,6 +28,7 @@ bls12_381 = { workspace = true }
 picomint-derive = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-logging = { workspace = true }
+picomint-redb = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true, features = ["serde"] }
 iroh = { workspace = true, default-features = false }

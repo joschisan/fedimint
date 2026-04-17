@@ -64,7 +64,7 @@ where
 )]
 pub struct FederationId(pub sha256::Hash);
 
-crate::consensus_key!(FederationId);
+picomint_redb::consensus_key!(FederationId);
 
 #[derive(
     Debug,

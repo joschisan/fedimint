@@ -35,7 +35,7 @@ pub struct TxSubmissionStatesSM {
     pub state: TxSubmissionStates,
 }
 
-picomint_core::consensus_key!(TxSubmissionStatesSM);
+picomint_redb::consensus_key!(TxSubmissionStatesSM);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum TxSubmissionStates {

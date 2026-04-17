@@ -44,7 +44,7 @@ pub const MODULE_CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVers
 )]
 pub struct Denomination(pub u8);
 
-picomint_core::consensus_key!(Denomination);
+picomint_redb::consensus_key!(Denomination);
 
 impl Denomination {
     /// Convert to Amount (only call at boundaries)
@@ -147,7 +147,7 @@ pub enum RecoveryItem {
     },
 }
 
-picomint_core::consensus_value!(RecoveryItem);
+picomint_redb::consensus_value!(RecoveryItem);
 
 pub struct MintModuleTypes;
 

@@ -21,7 +21,7 @@ pub struct MintOutputStateMachine {
     pub state: OutputSMState,
 }
 
-picomint_core::consensus_key!(MintOutputStateMachine);
+picomint_redb::consensus_key!(MintOutputStateMachine);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct OutputSMCommon {

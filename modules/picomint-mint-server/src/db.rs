@@ -1,6 +1,7 @@
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::PublicKey;
-use picomint_core::{table, OutPoint};
+use picomint_core::OutPoint;
+use picomint_redb::table;
 use picomint_mint_common::{Denomination, RecoveryItem};
 use tbs::{BlindedMessage, BlindedSignatureShare};
 
@@ -9,7 +10,7 @@ use tbs::{BlindedMessage, BlindedSignatureShare};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct NoteNonceKey(pub PublicKey);
 
-picomint_core::consensus_key!(NoteNonceKey);
+picomint_redb::consensus_key!(NoteNonceKey);
 
 table!(
     NOTE_NONCE,

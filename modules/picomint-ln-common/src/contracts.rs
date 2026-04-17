@@ -19,7 +19,7 @@ pub enum PaymentImage {
     Point(PublicKey),
 }
 
-picomint_core::consensus_key!(PaymentImage);
+picomint_redb::consensus_key!(PaymentImage);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct IncomingContract {
@@ -27,7 +27,7 @@ pub struct IncomingContract {
     pub ciphertext: CipherText,
 }
 
-picomint_core::consensus_value!(IncomingContract);
+picomint_redb::consensus_value!(IncomingContract);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct Commitment {
@@ -140,7 +140,7 @@ pub struct OutgoingContract {
     pub ephemeral_pk: PublicKey,
 }
 
-picomint_core::consensus_value!(OutgoingContract);
+picomint_redb::consensus_value!(OutgoingContract);
 
 impl OutgoingContract {
     pub fn contract_id(&self) -> ContractId {

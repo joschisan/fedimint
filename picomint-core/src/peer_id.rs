@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::consensus_key;
+use picomint_redb::consensus_key;
 use picomint_encoding::{Decodable, Encodable};
 
 #[derive(

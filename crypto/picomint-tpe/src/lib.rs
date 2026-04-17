@@ -26,7 +26,7 @@ pub struct AggregatePublicKey(#[serde(with = "bls_serde::g1")] pub G1Affine);
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct DecryptionKeyShare(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
-picomint_core::consensus_value!(DecryptionKeyShare);
+picomint_redb::consensus_value!(DecryptionKeyShare);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct AggregateDecryptionKey(#[serde(with = "bls_serde::g1")] pub G1Affine);

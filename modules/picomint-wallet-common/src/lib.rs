@@ -77,7 +77,7 @@ pub struct FederationWallet {
     pub tweak: sha256::Hash,
 }
 
-picomint_core::consensus_value!(FederationWallet);
+picomint_redb::consensus_value!(FederationWallet);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct TxInfo {
@@ -90,7 +90,7 @@ pub struct TxInfo {
     pub created: u64,
 }
 
-picomint_core::consensus_value!(TxInfo);
+picomint_redb::consensus_value!(TxInfo);
 
 impl TxInfo {
     pub fn feerate(&self) -> u64 {

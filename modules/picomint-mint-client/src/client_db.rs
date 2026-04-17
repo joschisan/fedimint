@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use bitcoin_hashes::hash160;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::table;
+use picomint_redb::table;
 
 use crate::issuance::NoteIssuanceRequest;
 use crate::SpendableNote;
@@ -36,7 +36,7 @@ pub struct RecoveryState {
     pub nonces: BTreeSet<hash160::Hash>,
 }
 
-picomint_core::consensus_value!(RecoveryState);
+picomint_redb::consensus_value!(RecoveryState);
 
 table!(
     RECOVERY_STATE,

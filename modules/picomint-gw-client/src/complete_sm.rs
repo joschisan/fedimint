@@ -30,7 +30,7 @@ pub struct CompleteStateMachine {
     pub state: CompleteSMState,
 }
 
-picomint_core::consensus_key!(CompleteStateMachine);
+picomint_redb::consensus_key!(CompleteStateMachine);
 
 impl CompleteStateMachine {
     pub fn update(&self, state: CompleteSMState) -> Self {

@@ -20,7 +20,7 @@ pub struct AcceptedItem {
     pub peer: PeerId,
 }
 
-picomint_core::consensus_value!(AcceptedItem);
+picomint_redb::consensus_value!(AcceptedItem);
 
 /// Items ordered in a single session that have been accepted by Picomint
 /// consensus.
@@ -75,7 +75,7 @@ pub struct SignedSessionOutcome {
     pub signatures: std::collections::BTreeMap<PeerId, secp256k1::schnorr::Signature>,
 }
 
-picomint_core::consensus_value!(SignedSessionOutcome);
+picomint_redb::consensus_value!(SignedSessionOutcome);
 
 impl SignedSessionOutcome {
     pub fn verify(

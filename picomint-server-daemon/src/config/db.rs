@@ -1,9 +1,9 @@
-use picomint_core::table;
+use picomint_redb::table;
 use picomint_redb::Database;
 
 use crate::config::ServerConfig;
 
-picomint_core::consensus_value!(ServerConfig);
+picomint_redb::consensus_value!(ServerConfig);
 
 table!(
     SERVER_CONFIG,

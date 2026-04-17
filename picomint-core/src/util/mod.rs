@@ -79,7 +79,7 @@ where
 // nosemgrep: ban-raw-url
 pub struct SafeUrl(Url);
 
-crate::consensus_key!(SafeUrl);
+picomint_redb::consensus_key!(SafeUrl);
 
 impl picomint_encoding::Encodable for SafeUrl {
     fn consensus_encode<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {

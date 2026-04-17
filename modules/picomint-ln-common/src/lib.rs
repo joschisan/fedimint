@@ -54,7 +54,7 @@ pub const MINIMUM_INCOMING_CONTRACT_AMOUNT: Amount = Amount::from_sats(5);
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct ContractId(pub sha256::Hash);
 
-picomint_core::consensus_key!(ContractId);
+picomint_redb::consensus_key!(ContractId);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub enum LightningInput {

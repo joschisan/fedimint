@@ -20,6 +20,7 @@ anyhow = { workspace = true }
 bitcoin = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
+picomint-redb = { workspace = true }
 picomint-ln-common = { workspace = true }
 picomint-logging = { workspace = true }
 picomint-mint-common = { workspace = true }

@@ -2,7 +2,7 @@ use picomint_api_client::config::ConsensusConfig;
 use picomint_client_module::module::recovery::RecoveryProgress;
 use picomint_core::core::ModuleKind;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::table;
+use picomint_redb::table;
 use serde::Serialize;
 
 table!(
@@ -54,7 +54,7 @@ pub enum InitState {
     Complete(InitModeComplete),
 }
 
-picomint_core::consensus_value!(InitState);
+picomint_redb::consensus_value!(InitState);
 
 impl InitState {
     pub fn into_complete(self) -> Self {
@@ -84,14 +84,14 @@ pub struct ClientModuleRecovery {
     pub kind: ModuleKind,
 }
 
-picomint_core::consensus_key!(ClientModuleRecovery);
+picomint_redb::consensus_key!(ClientModuleRecovery);
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct ClientModuleRecoveryState {
     pub progress: RecoveryProgress,
 }
 
-picomint_core::consensus_value!(ClientModuleRecoveryState);
+picomint_redb::consensus_value!(ClientModuleRecoveryState);
 
 impl ClientModuleRecoveryState {
     pub fn is_done(&self) -> bool {

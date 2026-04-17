@@ -79,7 +79,7 @@ pub struct FederationTx {
     pub fee: Amount,
 }
 
-picomint_core::consensus_value!(FederationTx);
+picomint_redb::consensus_value!(FederationTx);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct SpentTxOut {

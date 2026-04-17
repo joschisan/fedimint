@@ -1,13 +1,13 @@
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::PublicKey;
-use picomint_core::table;
+use picomint_redb::table;
 use picomint_core::util::SafeUrl;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct GatewayKey(pub PublicKey);
 
-picomint_core::consensus_key!(GatewayKey);
+picomint_redb::consensus_key!(GatewayKey);
 
 table!(
     GATEWAY,
