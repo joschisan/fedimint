@@ -20,7 +20,7 @@ use picomint_core::util::FmtCompact;
 use picomint_core::{PeerId, TransactionId};
 use picomint_logging::LOG_NET_API;
 use picomint_redb::{Database, ReadTransaction};
-use picomint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
+use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use tokio::sync::watch::{self, Receiver, Sender};
 use tracing::{debug, warn};
 
@@ -47,7 +47,7 @@ pub struct ConsensusApi {
     pub ord_latency_receiver: watch::Receiver<Option<Duration>>,
     pub p2p_status_receivers: P2PStatusReceivers,
     pub ci_status_receivers: BTreeMap<PeerId, Receiver<Option<u64>>>,
-    pub bitcoin_rpc_connection: ServerBitcoinRpcMonitor,
+    pub bitcoin_rpc_connection: BitcoinRpcMonitor,
     pub auth: ApiAuth,
     pub code_version_str: String,
     pub task_group: TaskGroup,

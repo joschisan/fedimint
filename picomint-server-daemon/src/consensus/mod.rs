@@ -29,7 +29,7 @@ use picomint_core::util::FmtCompactAnyhow as _;
 use picomint_logging::{LOG_CONSENSUS, LOG_CORE, LOG_NET_API};
 use picomint_redb::Database;
 use picomint_server_core::ServerModule;
-use picomint_server_core::bitcoin_rpc::{DynServerBitcoinRpc, ServerBitcoinRpcMonitor};
+use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
 use tracing::{info, warn};
@@ -52,7 +52,7 @@ pub async fn run(
     db: Database,
     task_group: &TaskGroup,
     code_version_str: String,
-    dyn_server_bitcoin_rpc: DynServerBitcoinRpc,
+    bitcoin_backend: Arc<BitcoinBackend>,
     ui_bind: SocketAddr,
     max_connections: usize,
     max_requests_per_connection: usize,
@@ -60,8 +60,8 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     cfg.validate_config(&cfg.private.identity)?;
 
-    let bitcoin_rpc_connection = ServerBitcoinRpcMonitor::new(
-        dyn_server_bitcoin_rpc,
+    let bitcoin_rpc_connection = BitcoinRpcMonitor::new(
+        bitcoin_backend,
         if is_running_in_test_env() {
             Duration::from_millis(100)
         } else {

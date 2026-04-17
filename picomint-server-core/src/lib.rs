@@ -11,27 +11,16 @@
 //! the dynamic module registry — after the minimint rip those live inside
 //! `picomint-server-daemon` alongside the single known module set.
 
-pub mod bitcoin_rpc;
 pub mod config;
 
 use std::fmt::Debug;
 
-use picomint_core::bitcoin::Network;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiEndpoint, InputMeta, ModuleCommon, TransactionItemAmounts};
-use picomint_core::{Feerate, InPoint, OutPoint, PeerId, apply, async_trait_maybe_send};
+use picomint_core::{InPoint, OutPoint, PeerId, apply, async_trait_maybe_send};
 use picomint_redb::{ReadTxRef, WriteTxRef};
 use serde::{Deserialize, Serialize};
-
-/// Status of the Bitcoin RPC backend as reported by the monitor.
-#[derive(Debug, Clone)]
-pub struct ServerBitcoinRpcStatus {
-    pub network: Network,
-    pub block_count: u64,
-    pub fee_rate: Feerate,
-    pub sync_progress: Option<f64>,
-}
 
 /// P2P connection status for a peer. `None` in a status channel means the peer
 /// is currently disconnected.

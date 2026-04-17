@@ -46,8 +46,8 @@ use picomint_core::module::ApiAuth;
 use picomint_core::task::TaskGroup;
 use picomint_logging::LOG_CONSENSUS;
 use picomint_redb::Database;
+use picomint_bitcoin_rpc::BitcoinBackend;
 pub use picomint_server_core as core;
-use picomint_server_core::bitcoin_rpc::DynServerBitcoinRpc;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -65,7 +65,7 @@ pub async fn run_server(
     db: Database,
     code_version_str: String,
     task_group: TaskGroup,
-    bitcoin_rpc: DynServerBitcoinRpc,
+    bitcoin_rpc: Arc<BitcoinBackend>,
     max_connections: usize,
     max_requests_per_connection: usize,
     cli_port: u16,

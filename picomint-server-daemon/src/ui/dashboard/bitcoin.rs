@@ -1,8 +1,8 @@
 use maud::{Markup, html};
 use picomint_core::util::SafeUrl;
-use picomint_server_core::ServerBitcoinRpcStatus;
+use picomint_bitcoin_rpc::BitcoinRpcStatus;
 
-pub fn render(url: SafeUrl, status: &Option<ServerBitcoinRpcStatus>) -> Markup {
+pub fn render(url: SafeUrl, status: &Option<BitcoinRpcStatus>) -> Markup {
     html! {
         div class="card h-100" {
             div class="card-header dashboard-header" { "Bitcoin Rpc Connection" }

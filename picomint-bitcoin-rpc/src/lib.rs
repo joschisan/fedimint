@@ -1,10 +1,11 @@
-use std::fmt::Debug;
+pub mod bitcoind;
+pub mod esplora;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use picomint_core::bitcoin::{Block, BlockHash, Network, Transaction};
-use picomint_core::envs::BitcoinRpcConfig;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::{FmtCompactAnyhow as _, SafeUrl};
 use picomint_core::{ChainId, Feerate};
@@ -12,7 +13,8 @@ use picomint_logging::LOG_SERVER;
 use tokio::sync::watch;
 use tracing::{debug, warn};
 
-use crate::ServerBitcoinRpcStatus;
+pub use crate::bitcoind::BitcoindClient;
+pub use crate::esplora::EsploraClient;
 
 // Well-known genesis block hashes for different Bitcoin networks
 // <https://blockstream.info/api/block-height/1>
@@ -38,25 +40,95 @@ pub fn network_from_chain_id(chain_id: ChainId) -> Network {
         TESTNET_CHAIN_ID_STR => Network::Testnet,
         SIGNET_4_CHAIN_ID_STR => Network::Signet,
         MUTINYNET_CHAIN_ID_STR => Network::Signet,
-        _ => {
-            // Unknown genesis hash - treat as regtest/custom network
-            Network::Regtest
+        _ => Network::Regtest,
+    }
+}
+
+/// Status of the Bitcoin RPC backend as reported by the monitor.
+#[derive(Debug, Clone)]
+pub struct BitcoinRpcStatus {
+    pub network: Network,
+    pub block_count: u64,
+    pub fee_rate: Feerate,
+    pub sync_progress: Option<f64>,
+}
+
+/// Match-dispatched backend over the two concrete RPC clients.
+#[derive(Debug)]
+pub enum BitcoinBackend {
+    Bitcoind(BitcoindClient),
+    Esplora(EsploraClient),
+}
+
+impl BitcoinBackend {
+    pub fn url(&self) -> SafeUrl {
+        match self {
+            BitcoinBackend::Bitcoind(c) => c.url(),
+            BitcoinBackend::Esplora(c) => c.url(),
+        }
+    }
+
+    pub async fn get_block_count(&self) -> Result<u64> {
+        match self {
+            BitcoinBackend::Bitcoind(c) => c.get_block_count().await,
+            BitcoinBackend::Esplora(c) => c.get_block_count().await,
+        }
+    }
+
+    pub async fn get_block_hash(&self, height: u64) -> Result<BlockHash> {
+        match self {
+            BitcoinBackend::Bitcoind(c) => c.get_block_hash(height).await,
+            BitcoinBackend::Esplora(c) => c.get_block_hash(height).await,
+        }
+    }
+
+    pub async fn get_block(&self, hash: &BlockHash) -> Result<Block> {
+        match self {
+            BitcoinBackend::Bitcoind(c) => c.get_block(hash).await,
+            BitcoinBackend::Esplora(c) => c.get_block(hash).await,
+        }
+    }
+
+    pub async fn get_feerate(&self) -> Result<Option<Feerate>> {
+        match self {
+            BitcoinBackend::Bitcoind(c) => c.get_feerate().await,
+            BitcoinBackend::Esplora(c) => c.get_feerate().await,
+        }
+    }
+
+    pub async fn submit_transaction(&self, transaction: Transaction) {
+        match self {
+            BitcoinBackend::Bitcoind(c) => c.submit_transaction(transaction).await,
+            BitcoinBackend::Esplora(c) => c.submit_transaction(transaction).await,
+        }
+    }
+
+    pub async fn get_sync_progress(&self) -> Result<Option<f64>> {
+        match self {
+            BitcoinBackend::Bitcoind(c) => c.get_sync_progress().await,
+            BitcoinBackend::Esplora(c) => c.get_sync_progress().await,
+        }
+    }
+
+    pub async fn get_chain_id(&self) -> Result<ChainId> {
+        match self {
+            BitcoinBackend::Bitcoind(c) => c.get_chain_id().await,
+            BitcoinBackend::Esplora(c) => c.get_chain_id().await,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct ServerBitcoinRpcMonitor {
-    rpc: DynServerBitcoinRpc,
-    status_receiver: watch::Receiver<Option<ServerBitcoinRpcStatus>>,
-    /// Cached chain ID (block hash at height 1) - fetched once and never
-    /// changes
+pub struct BitcoinRpcMonitor {
+    rpc: Arc<BitcoinBackend>,
+    status_receiver: watch::Receiver<Option<BitcoinRpcStatus>>,
+    /// Cached chain ID — fetched once and never changes.
     chain_id: OnceLock<ChainId>,
 }
 
-impl ServerBitcoinRpcMonitor {
+impl BitcoinRpcMonitor {
     pub fn new(
-        rpc: DynServerBitcoinRpc,
+        rpc: Arc<BitcoinBackend>,
         update_interval: Duration,
         task_group: &TaskGroup,
     ) -> Self {
@@ -96,7 +168,7 @@ impl ServerBitcoinRpcMonitor {
         }
     }
 
-    async fn fetch_status(rpc: &DynServerBitcoinRpc) -> Result<ServerBitcoinRpcStatus> {
+    async fn fetch_status(rpc: &BitcoinBackend) -> Result<BitcoinRpcStatus> {
         let chain_id = rpc.get_chain_id().await?;
         let network = network_from_chain_id(chain_id);
         let block_count = rpc.get_block_count().await?;
@@ -105,10 +177,12 @@ impl ServerBitcoinRpcMonitor {
         let fee_rate = if network == Network::Regtest {
             Feerate { sats_per_kvb: 1000 }
         } else {
-            rpc.get_feerate().await?.context("Feerate not available")?
+            rpc.get_feerate()
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Feerate not available"))?
         };
 
-        Ok(ServerBitcoinRpcStatus {
+        Ok(BitcoinRpcStatus {
             network,
             block_count,
             fee_rate,
@@ -116,15 +190,11 @@ impl ServerBitcoinRpcMonitor {
         })
     }
 
-    pub fn get_bitcoin_rpc_config(&self) -> BitcoinRpcConfig {
-        self.rpc.get_bitcoin_rpc_config()
-    }
-
     pub fn url(&self) -> SafeUrl {
-        self.rpc.get_url()
+        self.rpc.url()
     }
 
-    pub fn status(&self) -> Option<ServerBitcoinRpcStatus> {
+    pub fn status(&self) -> Option<BitcoinRpcStatus> {
         self.status_receiver.borrow().clone()
     }
 
@@ -151,30 +221,9 @@ impl ServerBitcoinRpcMonitor {
             self.rpc.submit_transaction(tx).await;
         }
     }
-
-    /// Returns the chain ID, caching the result after the
-    /// first successful fetch.
-    pub async fn get_chain_id(&self) -> Result<ChainId> {
-        // Return cached value if available
-        if let Some(chain_id) = self.chain_id.get() {
-            return Ok(*chain_id);
-        }
-
-        ensure!(
-            self.status_receiver.borrow().is_some(),
-            "Not connected to bitcoin backend"
-        );
-
-        // Fetch from RPC and cache
-        let chain_id = self.rpc.get_chain_id().await?;
-        // It's OK if another task already set the value - the chain ID is immutable
-        let _ = self.chain_id.set(chain_id);
-
-        Ok(chain_id)
-    }
 }
 
-impl Clone for ServerBitcoinRpcMonitor {
+impl Clone for BitcoinRpcMonitor {
     fn clone(&self) -> Self {
         Self {
             rpc: self.rpc.clone(),
@@ -190,74 +239,5 @@ impl Clone for ServerBitcoinRpcMonitor {
                 })
                 .unwrap_or_default(),
         }
-    }
-}
-
-pub type DynServerBitcoinRpc = Arc<dyn IServerBitcoinRpc>;
-
-#[async_trait::async_trait]
-pub trait IServerBitcoinRpc: Debug + Send + Sync + 'static {
-    /// Returns the Bitcoin RPC config
-    fn get_bitcoin_rpc_config(&self) -> BitcoinRpcConfig;
-
-    /// Returns the Bitcoin RPC url
-    fn get_url(&self) -> SafeUrl;
-
-    /// Returns the current block count
-    async fn get_block_count(&self) -> Result<u64>;
-
-    /// Returns the block hash at a given height
-    ///
-    /// # Panics
-    /// If the node does not know a block for that height. Make sure to only
-    /// query blocks of a height less to the one returned by
-    /// `Self::get_block_count`.
-    ///
-    /// While there is a corner case that the blockchain shrinks between these
-    /// two calls (through on average heavier blocks on a fork) this is
-    /// prevented by only querying hashes for blocks tailing the chain tip
-    /// by a certain number of blocks.
-    async fn get_block_hash(&self, height: u64) -> Result<BlockHash>;
-
-    async fn get_block(&self, block_hash: &BlockHash) -> Result<Block>;
-
-    /// Estimates the fee rate for a given confirmation target. Make sure that
-    /// all federation members use the same algorithm to avoid widely
-    /// diverging results. If the node is not ready yet to return a fee rate
-    /// estimation this function returns `None`.
-    async fn get_feerate(&self) -> Result<Option<Feerate>>;
-
-    /// Submits a transaction to the Bitcoin network
-    ///
-    /// This operation does not return anything as it never OK to consider its
-    /// success as final anyway. The caller should be retrying
-    /// broadcast periodically until it confirms the transaction was actually
-    /// via other means or decides that is no longer relevant.
-    ///
-    /// Also - most backends considers brodcasting a tx that is already included
-    /// in the blockchain as an error, which breaks idempotency and requires
-    /// brittle workarounds just to reliably ignore... just to retry on the
-    /// higher level anyway.
-    ///
-    /// Implementations of this error should log errors for debugging purposes
-    /// when it makes sense.
-    async fn submit_transaction(&self, transaction: Transaction);
-
-    /// Returns the node's estimated chain sync percentage as a float between
-    /// 0.0 and 1.0, or `None` if the node doesn't support this feature.
-    async fn get_sync_progress(&self) -> Result<Option<f64>>;
-
-    /// Returns the chain ID (block hash at height 1)
-    ///
-    /// The chain ID uniquely identifies which Bitcoin network this node is
-    /// connected to. Use [`network_from_chain_id`] to derive the `Network`
-    /// enum from the chain ID.
-    async fn get_chain_id(&self) -> Result<ChainId>;
-
-    fn into_dyn(self) -> DynServerBitcoinRpc
-    where
-        Self: Sized,
-    {
-        Arc::new(self)
     }
 }

@@ -41,7 +41,7 @@ use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_m
 use picomint_logging::LOG_MODULE_WALLET;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use picomint_server_core::ServerModule;
-use picomint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
+use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
 pub use picomint_wallet_common as common;
 use picomint_wallet_common::config::{WalletConfig, WalletConfigPrivate};
@@ -605,7 +605,7 @@ impl ServerModule for Wallet {
 pub struct Wallet {
     cfg: WalletConfig,
     db: Database,
-    btc_rpc: ServerBitcoinRpcMonitor,
+    btc_rpc: BitcoinRpcMonitor,
 }
 
 impl Wallet {
@@ -613,7 +613,7 @@ impl Wallet {
         cfg: WalletConfig,
         db: Database,
         task_group: &TaskGroup,
-        btc_rpc: ServerBitcoinRpcMonitor,
+        btc_rpc: BitcoinRpcMonitor,
     ) -> Wallet {
         Self::spawn_broadcast_unconfirmed_txs_task(btc_rpc.clone(), db.clone(), task_group);
 
@@ -621,7 +621,7 @@ impl Wallet {
     }
 
     fn spawn_broadcast_unconfirmed_txs_task(
-        btc_rpc: ServerBitcoinRpcMonitor,
+        btc_rpc: BitcoinRpcMonitor,
         db: Database,
         task_group: &TaskGroup,
     ) {

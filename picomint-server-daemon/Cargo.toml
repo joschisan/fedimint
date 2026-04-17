@@ -43,7 +43,7 @@ picomint-logging = { workspace = true, features = ["telemetry"] }
 picomint-mint-common = { workspace = true }
 picomint-mint-server = { workspace = true }
 picomint-redb = { workspace = true }
-picomint-server-bitcoin-rpc = { workspace = true }
+picomint-bitcoin-rpc = { workspace = true }
 picomint-server-cli-core = { workspace = true }
 picomint-server-core = { workspace = true }
 picomint-wallet-common = { workspace = true }

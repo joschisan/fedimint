@@ -4533,6 +4533,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-bitcoin-rpc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "bitcoincore-rpc",
+ "esplora-client 0.12.3",
+ "picomint-core",
+ "picomint-logging",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "picomint-bitcoind"
 version = "0.1.0"
 dependencies = [
@@ -4929,6 +4943,7 @@ dependencies = [
  "erased-serde",
  "futures",
  "group",
+ "picomint-bitcoin-rpc",
  "picomint-core",
  "picomint-ln-common",
  "picomint-logging",
@@ -5081,21 +5096,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-server-bitcoin-rpc"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "bitcoincore-rpc",
- "esplora-client 0.12.3",
- "picomint-core",
- "picomint-logging",
- "picomint-server-core",
- "tracing",
-]
-
-[[package]]
 name = "picomint-server-cli"
 version = "0.1.0"
 dependencies = [
@@ -5165,6 +5165,7 @@ dependencies = [
  "parity-scale-codec",
  "picomint-aead",
  "picomint-api-client",
+ "picomint-bitcoin-rpc",
  "picomint-client-module",
  "picomint-core",
  "picomint-derive-secret",
@@ -5174,7 +5175,6 @@ dependencies = [
  "picomint-mint-common",
  "picomint-mint-server",
  "picomint-redb",
- "picomint-server-bitcoin-rpc",
  "picomint-server-cli-core",
  "picomint-server-core",
  "picomint-wallet-common",
@@ -5288,6 +5288,7 @@ dependencies = [
  "erased-serde",
  "futures",
  "miniscript",
+ "picomint-bitcoin-rpc",
  "picomint-core",
  "picomint-logging",
  "picomint-redb",

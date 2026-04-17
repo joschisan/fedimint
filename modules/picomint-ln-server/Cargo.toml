@@ -15,6 +15,7 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 bls12_381 = { workspace = true }
 erased-serde = { workspace = true }
+picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }
 picomint-ln-common = { workspace = true }
 picomint-logging = { workspace = true }

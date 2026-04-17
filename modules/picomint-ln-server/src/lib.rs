@@ -39,7 +39,7 @@ use picomint_ln_common::{
 use picomint_logging::LOG_MODULE_LN;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use picomint_server_core::ServerModule;
-use picomint_server_core::bitcoin_rpc::ServerBitcoinRpcMonitor;
+use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_server_core::config::{PeerHandleOps, eval_poly_g1};
 use tpe::{DecryptionKeyShare, PublicKeyShare, SecretKeyShare};
 use tracing::trace;
@@ -96,14 +96,14 @@ pub fn validate_config(identity: &PeerId, cfg: &LightningConfig) -> anyhow::Resu
 pub struct Lightning {
     cfg: LightningConfig,
     db: Database,
-    server_bitcoin_rpc_monitor: ServerBitcoinRpcMonitor,
+    server_bitcoin_rpc_monitor: BitcoinRpcMonitor,
 }
 
 impl Lightning {
     pub fn new(
         cfg: LightningConfig,
         db: Database,
-        server_bitcoin_rpc_monitor: ServerBitcoinRpcMonitor,
+        server_bitcoin_rpc_monitor: BitcoinRpcMonitor,
     ) -> Self {
         Self {
             cfg,

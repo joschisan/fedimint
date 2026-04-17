@@ -6,21 +6,19 @@
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use futures::FutureExt as _;
+use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
 use picomint_core::rustls::install_crypto_provider;
 use picomint_core::task::TaskGroup;
 use picomint_core::timing;
 use picomint_core::util::{FmtCompactAnyhow as _, SafeUrl};
 use picomint_logging::{LOG_CORE, TracingSetup};
-use picomint_server_bitcoin_rpc::BitcoindClientWithFallback;
-use picomint_server_bitcoin_rpc::bitcoind::BitcoindClient;
-use picomint_server_bitcoin_rpc::esplora::EsploraClient;
-use picomint_server_core::bitcoin_rpc::IServerBitcoinRpc;
 use picomint_server_daemon::config::ConfigGenSettings;
 use picomint_server_daemon::{DB_FILE, run_server};
 use tracing::{debug, error, info};
@@ -45,7 +43,7 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
     group(
         ArgGroup::new("bitcoin_rpc")
             .required(true)
-            .multiple(true)
+            .multiple(false)
             .args(["bitcoind_url", "esplora_url"])
     )
 )]
@@ -169,7 +167,7 @@ async fn main() -> anyhow::Result<Infallible> {
         .await
         .expect("Failed to open picomint-server-daemon database");
 
-    let dyn_server_bitcoin_rpc = match (
+    let bitcoin_backend = Arc::new(match (
         server_opts.bitcoind_url.as_ref(),
         server_opts.esplora_url.as_ref(),
     ) {
@@ -182,31 +180,13 @@ async fn main() -> anyhow::Result<Infallible> {
                 .get_bitcoind_url_and_password()
                 .await
                 .expect("Failed to get bitcoind url");
-            BitcoindClient::new(bitcoind_username, bitcoind_password, &bitcoind_url)
-                .unwrap()
-                .into_dyn()
-        }
-        (None, Some(url)) => EsploraClient::new(url).unwrap().into_dyn(),
-        (Some(_), Some(esplora_url)) => {
-            let bitcoind_username = server_opts
-                .bitcoind_username
-                .clone()
-                .expect("BITCOIND_URL is set but BITCOIND_USERNAME is not");
-            let (bitcoind_url, bitcoind_password) = server_opts
-                .get_bitcoind_url_and_password()
-                .await
-                .expect("Failed to get bitcoind url");
-            BitcoindClientWithFallback::new(
-                bitcoind_username,
-                bitcoind_password,
-                &bitcoind_url,
-                esplora_url,
+            BitcoinBackend::Bitcoind(
+                BitcoindClient::new(bitcoind_username, bitcoind_password, &bitcoind_url).unwrap(),
             )
-            .unwrap()
-            .into_dyn()
         }
-        _ => unreachable!("ArgGroup already enforced XOR relation"),
-    };
+        (None, Some(url)) => BitcoinBackend::Esplora(EsploraClient::new(url).unwrap()),
+        _ => unreachable!("ArgGroup enforces exactly one of BITCOIND_URL or ESPLORA_URL"),
+    });
 
     root_task_group.install_kill_handler();
 
@@ -226,7 +206,7 @@ async fn main() -> anyhow::Result<Infallible> {
             db,
             code_version_str,
             task_group,
-            dyn_server_bitcoin_rpc,
+            bitcoin_backend,
             max_connections,
             max_requests_per_connection,
             cli_port,
