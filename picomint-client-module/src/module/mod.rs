@@ -3,15 +3,15 @@ use std::fmt::Debug;
 use std::marker;
 use std::sync::{Arc, Weak};
 
-use anyhow::bail;
-use bitcoin::secp256k1::PublicKey;
+use futures::StreamExt as _;
 use picomint_api_client::api::{ApiScope, FederationApi};
 use picomint_api_client::config::ConsensusConfig;
+use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use picomint_core::util::{BoxFuture, BoxStream};
-use picomint_core::{Amount, PeerId, TransactionId};
+use picomint_core::{Amount, TransactionId};
 use picomint_eventlog::{Event, EventLogId, PersistedLogEntry};
 use picomint_logging::LOG_CLIENT;
 use picomint_redb::{Database, WriteTxRef};
@@ -20,6 +20,7 @@ use tracing::warn;
 
 use self::init::ClientModuleInit;
 use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
+use crate::{TxAcceptedEvent, TxRejectedEvent};
 
 /// Return type of [`ClientModule::create_final_inputs_and_outputs`]. The
 /// primary module contributes inputs/outputs to balance a partial
@@ -45,17 +46,13 @@ pub type SpawnSms = Box<
 pub mod init;
 pub mod recovery;
 
-/// A picomint-client interface exposed to client modules
-///
-/// To break the dependency of the client modules on the whole picomint client
-/// and in particular the `picomint-client` crate, the module gets access to an
-/// interface, that is implemented by the `Client`.
-///
-/// This allows lose coupling, less recompilation and better control and
-/// understanding of what functionality of the Client the modules get access to.
+/// Minimal back-reference trait a client module needs to finalize and submit
+/// transactions. This is the only piece of the `Client` that modules cannot
+/// compute from the values threaded into [`ClientContext`] at construction
+/// time, because balancing a transaction requires access to the concrete
+/// mint / ln / wallet modules to compute fees and generate change.
 #[async_trait::async_trait]
-pub trait ClientContextIface: Send + Sync {
-    fn api_clone(&self) -> FederationApi;
+pub trait FinalizeTransaction: Send + Sync {
     async fn finalize_and_submit_transaction(
         &self,
         operation_id: OperationId,
@@ -75,46 +72,21 @@ pub trait ClientContextIface: Send + Sync {
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
-
-    async fn await_tx_accepted(
-        &self,
-        operation_id: OperationId,
-        txid: TransactionId,
-    ) -> Result<(), String>;
-
-    async fn config(&self) -> ConsensusConfig;
-
-    fn db(&self) -> &Database;
-
-    async fn invite_code(&self, peer: PeerId) -> Option<InviteCode>;
-
-    fn get_internal_payment_markers(&self) -> anyhow::Result<(PublicKey, u64)>;
-
-    fn log_event_added_tx(&self) -> watch::Sender<()>;
-
-    async fn get_event_log(&self, pos: Option<EventLogId>, limit: u64) -> Vec<PersistedLogEntry>;
-
-    fn subscribe_operation_events(
-        &self,
-        operation_id: OperationId,
-    ) -> BoxStream<'static, PersistedLogEntry>;
 }
 
-/// A final, fully initialized client
-///
-/// Client modules need to be able to access a `Client` they are a part
-/// of. To break the circular dependency, the final `Client` is passed
-/// after `Client` was built via a shared state.
+/// Lazily-set, `Weak<dyn FinalizeTransaction>` handle used to break the
+/// circular dependency between `picomint-client` and module crates. Set
+/// exactly once by `ClientBuilder` after the `Client` is constructed.
 #[derive(Clone, Default)]
-pub struct FinalClientIface(Arc<std::sync::OnceLock<Weak<dyn ClientContextIface>>>);
+pub struct FinalClientIface(Arc<std::sync::OnceLock<Weak<dyn FinalizeTransaction>>>);
 
 impl FinalClientIface {
-    /// Get a temporary strong reference to [`ClientContextIface`]
+    /// Get a temporary strong reference.
     ///
     /// Care must be taken to not let the user take ownership of this value,
     /// and not store it elsewhere permanently either, as it could prevent
     /// the cleanup of the Client.
-    pub(crate) fn get(&self) -> Arc<dyn ClientContextIface> {
+    pub(crate) fn get(&self) -> Arc<dyn FinalizeTransaction> {
         self.0
             .get()
             .expect("client must be already set")
@@ -122,7 +94,7 @@ impl FinalClientIface {
             .expect("client module context must not be use past client shutdown")
     }
 
-    pub fn set(&self, client: Weak<dyn ClientContextIface>) {
+    pub fn set(&self, client: Weak<dyn FinalizeTransaction>) {
         self.0.set(client).expect("FinalLazyClient already set");
     }
 }
@@ -132,15 +104,23 @@ impl fmt::Debug for FinalClientIface {
         f.write_str("FinalClientIface")
     }
 }
+
 /// A Client context for a [`ClientModule`] `M`
 ///
-/// Client modules can interact with the whole
-/// client through this struct.
+/// Client modules can interact with the whole client through this struct.
+/// All concrete handles are stored directly; only the three transaction
+/// finalize methods reach back to the full `Client` via
+/// [`FinalClientIface`].
 pub struct ClientContext<M> {
     client: FinalClientIface,
     kind: ModuleKind,
+    api: FederationApi,
     api_scope: ApiScope,
+    db: Database,
     module_db: Database,
+    config: ConsensusConfig,
+    federation_id: FederationId,
+    log_event_added_tx: watch::Sender<()>,
     _marker: marker::PhantomData<M>,
 }
 
@@ -148,9 +128,14 @@ impl<M> Clone for ClientContext<M> {
     fn clone(&self) -> Self {
         Self {
             client: self.client.clone(),
-            module_db: self.module_db.clone(),
             kind: self.kind,
+            api: self.api.clone(),
             api_scope: self.api_scope,
+            db: self.db.clone(),
+            module_db: self.module_db.clone(),
+            config: self.config.clone(),
+            federation_id: self.federation_id,
+            log_event_added_tx: self.log_event_added_tx.clone(),
             _marker: marker::PhantomData,
         }
     }
@@ -166,29 +151,40 @@ impl<M> ClientContext<M>
 where
     M: ClientModule,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: FinalClientIface,
         kind: ModuleKind,
+        api: FederationApi,
         api_scope: ApiScope,
+        db: Database,
         module_db: Database,
+        config: ConsensusConfig,
+        federation_id: FederationId,
+        log_event_added_tx: watch::Sender<()>,
     ) -> Self {
         Self {
             client,
             kind,
+            api,
             api_scope,
+            db,
             module_db,
+            config,
+            federation_id,
+            log_event_added_tx,
             _marker: marker::PhantomData,
         }
     }
 
     /// Get a reference to a global Api handle
     pub fn global_api(&self) -> FederationApi {
-        self.client.get().api_clone()
+        self.api.clone()
     }
 
     /// Get a reference to a module Api handle
     pub fn module_api(&self) -> FederationApi {
-        self.global_api().with_scope(self.api_scope)
+        self.api.clone().with_scope(self.api_scope)
     }
 
     /// Lift a typed [`ClientOutputBundle`] into a wire-level one.
@@ -237,36 +233,42 @@ where
     pub async fn await_tx_accepted(
         &self,
         operation_id: OperationId,
-        txid: TransactionId,
+        query_txid: TransactionId,
     ) -> Result<(), String> {
-        self.client
-            .get()
-            .await_tx_accepted(operation_id, txid)
-            .await
+        let mut stream = self.subscribe_operation_events(operation_id);
+        while let Some(entry) = stream.next().await {
+            if let Some(ev) = entry.to_event::<TxAcceptedEvent>()
+                && ev.txid == query_txid
+            {
+                return Ok(());
+            }
+            if let Some(ev) = entry.to_event::<TxRejectedEvent>()
+                && ev.txid == query_txid
+            {
+                return Err(ev.error);
+            }
+        }
+        unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
-    pub async fn get_config(&self) -> ConsensusConfig {
-        self.client.get().config().await
+    pub fn get_config(&self) -> &ConsensusConfig {
+        &self.config
+    }
+
+    pub fn federation_id(&self) -> FederationId {
+        self.federation_id
     }
 
     /// Returns an invite code for the federation that points to an arbitrary
     /// guardian server for fetching the config
-    pub async fn get_invite_code(&self) -> InviteCode {
-        let cfg = self.get_config().await;
-        self.client
-            .get()
-            .invite_code(
-                *cfg.iroh_endpoints
-                    .keys()
-                    .next()
-                    .expect("A federation always has at least one guardian"),
-            )
-            .await
-            .expect("The guardian we requested an invite code for exists")
-    }
-
-    pub fn get_internal_payment_markers(&self) -> anyhow::Result<(PublicKey, u64)> {
-        self.client.get().get_internal_payment_markers()
+    pub fn get_invite_code(&self) -> InviteCode {
+        let (peer, endpoints) = self
+            .config
+            .iroh_endpoints
+            .iter()
+            .next()
+            .expect("A federation always has at least one guardian");
+        InviteCode::new(endpoints.api_pk, *peer, self.federation_id)
     }
 
     pub async fn claim_inputs<I>(
@@ -289,7 +291,7 @@ where
     /// Watch channel that signals when any new event is added to the
     /// persistent event log.
     pub fn log_event_added_rx(&self) -> watch::Receiver<()> {
-        self.client.get().log_event_added_tx().subscribe()
+        self.log_event_added_tx.subscribe()
     }
 
     /// Read a batch of persisted event log entries starting at `pos`.
@@ -298,7 +300,22 @@ where
         pos: Option<EventLogId>,
         limit: u64,
     ) -> Vec<PersistedLogEntry> {
-        self.client.get().get_event_log(pos, limit).await
+        let pos = pos.unwrap_or(EventLogId::LOG_START);
+        let end = pos.saturating_add(limit);
+        self.db
+            .begin_read()
+            .await
+            .as_ref()
+            .with_native_table(&picomint_eventlog::EVENT_LOG, |t| {
+                t.range(pos..end)
+                    .expect("redb range failed")
+                    .map(|r| {
+                        let (k, v) = r.expect("redb range item failed");
+                        PersistedLogEntry::new(k.value(), v.value())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
     }
 
     /// Stream every event belonging to `operation_id`, starting from the
@@ -307,7 +324,11 @@ where
         &self,
         operation_id: OperationId,
     ) -> BoxStream<'static, PersistedLogEntry> {
-        self.client.get().subscribe_operation_events(operation_id)
+        Box::pin(picomint_eventlog::subscribe_operation_events(
+            self.db.clone(),
+            self.log_event_added_tx.subscribe(),
+            operation_id,
+        ))
     }
 
     /// Typed variant of [`Self::subscribe_operation_events`] — yields only
@@ -319,7 +340,6 @@ where
     where
         E: Event + Send + 'static,
     {
-        use futures::StreamExt as _;
         Box::pin(
             self.subscribe_operation_events(operation_id)
                 .filter_map(|entry| async move { entry.to_event::<E>() }),
@@ -340,7 +360,7 @@ where
         }
         picomint_eventlog::log_event(
             &dbtx.deisolate(),
-            self.client.get().log_event_added_tx(),
+            self.log_event_added_tx.clone(),
             Some(operation_id),
             event,
         );
@@ -359,8 +379,6 @@ pub trait ClientModule: Debug + Send + Sync + 'static {
         <<<Self as ClientModule>::Init as ModuleInit>::Common as CommonModuleInit>::KIND
     }
 
-    /// Initialize client.
-    ///
     /// Called by the core client code on start, after [`ClientContext`] is
     /// fully initialized, so unlike during [`ClientModuleInit::init`],
     /// access to global client is allowed.
@@ -381,13 +399,6 @@ pub trait ClientModule: Debug + Send + Sync + 'static {
     ) -> Option<Amount>;
 
     /// Returns the fee the processing of this output requires.
-    ///
-    /// If the semantics of a given output aren't known this function returns
-    /// `None`, this only happens if a future version of Picomint introduces a
-    /// new output variant. For clients this should only be the case when
-    /// processing transactions created by other users, so the result of
-    /// this function can be `unwrap`ped whenever dealing with inputs
-    /// generated by ourselves.
     fn output_fee(
         &self,
         amount: Amount,
@@ -406,22 +417,6 @@ pub trait ClientModule: Debug + Send + Sync + 'static {
     }
 
     /// Creates all inputs and outputs necessary to balance the transaction.
-    /// The function returns an error if and only if the client's funds are not
-    /// sufficient to create the inputs necessary to fully fund the transaction.
-    ///
-    /// A returned input also contains:
-    /// * A set of private keys belonging to the input for signing the
-    ///   transaction
-    /// * A closure that generates states belonging to the input. This closure
-    ///   takes the transaction id of the transaction in which the input was
-    ///   used and the input index as input since these cannot be known at time
-    ///   of calling `create_funding_input` and have to be injected later.
-    ///
-    /// A returned output also contains:
-    /// * A closure that generates states belonging to the output. This closure
-    ///   takes the transaction id of the transaction in which the output was
-    ///   used and the output index as input since these cannot be known at time
-    ///   of calling `create_change_output` and have to be injected later.
     async fn create_final_inputs_and_outputs(
         &self,
         _dbtx: &WriteTxRef<'_>,
@@ -447,65 +442,6 @@ pub trait ClientModule: Debug + Send + Sync + 'static {
     /// it changes.
     async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()> {
         unimplemented!()
-    }
-
-    /// Leave the federation
-    ///
-    /// While technically there's nothing stopping the client from just
-    /// abandoning Federation at any point by deleting all the related
-    /// local data, it is useful to make sure it's safe beforehand.
-    ///
-    /// This call indicates the desire of the caller client code
-    /// to orderly and safely leave the Federation by this module instance.
-    /// The goal of the implementations is to fulfil that wish,
-    /// giving prompt and informative feedback if it's not yet possible.
-    ///
-    /// The client module implementation should handle the request
-    /// and return as fast as possible avoiding blocking for longer than
-    /// necessary. This would usually involve some combination of:
-    ///
-    /// * recording the state of being in process of leaving the Federation to
-    ///   prevent initiating new conditions that could delay its completion;
-    /// * performing any fast to complete cleanup/exit logic;
-    /// * initiating any time-consuming logic (e.g. canceling outstanding
-    ///   contracts), as background jobs, tasks machines, etc.
-    /// * checking for any conditions indicating it might not be safe to leave
-    ///   at the moment.
-    ///
-    /// This function should return `Ok` only if from the perspective
-    /// of this module instance, it is safe to delete client data and
-    /// stop using it, with no further actions (like background jobs) required
-    /// to complete.
-    ///
-    /// This function should return an error if it's not currently possible
-    /// to safely (e.g. without losing funds) leave the Federation.
-    /// It should avoid running indefinitely trying to complete any cleanup
-    /// actions necessary to reach a clean state, preferring spawning new
-    /// state machines and returning an informative error about cleanup
-    /// still in progress.
-    ///
-    /// If any internal task needs to complete, any user action is required,
-    /// or even external condition needs to be met this function
-    /// should return a `Err`.
-    ///
-    /// Notably modules should not disable interaction that might be necessary
-    /// for the user (possibly through other modules) to leave the Federation.
-    /// In particular a Mint module should retain ability to create new notes,
-    /// and LN module should retain ability to send funds out.
-    ///
-    /// Calling code must NOT assume that a module that once returned `Ok`,
-    /// will not return `Err` at later point. E.g. a Mint module might have
-    /// no outstanding balance at first, but other modules winding down
-    /// might "cash-out" to Ecash.
-    ///
-    /// Before leaving the Federation and deleting any state the calling code
-    /// must collect a full round of `Ok` from all the modules.
-    ///
-    /// Calling code should allow the user to override and ignore any
-    /// outstanding errors, after sufficient amount of warnings. Ideally,
-    /// this should be done on per-module basis, to avoid mistakes.
-    async fn leave(&self, _dbtx: &WriteTxRef<'_>) -> anyhow::Result<()> {
-        bail!("Unable to determine if safe to leave the federation: Not implemented")
     }
 }
 

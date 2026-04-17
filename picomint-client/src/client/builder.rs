@@ -284,6 +284,7 @@ impl ClientBuilder {
             ModuleKind::Mint,
             ApiScope::Mint,
             config.mint.clone(),
+            &config,
             &db,
             &api,
             &connectors,
@@ -304,6 +305,7 @@ impl ClientBuilder {
             ModuleKind::Wallet,
             ApiScope::Wallet,
             config.wallet.clone(),
+            &config,
             &db,
             &api,
             &connectors,
@@ -326,6 +328,7 @@ impl ClientBuilder {
                     ModuleKind::Ln,
                     ApiScope::Ln,
                     config.ln.clone(),
+                    &config,
                     &db,
                     &api,
                     &connectors,
@@ -347,6 +350,7 @@ impl ClientBuilder {
                     ModuleKind::Ln,
                     ApiScope::Ln,
                     config.ln.clone(),
+                    &config,
                     &db,
                     &api,
                     &connectors,
@@ -382,7 +386,7 @@ impl ClientBuilder {
             db.clone(),
             TxSubmissionSmContext {
                 api: api.clone(),
-                client: final_client.clone(),
+                log_event_added_tx: log_event_added_tx.clone(),
             },
             task_group.clone(),
         );
@@ -469,6 +473,7 @@ async fn init_or_recover<I: ClientModuleInit>(
     kind: ModuleKind,
     api_scope: ApiScope,
     typed_cfg: <<I as picomint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
+    full_config: &ConsensusConfig,
     db: &Database,
     api: &FederationApi,
     connectors: &Endpoint,
@@ -494,6 +499,7 @@ async fn init_or_recover<I: ClientModuleInit>(
             kind,
             api_scope,
             typed_cfg.clone(),
+            full_config,
             db,
             api,
             task_group,
@@ -520,8 +526,13 @@ async fn init_or_recover<I: ClientModuleInit>(
         context: picomint_client_module::module::ClientContext::new(
             final_client,
             kind,
+            api.clone(),
             api_scope,
+            db.clone(),
             module_db,
+            full_config.clone(),
+            fed_id,
+            log_event_added_tx.clone(),
         ),
         task_group: task_group.clone(),
         connector_registry: connectors.clone(),
@@ -536,6 +547,7 @@ async fn schedule_recovery<I: ClientModuleInit>(
     kind: ModuleKind,
     api_scope: ApiScope,
     cfg: <<I as picomint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
+    full_config: &ConsensusConfig,
     db: &Database,
     api: &FederationApi,
     task_group: &TaskGroup,
@@ -593,9 +605,12 @@ where
     let module_api = api.with_scope(api_scope);
     let init_clone = init.clone();
     let api_clone = api.clone();
+    let db_clone = db.clone();
     let task_group_clone = task_group.clone();
     let root_secret_clone = root_secret.clone();
     let final_client_clone = final_client.clone();
+    let full_config_clone = full_config.clone();
+    let log_event_added_tx_clone = log_event_added_tx.clone();
 
     let recover_fut = Box::pin(async move {
         let args = picomint_client_module::module::init::ClientModuleRecoverArgs {
@@ -604,13 +619,18 @@ where
             cfg: cfg.clone(),
             db: module_db.clone(),
             module_root_secret: root_secret_clone.derive_module_secret(kind),
-            api: api_clone,
+            api: api_clone.clone(),
             module_api,
             context: picomint_client_module::module::ClientContext::new(
                 final_client_clone,
                 kind,
+                api_clone,
                 api_scope,
+                db_clone,
                 module_db,
+                full_config_clone,
+                fed_id,
+                log_event_added_tx_clone,
             ),
             progress_tx,
             task_group: task_group_clone,

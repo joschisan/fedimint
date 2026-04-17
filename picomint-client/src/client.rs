@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, bail};
 use bitcoin::key::Secp256k1;
-use bitcoin::secp256k1::{self, PublicKey};
+use bitcoin::secp256k1;
 use futures::{Stream, StreamExt as _};
 use picomint_api_client::api::{ApiScope, FederationApi};
 use picomint_api_client::config::ConsensusConfig;
@@ -16,7 +16,7 @@ use picomint_api_client::transaction::Transaction;
 use picomint_api_client::{Endpoint, wire};
 use picomint_client_module::executor::ModuleExecutor;
 use picomint_client_module::module::recovery::RecoveryProgress;
-use picomint_client_module::module::{ClientContextIface, ClientModule, IdxRange, OutPointRange};
+use picomint_client_module::module::{ClientModule, FinalizeTransaction, IdxRange, OutPointRange};
 use picomint_client_module::transaction::{
     TransactionBuilder, TxSubmissionStates, TxSubmissionStatesSM,
 };
@@ -30,7 +30,7 @@ use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::{BoxStream, FmtCompactAnyhow as _};
 use picomint_core::{Amount, PeerId, TransactionId};
-use picomint_eventlog::{Event, EventKind, EventLogId, PersistedLogEntry};
+use picomint_eventlog::{EventLogId, PersistedLogEntry};
 use picomint_gw_client::GatewayClientModuleV2;
 use picomint_ln_client::LightningClientModule;
 use picomint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
@@ -211,10 +211,6 @@ impl Client {
         (in_amount, out_amount)
     }
 
-    pub fn get_internal_payment_markers(&self) -> anyhow::Result<(PublicKey, u64)> {
-        Ok((self.federation_id().to_fake_ln_pub_key(&self.secp_ctx)?, 0))
-    }
-
     /// Get metadata value from the federation config itself
     pub fn get_config_meta(&self, key: &str) -> Option<String> {
         self.federation_config_meta.get(key).cloned()
@@ -393,7 +389,12 @@ impl Client {
             )
             .await;
 
-        self.log_event_dbtx(dbtx, Some(operation_id), TxCreatedEvent { txid });
+        picomint_eventlog::log_event(
+            dbtx,
+            self.log_event_added_tx.clone(),
+            Some(operation_id),
+            TxCreatedEvent { txid },
+        );
 
         Ok(OutPointRange::new(
             txid,
@@ -744,40 +745,6 @@ impl Client {
         self.config().await.broadcast_public_keys
     }
 
-    pub fn log_event_dbtx<E>(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: Option<OperationId>,
-        event: E,
-    ) where
-        E: Event + Send,
-    {
-        picomint_eventlog::log_event(
-            dbtx,
-            self.log_event_added_tx.clone(),
-            operation_id,
-            event,
-        );
-    }
-
-    pub fn log_event_raw_dbtx(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        kind: EventKind,
-        module: Option<ModuleKind>,
-        operation_id: Option<OperationId>,
-        payload: Vec<u8>,
-    ) {
-        picomint_eventlog::log_event_raw(
-            dbtx,
-            self.log_event_added_tx.clone(),
-            kind,
-            module,
-            operation_id,
-            payload,
-        );
-    }
-
     pub async fn get_event_log(
         &self,
         pos: Option<EventLogId>,
@@ -821,11 +788,7 @@ impl Client {
 }
 
 #[async_trait::async_trait]
-impl ClientContextIface for Client {
-    fn api_clone(&self) -> FederationApi {
-        Client::api_clone(self)
-    }
-
+impl FinalizeTransaction for Client {
     async fn finalize_and_submit_transaction(
         &self,
         operation_id: OperationId,
@@ -850,45 +813,6 @@ impl ClientContextIface for Client {
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
         Client::finalize_and_submit_transaction_inner(self, dbtx, operation_id, tx_builder).await
-    }
-
-    async fn config(&self) -> ConsensusConfig {
-        Client::config(self).await
-    }
-
-    fn db(&self) -> &Database {
-        Client::db(self)
-    }
-
-    async fn invite_code(&self, peer: PeerId) -> Option<InviteCode> {
-        Client::invite_code(self, peer).await
-    }
-
-    fn get_internal_payment_markers(&self) -> anyhow::Result<(PublicKey, u64)> {
-        Client::get_internal_payment_markers(self)
-    }
-
-    fn log_event_added_tx(&self) -> watch::Sender<()> {
-        self.log_event_added_tx.clone()
-    }
-
-    async fn get_event_log(&self, pos: Option<EventLogId>, limit: u64) -> Vec<PersistedLogEntry> {
-        Client::get_event_log(self, pos, limit).await
-    }
-
-    fn subscribe_operation_events(
-        &self,
-        operation_id: OperationId,
-    ) -> BoxStream<'static, PersistedLogEntry> {
-        Client::subscribe_operation_events(self, operation_id)
-    }
-
-    async fn await_tx_accepted(
-        &self,
-        operation_id: OperationId,
-        txid: TransactionId,
-    ) -> Result<(), String> {
-        Client::await_tx_accepted(self, operation_id, txid).await
     }
 }
 

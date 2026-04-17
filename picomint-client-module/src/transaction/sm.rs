@@ -16,7 +16,6 @@ use tokio::sync::watch;
 use tracing::debug;
 
 use crate::executor::{StateMachine, StateTransition as SmStateTransition};
-use crate::module::FinalClientIface;
 use crate::{TxAcceptedEvent, TxRejectedEvent};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -63,7 +62,7 @@ pub enum TxSubmissionStates {
 #[derive(Debug, Clone)]
 pub struct TxSubmissionSmContext {
     pub api: FederationApi,
-    pub client: FinalClientIface,
+    pub log_event_added_tx: watch::Sender<()>,
 }
 
 impl StateMachine for TxSubmissionStatesSM {
@@ -148,7 +147,7 @@ fn log_tx_event<E: Event + Send>(
 ) {
     picomint_eventlog::log_event(
         dbtx,
-        ctx.client.get().log_event_added_tx(),
+        ctx.log_event_added_tx.clone(),
         Some(operation_id),
         event,
     );

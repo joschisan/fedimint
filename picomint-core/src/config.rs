@@ -127,23 +127,6 @@ impl FederationId {
     pub fn to_prefix(&self) -> FederationIdPrefix {
         FederationIdPrefix(self.0[..4].try_into().expect("can't fail"))
     }
-
-    /// Converts a federation id to a public key to which we know but discard
-    /// the private key.
-    ///
-    /// Clients MUST never use this private key for any signing operations!
-    ///
-    /// That is ok because we only use the public key for adding a route
-    /// hint to LN invoices that tells picomint clients that the invoice can
-    /// only be paid internally. Since no LN node with that pub key can exist
-    /// other LN senders will know that they cannot pay the invoice.
-    pub fn to_fake_ln_pub_key(
-        &self,
-        secp: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
-    ) -> anyhow::Result<bitcoin::secp256k1::PublicKey> {
-        let sk = bitcoin::secp256k1::SecretKey::from_slice(&self.0.to_byte_array())?;
-        Ok(bitcoin::secp256k1::PublicKey::from_secret_key(secp, &sk))
-    }
 }
 
 impl FromStr for FederationId {
