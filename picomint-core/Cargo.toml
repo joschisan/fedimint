@@ -19,35 +19,26 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-async-channel = { workspace = true }
 async-trait = { workspace = true }
 backon = { workspace = true }
-backtrace = { workspace = true }
 base64 = { workspace = true }
 bech32 = { workspace = true }
 bitcoin = { workspace = true }
 bitcoin-io = { workspace = true }
 bitcoin-units = { workspace = true }
-bitvec = { workspace = true }
 bls12_381 = { workspace = true }
-erased-serde = { workspace = true }
 picomint-derive = { workspace = true }
 picomint-logging = { workspace = true }
 futures = { workspace = true }
 group = { workspace = true }
 hex = { workspace = true, features = ["serde"] }
-hex-conservative = { workspace = true }
-imbl = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false }
-iroh-relay = { workspace = true, default-features = false }
 itertools = { workspace = true }
 jsonrpsee-core = { workspace = true, features = ["client"] }
 lightning = { workspace = true }
 lightning-invoice = { workspace = true, features = ["serde"] }
 lightning-types = { workspace = true }
-macro_rules_attribute = { workspace = true }
-miniscript = { workspace = true, features = ["serde"] }
 n0-future = { workspace = true }
 rand = { workspace = true }
 redb = { workspace = true }
@@ -55,15 +46,11 @@ secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serdect = { workspace = true }
-strum = { workspace = true }
-strum_macros = { workspace = true }
 subtle = { workspace = true }
 thiserror = { workspace = true }
-threshold_crypto = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }
-z32 = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { workspace = true, features = ["full", "tracing"] }

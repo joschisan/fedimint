@@ -10,7 +10,6 @@ version = { workspace = true }
 
 [dependencies]
 picomint-core = { workspace = true }
-picomint-server-core = { workspace = true }
 serde = { workspace = true }
 
 [lints]

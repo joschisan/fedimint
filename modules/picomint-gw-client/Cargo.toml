@@ -22,10 +22,8 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 aquamarine = { workspace = true }
-async-stream = { workspace = true }
 async-trait = { workspace = true }
 bitcoin = { workspace = true }
-erased-serde = { workspace = true }
 picomint-api-client = { workspace = true }
 picomint-client-module = { workspace = true }
 picomint-core = { workspace = true }
@@ -36,7 +34,6 @@ picomint-redb = { workspace = true }
 futures = { workspace = true }
 lightning-invoice = { workspace = true }
 serde = { workspace = true }
-serde_millis = { workspace = true }
 thiserror = { workspace = true }
 tpe = { workspace = true }
 tracing = { workspace = true, features = ["log"] }

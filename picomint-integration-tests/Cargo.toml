@@ -16,7 +16,6 @@ anyhow = { workspace = true }
 async-stream = { workspace = true }
 bitcoin = { workspace = true }
 bitcoincore-rpc = { workspace = true }
-picomint-api-client = { workspace = true }
 picomint-bip39 = { workspace = true }
 picomint-client = { workspace = true }
 picomint-core = { workspace = true }
@@ -26,17 +25,14 @@ picomint-ln-client = { workspace = true }
 picomint-ln-common = { workspace = true }
 picomint-logging = { workspace = true }
 picomint-mint-client = { workspace = true }
-picomint-mint-common = { workspace = true }
 picomint-redb = { workspace = true }
 picomint-server-cli-core = { workspace = true }
 picomint-wallet-client = { workspace = true }
-picomint-wallet-common = { workspace = true }
 futures = { workspace = true }
 iroh = { workspace = true, default-features = false }
 ldk-node = { workspace = true }
 lightning-invoice = { workspace = true }
 lightning-types = { workspace = true }
-rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

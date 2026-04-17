@@ -17,8 +17,6 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-async-channel = { workspace = true }
-async-trait = { workspace = true }
 bitcoin = { workspace = true }
 picomint-core = { workspace = true }
 picomint-ln-common = { workspace = true }
@@ -28,14 +26,12 @@ picomint-wallet-common = { workspace = true }
 futures = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false }
-jsonrpsee-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tracing = { workspace = true }
-z32 = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }

@@ -16,8 +16,6 @@ name = "picomint_derive_secret"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = { workspace = true }
-bitcoin_hashes = { workspace = true }
 bls12_381 = { workspace = true }
 picomint-core = { workspace = true }
 hkdf = { workspace = true }

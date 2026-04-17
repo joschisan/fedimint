@@ -16,7 +16,6 @@ name = "picomint_wallet_common"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = { workspace = true }
 bitcoin = { workspace = true }
 picomint-core = { workspace = true }
 miniscript = { workspace = true, features = ["serde"] }

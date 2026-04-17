@@ -13,22 +13,13 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-bls12_381 = { workspace = true }
-erased-serde = { workspace = true }
 picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }
 picomint-ln-common = { workspace = true }
 picomint-logging = { workspace = true }
 picomint-redb = { workspace = true }
 picomint-server-core = { workspace = true }
-futures = { workspace = true }
 group = { workspace = true }
-rand = { workspace = true }
-rand_chacha = { workspace = true }
-serde = { workspace = true }
-strum = { workspace = true }
-strum_macros = { workspace = true }
-tokio = { workspace = true }
 tpe = { workspace = true }
 tracing = { workspace = true }
 

@@ -18,9 +18,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 async-stream = { workspace = true }
-async-trait = { workspace = true }
 picomint-core = { workspace = true }
-picomint-logging = { workspace = true }
 picomint-redb = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }

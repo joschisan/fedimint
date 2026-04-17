@@ -39,11 +39,7 @@ picomint-redb = { workspace = true }
 picomint-wallet-client = { workspace = true }
 futures = { workspace = true }
 iroh-base = { workspace = true, default-features = false }
-reqwest = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
-strum = { workspace = true }
-strum_macros = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tracing = { workspace = true }

@@ -16,14 +16,11 @@ name = "picomint_mint_common"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = { workspace = true }
 bitcoin_hashes = { workspace = true }
 picomint-core = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 
 [lints]
 workspace = true

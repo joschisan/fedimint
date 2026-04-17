@@ -14,9 +14,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 picomint-core = { workspace = true }
-futures = { workspace = true }
 redb = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt"] }
 

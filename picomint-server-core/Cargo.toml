@@ -18,17 +18,11 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-bitcoin = { workspace = true }
 bls12_381 = { workspace = true }
-picomint-api-client = { workspace = true }
 picomint-core = { workspace = true }
-picomint-logging = { workspace = true }
 picomint-redb = { workspace = true }
-futures = { workspace = true }
 group = { workspace = true }
 serde = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
 
 [lints]
 workspace = true
