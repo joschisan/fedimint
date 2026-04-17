@@ -245,6 +245,16 @@ function wallet_recovery_2() {
 }
 export -f wallet_recovery_2
 
+function mint_recovery_v1() {
+  fm-run-test "${FUNCNAME[0]}" ./scripts/tests/mint-recovery-test.sh
+}
+export -f mint_recovery_v1
+
+function mint_recovery_v2() {
+  fm-run-test "${FUNCNAME[0]}" ./scripts/tests/mint-recovery-test-v2.sh
+}
+export -f mint_recovery_v2
+
 function devimint_cli_test() {
   fm-run-test "${FUNCNAME[0]}" ./scripts/tests/devimint-cli-test.sh
 }
@@ -466,6 +476,8 @@ tests_to_run_in_parallel+=(
   "circular_deposit"
   "wallet_recovery"
   "wallet_recovery_2"
+  "mint_recovery_v1"
+  "mint_recovery_v2"
   "recurringd_test"
   "large_setup_test"
 )
