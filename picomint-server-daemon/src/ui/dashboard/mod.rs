@@ -2,8 +2,8 @@ pub mod audit;
 pub mod bitcoin;
 pub mod general;
 pub mod invite;
-pub mod latency;
 pub mod modules;
+pub mod peers;
 
 use std::sync::Arc;
 
@@ -64,7 +64,6 @@ async fn dashboard_view(
         .cloned()
         .expect("Federation name must be set");
     let session_count = api.session_count().await;
-    let consensus_ord_latency = *api.ord_latency_receiver.borrow();
     let p2p_connection_status: std::collections::BTreeMap<_, _> = api
         .p2p_status_receivers
         .iter()
@@ -92,7 +91,7 @@ async fn dashboard_view(
             }
 
             div class="col-lg-6" {
-                (latency::render(consensus_ord_latency, &p2p_connection_status))
+                (peers::render(&p2p_connection_status))
             }
         }
 

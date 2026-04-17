@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::time::Instant;
 
 use picomint_api_client::transaction::ConsensusItem;
 use picomint_core::TransactionId;
@@ -23,22 +22,14 @@ pub struct DataProvider {
     mempool_item_receiver: async_channel::Receiver<ConsensusItem>,
     submitted_transactions: BTreeSet<TransactionId>,
     leftover_item: Option<ConsensusItem>,
-    timestamp_sender: async_channel::Sender<Instant>,
-    is_recovery: bool,
 }
 
 impl DataProvider {
-    pub fn new(
-        mempool_item_receiver: async_channel::Receiver<ConsensusItem>,
-        timestamp_sender: async_channel::Sender<Instant>,
-        is_recovery: bool,
-    ) -> Self {
+    pub fn new(mempool_item_receiver: async_channel::Receiver<ConsensusItem>) -> Self {
         Self {
             mempool_item_receiver,
             submitted_transactions: BTreeSet::new(),
             leftover_item: None,
-            timestamp_sender,
-            is_recovery,
         }
     }
 }
@@ -83,10 +74,6 @@ impl aleph_bft::DataProvider<UnitData> for DataProvider {
 
         if items.is_empty() {
             return None;
-        }
-
-        if !self.is_recovery {
-            self.timestamp_sender.send(Instant::now()).await.ok();
         }
 
         let bytes = items.consensus_encode_to_vec();

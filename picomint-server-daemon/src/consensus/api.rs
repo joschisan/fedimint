@@ -1,7 +1,6 @@
 //! Implements the client API through which users interact with the federation
 
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use anyhow::Result;
 use picomint_api_client::config::ConsensusConfig;
@@ -20,7 +19,7 @@ use picomint_core::task::TaskGroup;
 use picomint_core::{PeerId, TransactionId};
 use picomint_logging::LOG_NET_API;
 use picomint_redb::{Database, ReadTransaction};
-use tokio::sync::watch::{self, Receiver, Sender};
+use tokio::sync::watch::{Receiver, Sender};
 use tracing::{debug, warn};
 
 use crate::config::ServerConfig;
@@ -43,7 +42,6 @@ pub struct ConsensusApi {
     pub submission_sender: async_channel::Sender<ConsensusItem>,
     pub shutdown_receiver: Receiver<Option<u64>>,
     pub shutdown_sender: Sender<Option<u64>>,
-    pub ord_latency_receiver: watch::Receiver<Option<Duration>>,
     pub p2p_status_receivers: P2PStatusReceivers,
     pub ci_status_receivers: BTreeMap<PeerId, Receiver<Option<u64>>>,
     pub bitcoin_rpc_connection: BitcoinRpcMonitor,

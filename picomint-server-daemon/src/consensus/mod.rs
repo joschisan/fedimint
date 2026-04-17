@@ -99,7 +99,6 @@ pub async fn run(
 
     let (submission_sender, submission_receiver) = async_channel::bounded(TRANSACTION_BUFFER);
     let (shutdown_sender, shutdown_receiver) = watch::channel(None);
-    let (ord_latency_sender, ord_latency_receiver) = watch::channel(None);
 
     let mut ci_status_senders = BTreeMap::new();
     let mut ci_status_receivers = BTreeMap::new();
@@ -121,7 +120,6 @@ pub async fn run(
         shutdown_receiver: shutdown_receiver.clone(),
         p2p_status_receivers,
         ci_status_receivers,
-        ord_latency_receiver,
         bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
         task_group: task_group.clone(),
     });
@@ -212,7 +210,6 @@ pub async fn run(
         db,
         cfg: cfg.clone(),
         connections,
-        ord_latency_sender,
         ci_status_senders,
         submission_receiver,
         shutdown_receiver,

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use async_channel::Receiver;
@@ -42,7 +42,6 @@ pub struct ConsensusEngine {
     pub shutdown_receiver: watch::Receiver<Option<u64>>,
     pub connections: ReconnectP2PConnections<P2PMessage>,
     pub ci_status_senders: BTreeMap<PeerId, watch::Sender<Option<u64>>>,
-    pub ord_latency_sender: watch::Sender<Option<Duration>>,
     pub task_group: TaskGroup,
 }
 
@@ -159,7 +158,6 @@ impl ConsensusEngine {
         // we can use an unbounded channel here since the number and size of units
         // ordered in a single aleph session is bounded as described above
         let (unit_data_sender, unit_data_receiver) = async_channel::unbounded();
-        let (timestamp_sender, timestamp_receiver) = async_channel::unbounded();
         let (terminator_sender, terminator_receiver) = futures::channel::oneshot::channel();
 
         // Create channels for P2P session sync
@@ -171,11 +169,7 @@ impl ConsensusEngine {
             aleph_bft::run_session(
                 config,
                 aleph_bft::LocalIO::new(
-                    DataProvider::new(
-                        self.submission_receiver.clone(),
-                        timestamp_sender,
-                        self.is_recovery().await,
-                    ),
+                    DataProvider::new(self.submission_receiver.clone()),
                     FinalizationHandler::new(unit_data_sender),
                     BackupWriter::new(self.db.clone()).await,
                     BackupReader::new(self.db.clone()),
@@ -192,13 +186,10 @@ impl ConsensusEngine {
             ),
         );
 
-        self.ord_latency_sender.send_replace(None);
-
         let signed_session_outcome = self
             .complete_signed_session_outcome(
                 session_index,
                 unit_data_receiver,
-                timestamp_receiver,
                 signed_outcomes_receiver,
                 signatures_receiver,
                 connections,
@@ -234,7 +225,6 @@ impl ConsensusEngine {
         &self,
         session_index: u64,
         ordered_unit_receiver: Receiver<OrderedUnit>,
-        timestamp_receiver: Receiver<Instant>,
         signed_outcomes_receiver: Receiver<(PeerId, SignedSessionOutcome)>,
         signatures_receiver: Receiver<(PeerId, schnorr::Signature)>,
         connections: ReconnectP2PConnections<P2PMessage>,
@@ -264,22 +254,6 @@ impl ConsensusEngine {
                     }
 
                     if let Some(UnitData(bytes)) = ordered_unit.data {
-                        if ordered_unit.creator == self.identity() {
-                            match timestamp_receiver.try_recv() {
-                                Ok(timestamp) => {
-                                    let latency = match *self.ord_latency_sender.borrow() {
-                                        Some(latency) => (9 * latency +  timestamp.elapsed()) / 10,
-                                        None => timestamp.elapsed()
-                                    };
-
-                                    self.ord_latency_sender.send_replace(Some(latency));
-                                }
-                                Err(err) => {
-                                    debug!(target: LOG_CONSENSUS, err = %err, "Missing submission timestamp. This is normal in recovery");
-                                }
-                            }
-                        }
-
                         match Vec::<ConsensusItem>::consensus_decode_exact(&bytes) {
                             Ok(items) => {
                                 for item in items {
