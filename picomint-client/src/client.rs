@@ -49,16 +49,6 @@ use crate::db::{
 pub(crate) mod builder;
 pub(crate) mod handle;
 
-/// Map a [`ModuleKind`] to its fixed instance id in the static module set.
-fn instance_id_for_kind(kind: &ModuleKind) -> Option<ModuleInstanceId> {
-    match kind.as_str() {
-        "mint" => Some(wire::MINT_INSTANCE_ID),
-        "ln" => Some(wire::LN_INSTANCE_ID),
-        "wallet" => Some(wire::WALLET_INSTANCE_ID),
-        _ => None,
-    }
-}
-
 /// Lightning-module flavor mounted on a client. Regular federation clients
 /// use `Regular`, while the gateway daemon mounts `Gateway`. The two variants
 /// share `Common = LightningModuleTypes` on the federation, so they are
@@ -69,13 +59,6 @@ pub enum LnFlavor {
 }
 
 impl LnFlavor {
-    fn as_any(&self) -> &(dyn Any + Send + Sync) {
-        match self {
-            LnFlavor::Regular(m) => &**m,
-            LnFlavor::Gateway(m) => &**m,
-        }
-    }
-
     fn input_fee(
         &self,
         amount: Amount,
@@ -183,17 +166,6 @@ impl Client {
 
     pub async fn config(&self) -> ConsensusConfig {
         self.config.read().await.clone()
-    }
-
-    /// Returns the module at the given instance id as `&dyn Any`, or panics
-    /// if the instance id doesn't match the fixed module set.
-    fn get_module_any(&self, instance: ModuleInstanceId) -> &(dyn Any + Send + Sync) {
-        match instance {
-            wire::MINT_INSTANCE_ID => &*self.mint,
-            wire::LN_INSTANCE_ID => self.ln.as_any(),
-            wire::WALLET_INSTANCE_ID => &*self.wallet,
-            _ => panic!("Module instance {instance} not found"),
-        }
     }
 
     /// Returns the input amount and output amount of a transaction
@@ -584,8 +556,12 @@ impl Client {
         &self,
         module_kind: ModuleKind,
     ) -> anyhow::Result<()> {
-        let target_id = instance_id_for_kind(&module_kind)
-            .with_context(|| format!("Unknown module kind {module_kind}"))?;
+        let target_id = match module_kind.as_str() {
+            "mint" => wire::MINT_INSTANCE_ID,
+            "ln" => wire::LN_INSTANCE_ID,
+            "wallet" => wire::WALLET_INSTANCE_ID,
+            _ => anyhow::bail!("Unknown module kind {module_kind}"),
+        };
         let mut recovery_receiver = self.client_recovery_progress_receiver.clone();
         recovery_receiver
             .wait_for(|in_progress| {
@@ -870,10 +846,6 @@ impl Client {
 
 #[async_trait::async_trait]
 impl ClientContextIface for Client {
-    fn get_module(&self, instance: ModuleInstanceId) -> &(dyn Any + Send + Sync) {
-        Client::get_module_any(self, instance)
-    }
-
     fn api_clone(&self) -> FederationApi {
         Client::api_clone(self)
     }

@@ -1,8 +1,7 @@
 use core::fmt;
-use std::any::Any;
 use std::fmt::Debug;
+use std::marker;
 use std::sync::{Arc, Weak};
-use std::{marker, ops};
 
 use anyhow::bail;
 use bitcoin::secp256k1::PublicKey;
@@ -56,10 +55,6 @@ pub mod recovery;
 /// understanding of what functionality of the Client the modules get access to.
 #[async_trait::async_trait]
 pub trait ClientContextIface: Send + Sync {
-    /// Return the module at `instance` as `&dyn Any` so the caller can
-    /// downcast to the concrete module type. Panics if no module is mounted
-    /// at the given instance id.
-    fn get_module(&self, instance: ModuleInstanceId) -> &(dyn Any + Send + Sync);
     fn api_clone(&self) -> FederationApi;
     async fn finalize_and_submit_transaction(
         &self,
@@ -161,30 +156,6 @@ impl<M> Clone for ClientContext<M> {
     }
 }
 
-/// A reference back to itself that the module cacn get from the
-/// [`ClientContext`]
-pub struct ClientContextSelfRef<'s, M> {
-    // we are OK storing `ClientStrong` here, because of the `'s` preventing `Self` from being
-    // stored permanently somewhere
-    client: Arc<dyn ClientContextIface>,
-    module_instance_id: ModuleInstanceId,
-    _marker: marker::PhantomData<&'s M>,
-}
-
-impl<M> ops::Deref for ClientContextSelfRef<'_, M>
-where
-    M: ClientModule,
-{
-    type Target = M;
-
-    fn deref(&self) -> &Self::Target {
-        self.client
-            .get_module(self.module_instance_id)
-            .downcast_ref::<M>()
-            .unwrap_or_else(|| panic!("Module is not of type {}", std::any::type_name::<M>()))
-    }
-}
-
 impl<M> fmt::Debug for ClientContext<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("ClientContext")
@@ -206,25 +177,6 @@ where
             module_instance_id,
             api_scope,
             module_db,
-            _marker: marker::PhantomData,
-        }
-    }
-
-    /// Get a reference back to client module from the [`Self`]
-    ///
-    /// It's often necessary for a client module to "move self"
-    /// by-value, especially due to async lifetimes issues.
-    /// Clients usually work with `&mut self`, which can't really
-    /// work in such context.
-    ///
-    /// Fortunately [`ClientContext`] is `Clone` and `Send, and
-    /// can be used to recover the reference to the module at later
-    /// time.
-    #[allow(clippy::needless_lifetimes)] // just for explicitiness
-    pub fn self_ref(&self) -> ClientContextSelfRef<'_, M> {
-        ClientContextSelfRef {
-            client: self.client.get(),
-            module_instance_id: self.module_instance_id,
             _marker: marker::PhantomData,
         }
     }
