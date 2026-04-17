@@ -15,7 +15,7 @@ pub struct WalletConfig {
     pub consensus: WalletConfigConsensus,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Encodable, Decodable)]
 pub struct WalletConfigPrivate {
     pub bitcoin_sk: SecretKey,
 }

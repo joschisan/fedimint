@@ -28,12 +28,12 @@ use tokio::select;
 use tracing::{error, info, warn};
 
 use crate::p2p::{P2PMessage, P2PStatusReceivers, Recipient, ReconnectP2PConnections};
-use crate::picomint_core::encoding::Encodable;
+use crate::picomint_core::encoding::{Decodable, Encodable};
 
+pub mod db;
 pub mod dkg;
 pub mod dkg_g1;
 pub mod dkg_g2;
-pub mod io;
 pub mod peer_handle;
 pub mod setup;
 
@@ -53,7 +53,7 @@ const DEFAULT_TEST_BROADCAST_ROUND_DELAY_MS: u16 = 50;
 const DEFAULT_TEST_BROADCAST_ROUNDS_PER_SESSION: u16 = 200;
 
 #[allow(clippy::unsafe_derive_deserialize)] // clippy fires on `select!` https://github.com/rust-lang/rust-clippy/issues/13062
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 /// All the serializable configuration for the picomint server
 pub struct ServerConfig {
     /// Contains all configuration that needs to be the same for every server
@@ -65,7 +65,7 @@ pub struct ServerConfig {
     pub private: ServerConfigPrivate,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ServerConfigPrivate {
     /// Secret key for our iroh api endpoint
     pub iroh_api_sk: iroh::SecretKey,
@@ -81,7 +81,7 @@ pub struct ServerConfigPrivate {
     pub wallet: WalletConfigPrivate,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encodable)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ServerConfigConsensus {
     /// The version of the binary code running
     pub code_version: String,
@@ -104,7 +104,7 @@ pub struct ServerConfigConsensus {
     pub wallet: WalletConfigConsensus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encodable)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct PeerIrohEndpoints {
     /// The peer's name
     pub name: String,
@@ -116,7 +116,7 @@ pub struct PeerIrohEndpoints {
 
 // FIXME: (@leonardo) Should this have another field for the expected transport
 // ? (e.g. clearnet/tor/...)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ServerConfigLocal {
     /// Our peer id (generally should not change)
     pub identity: PeerId,

@@ -33,7 +33,7 @@ impl LightningConfigConsensus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct LightningConfigPrivate {
     pub sk: SecretKeyShare,
 }

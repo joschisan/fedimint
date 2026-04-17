@@ -33,12 +33,13 @@ pub mod p2p;
 pub mod ui;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Name of the server daemon's database file on disk.
+pub const DB_FILE: &str = "database.redb";
 
 use anyhow::Context;
 use config::ServerConfig;
-use config::io::read_server_config;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use picomint_core::module::ApiAuth;
@@ -51,7 +52,7 @@ use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::config::ConfigGenSettings;
-use crate::config::io::write_server_config;
+use crate::config::db::{load_server_config, store_server_config};
 use crate::config::setup::SetupApi;
 use crate::p2p::{
     P2PConnector, P2PMessage, P2PStatusReceivers, ReconnectP2PConnections, p2p_status_channels,
@@ -59,7 +60,6 @@ use crate::p2p::{
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_server(
-    data_dir: PathBuf,
     auth: ApiAuth,
     settings: ConfigGenSettings,
     db: Database,
@@ -70,7 +70,7 @@ pub async fn run_server(
     max_requests_per_connection: usize,
     cli_port: u16,
 ) -> anyhow::Result<()> {
-    let (cfg, connections, p2p_status_receivers) = match get_config(&data_dir)? {
+    let (cfg, connections, p2p_status_receivers) = match load_server_config(&db).await {
         Some(cfg) => {
             let connector = P2PConnector::new(
                 cfg.private.iroh_p2p_sk.clone(),
@@ -96,7 +96,7 @@ pub async fn run_server(
         }
         None => {
             Box::pin(run_config_gen(
-                data_dir.clone(),
+                db.clone(),
                 settings.clone(),
                 &task_group,
                 code_version_str.clone(),
@@ -135,16 +135,8 @@ pub async fn run_server(
     Ok(())
 }
 
-pub fn get_config(data_dir: &Path) -> anyhow::Result<Option<ServerConfig>> {
-    if !data_dir.join("consensus.json").exists() {
-        return Ok(None);
-    }
-
-    read_server_config(data_dir).map(Some)
-}
-
 pub async fn run_config_gen(
-    data_dir: PathBuf,
+    db: Database,
     settings: ConfigGenSettings,
     task_group: &TaskGroup,
     code_version_str: String,
@@ -230,7 +222,7 @@ pub async fn run_config_gen(
     )
     .await?;
 
-    write_server_config(&cfg, &data_dir)?;
+    store_server_config(&db, &cfg).await;
 
     Ok((cfg, connections, p2p_status_receivers))
 }

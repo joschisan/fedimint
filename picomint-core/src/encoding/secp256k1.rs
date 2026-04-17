@@ -55,6 +55,18 @@ impl Decodable for secp256k1::schnorr::Signature {
     }
 }
 
+impl Encodable for secp256k1::SecretKey {
+    fn consensus_encode<W: io::Write>(&self, w: &mut W) -> io::Result<()> {
+        self.secret_bytes().consensus_encode(w)
+    }
+}
+
+impl Decodable for secp256k1::SecretKey {
+    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Self::from_slice(&<[u8; 32]>::consensus_decode(r)?).map_err(invalid)
+    }
+}
+
 impl Encodable for bitcoin::key::Keypair {
     fn consensus_encode<W: io::Write>(&self, w: &mut W) -> io::Result<()> {
         self.secret_bytes().consensus_encode(w)

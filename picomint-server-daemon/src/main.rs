@@ -22,8 +22,7 @@ use picomint_server_bitcoin_rpc::bitcoind::BitcoindClient;
 use picomint_server_bitcoin_rpc::esplora::EsploraClient;
 use picomint_server_core::bitcoin_rpc::IServerBitcoinRpc;
 use picomint_server_daemon::config::ConfigGenSettings;
-use picomint_server_daemon::config::io::DB_FILE;
-use picomint_server_daemon::run_server;
+use picomint_server_daemon::{DB_FILE, run_server};
 use tracing::{debug, error, info};
 
 /// Time we will wait before forcefully shutting down tasks on exit.
@@ -216,14 +215,12 @@ async fn main() -> anyhow::Result<Infallible> {
     let ui_password = picomint_core::module::ApiAuth::new(server_opts.ui_password);
 
     let task_group = root_task_group.clone();
-    let data_dir = server_opts.data_dir.clone();
     let max_connections = server_opts.max_connections;
     let max_requests_per_connection = server_opts.max_requests_per_connection;
     let cli_port = server_opts.cli_port;
 
     root_task_group.spawn_cancellable("main", async move {
         run_server(
-            data_dir,
             ui_password,
             settings,
             db,

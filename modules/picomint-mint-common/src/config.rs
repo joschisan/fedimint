@@ -40,7 +40,7 @@ impl MintConfigConsensus {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Encodable, Decodable)]
 pub struct MintConfigPrivate {
     pub tbs_sks: BTreeMap<Denomination, tbs::SecretKeyShare>,
 }
