@@ -36,7 +36,7 @@ use picomint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_se
 use picomint_derive_secret::{ChildId, DerivableSecret};
 use picomint_logging::LOG_CLIENT_MODULE_WALLET;
 use picomint_redb::Database;
-use picomint_wallet_common::config::WalletClientConfig;
+use picomint_wallet_common::config::WalletConfigConsensus;
 use picomint_wallet_common::{
     StandardScript, WalletCommonInit, WalletInput, WalletInputV0, WalletModuleTypes, WalletOutput,
     WalletOutputV0, descriptor, is_potential_receive,
@@ -53,7 +53,7 @@ const SLICE_SIZE: u64 = 1000;
 #[derive(Debug, Clone)]
 pub struct WalletClientModule {
     root_secret: DerivableSecret,
-    cfg: WalletClientConfig,
+    cfg: WalletConfigConsensus,
     client_ctx: ClientContext<Self>,
     db: Database,
     module_api: FederationApi,

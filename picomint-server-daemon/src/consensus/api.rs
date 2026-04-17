@@ -7,7 +7,7 @@ use anyhow::Result;
 use picomint_api_client::transaction::{
     ConsensusItem, Transaction, TransactionError, TransactionSubmissionOutcome,
 };
-use picomint_core::config::ClientConfig;
+use picomint_api_client::config::ConsensusConfig;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
@@ -39,7 +39,7 @@ pub struct ConsensusApi {
     /// Static wire-dispatch handle to the fixed module set
     pub server: Server,
     /// Cached client config
-    pub client_cfg: ClientConfig,
+    pub client_cfg: ConsensusConfig,
     /// For sending API events to consensus such as transactions
     pub submission_sender: async_channel::Sender<ConsensusItem>,
     pub shutdown_receiver: Receiver<Option<u64>>,
@@ -149,7 +149,7 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
         api_endpoint! {
             CLIENT_CONFIG_ENDPOINT,
             ApiVersion::new(0, 0),
-            async |picomint: &ConsensusApi, _v: ()| -> ClientConfig {
+            async |picomint: &ConsensusApi, _v: ()| -> ConsensusConfig {
                 Ok(picomint.client_cfg.clone())
             }
         },

@@ -86,7 +86,7 @@ pub async fn run_server(
             let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
 
             let connections = ReconnectP2PConnections::<P2PMessage>::new(
-                cfg.local.identity,
+                cfg.private.identity,
                 connector,
                 &task_group,
                 p2p_status_senders,
@@ -99,7 +99,6 @@ pub async fn run_server(
                 db.clone(),
                 settings.clone(),
                 &task_group,
-                code_version_str.clone(),
                 auth.clone(),
                 cli_port,
             ))
@@ -139,7 +138,6 @@ pub async fn run_config_gen(
     db: Database,
     settings: ConfigGenSettings,
     task_group: &TaskGroup,
-    code_version_str: String,
     auth: ApiAuth,
     cli_port: u16,
 ) -> anyhow::Result<(
@@ -216,7 +214,6 @@ pub async fn run_config_gen(
 
     let cfg = ServerConfig::distributed_gen(
         &cg_params,
-        code_version_str.clone(),
         connections.clone(),
         p2p_status_receivers.clone(),
     )

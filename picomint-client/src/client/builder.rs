@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::bail;
 use bitcoin::key::Secp256k1;
 use picomint_api_client::api::FederationApi;
+use picomint_api_client::config::ConsensusConfig;
 use picomint_api_client::{Endpoint, download_from_invite_code, wire};
 use picomint_client_module::ModuleRecoveryStarted;
 use picomint_client_module::executor::ModuleExecutor;
@@ -13,7 +14,7 @@ use picomint_client_module::module::recovery::RecoveryProgress;
 use picomint_client_module::module::{ClientModule, FinalClientIface};
 use picomint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use picomint_client_module::transaction::TxSubmissionSmContext;
-use picomint_core::config::{ClientConfig, FederationId};
+use picomint_core::config::FederationId;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::CommonModuleInit;
@@ -128,7 +129,7 @@ impl ClientBuilder {
         self.stopped = true;
     }
 
-    pub async fn load_existing_config(&self, db: &Database) -> anyhow::Result<ClientConfig> {
+    pub async fn load_existing_config(&self, db: &Database) -> anyhow::Result<ConsensusConfig> {
         let Some(config) = Client::get_config_from_db(db).await else {
             bail!("Client database not initialized")
         };
@@ -141,7 +142,7 @@ impl ClientBuilder {
         connectors: Endpoint,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
-        config: ClientConfig,
+        config: ConsensusConfig,
         init_mode: InitMode,
     ) -> anyhow::Result<ClientHandle> {
         if Client::is_initialized(&db_no_decoders).await {
@@ -183,7 +184,7 @@ impl ClientBuilder {
     pub async fn preview_with_existing_config(
         self,
         connectors: Endpoint,
-        config: ClientConfig,
+        config: ConsensusConfig,
     ) -> anyhow::Result<ClientPreview> {
         Ok(ClientPreview {
             connectors,
@@ -221,7 +222,7 @@ impl ClientBuilder {
         connectors: Endpoint,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
-        config: ClientConfig,
+        config: ConsensusConfig,
         stopped: bool,
     ) -> anyhow::Result<ClientHandle> {
         let client = self
@@ -241,7 +242,7 @@ impl ClientBuilder {
         connectors: Endpoint,
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
-        config: &ClientConfig,
+        config: &ConsensusConfig,
     ) -> anyhow::Result<ClientHandle> {
         debug!(
             target: LOG_CLIENT,
@@ -254,10 +255,9 @@ impl ClientBuilder {
         let fed_id = config.calculate_federation_id();
         let db = db_no_decoders;
         let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
-            .global
-            .api_endpoints
+            .iroh_endpoints
             .iter()
-            .map(|(peer, endpoint)| (*peer, endpoint.node_id))
+            .map(|(peer, endpoints)| (*peer, endpoints.api_pk))
             .collect();
         let api: FederationApi = FederationApi::new(connectors.clone(), peer_node_ids).into();
 
@@ -268,7 +268,7 @@ impl ClientBuilder {
         let final_client = FinalClientIface::default();
 
         let root_secret = Self::federation_root_secret(&pre_root_secret, &config);
-        let num_peers = NumPeers::from(config.global.api_endpoints.len());
+        let num_peers = NumPeers::from(config.iroh_endpoints.len());
 
         let mut module_recoveries: BTreeMap<
             ModuleInstanceId,
@@ -283,7 +283,7 @@ impl ClientBuilder {
             &self.mint_init,
             wire::MINT_INSTANCE_ID,
             "mint",
-            &config,
+            config.mint.clone(),
             &db,
             &api,
             &connectors,
@@ -303,7 +303,7 @@ impl ClientBuilder {
             &self.wallet_init,
             wire::WALLET_INSTANCE_ID,
             "wallet",
-            &config,
+            config.wallet.clone(),
             &db,
             &api,
             &connectors,
@@ -325,7 +325,7 @@ impl ClientBuilder {
                     &init,
                     wire::LN_INSTANCE_ID,
                     "ln",
-                    &config,
+                    config.ln.clone(),
                     &db,
                     &api,
                     &connectors,
@@ -346,7 +346,7 @@ impl ClientBuilder {
                     &init,
                     wire::LN_INSTANCE_ID,
                     "ln",
-                    &config,
+                    config.ln.clone(),
                     &db,
                     &api,
                     &connectors,
@@ -392,7 +392,7 @@ impl ClientBuilder {
             db: db.clone(),
             connectors,
             federation_id: fed_id,
-            federation_config_meta: config.global.meta,
+            federation_config_meta: config.meta,
             mint,
             wallet,
             ln,
@@ -451,9 +451,9 @@ impl ClientBuilder {
     /// across multiple federations.
     fn federation_root_secret(
         pre_root_secret: &DerivableSecret,
-        config: &ClientConfig,
+        config: &ConsensusConfig,
     ) -> DerivableSecret {
-        pre_root_secret.federation_key(&config.global.calculate_federation_id())
+        pre_root_secret.federation_key(&config.calculate_federation_id())
     }
 }
 
@@ -468,7 +468,7 @@ async fn init_or_recover<I: ClientModuleInit>(
     init: &I,
     module_instance_id: ModuleInstanceId,
     kind_str: &'static str,
-    config: &ClientConfig,
+    typed_cfg: <<I as picomint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     db: &Database,
     api: &FederationApi,
     connectors: &Endpoint,
@@ -488,17 +488,6 @@ async fn init_or_recover<I: ClientModuleInit>(
         watch::Receiver<RecoveryProgress>,
     >,
 ) -> anyhow::Result<Arc<<I as ClientModuleInit>::Module>> {
-    let module_config = config
-        .modules
-        .get(&module_instance_id)
-        .cloned()
-        .unwrap_or_else(|| {
-            panic!("Module config for {kind_str} missing at instance {module_instance_id}")
-        });
-
-    let typed_cfg: <<I as picomint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig =
-        module_config.cast()?;
-
     if init_state.does_require_recovery() {
         schedule_recovery(
             init,
@@ -646,13 +635,13 @@ where
 /// before actually joining.
 pub struct ClientPreview {
     inner: ClientBuilder,
-    config: ClientConfig,
+    config: ConsensusConfig,
     connectors: Endpoint,
 }
 
 impl ClientPreview {
     /// Get the config
-    pub fn config(&self) -> &ClientConfig {
+    pub fn config(&self) -> &ConsensusConfig {
         &self.config
     }
 

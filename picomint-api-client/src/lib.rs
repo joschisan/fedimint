@@ -9,8 +9,9 @@ use std::collections::BTreeMap;
 
 use anyhow::{Context as _, bail};
 use api::{FederationApi, ServerError};
+use config::ConsensusConfig;
 use picomint_core::PeerId;
-use picomint_core::config::{ClientConfig, FederationId};
+use picomint_core::config::FederationId;
 use picomint_core::endpoint_constants::CLIENT_CONFIG_ENDPOINT;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::ApiRequestErased;
@@ -20,6 +21,8 @@ use query::FilterMap;
 use tracing::debug;
 
 pub mod api;
+/// Federation-wide consensus config (shared between client and server).
+pub mod config;
 /// Client query system
 pub mod query;
 /// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
@@ -31,12 +34,12 @@ pub mod wire;
 
 pub use iroh::Endpoint;
 
-/// Tries to download the [`ClientConfig`], attempts to retry ten times before
-/// giving up.
+/// Tries to download the [`ConsensusConfig`], attempts to retry ten times
+/// before giving up.
 pub async fn download_from_invite_code(
     endpoint: &Endpoint,
     invite: &InviteCode,
-) -> anyhow::Result<(ClientConfig, FederationApi)> {
+) -> anyhow::Result<(ConsensusConfig, FederationApi)> {
     debug!(
         target: LOG_CLIENT_NET,
         %invite,
@@ -56,21 +59,21 @@ pub async fn download_from_invite_code(
     .context("Failed to download client config")
 }
 
-/// Tries to download the [`ClientConfig`] only once.
+/// Tries to download the [`ConsensusConfig`] only once.
 pub async fn try_download_client_config(
     endpoint: &Endpoint,
     api_from_invite: &FederationApi,
     federation_id: FederationId,
-) -> anyhow::Result<(ClientConfig, FederationApi)> {
+) -> anyhow::Result<(ConsensusConfig, FederationApi)> {
     debug!(target: LOG_CLIENT_NET, "Downloading client config from peer");
-    let query_strategy = FilterMap::new(move |cfg: ClientConfig| {
-        if federation_id != cfg.global.calculate_federation_id() {
+    let query_strategy = FilterMap::new(move |cfg: ConsensusConfig| {
+        if federation_id != cfg.calculate_federation_id() {
             return Err(ServerError::ConditionFailed(anyhow::anyhow!(
                 "FederationId in invite code does not match client config"
             )));
         }
 
-        Ok(cfg.global.api_endpoints)
+        Ok(cfg.api_endpoints())
     });
 
     let api_endpoints: BTreeMap<PeerId, picomint_core::config::PeerEndpoint> = api_from_invite
@@ -90,7 +93,7 @@ pub async fn try_download_client_config(
 
     let api_full = FederationApi::new(endpoint.clone(), api_endpoints);
     let client_config = api_full
-        .request_current_consensus::<ClientConfig>(
+        .request_current_consensus::<ConsensusConfig>(
             CLIENT_CONFIG_ENDPOINT.to_owned(),
             ApiRequestErased::default(),
         )

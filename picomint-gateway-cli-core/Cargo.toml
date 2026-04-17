@@ -13,6 +13,7 @@ bitcoin = { workspace = true }
 picomint-core = { workspace = true }
 lightning-invoice = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

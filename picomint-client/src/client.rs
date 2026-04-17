@@ -22,7 +22,8 @@ use picomint_client_module::transaction::{
 use picomint_client_module::{
     ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
 };
-use picomint_core::config::{ClientConfig, FederationId, JsonClientConfig};
+use picomint_api_client::config::ConsensusConfig;
+use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use picomint_core::encoding::Encodable as _;
 use picomint_core::invite_code::InviteCode;
@@ -50,6 +51,16 @@ use crate::db::{
 
 pub(crate) mod builder;
 pub(crate) mod handle;
+
+/// Map a [`ModuleKind`] to its fixed instance id in the static module set.
+fn instance_id_for_kind(kind: &ModuleKind) -> Option<ModuleInstanceId> {
+    match kind.as_str() {
+        "mint" => Some(wire::MINT_INSTANCE_ID),
+        "ln" => Some(wire::LN_INSTANCE_ID),
+        "wallet" => Some(wire::WALLET_INSTANCE_ID),
+        _ => None,
+    }
+}
 
 /// Lightning-module flavor mounted on a client. Regular federation clients
 /// use `Regular`, while the gateway daemon mounts `Gateway`. The two variants
@@ -112,7 +123,7 @@ impl LnFlavor {
 /// [`crate::ClientHandle`] is responsible for external lifecycle management
 /// and resource freeing of the [`Client`].
 pub struct Client {
-    config: tokio::sync::RwLock<ClientConfig>,
+    config: tokio::sync::RwLock<ConsensusConfig>,
     connectors: Endpoint,
     db: Database,
     federation_id: FederationId,
@@ -161,7 +172,7 @@ impl Client {
         &self.task_group
     }
 
-    pub async fn get_config_from_db(db: &Database) -> Option<ClientConfig> {
+    pub async fn get_config_from_db(db: &Database) -> Option<ConsensusConfig> {
         db.begin_read().await.as_ref().get(&CLIENT_CONFIG, &())
     }
 
@@ -173,7 +184,7 @@ impl Client {
         self.federation_id
     }
 
-    pub async fn config(&self) -> ClientConfig {
+    pub async fn config(&self) -> ConsensusConfig {
         self.config.read().await.clone()
     }
 
@@ -492,15 +503,6 @@ impl Client {
         &self.connectors
     }
 
-    /// Returns the config of the client in JSON format.
-    ///
-    /// Compared to the consensus module format where module configs are binary
-    /// encoded this format cannot be cryptographically verified but is easier
-    /// to consume and to some degree human-readable.
-    pub async fn get_config_json(&self) -> JsonClientConfig {
-        self.config().await.to_json()
-    }
-
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {
         let dbtx = self.db().begin_write().await;
         Ok(self
@@ -585,15 +587,14 @@ impl Client {
         &self,
         module_kind: ModuleKind,
     ) -> anyhow::Result<()> {
+        let target_id = instance_id_for_kind(&module_kind)
+            .with_context(|| format!("Unknown module kind {module_kind}"))?;
         let mut recovery_receiver = self.client_recovery_progress_receiver.clone();
-        let config = self.config().await;
         recovery_receiver
             .wait_for(|in_progress| {
                 !in_progress
                     .iter()
-                    .filter(|(module_instance_id, _progress)| {
-                        config.modules[module_instance_id].kind == module_kind
-                    })
+                    .filter(|(instance_id, _)| **instance_id == target_id)
                     .any(|(_id, progress)| !progress.is_done())
             })
             .await
@@ -766,10 +767,9 @@ impl Client {
     pub async fn get_peer_node_ids(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
         self.config()
             .await
-            .global
-            .api_endpoints
+            .iroh_endpoints
             .iter()
-            .map(|(peer, endpoint)| (*peer, endpoint.node_id))
+            .map(|(peer, endpoints)| (*peer, endpoints.api_pk))
             .collect()
     }
 
@@ -787,7 +787,7 @@ impl Client {
     pub async fn get_guardian_public_keys_blocking(
         &self,
     ) -> BTreeMap<PeerId, picomint_core::secp256k1::PublicKey> {
-        self.config().await.global.broadcast_public_keys
+        self.config().await.broadcast_public_keys
     }
 
     pub fn log_event_dbtx<E>(
@@ -907,7 +907,7 @@ impl ClientContextIface for Client {
         Client::finalize_and_submit_transaction_inner(self, dbtx, operation_id, tx_builder).await
     }
 
-    async fn config(&self) -> ClientConfig {
+    async fn config(&self) -> ConsensusConfig {
         Client::config(self).await
     }
 

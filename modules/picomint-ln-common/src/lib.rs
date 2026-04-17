@@ -18,7 +18,7 @@ pub mod tweak;
 
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
-use config::LightningClientConfig;
+use config::LightningConfigConsensus;
 pub use gateway_connection::GatewayApi;
 use picomint_core::core::ModuleKind;
 use picomint_core::encoding::{Decodable, Encodable};
@@ -143,7 +143,7 @@ impl CommonModuleInit for LightningCommonInit {
     const CONSENSUS_VERSION: ModuleConsensusVersion = MODULE_CONSENSUS_VERSION;
     const KIND: ModuleKind = KIND;
 
-    type ClientConfig = LightningClientConfig;
+    type ClientConfig = LightningConfigConsensus;
 }
 
 pub struct LightningModuleTypes;
@@ -151,7 +151,7 @@ pub struct LightningModuleTypes;
 plugin_types_trait_impl_common!(
     KIND,
     LightningModuleTypes,
-    LightningClientConfig,
+    LightningConfigConsensus,
     LightningInput,
     LightningOutput,
     LightningConsensusItem,

@@ -1,37 +1,3 @@
-/// Implements the necessary traits for all configuration related types of a
-/// `FederationServer` module.
-#[macro_export]
-macro_rules! plugin_types_trait_impl_config {
-    ($common_gen:ty, $cfg:ty, $cfg_private:ty, $cfg_consensus:ty, $cfg_client:ty) => {
-        impl picomint_core::config::TypedServerModuleConsensusConfig for $cfg_consensus {
-            fn kind(&self) -> picomint_core::core::ModuleKind {
-                <$common_gen as picomint_core::module::CommonModuleInit>::KIND
-            }
-
-            fn version(&self) -> picomint_core::module::ModuleConsensusVersion {
-                <$common_gen as picomint_core::module::CommonModuleInit>::CONSENSUS_VERSION
-            }
-        }
-
-        impl picomint_core::config::TypedServerModuleConfig for $cfg {
-            type Private = $cfg_private;
-            type Consensus = $cfg_consensus;
-
-            fn from_parts(private: Self::Private, consensus: Self::Consensus) -> Self {
-                Self { private, consensus }
-            }
-
-            fn to_parts(self) -> (ModuleKind, Self::Private, Self::Consensus) {
-                (
-                    <$common_gen as picomint_core::module::CommonModuleInit>::KIND,
-                    self.private,
-                    self.consensus,
-                )
-            }
-        }
-    };
-}
-
 /// Implements the necessary traits for all associated types of a
 /// `FederationServer` module.
 #[macro_export]

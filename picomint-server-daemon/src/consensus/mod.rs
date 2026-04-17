@@ -58,7 +58,7 @@ pub async fn run(
     max_requests_per_connection: usize,
     cli_port: u16,
 ) -> anyhow::Result<()> {
-    cfg.validate_config(&cfg.local.identity)?;
+    cfg.validate_config(&cfg.private.identity)?;
 
     let bitcoin_rpc_connection = ServerBitcoinRpcMonitor::new(
         dyn_server_bitcoin_rpc,
@@ -97,7 +97,7 @@ pub async fn run(
 
     let server = crate::consensus::server::Server { mint, ln, wallet };
 
-    let client_cfg = cfg.consensus.to_client_config();
+    let client_cfg = cfg.consensus.clone();
 
     let (submission_sender, submission_receiver) = async_channel::bounded(TRANSACTION_BUFFER);
     let (shutdown_sender, shutdown_receiver) = watch::channel(None);

@@ -20,7 +20,7 @@ pub struct WalletConfigPrivate {
     pub bitcoin_sk: SecretKey,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Encodable, Decodable)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct WalletConfigConsensus {
     /// The public keys for the bitcoin multisig
     pub bitcoin_pks: BTreeMap<PeerId, PublicKey>,
@@ -119,44 +119,3 @@ impl WalletConfigConsensus {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub struct WalletClientConfig {
-    /// The public keys for the bitcoin multisig
-    pub bitcoin_pks: BTreeMap<PeerId, PublicKey>,
-    /// Total vbytes of a pegout bitcoin transaction
-    pub send_tx_vbytes: u64,
-    /// Total vbytes of a pegin bitcoin transaction
-    pub receive_tx_vbytes: u64,
-    /// The minimum feerate doubles for each pending transaction in the stack,
-    /// protecting against catastrophic feerate estimation errors
-    pub feerate_base: u64,
-    /// The minimum amount a user can send on chain
-    pub dust_limit: bitcoin::Amount,
-    /// Fee charged per wallet input
-    pub input_fee: Amount,
-    /// Fee charged per wallet output
-    pub output_fee: Amount,
-    /// Bitcoin network (e.g. testnet, bitcoin)
-    pub network: Network,
-}
-
-impl std::fmt::Display for WalletClientConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "WalletClientConfig {self:?}")
-    }
-}
-
-impl WalletConfigConsensus {
-    pub fn to_client(&self) -> WalletClientConfig {
-        WalletClientConfig {
-            bitcoin_pks: self.bitcoin_pks.clone(),
-            send_tx_vbytes: self.send_tx_vbytes,
-            receive_tx_vbytes: self.receive_tx_vbytes,
-            feerate_base: self.feerate_base,
-            dust_limit: self.dust_limit,
-            input_fee: self.input_fee,
-            output_fee: self.output_fee,
-            network: self.network,
-        }
-    }
-}

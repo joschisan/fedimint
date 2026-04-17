@@ -5,22 +5,19 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use futures::future::select_all;
 use peer_handle::PeerHandle;
-use picomint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
-pub use picomint_core::config::{
-    ClientConfig, ClientModuleConfig, FederationId, GlobalClientConfig, PeerEndpoint,
-};
-use picomint_core::core::ModuleKind;
+use picomint_api_client::config::{ConsensusConfig, PeerIrohEndpoints};
+pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::invite_code::InviteCode;
-use picomint_core::module::{CORE_CONSENSUS_VERSION, CoreConsensusVersion};
+use picomint_core::module::CORE_CONSENSUS_VERSION;
 use picomint_core::setup_code::PeerSetupCode;
 use picomint_core::task::sleep;
 use picomint_core::util::SafeUrl;
 use picomint_core::{NumPeersExt, PeerId, secp256k1, timing};
-use picomint_ln_common::config::{LightningConfigConsensus, LightningConfigPrivate};
+use picomint_ln_common::config::LightningConfigPrivate;
 use picomint_logging::LOG_NET_PEER_DKG;
-use picomint_mint_common::config::{MintConfig, MintConfigConsensus, MintConfigPrivate};
-use picomint_wallet_common::config::{WalletConfig, WalletConfigConsensus, WalletConfigPrivate};
+use picomint_mint_common::config::{MintConfig, MintConfigPrivate};
+use picomint_wallet_common::config::{WalletConfig, WalletConfigPrivate};
 use rand::rngs::OsRng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
@@ -37,36 +34,40 @@ pub mod dkg_g2;
 pub mod peer_handle;
 pub mod setup;
 
-/// The default maximum open connections the API can handle
-pub const DEFAULT_MAX_CLIENT_CONNECTIONS: u32 = 1000;
+/// How many concurrent Iroh API connections the server will accept.
+pub const MAX_CLIENT_CONNECTIONS: u32 = 1000;
 
-/// Consensus broadcast settings that result in 3 minutes session time
-const DEFAULT_BROADCAST_ROUND_DELAY_MS: u16 = 50;
+/// AlephBFT round delay (ms). Byzantine-fault-only; the ordering floor is
+/// dominated by network latency in practice.
+pub const BROADCAST_ROUND_DELAY_MS: u16 = 50;
+
+/// AlephBFT rounds per session. Controls session duration (3 min prod / 10 s
+/// test).
 const DEFAULT_BROADCAST_ROUNDS_PER_SESSION: u16 = 3600;
+const TEST_BROADCAST_ROUNDS_PER_SESSION: u16 = 200;
 
-fn default_broadcast_rounds_per_session() -> u16 {
-    DEFAULT_BROADCAST_ROUNDS_PER_SESSION
+fn broadcast_rounds_per_session() -> u16 {
+    if is_running_in_test_env() {
+        TEST_BROADCAST_ROUNDS_PER_SESSION
+    } else {
+        DEFAULT_BROADCAST_ROUNDS_PER_SESSION
+    }
 }
-
-/// Consensus broadcast settings that result in 10 seconds session time
-const DEFAULT_TEST_BROADCAST_ROUND_DELAY_MS: u16 = 50;
-const DEFAULT_TEST_BROADCAST_ROUNDS_PER_SESSION: u16 = 200;
 
 #[allow(clippy::unsafe_derive_deserialize)] // clippy fires on `select!` https://github.com/rust-lang/rust-clippy/issues/13062
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
-/// All the serializable configuration for the picomint server
+/// Full picomint server config (persisted in redb).
 pub struct ServerConfig {
-    /// Contains all configuration that needs to be the same for every server
-    pub consensus: ServerConfigConsensus,
-    /// Contains all configuration that is locally configurable and not secret
-    pub local: ServerConfigLocal,
-    /// Contains all configuration that will be encrypted such as private key
-    /// material
+    /// Federation-wide config, identical across peers
+    pub consensus: ConsensusConfig,
+    /// Per-peer secrets (identity + DKG keys)
     pub private: ServerConfigPrivate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ServerConfigPrivate {
+    /// Our peer id
+    pub identity: PeerId,
     /// Secret key for our iroh api endpoint
     pub iroh_api_sk: iroh::SecretKey,
     /// Secret key for our iroh p2p endpoint
@@ -79,54 +80,6 @@ pub struct ServerConfigPrivate {
     pub ln: LightningConfigPrivate,
     /// Private key material for the wallet module
     pub wallet: WalletConfigPrivate,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ServerConfigConsensus {
-    /// The version of the binary code running
-    pub code_version: String,
-    /// Agreed on core consensus version
-    pub version: CoreConsensusVersion,
-    /// Public keys for the atomic broadcast to authenticate messages
-    pub broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
-    /// Number of rounds per session.
-    #[serde(default = "default_broadcast_rounds_per_session")]
-    pub broadcast_rounds_per_session: u16,
-    /// Public keys for all iroh api and p2p endpoints
-    pub iroh_endpoints: BTreeMap<PeerId, PeerIrohEndpoints>,
-    /// Additional config the federation wants to transmit to the clients
-    pub meta: BTreeMap<String, String>,
-    /// Consensus config for the mint module
-    pub mint: MintConfigConsensus,
-    /// Consensus config for the lightning module
-    pub ln: LightningConfigConsensus,
-    /// Consensus config for the wallet module
-    pub wallet: WalletConfigConsensus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
-pub struct PeerIrohEndpoints {
-    /// The peer's name
-    pub name: String,
-    /// Public key for our iroh api endpoint
-    pub api_pk: iroh::PublicKey,
-    /// Public key for our iroh p2p endpoint
-    pub p2p_pk: iroh::PublicKey,
-}
-
-// FIXME: (@leonardo) Should this have another field for the expected transport
-// ? (e.g. clearnet/tor/...)
-#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ServerConfigLocal {
-    /// Our peer id (generally should not change)
-    pub identity: PeerId,
-    /// How many API connections we will accept
-    pub max_connections: u32,
-    /// Influences the atomic broadcast ordering latency, should be higher than
-    /// the expected latency between peers so everyone can get proposed
-    /// consensus items confirmed. This is only relevant for byzantine
-    /// faults.
-    pub broadcast_round_delay_ms: u16,
 }
 
 /// All the info we configure prior to config gen starting
@@ -164,67 +117,6 @@ pub struct ConfigGenParams {
     pub network: bitcoin::Network,
 }
 
-impl ServerConfigConsensus {
-    pub fn api_endpoints(&self) -> BTreeMap<PeerId, PeerEndpoint> {
-        self.iroh_endpoints
-            .iter()
-            .map(|(peer, endpoints)| {
-                let endpoint = PeerEndpoint {
-                    name: endpoints.name.clone(),
-                    node_id: endpoints.api_pk,
-                };
-
-                (*peer, endpoint)
-            })
-            .collect()
-    }
-
-    pub fn to_client_config(&self) -> ClientConfig {
-        let modules = BTreeMap::from([
-            (
-                MINT_INSTANCE_ID,
-                ClientModuleConfig::from_typed(
-                    MINT_INSTANCE_ID,
-                    ModuleKind::from_static_str("mint"),
-                    picomint_mint_common::MODULE_CONSENSUS_VERSION,
-                    self.mint.to_client(),
-                )
-                .expect("Encoding mint client config must succeed"),
-            ),
-            (
-                LN_INSTANCE_ID,
-                ClientModuleConfig::from_typed(
-                    LN_INSTANCE_ID,
-                    ModuleKind::from_static_str("ln"),
-                    picomint_ln_common::MODULE_CONSENSUS_VERSION,
-                    self.ln.to_client(),
-                )
-                .expect("Encoding ln client config must succeed"),
-            ),
-            (
-                WALLET_INSTANCE_ID,
-                ClientModuleConfig::from_typed(
-                    WALLET_INSTANCE_ID,
-                    ModuleKind::from_static_str("wallet"),
-                    picomint_wallet_common::MODULE_CONSENSUS_VERSION,
-                    self.wallet.to_client(),
-                )
-                .expect("Encoding wallet client config must succeed"),
-            ),
-        ]);
-
-        ClientConfig {
-            global: GlobalClientConfig {
-                api_endpoints: self.api_endpoints(),
-                broadcast_public_keys: self.broadcast_public_keys.clone(),
-                consensus_version: self.version,
-                meta: self.meta.clone(),
-            },
-            modules,
-        }
-    }
-}
-
 impl ServerConfig {
     /// Assemble a fresh `ServerConfig` from config-gen parameters, the
     /// threshold-signing key pair we generated locally, and the per-module
@@ -237,17 +129,11 @@ impl ServerConfig {
         mint: MintConfig,
         ln: picomint_ln_common::config::LightningConfig,
         wallet: WalletConfig,
-        code_version: String,
     ) -> Self {
-        let consensus = ServerConfigConsensus {
-            code_version,
+        let consensus = ConsensusConfig {
             version: CORE_CONSENSUS_VERSION,
             broadcast_public_keys,
-            broadcast_rounds_per_session: if is_running_in_test_env() {
-                DEFAULT_TEST_BROADCAST_ROUNDS_PER_SESSION
-            } else {
-                DEFAULT_BROADCAST_ROUNDS_PER_SESSION
-            },
+            broadcast_rounds_per_session: broadcast_rounds_per_session(),
             iroh_endpoints: params.iroh_endpoints(),
             mint: mint.consensus,
             ln: ln.consensus,
@@ -255,17 +141,8 @@ impl ServerConfig {
             meta: params.meta.clone(),
         };
 
-        let local = ServerConfigLocal {
-            identity,
-            max_connections: DEFAULT_MAX_CLIENT_CONNECTIONS,
-            broadcast_round_delay_ms: if is_running_in_test_env() {
-                DEFAULT_TEST_BROADCAST_ROUND_DELAY_MS
-            } else {
-                DEFAULT_BROADCAST_ROUND_DELAY_MS
-            },
-        };
-
         let private = ServerConfigPrivate {
+            identity,
             iroh_api_sk: params.iroh_api_sk,
             iroh_p2p_sk: params.iroh_p2p_sk,
             broadcast_secret_key,
@@ -274,23 +151,15 @@ impl ServerConfig {
             wallet: wallet.private,
         };
 
-        Self {
-            consensus,
-            local,
-            private,
-        }
+        Self { consensus, private }
     }
 
     pub fn get_invite_code(&self) -> InviteCode {
         InviteCode::new(
-            self.consensus.api_endpoints()[&self.local.identity].node_id,
-            self.local.identity,
-            self.calculate_federation_id(),
+            self.consensus.api_endpoints()[&self.private.identity].node_id,
+            self.private.identity,
+            self.consensus.calculate_federation_id(),
         )
-    }
-
-    pub fn calculate_federation_id(&self) -> FederationId {
-        FederationId(self.consensus.api_endpoints().consensus_hash())
     }
 
     /// Bundle the current peer's typed configs back into per-module
@@ -343,7 +212,6 @@ impl ServerConfig {
     /// Runs the distributed key gen algorithm
     pub async fn distributed_gen(
         params: &ConfigGenParams,
-        code_version_str: String,
         connections: ReconnectP2PConnections<P2PMessage>,
         mut p2p_status_receivers: P2PStatusReceivers,
     ) -> anyhow::Result<Self> {
@@ -462,7 +330,6 @@ impl ServerConfig {
             mint,
             ln,
             wallet,
-            code_version_str,
         );
 
         let checksum = cfg.consensus.consensus_hash_sha256();

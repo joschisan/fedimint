@@ -1,5 +1,5 @@
+use picomint_api_client::config::ConsensusConfig;
 use picomint_client_module::module::recovery::RecoveryProgress;
-use picomint_core::config::ClientConfig;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::table;
@@ -7,7 +7,7 @@ use serde::Serialize;
 
 table!(
     CLIENT_CONFIG,
-    () => ClientConfig,
+    () => ConsensusConfig,
     "client-config",
 );
 

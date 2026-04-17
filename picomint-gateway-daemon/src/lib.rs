@@ -40,7 +40,6 @@ use picomint_client::ClientHandleArc;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::invite_code::InviteCode;
-use picomint_core::module::CommonModuleInit;
 use picomint_core::secp256k1::PublicKey;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::time::duration_since_epoch;
@@ -145,32 +144,17 @@ impl AppState {
         let federation_id = client.federation_id();
         let config = client.config().await;
 
-        let ln_cfg = config
-            .modules
-            .values()
-            .find(|m| picomint_ln_common::LightningCommonInit::KIND == m.kind);
-
-        if ln_cfg.is_none() {
+        if config.ln.network != network {
+            crit!(
+                target: LOG_GATEWAY,
+                %federation_id,
+                %network,
+                "Incorrect LNv2 network for federation",
+            );
             return Err(anyhow::anyhow!(format!(
-                "Federation {federation_id} does not have an LNv2 lightning module"
+                "Unsupported LNv2 network {}",
+                config.ln.network
             )));
-        }
-
-        if let Some(cfg) = ln_cfg {
-            let ln_cfg: picomint_ln_common::config::LightningClientConfig = cfg.cast()?;
-
-            if ln_cfg.network != network {
-                crit!(
-                    target: LOG_GATEWAY,
-                    %federation_id,
-                    %network,
-                    "Incorrect LNv2 network for federation",
-                );
-                return Err(anyhow::anyhow!(format!(
-                    "Unsupported LNv2 network {}",
-                    ln_cfg.network
-                )));
-            }
         }
 
         Ok(())
@@ -181,7 +165,6 @@ impl AppState {
         client
             .config()
             .await
-            .global
             .federation_name()
             .map(String::from)
     }
@@ -202,13 +185,14 @@ impl AppState {
     /// Get JSON client configs for all connected federations.
     pub async fn all_federation_configs(
         &self,
-    ) -> BTreeMap<FederationId, picomint_core::config::JsonClientConfig> {
+    ) -> BTreeMap<FederationId, serde_json::Value> {
         let clients = self.clients.read().await;
         let mut configs = BTreeMap::new();
         for (federation_id, client) in clients.iter() {
+            let config = client.value().config().await;
             configs.insert(
                 *federation_id,
-                client.borrow().with(|c| c.get_config_json()).await,
+                serde_json::to_value(&config).expect("ConsensusConfig is serializable"),
             );
         }
         configs
@@ -223,9 +207,9 @@ impl AppState {
         for (federation_id, client) in clients.iter() {
             let config = client.value().config().await;
             let mut fed_codes = BTreeMap::new();
-            for (peer_id, peer_url) in &config.global.api_endpoints {
+            for (peer_id, endpoints) in &config.iroh_endpoints {
                 if let Some(code) = client.value().invite_code(*peer_id).await {
-                    fed_codes.insert(*peer_id, (peer_url.name.clone(), code));
+                    fed_codes.insert(*peer_id, (endpoints.name.clone(), code));
                 }
             }
             invite_codes.insert(*federation_id, fed_codes);

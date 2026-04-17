@@ -33,7 +33,7 @@ use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send};
 use picomint_derive_secret::{ChildId, DerivableSecret};
-use picomint_ln_common::config::LightningClientConfig;
+use picomint_ln_common::config::LightningConfigConsensus;
 use picomint_ln_common::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use picomint_ln_common::gateway_api::{
     GatewayConnection, PaymentFee, RealGatewayConnection, RoutingInfo,
@@ -114,7 +114,7 @@ pub struct LightningClientContext {
 #[derive(Debug, Clone)]
 pub struct LightningClientModule {
     federation_id: FederationId,
-    cfg: LightningClientConfig,
+    cfg: LightningConfigConsensus,
     client_ctx: ClientContext<Self>,
     module_api: FederationApi,
     keypair: Keypair,
@@ -155,7 +155,7 @@ impl LightningClientModule {
     #[allow(clippy::too_many_arguments)]
     fn new(
         federation_id: FederationId,
-        cfg: LightningClientConfig,
+        cfg: LightningConfigConsensus,
         client_ctx: ClientContext<Self>,
         module_api: FederationApi,
         module_root_secret: &DerivableSecret,

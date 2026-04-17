@@ -9,7 +9,7 @@ use std::fmt;
 use std::hash::Hash;
 
 use bitcoin_hashes::hash160;
-use config::MintClientConfig;
+use config::MintConfigConsensus;
 use picomint_core::core::ModuleKind;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
@@ -100,7 +100,7 @@ impl CommonModuleInit for MintCommonInit {
     const CONSENSUS_VERSION: ModuleConsensusVersion = MODULE_CONSENSUS_VERSION;
     const KIND: ModuleKind = KIND;
 
-    type ClientConfig = MintClientConfig;
+    type ClientConfig = MintConfigConsensus;
 }
 
 extensible_associated_module_type!(MintInput, MintInputV0);
@@ -181,7 +181,7 @@ pub fn nonce_message(nonce: PublicKey) -> Message {
 plugin_types_trait_impl_common!(
     KIND,
     MintModuleTypes,
-    MintClientConfig,
+    MintConfigConsensus,
     MintInput,
     MintOutput,
     MintConsensusItem,

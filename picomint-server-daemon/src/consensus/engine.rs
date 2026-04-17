@@ -53,10 +53,10 @@ impl ConsensusEngine {
     }
 
     fn identity(&self) -> PeerId {
-        self.cfg.local.identity
+        self.cfg.private.identity
     }
 
-    #[instrument(target = LOG_CONSENSUS, name = "run", skip_all, fields(id=%self.cfg.local.identity))]
+    #[instrument(target = LOG_CONSENSUS, name = "run", skip_all, fields(id=%self.cfg.private.identity))]
     pub async fn run(self) -> anyhow::Result<()> {
         self.run_consensus(self.task_group.make_handle()).await
     }
@@ -127,7 +127,7 @@ impl ConsensusEngine {
         const BASE: f64 = 1.02;
 
         let rounds_per_session = self.cfg.consensus.broadcast_rounds_per_session;
-        let round_delay = f64::from(self.cfg.local.broadcast_round_delay_ms);
+        let round_delay = f64::from(crate::config::BROADCAST_ROUND_DELAY_MS);
 
         let mut delay_config = aleph_bft::default_delay_config();
 

@@ -5,7 +5,8 @@ use iroh::endpoint::presets::N0;
 use picomint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use picomint_client::{Client, ClientBuilder, RootSecret};
 use picomint_client_module::secret::RootSecretStrategy;
-use picomint_core::config::{ClientConfig, FederationId};
+use picomint_api_client::config::ConsensusConfig;
+use picomint_core::config::FederationId;
 use picomint_core::invite_code::InviteCode;
 use picomint_redb::Database;
 
@@ -82,7 +83,7 @@ impl GatewayClientFactory {
         Ok(builder)
     }
 
-    async fn save_config(&self, config: &ClientConfig) {
+    async fn save_config(&self, config: &ConsensusConfig) {
         let dbtx = self.db.begin_write().await;
         dbtx.as_ref()
             .insert(&CLIENT_CONFIG, &config.calculate_federation_id(), config);
@@ -143,7 +144,7 @@ impl GatewayClientFactory {
     }
 
     /// List all federation configs stored in the database.
-    pub async fn list_federations(&self) -> Vec<(FederationId, ClientConfig)> {
+    pub async fn list_federations(&self) -> Vec<(FederationId, ConsensusConfig)> {
         self.db.begin_read().await.as_ref().iter(&CLIENT_CONFIG)
     }
 }

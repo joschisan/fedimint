@@ -11,7 +11,7 @@ use std::time::Duration;
 use bitcoin::hashes::{Hash, hash160, sha256};
 use bitcoin::key::TapTweak;
 use bitcoin::{Address, PubkeyHash, ScriptBuf, ScriptHash, Txid, WPubkeyHash, WScriptHash};
-use config::WalletClientConfig;
+use config::WalletConfigConsensus;
 use miniscript::descriptor::Wsh;
 use picomint_core::core::ModuleKind;
 use picomint_core::encoding::{Decodable, Encodable};
@@ -114,7 +114,7 @@ impl CommonModuleInit for WalletCommonInit {
     const CONSENSUS_VERSION: ModuleConsensusVersion = MODULE_CONSENSUS_VERSION;
     const KIND: ModuleKind = KIND;
 
-    type ClientConfig = WalletClientConfig;
+    type ClientConfig = WalletConfigConsensus;
 }
 
 pub struct WalletModuleTypes;
@@ -122,7 +122,7 @@ pub struct WalletModuleTypes;
 plugin_types_trait_impl_common!(
     KIND,
     WalletModuleTypes,
-    WalletClientConfig,
+    WalletConfigConsensus,
     WalletInput,
     WalletOutput,
     WalletConsensusItem,

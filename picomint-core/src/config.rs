@@ -4,55 +4,17 @@ use std::hash::Hash;
 use std::path::Path;
 use std::str::FromStr;
 
-use anyhow::{Context, format_err};
-use bitcoin::hashes::sha256::HashEngine;
 use bitcoin::hashes::{Hash as BitcoinHash, hex, sha256};
 use hex::FromHex;
-use picomint_core::core::{ModuleInstanceId, ModuleKind};
-use picomint_core::encoding::Encodable;
-use picomint_core::format_hex;
-use secp256k1::PublicKey;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::json;
 
-use crate::encoding::Decodable;
-use crate::module::{CoreConsensusVersion, ModuleConsensusVersion};
-use crate::{PeerId, secp256k1};
+use crate::encoding::{Decodable, Encodable};
+use crate::format_hex;
 
 // TODO: make configurable
 /// This limits the RAM consumption of a AlephBFT Unit to roughly 50kB
 pub const ALEPH_BFT_UNIT_BYTE_LIMIT: usize = 50_000;
-
-/// [`serde_json::Value`] that must contain `kind: String` field
-///
-/// TODO: enforce at ser/deserialization
-/// TODO: make inside prive and enforce `kind` on construction, to
-/// other functions non-falliable
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct JsonWithKind {
-    kind: ModuleKind,
-    #[serde(flatten)]
-    value: serde_json::Value,
-}
-
-impl JsonWithKind {
-    pub fn new(kind: ModuleKind, value: serde_json::Value) -> Self {
-        Self { kind, value }
-    }
-
-    pub fn value(&self) -> &serde_json::Value {
-        &self.value
-    }
-
-    pub fn kind(&self) -> &ModuleKind {
-        &self.kind
-    }
-
-    pub fn is_kind(&self, kind: &ModuleKind) -> bool {
-        &self.kind == kind
-    }
-}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct PeerEndpoint {
@@ -62,21 +24,8 @@ pub struct PeerEndpoint {
     pub name: String,
 }
 
-/// Total client config
-///
-/// This includes global settings and client-side module configs.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ClientConfig {
-    #[serde(flatten)]
-    pub global: GlobalClientConfig,
-    #[serde(deserialize_with = "de_int_key")]
-    pub modules: BTreeMap<ModuleInstanceId, ClientModuleConfig>,
-}
-
-crate::consensus_value!(ClientConfig);
-
 // FIXME: workaround for https://github.com/serde-rs/json/issues/989
-fn de_int_key<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
+pub fn de_int_key<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
 where
     D: Deserializer<'de>,
     K: Eq + Ord + FromStr,
@@ -92,98 +41,6 @@ where
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
     Ok(map)
-}
-
-/// Client config that cannot be cryptographically verified but is easier to
-/// parse by external tools
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct JsonClientConfig {
-    pub global: GlobalClientConfig,
-    pub modules: BTreeMap<ModuleInstanceId, JsonWithKind>,
-}
-
-/// Federation-wide client config
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
-pub struct GlobalClientConfig {
-    /// API endpoints for each federation member
-    #[serde(deserialize_with = "de_int_key")]
-    pub api_endpoints: BTreeMap<PeerId, PeerEndpoint>,
-    /// Signing session keys for each federation member
-    #[serde(deserialize_with = "de_int_key")]
-    pub broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
-    /// Core consensus version
-    pub consensus_version: CoreConsensusVersion,
-    // TODO: make it a String -> serde_json::Value map?
-    /// Additional config the federation wants to transmit to the clients
-    pub meta: BTreeMap<String, String>,
-}
-
-impl GlobalClientConfig {
-    /// 0.4.0 and later uses a hash of broadcast public keys to calculate the
-    /// federation id. 0.3.x and earlier use a hash of api endpoints
-    pub fn calculate_federation_id(&self) -> FederationId {
-        FederationId(self.api_endpoints.consensus_hash())
-    }
-
-    /// Federation name from config metadata (if set)
-    pub fn federation_name(&self) -> Option<&str> {
-        self.meta.get(META_FEDERATION_NAME_KEY).map(|x| &**x)
-    }
-}
-
-impl ClientConfig {
-    pub fn calculate_federation_id(&self) -> FederationId {
-        self.global.calculate_federation_id()
-    }
-
-    /// Get the value of a given meta field
-    pub fn meta<V: serde::de::DeserializeOwned + 'static>(
-        &self,
-        key: &str,
-    ) -> Result<Option<V>, anyhow::Error> {
-        let Some(str_value) = self.global.meta.get(key) else {
-            return Ok(None);
-        };
-        let res = serde_json::from_str(str_value)
-            .map(Some)
-            .context(format!("Decoding meta field '{key}' failed"));
-
-        // In the past we encoded some string fields as "just a string" without quotes,
-        // this code ensures that old meta values still parse since config is hard to
-        // change
-        if res.is_err() && std::any::TypeId::of::<V>() == std::any::TypeId::of::<String>() {
-            let string_ret = Box::new(str_value.clone());
-            let ret = unsafe {
-                // We can transmute a String to V because we know that V==String
-                std::mem::transmute::<Box<String>, Box<V>>(string_ret)
-            };
-            Ok(Some(*ret))
-        } else {
-            res
-        }
-    }
-
-    /// Converts a consensus-encoded client config struct to a client config
-    /// struct that when encoded as JSON exposes the module's kind and an
-    /// opaque hex-encoded config blob.
-    pub fn to_json(&self) -> JsonClientConfig {
-        JsonClientConfig {
-            global: self.global.clone(),
-            modules: self
-                .modules
-                .iter()
-                .map(|(&module_instance_id, module_config)| {
-                    let module_config_json = JsonWithKind {
-                        kind: module_config.kind.clone(),
-                        value: json!({
-                            "config_hex": module_config.config.consensus_encode_to_hex(),
-                        }),
-                    };
-                    (module_instance_id, module_config_json)
-                })
-                .collect(),
-        }
-    }
 }
 
 /// The federation id is a copy of the authentication threshold public key of
@@ -297,181 +154,6 @@ impl FromStr for FederationId {
     }
 }
 
-impl ClientConfig {
-    /// Returns the consensus hash for a given client config
-    pub fn consensus_hash(&self) -> sha256::Hash {
-        let mut engine = HashEngine::default();
-        self.consensus_encode(&mut engine)
-            .expect("Consensus hashing should never fail");
-        sha256::Hash::from_engine(engine)
-    }
-
-    pub fn get_module<T: Decodable + 'static>(&self, id: ModuleInstanceId) -> anyhow::Result<T> {
-        self.modules.get(&id).map_or_else(
-            || Err(format_err!("Client config for module id {id} not found")),
-            ClientModuleConfig::cast,
-        )
-    }
-
-    // TODO: rename this and one above
-    pub fn get_module_cfg(&self, id: ModuleInstanceId) -> anyhow::Result<ClientModuleConfig> {
-        self.modules.get(&id).map_or_else(
-            || Err(format_err!("Client config for module id {id} not found")),
-            |client_cfg| Ok(client_cfg.clone()),
-        )
-    }
-
-    /// (soft-deprecated): Get the first instance of a module of a given kind in
-    /// defined in config
-    ///
-    /// Since module ids are numerical and for time being we only support 1:1
-    /// mint, wallet, ln module code in the client, this is useful, but
-    /// please write any new code that avoids assumptions about available
-    /// modules.
-    pub fn get_first_module_by_kind<T: Decodable + 'static>(
-        &self,
-        kind: impl Into<ModuleKind>,
-    ) -> anyhow::Result<(ModuleInstanceId, T)> {
-        let kind: ModuleKind = kind.into();
-        let Some((id, module_cfg)) = self.modules.iter().find(|(_, v)| v.is_kind(&kind)) else {
-            anyhow::bail!("Module kind {kind} not found")
-        };
-        Ok((*id, module_cfg.cast()?))
-    }
-
-    // TODO: rename this and above
-    pub fn get_first_module_by_kind_cfg(
-        &self,
-        kind: impl Into<ModuleKind>,
-    ) -> anyhow::Result<(ModuleInstanceId, ClientModuleConfig)> {
-        let kind: ModuleKind = kind.into();
-        self.modules
-            .iter()
-            .find(|(_, v)| v.is_kind(&kind))
-            .map(|(id, v)| (*id, v.clone()))
-            .ok_or_else(|| anyhow::format_err!("Module kind {kind} not found"))
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ServerModuleConsensusConfig {
-    pub kind: ModuleKind,
-    pub version: ModuleConsensusVersion,
-    #[serde(with = "::hex::serde")]
-    pub config: Vec<u8>,
-}
-
-/// Config for the client-side of a particular Federation module
-///
-/// The inner `config` payload is a consensus-encoded blob of the module's
-/// typed `ClientConfig`. Callers who know the module kind can decode it via
-/// [`ClientModuleConfig::cast`].
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ClientModuleConfig {
-    pub kind: ModuleKind,
-    pub version: ModuleConsensusVersion,
-    #[serde(with = "::hex::serde")]
-    pub config: Vec<u8>,
-}
-
-impl ClientModuleConfig {
-    pub fn from_typed<T: Encodable>(
-        _module_instance_id: ModuleInstanceId,
-        kind: ModuleKind,
-        version: ModuleConsensusVersion,
-        value: T,
-    ) -> anyhow::Result<Self> {
-        Ok(Self {
-            kind,
-            version,
-            config: value.consensus_encode_to_vec(),
-        })
-    }
-
-    pub fn is_kind(&self, kind: &ModuleKind) -> bool {
-        &self.kind == kind
-    }
-
-    pub fn kind(&self) -> &ModuleKind {
-        &self.kind
-    }
-
-    /// Decode the inner config bytes into a typed value `T`.
-    pub fn cast<T>(&self) -> anyhow::Result<T>
-    where
-        T: Decodable + 'static,
-    {
-        Ok(T::consensus_decode_exact(&self.config)?)
-    }
-}
-
-/// Config for the server-side of a particular Federation module
-///
-/// See [`ClientModuleConfig`].
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ServerModuleConfig {
-    pub private: JsonWithKind,
-    pub consensus: ServerModuleConsensusConfig,
-}
-
-impl ServerModuleConfig {
-    pub fn from(private: JsonWithKind, consensus: ServerModuleConsensusConfig) -> Self {
-        Self { private, consensus }
-    }
-
-    pub fn to_typed<T: TypedServerModuleConfig>(&self) -> anyhow::Result<T> {
-        let private = serde_json::from_value(self.private.value().clone())?;
-        let consensus = <T::Consensus>::consensus_decode_exact(&self.consensus.config[..])?;
-
-        Ok(TypedServerModuleConfig::from_parts(private, consensus))
-    }
-}
-
-/// Consensus-critical part of a server side module config
-pub trait TypedServerModuleConsensusConfig:
-    DeserializeOwned + Serialize + Encodable + Decodable
-{
-    fn kind(&self) -> ModuleKind;
-
-    fn version(&self) -> ModuleConsensusVersion;
-
-    fn from_erased(erased: &ServerModuleConsensusConfig) -> anyhow::Result<Self> {
-        Ok(Self::consensus_decode_exact(&erased.config[..])?)
-    }
-}
-
-/// Module (server side) config, typed
-pub trait TypedServerModuleConfig: DeserializeOwned + Serialize {
-    /// Private for this federation member data that are security sensitive and
-    /// will be encrypted at rest
-    type Private: DeserializeOwned + Serialize;
-    /// Shared consensus-critical config
-    type Consensus: TypedServerModuleConsensusConfig;
-
-    /// Assemble from the three functionally distinct parts
-    fn from_parts(private: Self::Private, consensus: Self::Consensus) -> Self;
-
-    /// Split the config into its two functionally distinct parts
-    fn to_parts(self) -> (ModuleKind, Self::Private, Self::Consensus);
-
-    /// Turn the typed config into type-erased version
-    fn to_erased(self) -> ServerModuleConfig {
-        let (kind, private, consensus) = self.to_parts();
-
-        ServerModuleConfig {
-            private: JsonWithKind::new(
-                kind,
-                serde_json::to_value(private).expect("serialization can't fail"),
-            ),
-            consensus: ServerModuleConsensusConfig {
-                kind: consensus.kind(),
-                version: consensus.version(),
-                config: consensus.consensus_encode_to_vec(),
-            },
-        }
-    }
-}
-
 /// Key under which the federation name can be sent to client in the `meta` part
 /// of the config
 pub const META_FEDERATION_NAME_KEY: &str = "federation_name";
@@ -480,6 +162,3 @@ pub fn load_from_file<T: DeserializeOwned>(path: &Path) -> Result<T, anyhow::Err
     let file = std::fs::File::open(path)?;
     Ok(serde_json::from_reader(file)?)
 }
-
-#[cfg(test)]
-mod tests;

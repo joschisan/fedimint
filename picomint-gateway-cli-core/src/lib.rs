@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use bitcoin::address::NetworkUnchecked;
 use lightning_invoice::Bolt11Invoice;
-use picomint_core::config::{FederationId, JsonClientConfig};
+use picomint_core::config::FederationId;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::{Amount, BitcoinAmountOrAll, PeerId, secp256k1};
 use serde::{Deserialize, Serialize};
@@ -232,7 +232,7 @@ pub struct FederationConfigRequest {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct FederationConfigResponse {
-    pub federations: BTreeMap<FederationId, JsonClientConfig>,
+    pub federations: BTreeMap<FederationId, serde_json::Value>,
 }
 
 // --- /federation/invite ---

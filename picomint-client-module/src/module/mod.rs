@@ -7,7 +7,7 @@ use std::{marker, ops};
 use anyhow::bail;
 use bitcoin::secp256k1::PublicKey;
 use picomint_api_client::api::FederationApi;
-use picomint_core::config::ClientConfig;
+use picomint_api_client::config::ConsensusConfig;
 use picomint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
@@ -95,7 +95,7 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
         txid: TransactionId,
     ) -> Result<(), String>;
 
-    async fn config(&self) -> ClientConfig;
+    async fn config(&self) -> ConsensusConfig;
 
     fn db(&self) -> &Database;
 
@@ -297,18 +297,18 @@ where
             .await
     }
 
-    pub async fn get_config(&self) -> ClientConfig {
+    pub async fn get_config(&self) -> ConsensusConfig {
         self.client.get().config().await
     }
 
     /// Returns an invite code for the federation that points to an arbitrary
     /// guardian server for fetching the config
     pub async fn get_invite_code(&self) -> InviteCode {
-        let cfg = self.get_config().await.global;
+        let cfg = self.get_config().await;
         self.client
             .get()
             .invite_code(
-                *cfg.api_endpoints
+                *cfg.iroh_endpoints
                     .keys()
                     .next()
                     .expect("A federation always has at least one guardian"),

@@ -1,4 +1,5 @@
-use picomint_core::config::{ClientConfig, FederationId};
+use picomint_api_client::config::ConsensusConfig;
+use picomint_core::config::FederationId;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::table;
 use picomint_ln_common::contracts::{IncomingContract, PaymentImage};
@@ -11,7 +12,7 @@ table!(
 
 table!(
     CLIENT_CONFIG,
-    FederationId => ClientConfig,
+    FederationId => ConsensusConfig,
     "client-config",
 );
 

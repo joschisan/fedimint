@@ -47,7 +47,7 @@ use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_core::util::BoxStream;
 use picomint_core::{apply, async_trait_maybe_send, Amount, PeerId};
 use picomint_derive_secret::DerivableSecret;
-use picomint_mint_common::config::{client_denominations, MintClientConfig};
+use picomint_mint_common::config::{client_denominations, MintConfigConsensus};
 use picomint_mint_common::{
     Denomination, MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, RecoveryItem,
 };
@@ -256,7 +256,7 @@ impl ClientModuleInit for MintClientInit {
             }
         });
 
-        let cfg: MintClientConfig = args.cfg().clone();
+        let cfg: MintConfigConsensus = args.cfg().clone();
         let client_ctx = args.context();
         let balance_update_sender = tokio::sync::watch::channel(()).0;
 
@@ -302,7 +302,7 @@ impl ClientModuleInit for MintClientInit {
 #[derive(Debug)]
 pub struct MintClientModule {
     federation_id: FederationId,
-    cfg: MintClientConfig,
+    cfg: MintConfigConsensus,
     root_secret: DerivableSecret,
     client_ctx: ClientContext<Self>,
     balance_update_sender: tokio::sync::watch::Sender<()>,

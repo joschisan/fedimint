@@ -4738,6 +4738,7 @@ dependencies = [
  "lightning-invoice",
  "picomint-core",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

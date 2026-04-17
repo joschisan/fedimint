@@ -30,7 +30,7 @@ use picomint_core::hex::ToHex;
 use picomint_core::module::{ModuleCommon, ModuleInit};
 use picomint_core::secp256k1::Keypair;
 use picomint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send, secp256k1};
-use picomint_ln_common::config::LightningClientConfig;
+use picomint_ln_common::config::LightningConfigConsensus;
 use picomint_ln_common::contracts::{IncomingContract, PaymentImage};
 use picomint_ln_common::gateway_api::SendPaymentPayload;
 use picomint_ln_common::{
@@ -114,7 +114,7 @@ impl ClientModuleInit for GatewayClientInitV2 {
 #[derive(Debug, Clone)]
 pub struct GatewayClientModuleV2 {
     pub federation_id: FederationId,
-    pub cfg: LightningClientConfig,
+    pub cfg: LightningConfigConsensus,
     pub client_ctx: ClientContext<Self>,
     pub module_api: FederationApi,
     pub keypair: Keypair,
