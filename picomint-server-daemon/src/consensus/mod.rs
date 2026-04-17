@@ -44,7 +44,6 @@ const TRANSACTION_BUFFER: usize = 1000;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
-    connectors: Endpoint,
     auth: ApiAuth,
     connections: ReconnectP2PConnections<P2PMessage>,
     p2p_status_receivers: P2PStatusReceivers,
@@ -129,10 +128,6 @@ pub async fn run(
         code_version_str,
         task_group: task_group.clone(),
     });
-
-    // Drop the unused endpoint handle — it was originally needed to build a
-    // client-side `FederationApi`, which the static-module rip no longer uses.
-    drop(connectors);
 
     info!(target: LOG_CONSENSUS, "Starting Consensus Api...");
 

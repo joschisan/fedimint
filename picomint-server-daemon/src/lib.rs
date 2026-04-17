@@ -40,8 +40,6 @@ pub const DB_FILE: &str = "database.redb";
 
 use anyhow::Context;
 use config::ServerConfig;
-use iroh::Endpoint;
-use iroh::endpoint::presets::N0;
 use picomint_bitcoin_rpc::BitcoinBackend;
 use picomint_core::module::ApiAuth;
 use picomint_core::task::TaskGroup;
@@ -108,10 +106,7 @@ pub async fn run_server(
 
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 
-    let client_endpoint = Endpoint::builder(N0).bind().await?;
-
     Box::pin(consensus::run(
-        client_endpoint,
         auth,
         connections,
         p2p_status_receivers,
