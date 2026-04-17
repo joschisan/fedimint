@@ -51,7 +51,6 @@ url = { workspace = true, features = ["serde"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { workspace = true, features = ["full", "tracing"] }
-tokio-rustls = { workspace = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 async-lock = { workspace = true }

@@ -20,7 +20,6 @@ use lightning::types::payment::PaymentHash;
 use picomint_bip39::Bip39RootSecretStrategy;
 use picomint_client::secret::RootSecretStrategy;
 use picomint_core::Amount;
-use picomint_core::rustls::install_crypto_provider;
 use picomint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl};
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
@@ -112,7 +111,9 @@ fn main() -> anyhow::Result<()> {
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);
 
     // 2. Open database
-    runtime.block_on(install_crypto_provider());
+    tokio_rustls::rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
 
     let gateway_db =
         runtime.block_on(picomint_redb::Database::open(opts.data_dir.join(DB_FILE)))?;

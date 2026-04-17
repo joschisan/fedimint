@@ -13,7 +13,6 @@ use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use futures::FutureExt as _;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
-use picomint_core::rustls::install_crypto_provider;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::{FmtCompactAnyhow as _, SafeUrl};
 use picomint_logging::{LOG_CORE, TracingSetup};
@@ -137,7 +136,9 @@ async fn main() -> anyhow::Result<Infallible> {
 
     root_task_group.install_kill_handler();
 
-    install_crypto_provider().await;
+    tokio_rustls::rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
 
     let task_group = root_task_group.clone();
     let data_dir = server_opts.data_dir.clone();

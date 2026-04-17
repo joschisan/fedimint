@@ -1,7 +1,5 @@
 #![cfg_attr(target_family = "wasm", allow(dead_code))]
 
-/// Just-in-time initialization
-pub mod jit;
 
 use std::future::Future;
 use std::pin::Pin;

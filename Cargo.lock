@@ -3973,7 +3973,6 @@ dependencies = [
  "test-log",
  "thiserror 2.0.18",
  "tokio",
- "tokio-rustls 0.26.4",
  "tokio-test",
  "tokio-util",
  "tracing",
@@ -4102,6 +4101,7 @@ dependencies = [
  "reqwest 0.12.22",
  "serde_json",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tower-http",
  "tracing",
 ]
@@ -4416,6 +4416,7 @@ dependencies = [
  "serde_json",
  "test-log",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tracing",
 ]
 
