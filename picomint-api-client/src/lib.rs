@@ -73,7 +73,7 @@ pub async fn try_download_client_config(
             )));
         }
 
-        Ok(cfg.api_endpoints())
+        Ok(cfg.iroh_endpoints.clone())
     });
 
     let api_endpoints: BTreeMap<PeerId, picomint_core::config::PeerEndpoint> = api_from_invite

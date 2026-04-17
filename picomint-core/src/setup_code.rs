@@ -7,19 +7,12 @@ use crate::encoding::{Decodable, Encodable};
 pub struct PeerSetupCode {
     /// Name of the peer
     pub name: String,
-    /// The peer's api and p2p endpoint
-    pub endpoints: PeerEndpoints,
+    /// Public key of the peer's single iroh endpoint (serves both p2p and
+    /// client-API traffic, demuxed by node-id on accept).
+    pub pk: iroh_base::PublicKey,
     /// Federation name set by the leader
     pub federation_name: Option<String>,
     /// Total number of guardians (including the one who sets this), set by the
     /// leader
     pub federation_size: Option<u32>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]
-pub struct PeerEndpoints {
-    /// Public key for our iroh api endpoint
-    pub api_pk: iroh_base::PublicKey,
-    /// Public key for our iroh p2p endpoint
-    pub p2p_pk: iroh_base::PublicKey,
 }

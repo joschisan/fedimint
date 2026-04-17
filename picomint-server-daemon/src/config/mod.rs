@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use futures::future::select_all;
 use peer_handle::PeerHandle;
-use picomint_api_client::config::{ConsensusConfig, PeerIrohEndpoints};
+use picomint_api_client::config::ConsensusConfig;
 pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::invite_code::InviteCode;
@@ -68,10 +68,8 @@ pub struct ServerConfig {
 pub struct ServerConfigPrivate {
     /// Our peer id
     pub identity: PeerId,
-    /// Secret key for our iroh api endpoint
-    pub iroh_api_sk: iroh::SecretKey,
-    /// Secret key for our iroh p2p endpoint
-    pub iroh_p2p_sk: iroh::SecretKey,
+    /// Secret key for our single iroh endpoint (p2p + api)
+    pub iroh_sk: iroh::SecretKey,
     /// Secret key for the atomic broadcast to sign messages
     pub broadcast_secret_key: SecretKey,
     /// Private key material for the mint module
@@ -105,10 +103,8 @@ pub struct ConfigGenSettings {
 pub struct ConfigGenParams {
     /// Our own peer id
     pub identity: PeerId,
-    /// Secret key for our iroh api endpoint
-    pub iroh_api_sk: iroh::SecretKey,
-    /// Secret key for our iroh p2p endpoint
-    pub iroh_p2p_sk: iroh::SecretKey,
+    /// Secret key for our single iroh endpoint (p2p + api)
+    pub iroh_sk: iroh::SecretKey,
     /// Endpoints of all servers
     pub peers: BTreeMap<PeerId, PeerSetupCode>,
     /// Guardian-defined key-value pairs that will be passed to the client
@@ -143,8 +139,7 @@ impl ServerConfig {
 
         let private = ServerConfigPrivate {
             identity,
-            iroh_api_sk: params.iroh_api_sk,
-            iroh_p2p_sk: params.iroh_p2p_sk,
+            iroh_sk: params.iroh_sk,
             broadcast_secret_key,
             mint: mint.private,
             ln: ln.private,
@@ -156,7 +151,7 @@ impl ServerConfig {
 
     pub fn get_invite_code(&self) -> InviteCode {
         InviteCode::new(
-            self.consensus.api_endpoints()[&self.private.identity].node_id,
+            self.private.iroh_sk.public(),
             self.private.identity,
             self.consensus.calculate_federation_id(),
         )
@@ -186,7 +181,7 @@ impl ServerConfig {
     }
 
     pub fn validate_config(&self, identity: &PeerId) -> anyhow::Result<()> {
-        let endpoints = self.consensus.api_endpoints().clone();
+        let endpoints = &self.consensus.iroh_endpoints;
         let my_public_key = self
             .private
             .broadcast_secret_key
@@ -383,16 +378,15 @@ impl ConfigGenParams {
         self.peers.keys().copied().collect()
     }
 
-    pub fn iroh_endpoints(&self) -> BTreeMap<PeerId, PeerIrohEndpoints> {
+    pub fn iroh_endpoints(&self) -> BTreeMap<PeerId, PeerEndpoint> {
         self.peers
             .iter()
             .map(|(id, peer)| {
-                let endpoints = PeerIrohEndpoints {
+                let endpoint = PeerEndpoint {
                     name: peer.name.clone(),
-                    api_pk: peer.endpoints.api_pk,
-                    p2p_pk: peer.endpoints.p2p_pk,
+                    node_id: peer.pk,
                 };
-                (*id, endpoints)
+                (*id, endpoint)
             })
             .collect()
     }

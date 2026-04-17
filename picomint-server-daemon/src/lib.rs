@@ -71,12 +71,12 @@ pub async fn run_server(
     let (cfg, connections, p2p_status_receivers) = match load_server_config(&db).await {
         Some(cfg) => {
             let connector = P2PConnector::new(
-                cfg.private.iroh_p2p_sk.clone(),
+                cfg.private.iroh_sk.clone(),
                 settings.p2p_bind,
                 cfg.consensus
                     .iroh_endpoints
                     .iter()
-                    .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
+                    .map(|(peer, endpoints)| (*peer, endpoints.node_id))
                     .collect(),
             )
             .await?;
@@ -188,12 +188,12 @@ pub async fn run_config_gen(
         .context("Failed to shutdown CLI server after config gen")?;
 
     let connector = P2PConnector::new(
-        cg_params.iroh_p2p_sk.clone(),
+        cg_params.iroh_sk.clone(),
         settings.p2p_bind,
         cg_params
             .iroh_endpoints()
             .iter()
-            .map(|(peer, endpoints)| (*peer, endpoints.p2p_pk))
+            .map(|(peer, endpoints)| (*peer, endpoints.node_id))
             .collect(),
     )
     .await?;

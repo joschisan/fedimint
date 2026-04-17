@@ -120,8 +120,7 @@ pub struct IrohGatewayResponse {
     pub body: serde_json::Value,
 }
 
-pub const PICOMINT_API_ALPN: &[u8] = b"PICOMINT_API_ALPN";
-pub const PICOMINT_GATEWAY_ALPN: &[u8] = b"PICOMINT_GATEWAY_ALPN";
+pub const PICOMINT_ALPN: &[u8] = b"picomint";
 
 /// Authentication secret used to verify guardian admin API requests.
 ///

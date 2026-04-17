@@ -17,7 +17,7 @@ use picomint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };
 use picomint_core::module::{
-    ApiError, ApiMethod, ApiRequestErased, IrohApiRequest, PICOMINT_API_ALPN,
+    ApiError, ApiMethod, ApiRequestErased, IrohApiRequest, PICOMINT_ALPN,
 };
 use picomint_core::runtime::sleep;
 use picomint_core::util::FmtCompact as _;
@@ -487,7 +487,7 @@ async fn connection_task(
     let mut backoff = api_networking_backoff();
 
     loop {
-        match endpoint.connect(node_id, PICOMINT_API_ALPN).await {
+        match endpoint.connect(node_id, PICOMINT_ALPN).await {
             Ok(conn) => {
                 backoff = api_networking_backoff();
 

@@ -15,6 +15,7 @@ use iroh::endpoint::{Connection, RecvStream};
 use iroh::{Endpoint, PublicKey, SecretKey, Watcher as _};
 use picomint_api_client::session_outcome::SignedSessionOutcome;
 use picomint_core::encoding::{Decodable, Encodable};
+use picomint_core::module::PICOMINT_ALPN;
 use picomint_core::net::STANDARD_PICOMINT_P2P_PORT;
 use picomint_core::net::iroh::build_iroh_endpoint;
 use picomint_core::task::{TaskGroup, sleep};
@@ -59,8 +60,6 @@ pub enum DkgMessageG2 {
 /// Maximum size of a p2p message in bytes. The largest message we expect to
 /// receive is a signed session outcome.
 const MAX_P2P_MESSAGE_SIZE: usize = 10_000_000;
-
-pub(crate) const PICOMINT_P2P_ALPN: &[u8] = b"PICOMINT_P2P_ALPN";
 
 /// Parse the host and port from a p2p `picomint://` url.
 pub fn parse_p2p(url: &SafeUrl) -> anyhow::Result<String> {
@@ -145,7 +144,7 @@ impl P2PConnector {
             .expect("Our public key is not part of the keyset")
             .0;
 
-        let endpoint = build_iroh_endpoint(secret_key, p2p_bind_addr, PICOMINT_P2P_ALPN).await?;
+        let endpoint = build_iroh_endpoint(secret_key, p2p_bind_addr, PICOMINT_ALPN).await?;
 
         Ok(Self {
             node_ids: node_ids
@@ -163,7 +162,7 @@ impl P2PConnector {
     pub async fn connect(&self, peer: PeerId) -> anyhow::Result<P2PConnection> {
         let node_id = *self.node_ids.get(&peer).expect("No node id found for peer");
 
-        let connection = self.endpoint.connect(node_id, PICOMINT_P2P_ALPN).await?;
+        let connection = self.endpoint.connect(node_id, PICOMINT_ALPN).await?;
 
         Ok(P2PConnection::new(connection))
     }

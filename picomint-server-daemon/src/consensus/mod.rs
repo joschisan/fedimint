@@ -22,7 +22,7 @@ use picomint_core::NumPeers;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::module::{
-    ApiAuth, ApiError, ApiMethod, IrohApiRequest, ModuleCommon, PICOMINT_API_ALPN,
+    ApiAuth, ApiError, ApiMethod, IrohApiRequest, ModuleCommon, PICOMINT_ALPN,
 };
 use picomint_core::net::iroh::build_iroh_endpoint;
 use picomint_core::task::{TaskGroup, sleep};
@@ -71,7 +71,7 @@ pub async fn run(
 
     // Wait for the bitcoin backend to come up before instantiating modules that
     // read its status during startup (the wallet module broadcast loop).
-    let _num_peers = NumPeers::from(cfg.consensus.api_endpoints().len());
+    let _num_peers = NumPeers::from(cfg.consensus.iroh_endpoints.len());
 
     info!(target: LOG_CORE, "Initialise module mint...");
     let mint = Arc::new(picomint_mint_server::Mint::new(
@@ -132,7 +132,7 @@ pub async fn run(
     info!(target: LOG_CONSENSUS, "Starting Consensus Api...");
 
     Box::pin(start_iroh_api(
-        cfg.private.iroh_api_sk.clone(),
+        cfg.private.iroh_sk.clone(),
         consensus_api.clone(),
         task_group,
         max_connections,
@@ -285,7 +285,7 @@ async fn start_iroh_api(
     let endpoint = build_iroh_endpoint(
         secret_key,
         SocketAddr::from(([0, 0, 0, 0], 0)),
-        PICOMINT_API_ALPN,
+        PICOMINT_ALPN,
     )
     .await?;
     task_group.spawn_cancellable(

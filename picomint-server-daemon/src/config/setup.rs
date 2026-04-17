@@ -7,7 +7,6 @@ use iroh::SecretKey;
 use picomint_core::base32::PICOMINT_PREFIX;
 use picomint_core::config::META_FEDERATION_NAME_KEY;
 use picomint_core::module::ApiAuth;
-use picomint_core::setup_code::PeerEndpoints;
 use picomint_core::{PeerId, base32};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
@@ -37,12 +36,8 @@ pub struct SetupState {
 #[derive(Clone, Debug)]
 /// Connection information sent between peers in order to start config gen
 pub struct LocalParams {
-    /// Secret key for our iroh api endpoint
-    iroh_api_sk: iroh::SecretKey,
-    /// Secret key for our iroh p2p endpoint
-    iroh_p2p_sk: iroh::SecretKey,
-    /// Our api and p2p endpoint
-    endpoints: PeerEndpoints,
+    /// Secret key for our single iroh endpoint (p2p + api)
+    iroh_sk: iroh::SecretKey,
     /// Name of the peer
     name: String,
     /// Federation name set by the leader
@@ -56,7 +51,7 @@ impl LocalParams {
     pub fn setup_code(&self) -> PeerSetupCode {
         PeerSetupCode {
             name: self.name.clone(),
-            endpoints: self.endpoints.clone(),
+            pk: self.iroh_sk.public(),
             federation_name: self.federation_name.clone(),
             federation_size: self.federation_size,
         }
@@ -175,16 +170,10 @@ impl SetupApi {
             "Local parameters have already been set"
         );
 
-        let iroh_api_sk = SecretKey::from_bytes(&rand::random());
-        let iroh_p2p_sk = SecretKey::from_bytes(&rand::random());
+        let iroh_sk = SecretKey::from_bytes(&rand::random());
 
         let lp = LocalParams {
-            iroh_api_sk: iroh_api_sk.clone(),
-            iroh_p2p_sk: iroh_p2p_sk.clone(),
-            endpoints: PeerEndpoints {
-                api_pk: iroh_api_sk.public(),
-                p2p_pk: iroh_p2p_sk.public(),
-            },
+            iroh_sk,
             name,
             federation_name,
             federation_size,
@@ -286,8 +275,7 @@ impl SetupApi {
 
         let params = ConfigGenParams {
             identity: PeerId::from(our_id as u8),
-            iroh_api_sk: local_params.iroh_api_sk,
-            iroh_p2p_sk: local_params.iroh_p2p_sk,
+            iroh_sk: local_params.iroh_sk,
             peers: (0..)
                 .map(|i| PeerId::from(i as u8))
                 .zip(state.setup_codes.clone().into_iter())

@@ -268,7 +268,7 @@ where
             .iter()
             .next()
             .expect("A federation always has at least one guardian");
-        InviteCode::new(endpoints.api_pk, *peer, self.federation_id)
+        InviteCode::new(endpoints.node_id, *peer, self.federation_id)
     }
 
     pub async fn claim_inputs<I>(

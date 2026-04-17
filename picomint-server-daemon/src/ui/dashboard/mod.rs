@@ -51,7 +51,7 @@ async fn dashboard_view(
     let guardian_names: std::collections::BTreeMap<_, _> = api
         .cfg
         .consensus
-        .api_endpoints()
+        .iroh_endpoints
         .iter()
         .map(|(peer_id, endpoint)| (*peer_id, endpoint.name.clone()))
         .collect();

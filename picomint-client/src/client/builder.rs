@@ -257,7 +257,7 @@ impl ClientBuilder {
         let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
             .iroh_endpoints
             .iter()
-            .map(|(peer, endpoints)| (*peer, endpoints.api_pk))
+            .map(|(peer, endpoints)| (*peer, endpoints.node_id))
             .collect();
         let api: FederationApi = FederationApi::new(connectors.clone(), peer_node_ids).into();
 

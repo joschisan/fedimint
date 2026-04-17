@@ -24,8 +24,8 @@ pub struct ConsensusConfig {
     pub broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
     /// Number of rounds per session
     pub broadcast_rounds_per_session: u16,
-    /// Public keys for every peer's iroh api + p2p endpoints
-    pub iroh_endpoints: BTreeMap<PeerId, PeerIrohEndpoints>,
+    /// Public keys + names for every peer's single iroh endpoint (p2p + api).
+    pub iroh_endpoints: BTreeMap<PeerId, PeerEndpoint>,
     /// Free-form federation metadata (federation name, etc.)
     pub meta: BTreeMap<String, String>,
     /// Mint module config
@@ -38,36 +38,9 @@ pub struct ConsensusConfig {
 
 picomint_core::consensus_value!(ConsensusConfig);
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
-pub struct PeerIrohEndpoints {
-    /// The peer's name
-    pub name: String,
-    /// Public key for the peer's iroh api endpoint
-    pub api_pk: iroh::PublicKey,
-    /// Public key for the peer's iroh p2p endpoint
-    pub p2p_pk: iroh::PublicKey,
-}
-
 impl ConsensusConfig {
-    /// Client-facing view: the iroh api public key and human-readable name
-    /// for every peer. Used for federation-id hashing and invite codes.
-    pub fn api_endpoints(&self) -> BTreeMap<PeerId, PeerEndpoint> {
-        self.iroh_endpoints
-            .iter()
-            .map(|(peer, endpoints)| {
-                (
-                    *peer,
-                    PeerEndpoint {
-                        node_id: endpoints.api_pk,
-                        name: endpoints.name.clone(),
-                    },
-                )
-            })
-            .collect()
-    }
-
     pub fn calculate_federation_id(&self) -> FederationId {
-        FederationId(self.api_endpoints().consensus_hash())
+        FederationId(self.iroh_endpoints.consensus_hash())
     }
 
     pub fn federation_name(&self) -> Option<&str> {

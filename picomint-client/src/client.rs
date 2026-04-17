@@ -724,7 +724,7 @@ impl Client {
             .await
             .iroh_endpoints
             .iter()
-            .map(|(peer, endpoints)| (*peer, endpoints.api_pk))
+            .map(|(peer, endpoints)| (*peer, endpoints.node_id))
             .collect()
     }
 
