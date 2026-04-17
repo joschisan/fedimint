@@ -14,7 +14,7 @@ use devimint::envs::FM_DATA_DIR_ENV;
 use devimint::external::{Bitcoind, Esplora};
 use devimint::federation::Federation;
 use devimint::util::{ProcessManager, almost_equal, poll, poll_with_timeout};
-use devimint::version_constants::{VERSION_0_8_2, VERSION_0_10_0_ALPHA};
+use devimint::version_constants::{VERSION_0_8_2, VERSION_0_9_0_ALPHA, VERSION_0_10_0_ALPHA};
 use devimint::{Gatewayd, LightningNode, cli, util};
 use fedimint_core::config::FederationId;
 use fedimint_core::time::now;
@@ -475,20 +475,27 @@ async fn liquidity_test() -> anyhow::Result<()> {
                 bitcoind.poll_get_transaction(txid).await?;
             }
 
-            info!(target: LOG_TEST, "Testing closing all channels...");
+            // Skip channel closing for gateways older than 0.9.0-alpha, since
+            // cooperative close can hang due to LND fee estimation in regtest
+            // (fixed by adding sats_per_vbyte in 0.9.0-alpha).
+            if gw_lnd.gatewayd_version >= *VERSION_0_9_0_ALPHA {
+                info!(target: LOG_TEST, "Testing closing all channels...");
 
-            // Gracefully close one of LND's channel's
-            let gw_ldk_pubkey = gw_ldk.client().lightning_pubkey().await?;
-            gw_lnd.client().close_channel(gw_ldk_pubkey, false).await?;
+                // Gracefully close one of LND's channel's
+                let gw_ldk_pubkey = gw_ldk.client().lightning_pubkey().await?;
+                gw_lnd.client().close_channel(gw_ldk_pubkey, false).await?;
 
-            // Force close LDK's channels
-            gw_ldk_second.client().close_all_channels(true).await?;
+                // Force close LDK's channels
+                gw_ldk_second.client().close_all_channels(true).await?;
 
-            // Verify none of the channels are active
-            for gw in gateways {
-                let channels = gw.client().list_channels().await?;
-                let active_channel = channels.into_iter().any(|chan| chan.is_active);
-                assert!(!active_channel);
+                // Verify none of the channels are active
+                for gw in gateways {
+                    let channels = gw.client().list_channels().await?;
+                    let active_channel = channels.into_iter().any(|chan| chan.is_active);
+                    assert!(!active_channel);
+                }
+            } else {
+                info!(target: LOG_TEST, "Skipping channel close test for gateway version < 0.9.0");
             }
 
             Ok(())
