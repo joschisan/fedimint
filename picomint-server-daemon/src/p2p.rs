@@ -135,7 +135,7 @@ pub struct P2PConnector {
 impl P2PConnector {
     pub async fn new(
         secret_key: SecretKey,
-        p2p_bind_addr: SocketAddr,
+        p2p_addr: SocketAddr,
         node_ids: BTreeMap<PeerId, PublicKey>,
     ) -> anyhow::Result<Self> {
         let identity = *node_ids
@@ -144,7 +144,7 @@ impl P2PConnector {
             .expect("Our public key is not part of the keyset")
             .0;
 
-        let endpoint = build_iroh_endpoint(secret_key, p2p_bind_addr, PICOMINT_ALPN).await?;
+        let endpoint = build_iroh_endpoint(secret_key, p2p_addr, PICOMINT_ALPN).await?;
 
         Ok(Self {
             node_ids: node_ids

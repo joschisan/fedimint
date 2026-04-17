@@ -4,20 +4,19 @@ services:
     container_name: picomint-gateway
     restart: unless-stopped
     ports:
-      # Public API (safe to expose publicly)
-      - "8175:8175"
-      # LDK lightning P2P (safe to expose publicly)
-      - "8177:8177"
-      # Admin CLI (localhost only, never expose publicly)
-      # - "127.0.0.1:8176:8176"
+      # Public API
+      - "8080:8080"
+      # LDK lightning P2P (BOLT default port)
+      - "9735:9735"
     volumes:
       - picomint_gateway_data:/data
     environment:
       - DATA_DIR=/data
       - BITCOIN_NETWORK=bitcoin
       - ESPLORA_URL=https://mempool.space/api
-      - API_BIND=0.0.0.0:8175
-      - LDK_BIND=0.0.0.0:8177
+      - API_ADDR=0.0.0.0:8080
+      - LDK_ADDR=0.0.0.0:9735
+      - CLI_PORT=3030
 
 volumes:
   picomint_gateway_data:

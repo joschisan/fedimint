@@ -80,7 +80,7 @@ pub struct AppState {
     pub node: Arc<ldk_node::Node>,
     pub client_factory: GatewayClientFactory,
     pub gateway_db: Database,
-    pub api_bind: SocketAddr,
+    pub api_addr: SocketAddr,
     pub cli_bind: SocketAddr,
     pub network: Network,
     pub routing_fees: PaymentFee,
@@ -92,7 +92,7 @@ impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppState")
             .field("gateway_db", &self.gateway_db)
-            .field("api_bind", &self.api_bind)
+            .field("api_addr", &self.api_addr)
             .field("cli_bind", &self.cli_bind)
             .field("node_id", &self.node.node_id())
             .finish_non_exhaustive()

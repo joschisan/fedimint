@@ -79,7 +79,7 @@ pub async fn run_server(
         Some(cfg) => {
             let connector = P2PConnector::new(
                 cfg.private.iroh_sk.clone(),
-                settings.p2p_bind,
+                settings.p2p_addr,
                 cfg.consensus
                     .iroh_endpoints
                     .iter()
@@ -125,7 +125,7 @@ pub async fn run_server(
         &task_group,
         code_version_str,
         bitcoin_rpc,
-        settings.ui_bind,
+        settings.ui_addr,
         max_connections,
         max_requests_per_connection,
         cli_port,
@@ -161,7 +161,7 @@ pub async fn run_config_gen(
 
     let ui_service = ui::setup::router(setup_api.clone()).into_make_service();
 
-    let ui_listener = TcpListener::bind(settings.ui_bind)
+    let ui_listener = TcpListener::bind(settings.ui_addr)
         .await
         .expect("Failed to bind setup UI");
 
@@ -172,7 +172,7 @@ pub async fn run_config_gen(
             .expect("Failed to serve setup UI");
     });
 
-    info!(target: LOG_CONSENSUS, "Setup UI running at http://{} 🚀", settings.ui_bind);
+    info!(target: LOG_CONSENSUS, "Setup UI running at http://{} 🚀", settings.ui_addr);
 
     let cli_task_group = TaskGroup::new();
     let cli_state = cli::CliState {
@@ -200,7 +200,7 @@ pub async fn run_config_gen(
 
     let connector = P2PConnector::new(
         cg_params.iroh_sk.clone(),
-        settings.p2p_bind,
+        settings.p2p_addr,
         cg_params
             .iroh_endpoints()
             .iter()

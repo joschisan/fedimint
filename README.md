@@ -65,17 +65,17 @@ The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works fr
 
 | Port | Purpose                      | Safe to expose? |
 |------|------------------------------|-----------------|
-| 8173 | P2P consensus (Iroh)         | Yes             |
-| 8174 | Web UI (setup + dashboard)   | Localhost only  |
-| 8175 | Admin CLI HTTP API           | **Never**       |
+| 8080 | Iroh endpoint                | Yes             |
+| 3000 | Web UI (setup + dashboard)   | Localhost only  |
+| 3030 | Admin CLI HTTP API           | **Never**       |
 
 ### Gateway daemon (`picomint-gateway-daemon`)
 
 | Port | Purpose                      | Safe to expose? |
 |------|------------------------------|-----------------|
-| 8175 | Public API (Iroh)            | Yes             |
-| 8176 | Admin CLI HTTP API           | **Never**       |
-| 8177 | LDK Lightning P2P            | Yes             |
+| 8080 | Public API (HTTP)            | Yes             |
+| 3030 | Admin CLI HTTP API           | **Never**       |
+| 9735 | LDK Lightning P2P (BOLT)     | Yes             |
 
 ## Configuration reference
 
@@ -90,10 +90,9 @@ The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works fr
 | `BITCOIND_URL`               | one of   |                   | Bitcoin Core RPC URL                       |
 | `BITCOIND_USERNAME`          | if RPC   |                   | Bitcoin Core RPC user                      |
 | `BITCOIND_PASSWORD`          | if RPC   |                   | Bitcoin Core RPC password                  |
-| `BITCOIND_URL_PASSWORD_FILE` | no       |                   | Alternative: file containing RPC password  |
-| `BIND_P2P`                   | no       | `0.0.0.0:8173`    | P2P consensus listen address               |
-| `BIND_UI`                    | no       | `127.0.0.1:8174`  | Web UI listen address                      |
-| `CLI_PORT`                   | no       | `8175`            | Admin CLI port (always 127.0.0.1)          |
+| `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
+| `UI_ADDR`                    | no       | `127.0.0.1:3000`  | Web UI listen address                      |
+| `CLI_PORT`                   | no       | `3030`            | Admin CLI port (always 127.0.0.1)          |
 | `IROH_DNS`                   | no       |                   | Override Iroh DNS server                   |
 | `IROH_RELAY`                 | no       |                   | Comma-separated list of Iroh relay URLs    |
 | `MAX_CONNECTIONS`            | no       | `1000`            | Max concurrent Iroh API connections        |
@@ -111,9 +110,9 @@ The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works fr
 | `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL                        |
 | `BITCOIND_USERNAME`        | if RPC   |                   | Bitcoin Core RPC user                       |
 | `BITCOIND_PASSWORD`        | if RPC   |                   | Bitcoin Core RPC password                   |
-| `API_BIND`                 | no       | `0.0.0.0:8175`    | Public API listen address                   |
-| `CLI_PORT`                 | no       | `8176`            | Admin CLI port (always 127.0.0.1)           |
-| `LDK_BIND`                 | no       | `0.0.0.0:8177`    | LDK Lightning P2P listen address            |
+| `API_ADDR`                 | no       | `0.0.0.0:8080`    | Public API listen address                   |
+| `CLI_PORT`                 | no       | `3030`            | Admin CLI port (always 127.0.0.1)           |
+| `LDK_ADDR`                 | no       | `0.0.0.0:9735`    | LDK Lightning P2P listen address (BOLT)     |
 | `ROUTING_FEE_BASE_MSAT`    | no       | `2000`            | Lightning base routing fee (msat)           |
 | `ROUTING_FEE_PPM`          | no       | `3000`            | Lightning routing fee rate (ppm)            |
 | `TRANSACTION_FEE_BASE_MSAT`| no       | `2000`            | Federation transaction base fee (msat)      |

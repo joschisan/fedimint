@@ -84,9 +84,9 @@ pub struct ServerConfigPrivate {
 #[derive(Debug, Clone)]
 pub struct ConfigGenSettings {
     /// Bind address for our P2P connection
-    pub p2p_bind: SocketAddr,
+    pub p2p_addr: SocketAddr,
     /// Bind address for our UI connection (always http)
-    pub ui_bind: SocketAddr,
+    pub ui_addr: SocketAddr,
     /// Optional URL of the Iroh DNS server
     pub iroh_dns: Option<SafeUrl>,
     /// Optional URLs of the Iroh relays to register on

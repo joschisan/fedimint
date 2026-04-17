@@ -57,7 +57,7 @@ impl IntoResponse for LnurlError {
 }
 
 pub async fn run_public(state: AppState, handle: TaskHandle) {
-    let listener = TcpListener::bind(state.api_bind)
+    let listener = TcpListener::bind(state.api_addr)
         .await
         .expect("Failed to bind public API server");
 

@@ -49,7 +49,7 @@ pub async fn run(
     task_group: &TaskGroup,
     code_version_str: String,
     bitcoin_backend: Arc<BitcoinBackend>,
-    ui_bind: SocketAddr,
+    ui_addr: SocketAddr,
     max_connections: usize,
     max_requests_per_connection: usize,
     cli_port: u16,
@@ -168,7 +168,7 @@ pub async fn run(
 
     let ui_service = crate::ui::dashboard::router(consensus_api.clone()).into_make_service();
 
-    let ui_listener = TcpListener::bind(ui_bind)
+    let ui_listener = TcpListener::bind(ui_addr)
         .await
         .expect("Failed to bind dashboard UI");
 
@@ -179,7 +179,7 @@ pub async fn run(
             .expect("Failed to serve dashboard UI");
     });
 
-    info!(target: LOG_CONSENSUS, "Dashboard UI running at http://{ui_bind} 🚀");
+    info!(target: LOG_CONSENSUS, "Dashboard UI running at http://{ui_addr} 🚀");
 
     {
         let cli_bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), cli_port);

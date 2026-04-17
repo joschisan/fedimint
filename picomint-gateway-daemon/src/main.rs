@@ -59,16 +59,16 @@ pub struct GatewayOpts {
     pub data_dir: PathBuf,
 
     /// Public API listen address
-    #[arg(long = "api-bind", env = "API_BIND", default_value = "0.0.0.0:8175")]
-    pub api_bind: SocketAddr,
+    #[arg(long = "api-addr", env = "API_ADDR", default_value = "0.0.0.0:8080")]
+    pub api_addr: SocketAddr,
 
     /// Port for the CLI admin API (always binds 127.0.0.1, never public)
-    #[arg(long = "cli-port", env = "CLI_PORT", default_value = "8176")]
+    #[arg(long = "cli-port", env = "CLI_PORT", default_value = "3030")]
     pub cli_port: u16,
 
-    /// Network address and port for the lightning P2P interface
-    #[arg(long = "ldk-bind", env = "LDK_BIND", default_value = "0.0.0.0:8177")]
-    pub ldk_bind: SocketAddr,
+    /// Network address and port for the lightning P2P interface (BOLT)
+    #[arg(long = "ldk-addr", env = "LDK_ADDR", default_value = "0.0.0.0:9735")]
+    pub ldk_addr: SocketAddr,
 
     /// Bitcoin network this gateway will be running on
     #[arg(long = "network", env = "BITCOIN_NETWORK")]
@@ -145,7 +145,7 @@ fn main() -> anyhow::Result<()> {
 
     node_builder.set_network(opts.network);
     node_builder.set_node_alias("picomint-gateway-daemon".to_string())?;
-    node_builder.set_listening_addresses(vec![opts.ldk_bind.into()])?;
+    node_builder.set_listening_addresses(vec![opts.ldk_addr.into()])?;
     node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
     node_builder.set_storage_dir_path(ldk_data_dir);
 
@@ -182,7 +182,7 @@ fn main() -> anyhow::Result<()> {
         node: node.clone(),
         client_factory,
         gateway_db,
-        api_bind: opts.api_bind,
+        api_addr: opts.api_addr,
         cli_bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), opts.cli_port),
         network: opts.network,
         routing_fees: PaymentFee {

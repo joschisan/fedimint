@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Context as _;
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use futures::FutureExt as _;
@@ -30,15 +29,9 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 #[command(version)]
 #[command(
     group(
-        ArgGroup::new("bitcoind_password_auth")
-           .args(["bitcoind_password", "bitcoind_url_password_file"])
-           .multiple(false)
-    ),
-    group(
         ArgGroup::new("bitcoind_auth")
             .args(["bitcoind_url"])
-            .requires("bitcoind_password_auth")
-            .requires_all(["bitcoind_username", "bitcoind_url"])
+            .requires_all(["bitcoind_username", "bitcoind_password", "bitcoind_url"])
     ),
     group(
         ArgGroup::new("bitcoin_rpc")
@@ -72,21 +65,16 @@ struct ServerOpts {
     #[arg(long, env = "BITCOIND_PASSWORD")]
     bitcoind_password: Option<String>,
 
-    /// If set, the password part of `--bitcoind-url` will be set/replaced with
-    /// the content of this file.
-    #[arg(long, env = "BITCOIND_URL_PASSWORD_FILE")]
-    bitcoind_url_password_file: Option<PathBuf>,
-
-    /// Address we bind to for p2p consensus communication
-    #[arg(long, env = "BIND_P2P", default_value = "0.0.0.0:8173")]
-    bind_p2p: SocketAddr,
+    /// Address we bind to for iroh (p2p consensus + client API)
+    #[arg(long = "p2p-addr", env = "P2P_ADDR", default_value = "0.0.0.0:8080")]
+    p2p_addr: SocketAddr,
 
     /// Address we bind to for exposing the Web UI
-    #[arg(long, env = "BIND_UI", default_value = "127.0.0.1:8174")]
-    bind_ui: SocketAddr,
+    #[arg(long = "ui-addr", env = "UI_ADDR", default_value = "127.0.0.1:3000")]
+    ui_addr: SocketAddr,
 
     /// Port for the CLI admin API (always binds 127.0.0.1, never public)
-    #[arg(long, env = "CLI_PORT", default_value = "8175")]
+    #[arg(long, env = "CLI_PORT", default_value = "3030")]
     cli_port: u16,
 
     /// Password for the web UI (setup and dashboard)
@@ -102,8 +90,8 @@ struct ServerOpts {
     iroh_relays: Vec<SafeUrl>,
 
     /// Enable tokio console logging
-    #[arg(long, env = "BIND_TOKIO_CONSOLE")]
-    bind_tokio_console: Option<SocketAddr>,
+    #[arg(long = "tokio-console-addr", env = "TOKIO_CONSOLE_ADDR")]
+    tokio_console_addr: Option<SocketAddr>,
 
     /// Maximum number of concurrent Iroh API connections
     #[arg(long, env = "MAX_CONNECTIONS", default_value = "1000")]
@@ -114,29 +102,6 @@ struct ServerOpts {
     max_requests_per_connection: usize,
 }
 
-impl ServerOpts {
-    async fn get_bitcoind_url_and_password(&self) -> anyhow::Result<(SafeUrl, String)> {
-        let url = self
-            .bitcoind_url
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("No bitcoind url set"))?;
-        if let Some(password_file) = self.bitcoind_url_password_file.as_ref() {
-            let password = tokio::fs::read_to_string(password_file)
-                .await
-                .context("Failed to read the password")?
-                .trim()
-                .to_owned();
-            Ok((url, password))
-        } else {
-            let password = self
-                .bitcoind_password
-                .clone()
-                .expect("BITCOIND_URL is set but BITCOIND_PASSWORD is not");
-            Ok((url, password))
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<Infallible> {
     let picomint_version = env!("CARGO_PKG_VERSION");
@@ -144,7 +109,7 @@ async fn main() -> anyhow::Result<Infallible> {
     let server_opts = ServerOpts::parse();
 
     let mut tracing_builder = TracingSetup::default();
-    tracing_builder.tokio_console_bind(server_opts.bind_tokio_console);
+    tracing_builder.tokio_console_bind(server_opts.tokio_console_addr);
     tracing_builder.init().unwrap();
 
     info!("Starting picomint-server-daemon (version: {picomint_version})");
@@ -156,8 +121,8 @@ async fn main() -> anyhow::Result<Infallible> {
     let root_task_group = TaskGroup::new();
 
     let settings = ConfigGenSettings {
-        p2p_bind: server_opts.bind_p2p,
-        ui_bind: server_opts.bind_ui,
+        p2p_addr: server_opts.p2p_addr,
+        ui_addr: server_opts.ui_addr,
         iroh_dns: server_opts.iroh_dns.clone(),
         iroh_relays: server_opts.iroh_relays.clone(),
         network: server_opts.bitcoin_network,
@@ -172,17 +137,17 @@ async fn main() -> anyhow::Result<Infallible> {
             server_opts.bitcoind_url.as_ref(),
             server_opts.esplora_url.as_ref(),
         ) {
-            (Some(_), None) => {
+            (Some(bitcoind_url), None) => {
                 let bitcoind_username = server_opts
                     .bitcoind_username
                     .clone()
                     .expect("BITCOIND_URL is set but BITCOIND_USERNAME is not");
-                let (bitcoind_url, bitcoind_password) = server_opts
-                    .get_bitcoind_url_and_password()
-                    .await
-                    .expect("Failed to get bitcoind url");
+                let bitcoind_password = server_opts
+                    .bitcoind_password
+                    .clone()
+                    .expect("BITCOIND_URL is set but BITCOIND_PASSWORD is not");
                 BitcoinBackend::Bitcoind(
-                    BitcoindClient::new(bitcoind_username, bitcoind_password, &bitcoind_url)
+                    BitcoindClient::new(bitcoind_username, bitcoind_password, bitcoind_url)
                         .unwrap(),
                 )
             }
