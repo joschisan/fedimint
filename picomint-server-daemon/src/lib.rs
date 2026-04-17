@@ -41,7 +41,6 @@ pub const DB_FILE: &str = "database.redb";
 use anyhow::Context;
 use config::ServerConfig;
 use picomint_bitcoin_rpc::BitcoinBackend;
-use picomint_core::module::ApiAuth;
 use picomint_core::task::TaskGroup;
 use picomint_logging::LOG_CONSENSUS;
 use picomint_redb::Database;
@@ -56,16 +55,11 @@ use crate::p2p::{
     P2PConnector, P2PMessage, P2PStatusReceivers, ReconnectP2PConnections, p2p_status_channels,
 };
 
-#[allow(clippy::too_many_arguments)]
 pub async fn run_server(
-    auth: ApiAuth,
     settings: ConfigGenSettings,
     db: Database,
-    code_version_str: String,
     task_group: TaskGroup,
     bitcoin_rpc: Arc<BitcoinBackend>,
-    max_connections: usize,
-    max_requests_per_connection: usize,
     cli_port: u16,
 ) -> anyhow::Result<()> {
     // Single channel for foreign (non-peer) iroh connections — fed by the
@@ -105,7 +99,6 @@ pub async fn run_server(
                 db.clone(),
                 settings.clone(),
                 &task_group,
-                auth.clone(),
                 cli_port,
                 foreign_conn_tx,
             ))
@@ -116,18 +109,14 @@ pub async fn run_server(
     info!(target: LOG_CONSENSUS, "Starting consensus...");
 
     Box::pin(consensus::run(
-        auth,
         connections,
         p2p_status_receivers,
         foreign_conn_rx,
         cfg,
         db,
         &task_group,
-        code_version_str,
         bitcoin_rpc,
-        settings.ui_addr,
-        max_connections,
-        max_requests_per_connection,
+        settings.ui_config,
         cli_port,
     ))
     .await?;
@@ -143,7 +132,6 @@ pub async fn run_config_gen(
     db: Database,
     settings: ConfigGenSettings,
     task_group: &TaskGroup,
-    auth: ApiAuth,
     cli_port: u16,
     foreign_conn_tx: async_channel::Sender<iroh::endpoint::Connection>,
 ) -> anyhow::Result<(
@@ -155,24 +143,25 @@ pub async fn run_config_gen(
 
     let (cgp_sender, mut cgp_receiver) = tokio::sync::mpsc::channel(1);
 
-    let setup_api = Arc::new(SetupApi::new(settings.clone(), cgp_sender, auth));
+    let setup_api = Arc::new(SetupApi::new(settings.clone(), cgp_sender));
 
     let ui_task_group = TaskGroup::new();
 
-    let ui_service = ui::setup::router(setup_api.clone()).into_make_service();
-
-    let ui_listener = TcpListener::bind(settings.ui_addr)
-        .await
-        .expect("Failed to bind setup UI");
-
-    ui_task_group.spawn("setup-ui", move |handle| async move {
-        axum::serve(ui_listener, ui_service)
-            .with_graceful_shutdown(handle.make_shutdown_rx())
+    if let Some((ui_addr, auth)) = settings.ui_config.clone() {
+        let ui_service = ui::setup::router(setup_api.clone(), auth).into_make_service();
+        let ui_listener = TcpListener::bind(ui_addr)
             .await
-            .expect("Failed to serve setup UI");
-    });
-
-    info!(target: LOG_CONSENSUS, "Setup UI running at http://{} 🚀", settings.ui_addr);
+            .expect("Failed to bind setup UI");
+        ui_task_group.spawn("setup-ui", move |handle| async move {
+            axum::serve(ui_listener, ui_service)
+                .with_graceful_shutdown(handle.make_shutdown_rx())
+                .await
+                .expect("Failed to serve setup UI");
+        });
+        info!(target: LOG_CONSENSUS, "Setup UI running at http://{ui_addr} 🚀");
+    } else {
+        info!(target: LOG_CONSENSUS, "UI disabled (UI_ADDR unset); driving setup via CLI only");
+    }
 
     let cli_task_group = TaskGroup::new();
     let cli_state = cli::CliState {

@@ -6,16 +6,19 @@ services:
     ports:
       # Iroh endpoint
       - "8080:8080"
+      # Web UI — uncomment to enable alongside `UI_ADDR` + `UI_PASSWORD` below.
+      # Never expose to the public internet without TLS (use a reverse proxy).
+      # - "127.0.0.1:3000:3000"
     volumes:
       - picomint_server_data:/data
     environment:
       - DATA_DIR=/data
       - BITCOIN_NETWORK=bitcoin
       - ESPLORA_URL=https://mempool.space/api
-      - P2P_ADDR=0.0.0.0:8080
-      - UI_ADDR=0.0.0.0:3000
-      - UI_PASSWORD=<change-me> # REQUIRED: set a strong password
-      - CLI_PORT=3030
+      # Enable the Web UI (optional, otherwise all admin actions go through
+      # the CLI via `docker exec`):
+      # - UI_ADDR=0.0.0.0:3000
+      # - UI_PASSWORD=<change-me>  # required when UI_ADDR is set
 
 volumes:
   picomint_server_data:

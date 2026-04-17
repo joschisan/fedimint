@@ -34,19 +34,21 @@ pub const ROOT_ROUTE: &str = "/";
 pub const LOGIN_ROUTE: &str = "/login";
 
 /// Generic state wrapper for the setup and dashboard axum routers. Holds the
-/// concrete API handle plus a random per-process auth cookie pair used to
-/// gate authenticated routes.
+/// concrete API handle, the admin password (verified by `UserAuth`), and a
+/// random per-process auth cookie pair used to gate authenticated routes.
 #[derive(Clone)]
 pub struct UiState<T> {
     pub api: T,
+    pub auth: ApiAuth,
     pub auth_cookie_name: String,
     pub auth_cookie_value: String,
 }
 
 impl<T> UiState<T> {
-    pub fn new(api: T) -> Self {
+    pub fn new(api: T, auth: ApiAuth) -> Self {
         Self {
             api,
+            auth,
             auth_cookie_name: thread_rng().r#gen::<[u8; 4]>().encode_hex(),
             auth_cookie_value: thread_rng().r#gen::<[u8; 32]>().encode_hex(),
         }

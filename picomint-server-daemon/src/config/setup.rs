@@ -6,7 +6,6 @@ use anyhow::{Context, ensure};
 use iroh::SecretKey;
 use picomint_core::base32::PICOMINT_PREFIX;
 use picomint_core::config::META_FEDERATION_NAME_KEY;
-use picomint_core::module::ApiAuth;
 use picomint_core::{PeerId, base32};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
@@ -67,21 +66,14 @@ pub struct SetupApi {
     state: Arc<Mutex<SetupState>>,
     /// Triggers the distributed key generation
     sender: Sender<ConfigGenParams>,
-    /// Guardian auth for authentication
-    auth: ApiAuth,
 }
 
 impl SetupApi {
-    pub fn new(
-        settings: ConfigGenSettings,
-        sender: Sender<ConfigGenParams>,
-        auth: ApiAuth,
-    ) -> Self {
+    pub fn new(settings: ConfigGenSettings, sender: Sender<ConfigGenParams>) -> Self {
         Self {
             settings,
             state: Arc::new(Mutex::new(SetupState::default())),
             sender,
-            auth,
         }
     }
 
@@ -101,10 +93,6 @@ impl SetupApi {
             .local_params
             .as_ref()
             .map(|lp| lp.name.clone())
-    }
-
-    pub async fn auth(&self) -> ApiAuth {
-        self.auth.clone()
     }
 
     pub async fn connected_peers(&self) -> Vec<String> {

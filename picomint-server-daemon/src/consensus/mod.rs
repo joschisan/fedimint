@@ -38,20 +38,22 @@ use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
 /// How many txs can be stored in memory before blocking the API
 const TRANSACTION_BUFFER: usize = 1000;
 
+/// Maximum number of concurrent iroh connections on the public API.
+const MAX_CONNECTIONS: usize = 1000;
+
+/// Maximum number of parallel requests per iroh API connection.
+const MAX_REQUESTS_PER_CONNECTION: usize = 50;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
-    auth: ApiAuth,
     connections: ReconnectP2PConnections<P2PMessage>,
     p2p_status_receivers: P2PStatusReceivers,
     foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
     cfg: ServerConfig,
     db: Database,
     task_group: &TaskGroup,
-    code_version_str: String,
     bitcoin_backend: Arc<BitcoinBackend>,
-    ui_addr: SocketAddr,
-    max_connections: usize,
-    max_requests_per_connection: usize,
+    ui_config: Option<(SocketAddr, ApiAuth)>,
     cli_port: u16,
 ) -> anyhow::Result<()> {
     cfg.validate_config(&cfg.private.identity)?;
@@ -121,8 +123,6 @@ pub async fn run(
         ci_status_receivers,
         ord_latency_receiver,
         bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
-        auth,
-        code_version_str,
         task_group: task_group.clone(),
     });
 
@@ -130,13 +130,7 @@ pub async fn run(
 
     task_group.spawn_cancellable(
         "iroh-api",
-        run_iroh_api(
-            consensus_api.clone(),
-            foreign_conn_rx,
-            task_group.clone(),
-            max_connections,
-            max_requests_per_connection,
-        ),
+        run_iroh_api(consensus_api.clone(), foreign_conn_rx, task_group.clone()),
     );
 
     info!(target: LOG_CONSENSUS, "Starting Submission of Module CI proposals...");
@@ -166,20 +160,22 @@ pub async fn run(
         wire::ModuleConsensusItem::Wallet,
     );
 
-    let ui_service = crate::ui::dashboard::router(consensus_api.clone()).into_make_service();
-
-    let ui_listener = TcpListener::bind(ui_addr)
-        .await
-        .expect("Failed to bind dashboard UI");
-
-    task_group.spawn("dashboard-ui", move |handle| async move {
-        axum::serve(ui_listener, ui_service)
-            .with_graceful_shutdown(handle.make_shutdown_rx())
+    if let Some((ui_addr, auth)) = ui_config {
+        let ui_service =
+            crate::ui::dashboard::router(consensus_api.clone(), auth).into_make_service();
+        let ui_listener = TcpListener::bind(ui_addr)
             .await
-            .expect("Failed to serve dashboard UI");
-    });
-
-    info!(target: LOG_CONSENSUS, "Dashboard UI running at http://{ui_addr} 🚀");
+            .expect("Failed to bind dashboard UI");
+        task_group.spawn("dashboard-ui", move |handle| async move {
+            axum::serve(ui_listener, ui_service)
+                .with_graceful_shutdown(handle.make_shutdown_rx())
+                .await
+                .expect("Failed to serve dashboard UI");
+        });
+        info!(target: LOG_CONSENSUS, "Dashboard UI running at http://{ui_addr} 🚀");
+    } else {
+        info!(target: LOG_CONSENSUS, "UI disabled (UI_ADDR unset); dashboard available via CLI only");
+    }
 
     {
         let cli_bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), cli_port);
@@ -278,16 +274,14 @@ async fn run_iroh_api(
     consensus_api: Arc<ConsensusApi>,
     foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
     task_group: TaskGroup,
-    max_connections: usize,
-    max_requests_per_connection: usize,
 ) {
-    let parallel_connections_limit = Arc::new(Semaphore::new(max_connections));
+    let parallel_connections_limit = Arc::new(Semaphore::new(MAX_CONNECTIONS));
 
     while let Ok(connection) = foreign_conn_rx.recv().await {
         if parallel_connections_limit.available_permits() == 0 {
             warn!(
                 target: LOG_NET_API,
-                limit = max_connections,
+                limit = MAX_CONNECTIONS,
                 "Iroh API connection limit reached, blocking new connections"
             );
         }
@@ -298,18 +292,12 @@ async fn run_iroh_api(
             .expect("semaphore should not be closed");
         task_group.spawn_cancellable_silent(
             "handle-iroh-connection",
-            handle_incoming(
-                consensus_api.clone(),
-                task_group.clone(),
-                connection,
-                permit,
-                max_requests_per_connection,
-            )
-            .then(|result| async {
-                if let Err(err) = result {
-                    warn!(target: LOG_NET_API, err = %err.fmt_compact_anyhow(), "Failed to handle iroh connection");
-                }
-            }),
+            handle_incoming(consensus_api.clone(), task_group.clone(), connection, permit)
+                .then(|result| async {
+                    if let Err(err) = result {
+                        warn!(target: LOG_NET_API, err = %err.fmt_compact_anyhow(), "Failed to handle iroh connection");
+                    }
+                }),
         );
     }
 }
@@ -319,9 +307,8 @@ async fn handle_incoming(
     task_group: TaskGroup,
     connection: iroh::endpoint::Connection,
     _connection_permit: tokio::sync::OwnedSemaphorePermit,
-    max_requests_per_connection: usize,
 ) -> anyhow::Result<()> {
-    let parallel_requests_limit = Arc::new(Semaphore::new(max_requests_per_connection));
+    let parallel_requests_limit = Arc::new(Semaphore::new(MAX_REQUESTS_PER_CONNECTION));
 
     loop {
         let (send_stream, recv_stream) = connection.accept_bi().await?;
@@ -329,7 +316,7 @@ async fn handle_incoming(
         if parallel_requests_limit.available_permits() == 0 {
             warn!(
                 target: LOG_NET_API,
-                limit = max_requests_per_connection,
+                limit = MAX_REQUESTS_PER_CONNECTION,
                 "Iroh API request limit reached for connection, blocking new requests"
             );
         }

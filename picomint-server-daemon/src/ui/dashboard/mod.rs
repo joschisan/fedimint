@@ -14,6 +14,7 @@ use axum::routing::{get, post};
 use axum_extra::extract::cookie::CookieJar;
 use maud::html;
 use picomint_core::config::META_FEDERATION_NAME_KEY;
+use picomint_core::module::ApiAuth;
 
 use crate::consensus::api::ConsensusApi;
 use crate::ui::assets::WithStaticRoutesExt;
@@ -34,7 +35,7 @@ async fn login_submit(
     Form(input): Form<LoginInput>,
 ) -> impl IntoResponse {
     login_submit_response(
-        state.api.auth.clone(),
+        state.auth.clone(),
         state.auth_cookie_name,
         state.auth_cookie_value,
         jar,
@@ -63,7 +64,6 @@ async fn dashboard_view(
         .cloned()
         .expect("Federation name must be set");
     let session_count = api.session_count().await;
-    let picomintd_version = api.code_version_str.clone();
     let consensus_ord_latency = *api.ord_latency_receiver.borrow();
     let p2p_connection_status: std::collections::BTreeMap<_, _> = api
         .p2p_status_receivers
@@ -117,15 +117,15 @@ async fn dashboard_view(
         }
     };
 
-    Html(dashboard_layout(content, &picomintd_version).into_string()).into_response()
+    Html(dashboard_layout(content, env!("CARGO_PKG_VERSION")).into_string()).into_response()
 }
 
-pub fn router(api: Arc<ConsensusApi>) -> Router {
+pub fn router(api: Arc<ConsensusApi>, auth: ApiAuth) -> Router {
     Router::new()
         .route(ROOT_ROUTE, get(dashboard_view))
         .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
         .route(ln::LN_ADD_ROUTE, post(ln::post_add))
         .route(ln::LN_REMOVE_ROUTE, post(ln::post_remove))
         .with_static_routes()
-        .with_state(UiState::new(api))
+        .with_state(UiState::new(api, auth))
 }

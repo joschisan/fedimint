@@ -12,7 +12,7 @@ use picomint_core::endpoint_constants::{
     SUBMIT_TRANSACTION_ENDPOINT,
 };
 use picomint_core::module::audit::{Audit, AuditSummary};
-use picomint_core::module::{ApiAuth, ApiError, ApiRequestErased};
+use picomint_core::module::{ApiError, ApiRequestErased};
 use picomint_server_core::handler;
 
 use crate::consensus::rpc;
@@ -48,8 +48,6 @@ pub struct ConsensusApi {
     pub p2p_status_receivers: P2PStatusReceivers,
     pub ci_status_receivers: BTreeMap<PeerId, Receiver<Option<u64>>>,
     pub bitcoin_rpc_connection: BitcoinRpcMonitor,
-    pub auth: ApiAuth,
-    pub code_version_str: String,
     pub task_group: TaskGroup,
 }
 

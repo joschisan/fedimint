@@ -30,7 +30,6 @@ pub const GW_PORT: u16 = 28175;
 pub const GW_LN_PORT: u16 = 9735;
 pub const TEST_LDK_PORT: u16 = 9736;
 
-pub const PASSWORD: &str = "theresnosecondbest";
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
 
@@ -257,7 +256,6 @@ async fn build_client(
 async fn start_picomintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
     let port_base = GUARDIAN_BASE_PORT + (peer_idx as u16 * PORTS_PER_GUARDIAN);
     let p2p_port = port_base;
-    let ui_port = port_base + 2;
     let cli_port = port_base + 4;
 
     let data_dir = base.join(format!("picomintd-{peer_idx}"));
@@ -273,9 +271,7 @@ async fn start_picomintd(base: &Path, peer_idx: usize) -> anyhow::Result<()> {
         .env("BITCOIND_USERNAME", BTC_RPC_USER)
         .env("BITCOIND_PASSWORD", BTC_RPC_PASS)
         .env("P2P_ADDR", format!("127.0.0.1:{p2p_port}"))
-        .env("UI_ADDR", format!("127.0.0.1:{ui_port}"))
         .env("CLI_PORT", cli_port.to_string())
-        .env("UI_PASSWORD", PASSWORD)
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()

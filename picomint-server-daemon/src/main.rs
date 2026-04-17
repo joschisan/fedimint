@@ -69,25 +69,20 @@ struct ServerOpts {
     #[arg(long = "p2p-addr", env = "P2P_ADDR", default_value = "0.0.0.0:8080")]
     p2p_addr: SocketAddr,
 
-    /// Address we bind to for exposing the Web UI
-    #[arg(long = "ui-addr", env = "UI_ADDR", default_value = "127.0.0.1:3000")]
-    ui_addr: SocketAddr,
+    /// Optional listen address for the Web UI. When unset the UI is
+    /// disabled and all admin actions (including DKG setup) must go
+    /// through the CLI.
+    #[arg(long = "ui-addr", env = "UI_ADDR")]
+    ui_addr: Option<SocketAddr>,
 
-    /// Password for the web UI (setup and dashboard)
+    /// Password for the web UI. Required when `UI_ADDR` is set,
+    /// unused otherwise.
     #[arg(long, env = "UI_PASSWORD")]
-    ui_password: String,
+    ui_password: Option<String>,
 
     /// Port for the CLI admin API (always binds 127.0.0.1, never public)
     #[arg(long, env = "CLI_PORT", default_value = "3030")]
     cli_port: u16,
-
-    /// Maximum number of concurrent Iroh API connections
-    #[arg(long, env = "MAX_CONNECTIONS", default_value = "1000")]
-    max_connections: usize,
-
-    /// Maximum number of parallel requests per Iroh API connection
-    #[arg(long, env = "MAX_REQUESTS_PER_CONNECTION", default_value = "50")]
-    max_requests_per_connection: usize,
 }
 
 #[tokio::main]
@@ -100,15 +95,21 @@ async fn main() -> anyhow::Result<Infallible> {
 
     info!("Starting picomint-server-daemon (version: {picomint_version})");
 
-    let code_version_str = picomint_version.to_string();
-
     let timing_total_runtime = timing::TimeReporter::new("total-runtime").info();
 
     let root_task_group = TaskGroup::new();
 
+    let ui_config = match (server_opts.ui_addr, server_opts.ui_password.clone()) {
+        (Some(addr), Some(password)) => Some((addr, picomint_core::module::ApiAuth::new(password))),
+        (None, _) => None,
+        (Some(_), None) => {
+            panic!("UI_ADDR is set but UI_PASSWORD is not; refusing to start the web UI without a password")
+        }
+    };
+
     let settings = ConfigGenSettings {
         p2p_addr: server_opts.p2p_addr,
-        ui_addr: server_opts.ui_addr,
+        ui_config,
         network: server_opts.bitcoin_network,
     };
 
@@ -144,25 +145,11 @@ async fn main() -> anyhow::Result<Infallible> {
 
     install_crypto_provider().await;
 
-    let ui_password = picomint_core::module::ApiAuth::new(server_opts.ui_password);
-
     let task_group = root_task_group.clone();
-    let max_connections = server_opts.max_connections;
-    let max_requests_per_connection = server_opts.max_requests_per_connection;
     let cli_port = server_opts.cli_port;
 
     root_task_group.spawn_cancellable("main", async move {
-        run_server(
-            ui_password,
-            settings,
-            db,
-            code_version_str,
-            task_group,
-            bitcoin_backend,
-            max_connections,
-            max_requests_per_connection,
-            cli_port,
-        )
+        run_server(settings, db, task_group, bitcoin_backend, cli_port)
         .await
         .unwrap_or_else(|err| panic!("Main task returned error: {}", err.fmt_compact_anyhow()));
     });

@@ -7,6 +7,7 @@ use axum::routing::{get, post};
 use axum_extra::extract::Form;
 use axum_extra::extract::cookie::CookieJar;
 use maud::{Markup, PreEscaped, html};
+use picomint_core::module::ApiAuth;
 use qrcode::QrCode;
 use serde::Deserialize;
 
@@ -245,7 +246,7 @@ async fn login_submit(
     Form(input): Form<LoginInput>,
 ) -> impl IntoResponse {
     login_submit_response(
-        state.api.auth().await,
+        state.auth.clone(),
         state.auth_cookie_name,
         state.auth_cookie_value,
         jar,
@@ -484,7 +485,7 @@ async fn post_reset_setup_codes(
     Redirect::to(FEDERATION_SETUP_ROUTE).into_response()
 }
 
-pub fn router(api: Arc<SetupApi>) -> Router {
+pub fn router(api: Arc<SetupApi>, auth: ApiAuth) -> Router {
     Router::new()
         .route(ROOT_ROUTE, get(setup_form).post(setup_submit))
         .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
@@ -493,5 +494,5 @@ pub fn router(api: Arc<SetupApi>) -> Router {
         .route(RESET_SETUP_CODES_ROUTE, post(post_reset_setup_codes))
         .route(START_DKG_ROUTE, post(post_start_dkg))
         .with_static_routes()
-        .with_state(UiState::new(api))
+        .with_state(UiState::new(api, auth))
 }

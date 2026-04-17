@@ -9,7 +9,7 @@ use picomint_api_client::config::ConsensusConfig;
 pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::invite_code::InviteCode;
-use picomint_core::module::CORE_CONSENSUS_VERSION;
+use picomint_core::module::{ApiAuth, CORE_CONSENSUS_VERSION};
 use picomint_core::setup_code::PeerSetupCode;
 use picomint_core::task::sleep;
 use picomint_core::{NumPeersExt, PeerId, secp256k1, timing};
@@ -84,8 +84,11 @@ pub struct ServerConfigPrivate {
 pub struct ConfigGenSettings {
     /// Bind address for our P2P connection
     pub p2p_addr: SocketAddr,
-    /// Bind address for our UI connection (always http)
-    pub ui_addr: SocketAddr,
+    /// Web UI bind address + admin password. `None` disables the UI and
+    /// requires all admin actions (including DKG setup) to go through the
+    /// CLI. `main` rejects boot if `UI_ADDR` is set without `UI_PASSWORD`
+    /// or vice versa, so these are always populated together.
+    pub ui_config: Option<(SocketAddr, ApiAuth)>,
     /// Bitcoin network for the federation
     pub network: bitcoin::Network,
 }

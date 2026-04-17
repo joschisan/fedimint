@@ -28,11 +28,21 @@ Edit `UI_PASSWORD` to a strong password, then:
 docker-compose up -d
 ```
 
-The UI is available at [http://localhost:3000](http://localhost:3000). Forward it over SSH if the daemon runs remotely:
+Day-to-day admin actions (including DKG setup) go through `picomint-server-cli`, running inside the container:
+
+```bash
+docker exec -it picomint-server picomint-server-cli setup status
+```
+
+### Optional: Web UI
+
+The Web UI is off by default. To enable it, uncomment `UI_ADDR` and `UI_PASSWORD` in `docker-compose.yml` (plus the `127.0.0.1:3000:3000` port mapping) and restart the container. Then forward it over SSH if the daemon runs remotely:
 
 ```bash
 ssh -NL 3000:127.0.0.1:3000 <your_server>
 ```
+
+Never expose the UI to the public internet without TLS — run it behind a reverse proxy that terminates HTTPS.
 
 ## Deploy a Lightning gateway
 
@@ -90,11 +100,9 @@ The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works fr
 | `BITCOIND_USERNAME`          | if RPC   |                   | Bitcoin Core RPC user                      |
 | `BITCOIND_PASSWORD`          | if RPC   |                   | Bitcoin Core RPC password                  |
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
-| `UI_ADDR`                    | no       | `127.0.0.1:3000`  | Web UI listen address                      |
-| `UI_PASSWORD`                | yes      |                   | Password for the web UI                    |
+| `UI_ADDR`                    | no       |                   | Web UI listen address — unset disables UI  |
+| `UI_PASSWORD`                | if UI    |                   | Web UI password, required when `UI_ADDR` is set |
 | `CLI_PORT`                   | no       | `3030`            | Admin CLI port (always 127.0.0.1)          |
-| `MAX_CONNECTIONS`            | no       | `1000`            | Max concurrent Iroh API connections        |
-| `MAX_REQUESTS_PER_CONNECTION`| no       | `50`              | Max parallel requests per Iroh connection  |
 
 *Either `ESPLORA_URL` or `BITCOIND_URL` must be set, but not both.*
 
