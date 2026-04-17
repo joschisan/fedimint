@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Multipart, State};
 use axum::response::{Html, IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum_extra::extract::Form;
@@ -11,6 +11,7 @@ use picomint_core::module::ApiAuth;
 use qrcode::QrCode;
 use serde::Deserialize;
 
+use crate::config::ServerConfig;
 use crate::config::setup::SetupApi;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::auth::UserAuth;
@@ -24,6 +25,8 @@ pub const FEDERATION_SETUP_ROUTE: &str = "/federation_setup";
 pub const ADD_SETUP_CODE_ROUTE: &str = "/add_setup_code";
 pub const RESET_SETUP_CODES_ROUTE: &str = "/reset_setup_codes";
 pub const START_DKG_ROUTE: &str = "/start_dkg";
+pub const RESTORE_CONFIG_ROUTE: &str = "/restore_config";
+pub const RECOVER_PAGE_ROUTE: &str = "/recover";
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct SetupInput {
@@ -116,6 +119,32 @@ fn peer_list_section(
     }
 }
 
+fn restore_form_content(error: Option<&str>) -> Markup {
+    html! {
+        form id="restore-form"
+            hx-post=(RESTORE_CONFIG_ROUTE)
+            hx-encoding="multipart/form-data"
+            hx-target="#restore-form"
+            hx-swap="outerHTML"
+        {
+            div class="alert alert-info mb-3" {
+                "Upload your saved server config to recover."
+            }
+
+            div class="form-group mb-3" {
+                input type="file" class="form-control" id="config_file" name="config_file"
+                    accept="application/json" required;
+            }
+
+            @if let Some(error) = error {
+                div class="alert alert-danger mb-3" { (error) }
+            }
+
+            button type="submit" class="btn btn-outline-primary w-100 py-2" { "Recover from Config" }
+        }
+    }
+}
+
 fn setup_form_content(error: Option<&str>) -> Markup {
     html! {
         form id="setup-form" hx-post=(ROOT_ROUTE) hx-target="#setup-form" hx-swap="outerHTML" {
@@ -173,6 +202,12 @@ fn setup_form_content(error: Option<&str>) -> Markup {
                 div class="alert alert-danger mb-3" { (error) }
             }
             button type="submit" class="btn btn-primary w-100 py-2" { "Confirm" }
+
+            div class="text-center mt-3" {
+                a href=(RECOVER_PAGE_ROUTE) class="text-decoration-none" {
+                    "Recover from Config"
+                }
+            }
         }
     }
 }
@@ -184,6 +219,17 @@ async fn setup_form(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoRes
     }
 
     Html(single_card_layout("Guardian Setup", setup_form_content(None)).into_string())
+        .into_response()
+}
+
+// GET handler for the /recover route (dedicated page for restoring from a
+// previously-saved server config).
+async fn recover_page(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
+    if state.api.setup_code().await.is_some() {
+        return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
+    }
+
+    Html(single_card_layout("Recover from Config", restore_form_content(None)).into_string())
         .into_response()
 }
 
@@ -476,6 +522,74 @@ async fn post_start_dkg(
     }
 }
 
+async fn post_restore_config(
+    State(state): State<UiState<Arc<SetupApi>>>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let bytes = match multipart.next_field().await {
+        Ok(Some(field)) => match field.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                return Html(restore_form_content(Some(&format!("Read failed: {e}"))).into_string())
+                    .into_response();
+            }
+        },
+        Ok(None) => {
+            return Html(restore_form_content(Some("No file uploaded")).into_string())
+                .into_response();
+        }
+        Err(e) => {
+            return Html(
+                restore_form_content(Some(&format!("Upload failed: {e}"))).into_string(),
+            )
+            .into_response();
+        }
+    };
+
+    let cfg: ServerConfig = match serde_json::from_slice(&bytes) {
+        Ok(c) => c,
+        Err(e) => {
+            return Html(
+                restore_form_content(Some(&format!("Invalid config JSON: {e}"))).into_string(),
+            )
+            .into_response();
+        }
+    };
+
+    if let Err(e) = state.api.restore_config(cfg).await {
+        return Html(restore_form_content(Some(&e.to_string())).into_string()).into_response();
+    }
+
+    let waiting = html! {
+        div class="alert alert-info mb-3" {
+            "Config restored. The guardian is rejoining the federation — you'll be redirected once it's back online."
+        }
+
+        div
+            hx-get=(ROOT_ROUTE)
+            hx-trigger="every 2s"
+            hx-swap="none"
+            hx-on--after-request={
+                "if (event.detail.xhr.status === 200) { window.location.href = '" (ROOT_ROUTE) "'; }"
+            }
+            style="display: none;"
+        {}
+
+        div class="text-center mt-4" {
+            div class="spinner-border text-primary" role="status" {
+                span class="visually-hidden" { "Loading..." }
+            }
+            p class="mt-2 text-muted" { "Waiting for guardian to come online..." }
+        }
+    };
+
+    (
+        [("HX-Retarget", "body"), ("HX-Reswap", "innerHTML")],
+        Html(single_card_layout("Restoring Config", waiting).into_string()),
+    )
+        .into_response()
+}
+
 async fn post_reset_setup_codes(
     State(state): State<UiState<Arc<SetupApi>>>,
     _auth: UserAuth,
@@ -493,6 +607,8 @@ pub fn router(api: Arc<SetupApi>, auth: ApiAuth) -> Router {
         .route(ADD_SETUP_CODE_ROUTE, post(post_add_setup_code))
         .route(RESET_SETUP_CODES_ROUTE, post(post_reset_setup_codes))
         .route(START_DKG_ROUTE, post(post_start_dkg))
+        .route(RESTORE_CONFIG_ROUTE, post(post_restore_config))
+        .route(RECOVER_PAGE_ROUTE, get(recover_page))
         .with_static_routes()
         .with_state(UiState::new(api, auth))
 }
