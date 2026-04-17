@@ -1,11 +1,8 @@
 use std::fmt::Debug;
-use std::io::{Read, Write};
 
 use picomint_core::config::FederationId;
 use picomint_core::core::ModuleInstanceId;
-use picomint_core::encoding::{Decodable, Encodable};
 use picomint_derive_secret::{ChildId, DerivableSecret};
-use rand::{CryptoRng, Rng, RngCore};
 
 // Derived from federation-root-secret
 const TYPE_MODULE: ChildId = ChildId(0);
@@ -51,36 +48,6 @@ pub trait RootSecretStrategy: Debug {
     fn random<R>(rng: &mut R) -> Self::Encoding
     where
         R: rand::RngCore + rand::CryptoRng;
-}
-
-/// Just uses 64 random bytes and derives the secret from them
-#[derive(Debug)]
-pub struct PlainRootSecretStrategy;
-
-impl RootSecretStrategy for PlainRootSecretStrategy {
-    type Encoding = [u8; 64];
-
-    fn to_root_secret(secret: &Self::Encoding) -> DerivableSecret {
-        const PICOMINT_CLIENT_NONCE: &[u8] = b"Picomint Client Salt";
-        DerivableSecret::new_root(secret.as_ref(), PICOMINT_CLIENT_NONCE)
-    }
-
-    fn consensus_encode(secret: &Self::Encoding, writer: &mut impl Write) -> std::io::Result<()> {
-        secret.consensus_encode(writer)
-    }
-
-    fn consensus_decode(reader: &mut impl Read) -> std::io::Result<Self::Encoding> {
-        Self::Encoding::consensus_decode(reader)
-    }
-
-    fn random<R>(rng: &mut R) -> Self::Encoding
-    where
-        R: RngCore + CryptoRng,
-    {
-        let mut secret = [0u8; 64];
-        rng.fill(&mut secret);
-        secret
-    }
 }
 
 /// Convenience function to derive picomint-client root secret

@@ -4,10 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::future::pending;
 use std::pin::Pin;
-use std::result;
 
 use anyhow::anyhow;
-pub use error::{FederationError, OutputOutcomeError};
+pub use error::FederationError;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{Future, StreamExt};
 use iroh::endpoint::Connection;
@@ -108,8 +107,6 @@ enum PeerState {
 }
 
 pub type FederationResult<T> = Result<T, FederationError>;
-
-pub type OutputOutcomeResult<O> = result::Result<O, OutputOutcomeError>;
 
 /// Federation API client.
 ///

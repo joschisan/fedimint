@@ -32,7 +32,7 @@ pub mod consensus;
 pub mod p2p;
 pub mod ui;
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -68,7 +68,7 @@ pub async fn run_server(
     bitcoin_rpc: DynServerBitcoinRpc,
     max_connections: usize,
     max_requests_per_connection: usize,
-    cli_bind: SocketAddr,
+    cli_port: u16,
 ) -> anyhow::Result<()> {
     let (cfg, connections, p2p_status_receivers) = match get_config(&data_dir)? {
         Some(cfg) => {
@@ -101,7 +101,7 @@ pub async fn run_server(
                 &task_group,
                 code_version_str.clone(),
                 auth.clone(),
-                cli_bind,
+                cli_port,
             ))
             .await?
         }
@@ -124,7 +124,7 @@ pub async fn run_server(
         settings.ui_bind,
         max_connections,
         max_requests_per_connection,
-        cli_bind,
+        cli_port,
     ))
     .await?;
 
@@ -149,7 +149,7 @@ pub async fn run_config_gen(
     task_group: &TaskGroup,
     code_version_str: String,
     auth: ApiAuth,
-    cli_bind: SocketAddr,
+    cli_port: u16,
 ) -> anyhow::Result<(
     ServerConfig,
     ReconnectP2PConnections<P2PMessage>,
@@ -182,6 +182,7 @@ pub async fn run_config_gen(
     let cli_state = cli::CliState {
         setup_api: setup_api.clone(),
     };
+    let cli_bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), cli_port);
     cli_task_group.spawn("setup-cli", move |handle| async move {
         cli::run_cli(cli_bind, cli_state, handle).await;
     });

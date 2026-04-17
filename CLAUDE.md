@@ -35,7 +35,7 @@ Picomint is a minimalist fork of Fedimint — two binaries (federation guardian 
 - Transport: Iroh-only (QUIC + hole-punching). No TLS/websocket/DNS announcements
 
 ### Admin CLIs
-- Both CLIs are thin HTTP clients. They POST JSON to the daemon's `BIND_CLI` (server: 8175) / `CLI_BIND` (gateway: 8176) port.
+- Both CLIs are thin HTTP clients. They POST JSON to the daemon's admin port (`CLI_PORT` env, always bound to 127.0.0.1; default 8175 for server, 8176 for gateway).
 - Route constants live in `picomint-server-cli-core` / `picomint-gateway-cli-core`.
 - Shared request/response types also live in the `*-cli-core` crates; daemon handlers live in `picomint-server-daemon/src/cli.rs` and `picomint-gateway-daemon/src/cli.rs`.
 

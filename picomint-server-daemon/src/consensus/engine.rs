@@ -11,7 +11,6 @@ use picomint_core::module::audit::Audit;
 use picomint_core::runtime::spawn;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::task::{TaskGroup, TaskHandle, sleep};
-use picomint_core::timing::TimeReporter;
 use picomint_core::util::{FmtCompact as _, FmtCompactAnyhow as _};
 use picomint_core::{NumPeers, NumPeersExt, PeerId, timing};
 use picomint_redb::{Database, ReadTransaction, WriteTransaction};
@@ -610,19 +609,6 @@ impl ConsensusEngine {
             item = ?DebugConsensusItem(&item),
             "Processed consensus item"
         );
-        let mut audit = Audit::default();
-
-        let _audit_timing = TimeReporter::new("audit server".to_string()).level(Level::TRACE);
-        self.server.audit(&tx, &mut audit).await;
-
-        assert!(
-            audit
-                .net_assets()
-                .expect("Overflow while checking balance sheet")
-                .milli_sat
-                >= 0,
-            "Balance sheet of the fed has gone negative, this should never happen! {audit}"
-        );
 
         tx.commit().await;
 
@@ -664,6 +650,18 @@ impl ConsensusEngine {
 
                 debug!(target: LOG_CONSENSUS, %txid,  "Transaction accepted");
                 tx.insert(&ACCEPTED_TRANSACTION, &txid, &modules_ids);
+
+                let mut audit = Audit::default();
+                self.server.audit(tx, &mut audit).await;
+
+                assert!(
+                    audit
+                        .net_assets()
+                        .expect("Overflow while checking balance sheet")
+                        .milli_sat
+                        >= 0,
+                    "Balance sheet of the fed has gone negative, this should never happen! {audit}"
+                );
 
                 Ok(())
             }

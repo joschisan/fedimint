@@ -57,7 +57,7 @@ docker exec picomint-server picomint-server-cli invite
 docker exec picomint-gateway picomint-gateway-cli info
 ```
 
-For the admin CLI to reach the daemon, the admin port (`8175` for server, `8176` for gateway) must be reachable from inside the container. The reference compose files bind admin ports to `0.0.0.0` inside the container but do not forward them to the host — **never expose admin ports publicly**.
+The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works from inside the container but the port is not reachable from the host or network — **never expose admin ports publicly**.
 
 ## Interfaces
 
@@ -93,7 +93,7 @@ For the admin CLI to reach the daemon, the admin port (`8175` for server, `8176`
 | `BITCOIND_URL_PASSWORD_FILE` | no       |                   | Alternative: file containing RPC password  |
 | `BIND_P2P`                   | no       | `0.0.0.0:8173`    | P2P consensus listen address               |
 | `BIND_UI`                    | no       | `127.0.0.1:8174`  | Web UI listen address                      |
-| `BIND_CLI`                   | no       | `127.0.0.1:8175`  | Admin CLI listen address (never public)    |
+| `CLI_PORT`                   | no       | `8175`            | Admin CLI port (always 127.0.0.1)          |
 | `IROH_DNS`                   | no       |                   | Override Iroh DNS server                   |
 | `IROH_RELAY`                 | no       |                   | Comma-separated list of Iroh relay URLs    |
 | `MAX_CONNECTIONS`            | no       | `1000`            | Max concurrent Iroh API connections        |
@@ -112,7 +112,7 @@ For the admin CLI to reach the daemon, the admin port (`8175` for server, `8176`
 | `BITCOIND_USERNAME`        | if RPC   |                   | Bitcoin Core RPC user                       |
 | `BITCOIND_PASSWORD`        | if RPC   |                   | Bitcoin Core RPC password                   |
 | `API_BIND`                 | no       | `0.0.0.0:8175`    | Public API listen address                   |
-| `CLI_BIND`                 | no       | `127.0.0.1:8176`  | Admin CLI listen address (never public)     |
+| `CLI_PORT`                 | no       | `8176`            | Admin CLI port (always 127.0.0.1)           |
 | `LDK_BIND`                 | no       | `0.0.0.0:8177`    | LDK Lightning P2P listen address            |
 | `ROUTING_FEE_BASE_MSAT`    | no       | `2000`            | Lightning base routing fee (msat)           |
 | `ROUTING_FEE_PPM`          | no       | `3000`            | Lightning routing fee rate (ppm)            |

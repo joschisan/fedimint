@@ -88,9 +88,9 @@ struct ServerOpts {
     #[arg(long, env = "BIND_UI", default_value = "127.0.0.1:8174")]
     bind_ui: SocketAddr,
 
-    /// Address we bind to for the CLI admin API (localhost-only, no auth)
-    #[arg(long, env = "BIND_CLI", default_value = "127.0.0.1:8175")]
-    bind_cli: SocketAddr,
+    /// Port for the CLI admin API (always binds 127.0.0.1, never public)
+    #[arg(long, env = "CLI_PORT", default_value = "8175")]
+    cli_port: u16,
 
     /// Password for the web UI (setup and dashboard)
     #[arg(long, env = "UI_PASSWORD")]
@@ -219,7 +219,7 @@ async fn main() -> anyhow::Result<Infallible> {
     let data_dir = server_opts.data_dir.clone();
     let max_connections = server_opts.max_connections;
     let max_requests_per_connection = server_opts.max_requests_per_connection;
-    let cli_bind = server_opts.bind_cli;
+    let cli_port = server_opts.cli_port;
 
     root_task_group.spawn_cancellable("main", async move {
         run_server(
@@ -232,7 +232,7 @@ async fn main() -> anyhow::Result<Infallible> {
             dyn_server_bitcoin_rpc,
             max_connections,
             max_requests_per_connection,
-            cli_bind,
+            cli_port,
         )
         .await
         .unwrap_or_else(|err| panic!("Main task returned error: {}", err.fmt_compact_anyhow()));

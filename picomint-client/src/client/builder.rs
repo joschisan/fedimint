@@ -65,11 +65,6 @@ pub enum RootSecret {
     ///
     /// **Note**: Applications MUST NOT do the derivation themselves anymore.
     StandardDoubleDerive(DerivableSecret),
-    /// No double derivation
-    ///
-    /// This is useful for applications that for whatever reason do the
-    /// double-derivation externally, or use a custom scheme.
-    Custom(DerivableSecret),
 }
 
 impl RootSecret {
@@ -78,7 +73,6 @@ impl RootSecret {
             RootSecret::StandardDoubleDerive(derivable_secret) => {
                 get_default_client_secret(derivable_secret, &federation_id)
             }
-            RootSecret::Custom(derivable_secret) => derivable_secret.clone(),
         }
     }
 }

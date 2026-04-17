@@ -1,11 +1,9 @@
 //! Implements the client API through which users interact with the federation
 
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use anyhow::Result;
-use picomint_api_client::session_outcome::SessionStatusV2;
 use picomint_api_client::transaction::{
     ConsensusItem, Transaction, TransactionError, TransactionSubmissionOutcome,
 };
@@ -27,7 +25,7 @@ use tokio::sync::watch::{self, Receiver, Sender};
 use tracing::{debug, warn};
 
 use crate::config::ServerConfig;
-use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION, SIGNED_SESSION_OUTCOME};
+use crate::consensus::db::ACCEPTED_TRANSACTION;
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::server::{Server, process_transaction_with_server};
 use crate::p2p::P2PStatusReceivers;
@@ -105,24 +103,6 @@ impl ConsensusApi {
 
     pub async fn session_count(&self) -> u64 {
         get_finished_session_count_static(&self.db.begin_read().await).await
-    }
-
-    pub async fn session_status(&self, session_index: u64) -> SessionStatusV2 {
-        let tx = self.db.begin_read().await;
-
-        match session_index.cmp(&get_finished_session_count_static(&tx).await) {
-            Ordering::Greater => SessionStatusV2::Initial,
-            Ordering::Equal => SessionStatusV2::Pending(
-                tx.iter(&ACCEPTED_ITEM)
-                    .into_iter()
-                    .map(|(_, v)| v)
-                    .collect(),
-            ),
-            Ordering::Less => SessionStatusV2::Complete(
-                tx.get(&SIGNED_SESSION_OUTCOME, &session_index)
-                    .expect("There are no gaps in session outcomes"),
-            ),
-        }
     }
 
     pub async fn federation_audit(&self) -> AuditSummary {

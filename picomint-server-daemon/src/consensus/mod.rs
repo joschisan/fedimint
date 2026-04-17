@@ -7,7 +7,7 @@ pub mod server;
 pub mod transaction;
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -56,7 +56,7 @@ pub async fn run(
     ui_bind: SocketAddr,
     max_connections: usize,
     max_requests_per_connection: usize,
-    cli_bind: SocketAddr,
+    cli_port: u16,
 ) -> anyhow::Result<()> {
     cfg.validate_config(&cfg.local.identity)?;
 
@@ -188,6 +188,7 @@ pub async fn run(
     info!(target: LOG_CONSENSUS, "Dashboard UI running at http://{ui_bind} 🚀");
 
     {
+        let cli_bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), cli_port);
         let dashboard_router = crate::cli::dashboard_cli_router(consensus_api.clone());
         task_group.spawn("consensus-cli", move |handle| async move {
             crate::cli::run_dashboard_cli(cli_bind, dashboard_router, handle).await;

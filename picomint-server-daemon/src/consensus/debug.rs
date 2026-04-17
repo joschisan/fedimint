@@ -1,9 +1,6 @@
 use std::fmt;
 
-use bitcoin::hashes::{Hash as _, sha256};
-use picomint_api_client::session_outcome::AcceptedItem;
 use picomint_api_client::transaction::ConsensusItem;
-use picomint_core::encoding::Encodable as _;
 
 /// A newtype for a nice [`fmt::Debug`] of a [`ConsensusItem`]
 pub struct DebugConsensusItem<'ci>(pub &'ci ConsensusItem);
@@ -40,49 +37,3 @@ impl fmt::Debug for DebugConsensusItem<'_> {
     }
 }
 
-/// A compact citem formatter, useful for debugging in case of consensus failure
-///
-/// Unlike [`DebugConsensusItem`], this one is used when a (potentially) long
-/// list of citems are dumped, so it needs to be very compact.
-pub struct DebugConsensusItemCompact<'a>(pub &'a AcceptedItem);
-
-impl fmt::Display for DebugConsensusItemCompact<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let bytes = self.0.consensus_encode_to_vec();
-        let count = bytes.len();
-        let hash = *sha256::Hash::hash(&bytes).as_byte_array();
-        f.write_fmt(format_args!(
-            "{}; peer={}; len={count}; ",
-            hex::encode(&hash[0..12]),
-            self.0.peer,
-        ))?;
-
-        match &self.0.item {
-            ConsensusItem::Transaction(tx) => {
-                f.write_fmt(format_args!("txid={}; ", tx.tx_hash()))?;
-                f.write_str("inputs_module_ids=")?;
-                for (i, input) in tx.inputs.iter().enumerate() {
-                    if i != 0 {
-                        f.write_str(",")?;
-                    }
-                    f.write_fmt(format_args!("{}", input.module_instance_id()))?;
-                }
-                f.write_str("; outputs_module_ids=")?;
-                for (i, output) in tx.outputs.iter().enumerate() {
-                    if i != 0 {
-                        f.write_str(",")?;
-                    }
-                    f.write_fmt(format_args!("{}", output.module_instance_id()))?;
-                }
-            }
-            ConsensusItem::Module(module_citem) => {
-                f.write_fmt(format_args!(
-                    "citem={}; ",
-                    module_citem.module_instance_id()
-                ))?;
-            }
-        }
-
-        Ok(())
-    }
-}

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::path::Path;
@@ -95,17 +95,6 @@ pub struct PeerEndpoint {
     pub name: String,
 }
 
-/// Total client config v0 (<0.4.0). Does not contain broadcast public keys.
-///
-/// This includes global settings and client-side module configs.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ClientConfigV0 {
-    #[serde(flatten)]
-    pub global: GlobalClientConfigV0,
-    #[serde(deserialize_with = "de_int_key")]
-    pub modules: BTreeMap<ModuleInstanceId, ClientModuleConfig>,
-}
-
 /// Total client config
 ///
 /// This includes global settings and client-side module configs.
@@ -166,19 +155,6 @@ where
 pub struct JsonClientConfig {
     pub global: GlobalClientConfig,
     pub modules: BTreeMap<ModuleInstanceId, JsonWithKind>,
-}
-
-/// Federation-wide client config
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
-pub struct GlobalClientConfigV0 {
-    /// API endpoints for each federation member
-    #[serde(deserialize_with = "de_int_key")]
-    pub api_endpoints: BTreeMap<PeerId, PeerEndpoint>,
-    /// Core consensus version
-    pub consensus_version: CoreConsensusVersion,
-    // TODO: make it a String -> serde_json::Value map?
-    /// Additional config the federation wants to transmit to the clients
-    pub meta: BTreeMap<String, String>,
 }
 
 /// Federation-wide client config
@@ -431,55 +407,6 @@ impl ClientConfig {
             .map(|(id, v)| (*id, v.clone()))
             .ok_or_else(|| anyhow::format_err!("Module kind {kind} not found"))
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct ModuleInitRegistry<M>(BTreeMap<ModuleKind, M>);
-
-impl<M> ModuleInitRegistry<M> {
-    pub fn iter(&self) -> impl Iterator<Item = (&ModuleKind, &M)> {
-        self.0.iter()
-    }
-}
-
-impl<M> Default for ModuleInitRegistry<M> {
-    fn default() -> Self {
-        Self(BTreeMap::new())
-    }
-}
-
-impl<M> ModuleInitRegistry<M> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Attach a module init impl. `kind` uniquely identifies the module.
-    pub fn attach<T>(&mut self, r#gen: T)
-    where
-        T: Into<M>,
-        M: ModuleKinded,
-    {
-        let r#gen: M = r#gen.into();
-        let kind = r#gen.module_kind();
-        assert!(
-            self.0.insert(kind.clone(), r#gen).is_none(),
-            "Can't insert module of same kind twice: {kind}"
-        );
-    }
-
-    pub fn kinds(&self) -> BTreeSet<ModuleKind> {
-        self.0.keys().cloned().collect()
-    }
-
-    pub fn get(&self, k: &ModuleKind) -> Option<&M> {
-        self.0.get(k)
-    }
-}
-
-/// Trait for types attached to a [`ModuleInitRegistry`] that expose their
-/// [`ModuleKind`].
-pub trait ModuleKinded {
-    fn module_kind(&self) -> ModuleKind;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]

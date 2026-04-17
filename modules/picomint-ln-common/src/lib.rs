@@ -93,15 +93,6 @@ impl std::fmt::Display for LightningOutputV0 {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct LightningOutputOutcome;
-
-impl std::fmt::Display for LightningOutputOutcome {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LightningOutputOutcome")
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum LightningInputError {
     #[error("No contract found for given ContractId")]
@@ -163,7 +154,6 @@ plugin_types_trait_impl_common!(
     LightningClientConfig,
     LightningInput,
     LightningOutput,
-    LightningOutputOutcome,
     LightningConsensusItem,
     LightningInputError,
     LightningOutputError

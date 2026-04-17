@@ -17,7 +17,6 @@
 //! * `ClientModuleInit` (in `picomint_client`)
 //! * `ClientModule` (in `picomint_client`)
 pub mod audit;
-pub mod registry;
 
 use std::error::Error;
 use std::fmt::{self, Debug, Formatter};
@@ -217,7 +216,8 @@ pub trait TypedApiEndpoint {
 ///
 /// ```rust
 /// # use picomint_core::module::ApiVersion;
-/// # use picomint_core::module::{api_endpoint, ApiEndpoint, registry::ModuleInstanceId};
+/// # use picomint_core::module::{api_endpoint, ApiEndpoint};
+/// # use picomint_core::core::ModuleInstanceId;
 /// struct State;
 ///
 /// let _: ApiEndpoint<State> = api_endpoint! {
@@ -358,7 +358,6 @@ pub trait ModuleCommon {
     type ClientConfig: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
     type Input: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
     type Output: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
-    type OutputOutcome: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
     type ConsensusItem: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
     type InputError: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
     type OutputError: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;

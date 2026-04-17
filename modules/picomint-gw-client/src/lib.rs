@@ -589,7 +589,6 @@ pub struct InterceptPaymentResponse {
 pub enum PaymentAction {
     Settle(Preimage),
     Cancel,
-    Forward,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]

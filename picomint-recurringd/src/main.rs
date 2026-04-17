@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState {
         gateway_conn: RealGatewayConnection {
-            api: GatewayApi::new(None),
+            api: GatewayApi::new(),
         },
     };
 

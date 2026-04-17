@@ -9,7 +9,7 @@
 //! The API also has endpoints for managing the gateway.
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -62,9 +62,9 @@ pub struct GatewayOpts {
     #[arg(long = "api-bind", env = "API_BIND", default_value = "0.0.0.0:8175")]
     pub api_bind: SocketAddr,
 
-    /// CLI/admin listen address
-    #[arg(long = "cli-bind", env = "CLI_BIND", default_value = "127.0.0.1:8176")]
-    pub cli_bind: SocketAddr,
+    /// Port for the CLI admin API (always binds 127.0.0.1, never public)
+    #[arg(long = "cli-port", env = "CLI_PORT", default_value = "8176")]
+    pub cli_port: u16,
 
     /// Network address and port for the lightning P2P interface
     #[arg(long = "ldk-bind", env = "LDK_BIND", default_value = "0.0.0.0:8177")]
@@ -183,7 +183,7 @@ fn main() -> anyhow::Result<()> {
         client_factory,
         gateway_db,
         api_bind: opts.api_bind,
-        cli_bind: opts.cli_bind,
+        cli_bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), opts.cli_port),
         network: opts.network,
         routing_fees: PaymentFee {
             base: Amount::from_msats(opts.routing_fee_base_msat),

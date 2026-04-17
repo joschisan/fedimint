@@ -1,13 +1,12 @@
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Display};
-use std::time::Duration;
 
 use picomint_core::PeerId;
 use picomint_core::module::ApiRequestErased;
 use picomint_core::util::FmtCompactAnyhow as _;
 use picomint_logging::LOG_CLIENT_NET_API;
 use thiserror::Error;
-use tracing::{trace, warn};
+use tracing::warn;
 
 use super::ServerError;
 
@@ -116,47 +115,3 @@ impl FederationError {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum OutputOutcomeError {
-    #[error("Response deserialization error: {0}")]
-    ResponseDeserialization(anyhow::Error),
-    #[error("Federation error: {0}")]
-    Federation(#[from] FederationError),
-    #[error("Core error: {0}")]
-    Core(#[from] anyhow::Error),
-    #[error("Transaction rejected: {0}")]
-    Rejected(String),
-    #[error("Invalid output index {out_idx}, larger than {outputs_num} in the transaction")]
-    InvalidVout { out_idx: u64, outputs_num: usize },
-    #[error("Timeout reached after waiting {}s", .0.as_secs())]
-    Timeout(Duration),
-}
-
-impl OutputOutcomeError {
-    pub fn report_if_important(&self) {
-        let important = match self {
-            OutputOutcomeError::Federation(e) => {
-                e.report_if_unusual("OutputOutcome");
-                return;
-            }
-            OutputOutcomeError::Core(_)
-            | OutputOutcomeError::InvalidVout { .. }
-            | OutputOutcomeError::ResponseDeserialization(_) => true,
-            OutputOutcomeError::Rejected(_) | OutputOutcomeError::Timeout(_) => false,
-        };
-
-        trace!(target: LOG_CLIENT_NET_API, error = %self, "OutputOutcomeError");
-
-        if important {
-            warn!(target: LOG_CLIENT_NET_API, error = %self, "Uncommon OutputOutcomeError");
-        }
-    }
-
-    /// Was the transaction rejected (which is final)
-    pub fn is_rejected(&self) -> bool {
-        matches!(
-            self,
-            OutputOutcomeError::Rejected(_) | OutputOutcomeError::InvalidVout { .. }
-        )
-    }
-}

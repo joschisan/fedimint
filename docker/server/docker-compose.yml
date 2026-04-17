@@ -18,7 +18,6 @@ services:
       - ESPLORA_URL=https://mempool.space/api
       - BIND_P2P=0.0.0.0:8173
       - BIND_UI=0.0.0.0:8174
-      - BIND_CLI=0.0.0.0:8175
       - UI_PASSWORD=<change-me> # REQUIRED: set a strong password
 
 volumes:

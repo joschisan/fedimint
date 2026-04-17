@@ -75,14 +75,6 @@ pub const DB_FILE: &str = "database.redb";
 /// Name of the folder for LDK node data.
 pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 
-#[derive(Debug, Clone)]
-pub struct LightningContext {
-    pub lightning_public_key: PublicKey,
-    pub lightning_alias: String,
-    pub lightning_network: Network,
-    pub supports_private_payments: bool,
-}
-
 #[derive(Clone)]
 pub struct AppState {
     pub clients: Arc<RwLock<BTreeMap<FederationId, Spanned<ClientHandleArc>>>>,
@@ -184,24 +176,6 @@ impl AppState {
         Ok(())
     }
 
-    /// Returns the `LightningContext` built from the node's current state.
-    pub async fn get_lightning_context(
-        &self,
-    ) -> std::result::Result<LightningContext, LightningRpcError> {
-        let alias = self
-            .node
-            .node_alias()
-            .expect("node alias is set")
-            .to_string();
-
-        Ok(LightningContext {
-            lightning_public_key: self.node.node_id(),
-            lightning_alias: alias,
-            lightning_network: self.node.config().network,
-            supports_private_payments: false,
-        })
-    }
-
     /// Get the name of a federation from its client config.
     pub async fn federation_name(client: &ClientHandleArc) -> Option<String> {
         client
@@ -281,14 +255,11 @@ impl AppState {
             .await
             .context("Federation not connected")?;
 
-        let context = self.get_lightning_context().await?;
-
         Ok(self
             .public_key_v2(federation_id)
             .await
             .map(|module_public_key| RoutingInfo {
-                lightning_public_key: context.lightning_public_key,
-                lightning_alias: Some(context.lightning_alias.clone()),
+                lightning_public_key: self.node.node_id(),
                 module_public_key,
                 send_fee_default: self.routing_fees + self.transaction_fees,
                 send_fee_minimum: self.transaction_fees,

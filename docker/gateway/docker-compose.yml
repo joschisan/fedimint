@@ -17,7 +17,6 @@ services:
       - BITCOIN_NETWORK=bitcoin
       - ESPLORA_URL=https://mempool.space/api
       - API_BIND=0.0.0.0:8175
-      - CLI_BIND=0.0.0.0:8176
       - LDK_BIND=0.0.0.0:8177
 
 volumes:

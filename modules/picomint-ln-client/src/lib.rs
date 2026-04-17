@@ -89,7 +89,7 @@ impl ClientModuleInit for LightningClientInit {
         let gateway_conn = if let Some(gateway_conn) = self.gateway_conn.clone() {
             gateway_conn
         } else {
-            let api = GatewayApi::new(None);
+            let api = GatewayApi::new();
             Arc::new(RealGatewayConnection { api })
         };
         Ok(LightningClientModule::new(

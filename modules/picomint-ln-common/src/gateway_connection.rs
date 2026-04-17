@@ -21,14 +21,12 @@ pub enum GatewayError {
 
 #[derive(Clone, Debug)]
 pub struct GatewayApi {
-    password: Option<String>,
     client: Arc<reqwest::Client>,
 }
 
 impl GatewayApi {
-    pub fn new(password: Option<String>) -> Self {
+    pub fn new() -> Self {
         Self {
-            password,
             client: Arc::new(reqwest::Client::new()),
         }
     }
@@ -42,9 +40,6 @@ impl GatewayApi {
     ) -> Result<T, GatewayError> {
         let url = base_url.join(route).expect("Invalid base url");
         let mut builder = self.client.request(method, url.to_unsafe());
-        if let Some(password) = self.password.clone() {
-            builder = builder.bearer_auth(password);
-        }
         if let Some(payload) = payload {
             builder = builder.json(&payload);
         }

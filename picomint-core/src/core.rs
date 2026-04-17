@@ -138,9 +138,6 @@ crate::consensus_key!(OperationId);
 // TODO: turn in a newtype
 pub type ModuleInstanceId = u16;
 
-/// Special IDs we use for global dkg
-pub const MODULE_INSTANCE_ID_GLOBAL: u16 = u16::MAX;
-
 /// A type of a module
 ///
 /// This is a short string that identifies type of a module.

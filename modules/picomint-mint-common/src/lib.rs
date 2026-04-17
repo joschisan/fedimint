@@ -168,15 +168,6 @@ pub enum RecoveryItem {
 
 picomint_core::consensus_value!(RecoveryItem);
 
-#[derive(Debug, Clone, PartialEq, Hash, Encodable, Decodable)]
-pub struct MintOutputOutcome;
-
-impl std::fmt::Display for MintOutputOutcome {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MintOutputOutcome")
-    }
-}
-
 pub struct MintModuleTypes;
 
 pub fn verify_note(note: Note, pk: tbs::AggregatePublicKey) -> bool {
@@ -193,7 +184,6 @@ plugin_types_trait_impl_common!(
     MintClientConfig,
     MintInput,
     MintOutput,
-    MintOutputOutcome,
     MintConsensusItem,
     MintInputError,
     MintOutputError

@@ -125,7 +125,6 @@ plugin_types_trait_impl_common!(
     WalletClientConfig,
     WalletInput,
     WalletOutput,
-    WalletOutputOutcome,
     WalletConsensusItem,
     WalletInputError,
     WalletOutputError
@@ -181,15 +180,6 @@ pub struct WalletOutputV0 {
 impl std::fmt::Display for WalletOutputV0 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Wallet PegOut {}", self.value)
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct WalletOutputOutcome;
-
-impl std::fmt::Display for WalletOutputOutcome {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Wallet Output Outcome")
     }
 }
 
