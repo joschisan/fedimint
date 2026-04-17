@@ -11,7 +11,7 @@ use bitcoin::hashes::sha256;
 use bls12_381::{G1Projective, G2Projective, Scalar};
 use futures::FutureExt;
 use futures::future::select_all;
-use iroh::endpoint::Connection;
+use iroh::endpoint::{Connection, RecvStream};
 use iroh::{Endpoint, PublicKey, SecretKey, Watcher as _};
 use picomint_api_client::session_outcome::SignedSessionOutcome;
 use picomint_core::encoding::{Decodable, Encodable};
@@ -95,12 +95,21 @@ impl P2PConnection {
         Ok(())
     }
 
-    /// Await the next incoming uni stream and decode the payload as `M`.
-    /// Cancel-safe: both the accept and the read happen without mutable state
-    /// on `self`.
-    pub async fn receive<M: Decodable + Send + 'static>(&self) -> anyhow::Result<M> {
-        let mut stream = self.connection.accept_uni().await?;
+    /// Await the next incoming uni stream. Cancel-safe — no bytes are
+    /// consumed here, so dropping this future before completion does not
+    /// lose any message data. The returned [`RecvStream`] must then be
+    /// read to completion with [`P2PConnection::read_frame`], outside of
+    /// any `select!`, to preserve message ordering.
+    pub async fn accept_stream(&self) -> anyhow::Result<RecvStream> {
+        Ok(self.connection.accept_uni().await?)
+    }
 
+    /// Drain a uni stream previously returned by [`Self::accept_stream`]
+    /// and decode it as `M`. Not cancel-safe — do not call inside
+    /// `select!`.
+    pub async fn read_frame<M: Decodable + Send + 'static>(
+        stream: &mut RecvStream,
+    ) -> anyhow::Result<M> {
         let bytes = stream.read_to_end(MAX_P2P_MESSAGE_SIZE).await?;
 
         Ok(M::consensus_decode_exact(&bytes)?)
@@ -440,8 +449,13 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
 
                 Some(P2PConnectionSMState::Connected(connection.ok()?))
             },
-            message = connection.receive::<M>() => {
-                match message {
+            stream = connection.accept_stream() => {
+                let mut stream = match stream {
+                    Ok(stream) => stream,
+                    Err(e) => return Some(self.disconnect(e)),
+                };
+
+                match P2PConnection::read_frame::<M>(&mut stream).await {
                     Ok(message) => {
                         if self.incoming_sender.try_send(message).is_err() {
                             debug!(target: LOG_NET_PEER, "Incoming message channel is full");
