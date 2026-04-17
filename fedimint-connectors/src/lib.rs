@@ -74,6 +74,11 @@ impl ConnectorRegistryBuilder {
         let mut connectors_lazy: BTreeMap<String, (ConnectorInitFn, OnceCell<DynConnector>)> =
             BTreeMap::new();
 
+        // Eagerly created so consumers can subscribe before the Iroh
+        // connector is lazily initialized. Only Iroh bumps it today
+        // (on transport-level path changes like relay → direct).
+        let path_change = Arc::new(watch::channel(0u64).0);
+
         // WS connector init function
         let builder_ws = self.clone();
         let ws_connector_init = Arc::new(move || {
@@ -86,12 +91,14 @@ impl ConnectorRegistryBuilder {
 
         // Iroh connector init function
         let builder_iroh = self.clone();
+        let path_change_iroh = path_change.clone();
         connectors_lazy.insert(
             "iroh".into(),
             (
                 Arc::new(move || {
                     let builder = builder_iroh.clone();
-                    Box::pin(async move { builder.build_iroh_connector().await })
+                    let path_change = path_change_iroh.clone();
+                    Box::pin(async move { builder.build_iroh_connector(path_change).await })
                         as Pin<Box<dyn Future<Output = anyhow::Result<DynConnector>> + Send>>
                 }),
                 OnceCell::new(),
@@ -119,18 +126,27 @@ impl ConnectorRegistryBuilder {
                 connectors_lazy,
                 connection_overrides: self.connection_overrides,
                 initialized: SetOnce::new(),
+                path_change,
             }
             .into(),
         })
     }
 
-    pub async fn build_iroh_connector(&self) -> anyhow::Result<DynConnector> {
+    pub async fn build_iroh_connector(
+        &self,
+        path_change: Arc<watch::Sender<u64>>,
+    ) -> anyhow::Result<DynConnector> {
         if !self.iroh_enable {
             bail!("Iroh connector not enabled");
         }
         Ok(Arc::new(
-            iroh::IrohConnector::new(self.iroh_dns.clone(), self.iroh_pkarr_dht, self.iroh_next)
-                .await?,
+            iroh::IrohConnector::new(
+                self.iroh_dns.clone(),
+                self.iroh_pkarr_dht,
+                self.iroh_next,
+                path_change,
+            )
+            .await?,
         ) as DynConnector)
     }
 
@@ -221,6 +237,9 @@ struct ConnectorRegistryInner {
     /// This is used for functionality that wants to avoid making
     /// network connections if nothing else did network request.
     initialized: tokio::sync::SetOnce<()>,
+    /// Ticks whenever a connector observes a transport-level path change
+    /// (e.g. iroh relay → direct). Only Iroh bumps this today.
+    path_change: Arc<watch::Sender<u64>>,
 }
 
 /// A set of available connectivity protocols a client can use to make
@@ -473,6 +492,39 @@ impl ConnectorRegistry {
 
         result
     }
+
+    /// Report how a connection to `url` is currently reaching its peer.
+    ///
+    /// Returns [`Connectivity::Unknown`] if no connector for the url's scheme
+    /// is registered, or if the matching connector has not been initialized
+    /// yet (i.e. no connection attempt has been made).
+    pub fn connectivity(&self, url: &SafeUrl) -> Connectivity {
+        let url = match self.inner.connection_overrides.get(url) {
+            Some(replacement) => replacement,
+            None => url,
+        };
+
+        let Some((_, connector_cell)) = self.inner.connectors_lazy.get(url.scheme()) else {
+            return Connectivity::Unknown;
+        };
+
+        match connector_cell.get() {
+            Some(connector) => connector.connectivity(url),
+            None => Connectivity::Unknown,
+        }
+    }
+
+    /// Subscribe to transport-level connectivity changes across all
+    /// connectors managed by this registry.
+    ///
+    /// The receiver ticks whenever a connector observes a path change on
+    /// an existing connection (for example an iroh connection upgrading
+    /// from relay to direct). The carried `u64` is an opaque counter —
+    /// consumers should treat each update as a "re-read connectivity"
+    /// signal.
+    pub fn connectivity_change_notifier(&self) -> watch::Receiver<u64> {
+        self.inner.path_change.subscribe()
+    }
 }
 pub type DynConnector = Arc<dyn Connector>;
 
@@ -485,6 +537,38 @@ pub trait Connector: Send + Sync + 'static + Debug {
     ) -> ServerResult<DynGuaridianConnection>;
 
     async fn connect_gateway(&self, url: &SafeUrl) -> anyhow::Result<DynGatewayConnection>;
+
+    /// Report how a connection to `url` is currently reaching its peer.
+    fn connectivity(&self, url: &SafeUrl) -> Connectivity;
+}
+
+/// How a connection is currently reaching its peer.
+///
+/// Transports without a relay concept (WS, HTTP) are always
+/// [`Connectivity::Direct`]. Tor-routed connections report
+/// [`Connectivity::Tor`]. Iroh connections may be [`Connectivity::Direct`]
+/// (peer-to-peer), [`Connectivity::Relay`] (routed through a relay
+/// server), or [`Connectivity::Mixed`] (both paths active); for Iroh this
+/// can change at runtime as hole-punching succeeds or falls back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Connectivity {
+    Direct,
+    Relay,
+    Mixed,
+    Tor,
+    Unknown,
+}
+
+/// Per-peer connection state reported by the federation API.
+///
+/// [`PeerStatus::Connected`] carries the current [`Connectivity`] of the
+/// active connection; for Iroh this reflects the path at the moment of the
+/// emission and may be stale until the next pool-level change (relay→direct
+/// upgrades on an existing connection are not yet streamed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PeerStatus {
+    Disconnected,
+    Connected(Connectivity),
 }
 
 /// Generic connection trait shared between [`IGuardianConnection`] and
@@ -698,6 +782,17 @@ impl<T: IConnection + ?Sized> ConnectionPool<T> {
 
     pub async fn wait_for_initialized_connections(&self) {
         self.connectors.wait_for_initialized_connections().await
+    }
+
+    /// Report how a connection to `url` is currently reaching its peer.
+    pub fn connectivity(&self, url: &SafeUrl) -> Connectivity {
+        self.connectors.connectivity(url)
+    }
+
+    /// Subscribe to transport-level connectivity changes observed by
+    /// the connectors underlying this pool.
+    pub fn connectivity_change_notifier(&self) -> watch::Receiver<u64> {
+        self.connectors.connectivity_change_notifier()
     }
 }
 

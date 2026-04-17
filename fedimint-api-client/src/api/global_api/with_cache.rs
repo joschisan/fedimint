@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, format_err};
 use bitcoin::secp256k1;
-use fedimint_connectors::{DynGuaridianConnection, ServerResult};
+use fedimint_connectors::{DynGuaridianConnection, PeerStatus, ServerResult};
 use fedimint_core::admin_client::{GuardianConfigBackup, SetLocalParamsRequest, SetupStatus};
 use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
 use fedimint_core::core::backup::SignedBackupRequest;
@@ -241,7 +241,7 @@ where
         self.inner.request_raw(peer_id, method, params).await
     }
 
-    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>> {
+    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, PeerStatus>> {
         self.inner.connection_status_stream()
     }
 

@@ -23,8 +23,8 @@ pub type JsonRpcResult<T> = Result<T, JsonRpcClientError>;
 
 use super::Connector;
 use crate::{
-    DynGatewayConnection, DynGuaridianConnection, IConnection, IGuardianConnection, ServerError,
-    ServerResult,
+    Connectivity, DynGatewayConnection, DynGuaridianConnection, IConnection, IGuardianConnection,
+    ServerError, ServerResult,
 };
 
 #[derive(Debug, Clone)]
@@ -131,6 +131,10 @@ impl Connector for WebsocketConnector {
 
     async fn connect_gateway(&self, _url: &SafeUrl) -> anyhow::Result<DynGatewayConnection> {
         Err(anyhow!("Unsupported transport method"))
+    }
+
+    fn connectivity(&self, _url: &SafeUrl) -> Connectivity {
+        Connectivity::Direct
     }
 }
 

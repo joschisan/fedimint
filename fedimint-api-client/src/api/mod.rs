@@ -14,7 +14,8 @@ pub use error::{FederationError, OutputOutcomeError};
 pub use fedimint_connectors::ServerResult;
 pub use fedimint_connectors::error::ServerError;
 use fedimint_connectors::{
-    ConnectionPool, ConnectorRegistry, DynGuaridianConnection, IGuardianConnection,
+    ConnectionPool, Connectivity, ConnectorRegistry, DynGuaridianConnection, IGuardianConnection,
+    PeerStatus,
 };
 use fedimint_core::admin_client::{GuardianConfigBackup, ServerStatusLegacy, SetupStatus};
 use fedimint_core::backup::{BackupStatistics, ClientBackupSnapshot};
@@ -101,10 +102,21 @@ pub trait IRawFederationApi: Debug + MaybeSend + MaybeSync {
         params: &ApiRequestErased,
     ) -> ServerResult<Value>;
 
-    /// Returns a stream of connection status for each peer
+    /// Returns a stream of connection status for each peer.
     ///
-    /// The stream emits a new value whenever the connection status changes.
-    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>>;
+    /// The stream emits a new value whenever either the set of active
+    /// connections in the pool changes, or a connector observes a
+    /// transport-level path change on an existing connection (e.g. an iroh
+    /// connection upgrading from relay to direct).
+    ///
+    /// Each peer's entry is [`PeerStatus::Disconnected`] if there is no
+    /// active pooled connection, or [`PeerStatus::Connected`] carrying the
+    /// current [`fedimint_connectors::Connectivity`] otherwise. If the pool
+    /// reports the peer as active but the underlying connector no longer
+    /// has a known path for it (a disconnection racing the pool update),
+    /// the peer is reported as [`PeerStatus::Disconnected`] — the next
+    /// emission will confirm.
+    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, PeerStatus>>;
     /// Wait for some connections being initialized
     ///
     /// This is useful to avoid initializing networking by
@@ -770,14 +782,45 @@ impl IRawFederationApi for FederationApi {
         self.request(peer_id, method, params.clone()).await
     }
 
-    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>> {
+    fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, PeerStatus>> {
         let peers = self.peers.clone();
+        let pool = self.connection_pool.clone();
+        let active_rx = self.connection_pool.get_active_connection_receiver();
 
-        WatchStream::new(self.connection_pool.get_active_connection_receiver())
-            .map(move |active_urls| {
+        // Tick on either (a) a change to the set of active pooled
+        // connections, or (b) a transport-level path change reported by
+        // the underlying connectors (e.g. iroh relay → direct). Both
+        // streams emit their current value immediately on subscription,
+        // so consumers see a snapshot right away.
+        let membership_ticks = WatchStream::new(active_rx.clone()).map(|_| ());
+        let path_change_ticks =
+            WatchStream::new(self.connection_pool.connectivity_change_notifier()).map(|_| ());
+        let ticks = futures::stream::select(membership_ticks, path_change_ticks);
+
+        ticks
+            .map(move |()| {
+                let active_urls = active_rx.borrow().clone();
                 peers
                     .iter()
-                    .map(|(peer_id, url)| (*peer_id, active_urls.contains(url)))
+                    .map(|(peer_id, url)| {
+                        let status = if active_urls.contains(url) {
+                            // The active-set snapshot and the per-connector
+                            // path state are separate sources of truth, so a
+                            // disconnection can race between them. If we saw
+                            // the url as active but the connector no longer
+                            // reports a known path, treat the race as
+                            // "disconnection won" and report Disconnected
+                            // for a consistent view — the next stream tick
+                            // will confirm.
+                            match pool.connectivity(url) {
+                                Connectivity::Unknown => PeerStatus::Disconnected,
+                                connectivity => PeerStatus::Connected(connectivity),
+                            }
+                        } else {
+                            PeerStatus::Disconnected
+                        };
+                        (*peer_id, status)
+                    })
                     .collect()
             })
             .boxed()

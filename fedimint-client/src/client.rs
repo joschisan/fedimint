@@ -33,7 +33,7 @@ use fedimint_client_module::{
     AddStateMachinesResult, ClientModuleInstance, GetInviteCodeRequest, ModuleGlobalContextGen,
     ModuleRecoveryCompleted, TransactionUpdates, TxCreatedEvent,
 };
-use fedimint_connectors::ConnectorRegistry;
+use fedimint_connectors::{ConnectorRegistry, PeerStatus};
 use fedimint_core::config::{
     ClientConfig, FederationId, GlobalClientConfig, JsonClientConfig, ModuleInitRegistry,
 };
@@ -211,7 +211,7 @@ impl Client {
 
     /// Returns a stream that emits the current connection status of all peers
     /// whenever any peer's status changes. Emits initial state immediately.
-    pub fn connection_status_stream(&self) -> impl Stream<Item = BTreeMap<PeerId, bool>> {
+    pub fn connection_status_stream(&self) -> impl Stream<Item = BTreeMap<PeerId, PeerStatus>> {
         self.api.connection_status_stream()
     }
 
