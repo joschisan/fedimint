@@ -6,7 +6,7 @@ use iroh::defaults::DEFAULT_STUN_PORT;
 use iroh::discovery::pkarr::{PkarrPublisher, PkarrResolver};
 use iroh::{Endpoint, RelayMode, RelayNode, RelayUrl, SecretKey};
 use iroh_relay::RelayQuicConfig;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::envs::{
     FM_IROH_DHT_ENABLE_ENV, FM_IROH_N0_DISCOVERY_ENABLE_ENV, FM_IROH_PKARR_PUBLISHER_ENABLE_ENV,
@@ -65,6 +65,10 @@ pub async fn build_iroh_endpoint(
     if is_env_var_set(FM_IROH_DHT_ENABLE_ENV) {
         #[cfg(not(target_family = "wasm"))]
         {
+            debug!(
+                target: LOG_NET_IROH,
+                "Iroh DHT is enabled"
+            );
             builder = builder.discovery_dht();
         }
     } else {
