@@ -1,6 +1,6 @@
 use maud::{Markup, html};
-use picomint_core::util::SafeUrl;
 use picomint_bitcoin_rpc::BitcoinRpcStatus;
+use picomint_core::util::SafeUrl;
 
 pub fn render(url: SafeUrl, status: &Option<BitcoinRpcStatus>) -> Markup {
     html! {

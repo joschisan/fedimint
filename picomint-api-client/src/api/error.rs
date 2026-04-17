@@ -114,4 +114,3 @@ impl FederationError {
             .any(|peer_err| matches!(peer_err, ServerError::InvalidRpcId(_)))
     }
 }
-

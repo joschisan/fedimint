@@ -105,4 +105,3 @@ impl ModuleConsensusVersion {
         Self { major, minor }
     }
 }
-

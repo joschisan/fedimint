@@ -4,8 +4,8 @@ use picomint_core::OutPoint;
 use picomint_core::core::OperationId;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::Keypair;
+use picomint_ln_common::LightningInput;
 use picomint_ln_common::contracts::IncomingContract;
-use picomint_ln_common::{LightningInput};
 use picomint_logging::LOG_CLIENT_MODULE_LN;
 use picomint_redb::WriteTxRef;
 use tpe::AggregateDecryptionKey;
@@ -104,10 +104,7 @@ async fn transition_incoming_contract_sm(
     };
 
     let client_input = ClientInput::<LightningInput> {
-        input: LightningInput::Incoming(
-            outpoint,
-            old_state.common.agg_decryption_key,
-        ),
+        input: LightningInput::Incoming(outpoint, old_state.common.agg_decryption_key),
         amount: old_state.common.contract.commitment.amount,
         keys: vec![old_state.common.claim_keypair],
     };

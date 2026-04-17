@@ -32,7 +32,7 @@ use picomint_core::core::OperationId;
 use picomint_core::encoding::Encodable;
 use picomint_core::module::{ModuleCommon, ModuleInit};
 use picomint_core::task::{TaskGroup, block_in_place, sleep};
-use picomint_core::{Amount, OutPoint, TransactionId, apply, async_trait_maybe_send};
+use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_derive_secret::{ChildId, DerivableSecret};
 use picomint_logging::LOG_CLIENT_MODULE_WALLET;
 use picomint_redb::Database;
@@ -66,7 +66,7 @@ pub struct WalletClientContext {
     pub client_ctx: ClientContext<WalletClientModule>,
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ClientModule for WalletClientModule {
     type Init = WalletClientInit;
     type Common = WalletModuleTypes;
@@ -100,7 +100,7 @@ impl ModuleInit for WalletClientInit {
     type Common = WalletCommonInit;
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ClientModuleInit for WalletClientInit {
     type Module = WalletClientModule;
 

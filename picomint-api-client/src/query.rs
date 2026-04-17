@@ -2,8 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::mem;
 
-use picomint_core::task::{MaybeSend, MaybeSync};
-use picomint_core::{NumPeers, PeerId, maybe_add_send_sync};
+use picomint_core::{NumPeers, PeerId};
 
 use crate::api::{ServerError, ServerResult};
 
@@ -37,13 +36,11 @@ pub enum QueryStep<R> {
 /// Returns when we obtain the first valid responses. RPC call errors or
 /// invalid responses are not retried.
 pub struct FilterMap<R, T> {
-    filter_map: Box<maybe_add_send_sync!(dyn Fn(R) -> ServerResult<T>)>,
+    filter_map: Box<dyn Fn(R) -> ServerResult<T> + Send + Sync>,
 }
 
 impl<R, T> FilterMap<R, T> {
-    pub fn new(
-        filter_map: impl Fn(R) -> ServerResult<T> + MaybeSend + MaybeSync + 'static,
-    ) -> Self {
+    pub fn new(filter_map: impl Fn(R) -> ServerResult<T> + Send + Sync + 'static) -> Self {
         Self {
             filter_map: Box::new(filter_map),
         }
@@ -62,14 +59,14 @@ impl<R, T> QueryStrategy<R, T> for FilterMap<R, T> {
 /// Returns when we obtain a threshold of valid responses. RPC call errors or
 /// invalid responses are not retried.
 pub struct FilterMapThreshold<R, T> {
-    filter_map: Box<maybe_add_send_sync!(dyn Fn(PeerId, R) -> ServerResult<T>)>,
+    filter_map: Box<dyn Fn(PeerId, R) -> ServerResult<T> + Send + Sync>,
     filtered_responses: BTreeMap<PeerId, T>,
     threshold: usize,
 }
 
 impl<R, T> FilterMapThreshold<R, T> {
     pub fn new(
-        verifier: impl Fn(PeerId, R) -> ServerResult<T> + MaybeSend + MaybeSync + 'static,
+        verifier: impl Fn(PeerId, R) -> ServerResult<T> + Send + Sync + 'static,
         num_peers: NumPeers,
     ) -> Self {
         Self {

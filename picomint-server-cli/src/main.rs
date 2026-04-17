@@ -2,11 +2,11 @@ use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use picomint_server_cli_core::{
     LnGatewayRequest, ROUTE_AUDIT, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
-    ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
-    ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
-    ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
-    ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_SET_LOCAL_PARAMS,
-    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest, SetupSetLocalParamsRequest,
+    ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT,
+    ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
+    ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SETUP_ADD_PEER,
+    ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest,
+    SetupSetLocalParamsRequest,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -171,11 +171,9 @@ fn main() -> Result<()> {
             },
             ModuleCommands::Ln(cmd) => match cmd {
                 LnCommands::Gateway(cmd) => match cmd {
-                    LnGatewayCommands::Add { url } => request(
-                        addr,
-                        ROUTE_MODULE_LN_GATEWAY_ADD,
-                        LnGatewayRequest { url },
-                    )?,
+                    LnGatewayCommands::Add { url } => {
+                        request(addr, ROUTE_MODULE_LN_GATEWAY_ADD, LnGatewayRequest { url })?
+                    }
                     LnGatewayCommands::Remove { url } => request(
                         addr,
                         ROUTE_MODULE_LN_GATEWAY_REMOVE,

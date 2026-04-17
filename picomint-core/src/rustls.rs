@@ -1,8 +1,6 @@
 use tokio::sync::OnceCell;
 
 static INSTALL_CRYPTO: OnceCell<()> = OnceCell::const_new();
-
-#[cfg(not(target_family = "wasm"))]
 pub async fn install_crypto_provider() {
     use picomint_logging::LOG_CORE;
     use tracing::warn;

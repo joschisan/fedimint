@@ -31,7 +31,7 @@ use picomint_core::secp256k1::SECP256K1;
 use picomint_core::task::TaskGroup;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;
-use picomint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send};
+use picomint_core::{Amount, OutPoint, PeerId};
 use picomint_derive_secret::{ChildId, DerivableSecret};
 use picomint_ln_common::config::LightningConfigConsensus;
 use picomint_ln_common::contracts::{IncomingContract, OutgoingContract, PaymentImage};
@@ -40,8 +40,7 @@ use picomint_ln_common::gateway_api::{
 };
 use picomint_ln_common::{
     Bolt11InvoiceDescription, GatewayApi, LightningCommonInit, LightningInvoice,
-    LightningModuleTypes, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT,
-    lnurl, tweak,
+    LightningModuleTypes, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl, tweak,
 };
 use picomint_redb::WriteTxRef;
 use secp256k1::{Keypair, PublicKey, Scalar, SecretKey, ecdh};
@@ -81,7 +80,7 @@ impl ModuleInit for LightningClientInit {
     type Common = LightningCommonInit;
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ClientModuleInit for LightningClientInit {
     type Module = LightningClientModule;
 
@@ -124,7 +123,7 @@ pub struct LightningClientModule {
     receive_executor: ModuleExecutor<ReceiveStateMachine>,
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ClientModule for LightningClientModule {
     type Init = LightningClientInit;
     type Common = LightningModuleTypes;

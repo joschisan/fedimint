@@ -17,9 +17,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::future::select_all;
-use picomint_core::task::{MaybeSend, MaybeSync, TaskGroup};
+use picomint_core::redb;
+use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxFuture;
-use picomint_core::{maybe_add_send, maybe_add_send_sync, redb};
 use picomint_redb::{Database, WriteTxRef};
 
 /// A persistent state machine driven by a [`ModuleExecutor`].
@@ -31,7 +31,7 @@ use picomint_redb::{Database, WriteTxRef};
 /// Returning an empty `Vec` from `transitions` marks the state terminal:
 /// the executor removes it from the DB and stops polling.
 pub trait StateMachine:
-    Debug + Clone + Eq + Hash + for<'a> redb::Key<SelfType<'a> = Self> + MaybeSend + MaybeSync + 'static
+    Debug + Clone + Eq + Hash + for<'a> redb::Key<SelfType<'a> = Self> + Send + Sync + 'static
 {
     /// Logical table name under which this state machine's active states are
     /// persisted in the owning [`ModuleExecutor`]'s database. Must be unique
@@ -39,7 +39,7 @@ pub trait StateMachine:
     const TABLE_NAME: &'static str;
 
     /// Per-module context handed to every transition.
-    type Context: Clone + MaybeSend + MaybeSync + 'static;
+    type Context: Clone + Send + Sync + 'static;
 
     /// Possible transitions out of this state.
     fn transitions(&self, ctx: &Self::Context) -> Vec<StateTransition<Self>>;
@@ -53,13 +53,12 @@ fn table<S: StateMachine>() -> picomint_core::db::NativeTableDef<S, ()> {
 /// closure stored on [`StateTransition::transition`] and recovered via
 /// downcast; retries of the transition body (write conflicts) clone the
 /// value from the [`Arc`].
-pub type ErasedValue = Arc<maybe_add_send_sync!(dyn Any)>;
+pub type ErasedValue = Arc<dyn Any + Send + Sync>;
 
-pub type TriggerFuture = Pin<Box<maybe_add_send!(dyn Future<Output = ErasedValue> + 'static)>>;
+pub type TriggerFuture = Pin<Box<dyn Future<Output = ErasedValue> + 'static + Send>>;
 
-pub type TransitionFn<S> = Arc<
-    maybe_add_send_sync!(dyn for<'a> Fn(&'a WriteTxRef<'_>, ErasedValue, S) -> BoxFuture<'a, S>),
->;
+pub type TransitionFn<S> =
+    Arc<dyn for<'a> Fn(&'a WriteTxRef<'_>, ErasedValue, S) -> BoxFuture<'a, S> + Send + Sync>;
 
 pub struct StateTransition<S> {
     pub trigger: TriggerFuture,
@@ -69,13 +68,9 @@ pub struct StateTransition<S> {
 impl<S: StateMachine> StateTransition<S> {
     pub fn new<V, Trigger, F>(trigger: Trigger, transition: F) -> Self
     where
-        V: Clone + MaybeSend + MaybeSync + 'static,
-        Trigger: Future<Output = V> + MaybeSend + 'static,
-        F: for<'a> Fn(&'a WriteTxRef<'_>, V, S) -> BoxFuture<'a, S>
-            + MaybeSend
-            + MaybeSync
-            + Clone
-            + 'static,
+        V: Clone + Send + Sync + 'static,
+        Trigger: Future<Output = V> + Send + 'static,
+        F: for<'a> Fn(&'a WriteTxRef<'_>, V, S) -> BoxFuture<'a, S> + Send + Sync + Clone + 'static,
     {
         Self {
             trigger: Box::pin(async move { Arc::new(trigger.await) as ErasedValue }),
@@ -193,7 +188,7 @@ impl<S: StateMachine> Inner<S> {
     }
 
     /// Drive one state machine from its current state to a terminal
-    /// one. Each iteration: race triggers, apply the winning transition
+    /// one. Each iteration: race triggers the winning transition
     /// atomically, advance to the new state (or exit when terminal).
     async fn drive(self: Arc<Self>, mut state: S) {
         loop {

@@ -84,11 +84,11 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     use axum::routing::post;
     use picomint_server_cli_core::{
         AuditResponse, InviteResponse, LnGatewayRequest, ROUTE_AUDIT, ROUTE_INVITE,
-        ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST,
-        ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT,
-        ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
-        ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TX_CHAIN, WalletBlockCountResponse,
-        WalletFeerateResponse, WalletTotalValueResponse,
+        ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
+        ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
+        ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
+        ROUTE_MODULE_WALLET_TX_CHAIN, WalletBlockCountResponse, WalletFeerateResponse,
+        WalletTotalValueResponse,
     };
 
     async fn invite(

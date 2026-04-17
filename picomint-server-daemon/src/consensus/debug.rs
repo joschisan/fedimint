@@ -36,4 +36,3 @@ impl fmt::Debug for DebugConsensusItem<'_> {
         Ok(())
     }
 }
-

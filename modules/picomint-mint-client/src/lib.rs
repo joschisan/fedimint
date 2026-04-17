@@ -45,7 +45,7 @@ use picomint_core::module::{ModuleCommon, ModuleInit};
 use picomint_core::secp256k1::rand::{thread_rng, Rng};
 use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_core::util::BoxStream;
-use picomint_core::{apply, async_trait_maybe_send, Amount, PeerId};
+use picomint_core::{Amount, PeerId};
 use picomint_derive_secret::DerivableSecret;
 use picomint_mint_common::config::{client_denominations, MintConfigConsensus};
 use picomint_mint_common::{
@@ -104,7 +104,7 @@ impl ModuleInit for MintClientInit {
     type Common = MintCommonInit;
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ClientModuleInit for MintClientInit {
     type Module = MintClientModule;
 
@@ -322,7 +322,7 @@ pub struct MintSmContext {
     pub balance_update_sender: tokio::sync::watch::Sender<()>,
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ClientModule for MintClientModule {
     type Init = MintClientInit;
     type Common = MintModuleTypes;
@@ -599,7 +599,9 @@ fn build_inputs(notes: &[SpendableNote]) -> Vec<ClientInput<MintInput>> {
     notes
         .iter()
         .map(|spendable_note| ClientInput {
-            input: MintInput { note: spendable_note.note() },
+            input: MintInput {
+                note: spendable_note.note(),
+            },
             keys: vec![spendable_note.keypair],
             amount: spendable_note.amount(),
         })

@@ -167,26 +167,29 @@ async fn main() -> anyhow::Result<Infallible> {
         .await
         .expect("Failed to open picomint-server-daemon database");
 
-    let bitcoin_backend = Arc::new(match (
-        server_opts.bitcoind_url.as_ref(),
-        server_opts.esplora_url.as_ref(),
-    ) {
-        (Some(_), None) => {
-            let bitcoind_username = server_opts
-                .bitcoind_username
-                .clone()
-                .expect("BITCOIND_URL is set but BITCOIND_USERNAME is not");
-            let (bitcoind_url, bitcoind_password) = server_opts
-                .get_bitcoind_url_and_password()
-                .await
-                .expect("Failed to get bitcoind url");
-            BitcoinBackend::Bitcoind(
-                BitcoindClient::new(bitcoind_username, bitcoind_password, &bitcoind_url).unwrap(),
-            )
-        }
-        (None, Some(url)) => BitcoinBackend::Esplora(EsploraClient::new(url).unwrap()),
-        _ => unreachable!("ArgGroup enforces exactly one of BITCOIND_URL or ESPLORA_URL"),
-    });
+    let bitcoin_backend = Arc::new(
+        match (
+            server_opts.bitcoind_url.as_ref(),
+            server_opts.esplora_url.as_ref(),
+        ) {
+            (Some(_), None) => {
+                let bitcoind_username = server_opts
+                    .bitcoind_username
+                    .clone()
+                    .expect("BITCOIND_URL is set but BITCOIND_USERNAME is not");
+                let (bitcoind_url, bitcoind_password) = server_opts
+                    .get_bitcoind_url_and_password()
+                    .await
+                    .expect("Failed to get bitcoind url");
+                BitcoinBackend::Bitcoind(
+                    BitcoindClient::new(bitcoind_username, bitcoind_password, &bitcoind_url)
+                        .unwrap(),
+                )
+            }
+            (None, Some(url)) => BitcoinBackend::Esplora(EsploraClient::new(url).unwrap()),
+            _ => unreachable!("ArgGroup enforces exactly one of BITCOIND_URL or ESPLORA_URL"),
+        },
+    );
 
     root_task_group.install_kill_handler();
 

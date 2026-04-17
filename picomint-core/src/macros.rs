@@ -13,4 +13,3 @@ macro_rules! plugin_types_trait_impl_common {
         }
     };
 }
-

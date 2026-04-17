@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Context, ensure};
 use group::Curve;
+use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::bitcoin::Network;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::module::audit::Audit;
@@ -19,9 +20,7 @@ use picomint_core::module::{
 use picomint_core::task::timeout;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;
-use picomint_core::{
-    Amount, InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send,
-};
+use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_ln_common::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
@@ -32,14 +31,12 @@ use picomint_ln_common::endpoint_constants::{
     OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
 };
 use picomint_ln_common::{
-    ContractId, LightningConsensusItem, LightningInput, LightningInputError,
-    LightningModuleTypes, LightningOutput, LightningOutputError,
-    OutgoingWitness,
+    ContractId, LightningConsensusItem, LightningInput, LightningInputError, LightningModuleTypes,
+    LightningOutput, LightningOutputError, OutgoingWitness,
 };
 use picomint_logging::LOG_MODULE_LN;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use picomint_server_core::ServerModule;
-use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_server_core::config::{PeerHandleOps, eval_poly_g1};
 use tpe::{DecryptionKeyShare, PublicKeyShare, SecretKeyShare};
 use tracing::trace;
@@ -113,7 +110,7 @@ impl Lightning {
     }
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ServerModule for Lightning {
     type Common = LightningModuleTypes;
 

@@ -21,7 +21,6 @@ use picomint_core::module::{
     ApiError, ApiMethod, ApiRequestErased, IrohApiRequest, PICOMINT_API_ALPN,
 };
 use picomint_core::runtime::sleep;
-use picomint_core::task::MaybeSend;
 use picomint_core::util::FmtCompact as _;
 use picomint_core::util::backoff_util::api_networking_backoff;
 use picomint_core::{NumPeersExt, PeerId, TransactionId, util};
@@ -240,7 +239,7 @@ impl FederationApi {
         peer_id: PeerId,
     ) -> FederationResult<FedRet>
     where
-        FedRet: Decodable + Eq + Debug + Clone + MaybeSend,
+        FedRet: Decodable + Eq + Debug + Clone + Send,
     {
         self.request_raw(peer_id, &method, &params)
             .await
@@ -256,14 +255,13 @@ impl FederationApi {
     #[instrument(target = LOG_CLIENT_NET_API, skip_all, fields(method = method))]
     pub async fn request_with_strategy<PR: Decodable, FR: Debug>(
         &self,
-        mut strategy: impl QueryStrategy<PR, FR> + MaybeSend,
+        mut strategy: impl QueryStrategy<PR, FR> + Send,
         method: String,
         params: ApiRequestErased,
     ) -> FederationResult<FR> {
         // NOTE: `FuturesUnorderded` is a footgun, but all we do here is polling
         // completed results from it and we don't do any `await`s when
         // processing them, it should be totally OK.
-        #[cfg(not(target_family = "wasm"))]
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
         #[cfg(target_family = "wasm")]
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _>>>>::new();
@@ -331,13 +329,12 @@ impl FederationApi {
     }
 
     #[instrument(target = LOG_CLIENT_NET_API, level = "debug", skip(self, strategy))]
-    pub async fn request_with_strategy_retry<PR: Decodable + MaybeSend, FR: Debug>(
+    pub async fn request_with_strategy_retry<PR: Decodable + Send, FR: Debug>(
         &self,
-        mut strategy: impl QueryStrategy<PR, FR> + MaybeSend,
+        mut strategy: impl QueryStrategy<PR, FR> + Send,
         method: String,
         params: ApiRequestErased,
     ) -> FR {
-        #[cfg(not(target_family = "wasm"))]
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
         #[cfg(target_family = "wasm")]
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _>>>>::new();
@@ -421,7 +418,7 @@ impl FederationApi {
         params: ApiRequestErased,
     ) -> FederationResult<Ret>
     where
-        Ret: Decodable + Eq + Debug + Clone + MaybeSend,
+        Ret: Decodable + Eq + Debug + Clone + Send,
     {
         self.request_with_strategy(
             ThresholdConsensus::new(self.all_peers().to_num_peers()),
@@ -437,7 +434,7 @@ impl FederationApi {
         params: ApiRequestErased,
     ) -> Ret
     where
-        Ret: Decodable + Eq + Debug + Clone + MaybeSend,
+        Ret: Decodable + Eq + Debug + Clone + Send,
     {
         self.request_with_strategy_retry(
             ThresholdConsensus::new(self.all_peers().to_num_peers()),

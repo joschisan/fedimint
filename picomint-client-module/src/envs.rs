@@ -4,8 +4,6 @@ use std::time::Duration;
 use tracing::warn;
 
 pub const DISCOVER_API_VERSION_TIMEOUT_ENV: &str = "DISCOVER_API_VERSION_TIMEOUT";
-
-#[cfg(not(target_family = "wasm"))]
 pub fn get_discover_api_version_timeout() -> Duration {
     use picomint_core::util::FmtCompact as _;
 

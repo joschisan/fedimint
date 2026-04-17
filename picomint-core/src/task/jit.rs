@@ -1,6 +1,5 @@
 use std::convert::Infallible;
 use std::fmt;
-#[cfg(not(target_family = "wasm"))]
 use std::panic;
 use std::sync::Arc;
 
@@ -10,7 +9,6 @@ use picomint_logging::LOG_TASK;
 use tokio::sync;
 use tracing::warn;
 
-use super::MaybeSend;
 use crate::util::FmtCompact;
 
 pub type Jit<T> = JitCore<T, Infallible>;
@@ -82,16 +80,16 @@ impl<T, E> Drop for JitInner<T, E> {
 }
 impl<T, E> JitCore<T, E>
 where
-    T: MaybeSend + 'static,
-    E: MaybeSend + 'static + fmt::Display,
+    T: Send + 'static,
+    E: Send + 'static + fmt::Display,
 {
     /// Create `JitTry` value, and spawn a future `f` that computes its value
     ///
     /// Unlike normal Rust futures, the `f` executes eagerly (is spawned as a
     /// tokio task).
-    pub fn new_try<Fut>(f: impl FnOnce() -> Fut + 'static + MaybeSend) -> Self
+    pub fn new_try<Fut>(f: impl FnOnce() -> Fut + 'static + Send) -> Self
     where
-        Fut: Future<Output = std::result::Result<T, E>> + 'static + MaybeSend,
+        Fut: Future<Output = std::result::Result<T, E>> + 'static + Send,
     {
         let handle = crate::runtime::spawn("jit-value", async { f().await });
 
@@ -121,20 +119,16 @@ where
                             Err(err_str)
                         },
                         Err(err) => {
-
-                            #[cfg(not(target_family = "wasm"))]
                             if err.is_panic() {
                                 warn!(target: LOG_TASK, err = %err.fmt_compact(), type_name = %std::any::type_name::<T>(), "Jit value panicked");
                                 // Resume the panic on the main task
                                 panic::resume_unwind(err.into_panic());
                             }
-                            #[cfg(not(target_family = "wasm"))]
                             if err.is_cancelled() {
                                 warn!(target: LOG_TASK, err = %err.fmt_compact(), type_name = %std::any::type_name::<T>(), "Jit value task canceled:");
                             }
                             Err(format!("Jit value {} failed unexpectedly with: {}", std::any::type_name::<T>(), err))
-                        },
-                    }
+                        }}
             })
             .await;
         if let Some(err) = init_error {
@@ -147,11 +141,11 @@ where
 }
 impl<T> JitCore<T, Infallible>
 where
-    T: MaybeSend + 'static,
+    T: Send + 'static,
 {
-    pub fn new<Fut>(f: impl FnOnce() -> Fut + 'static + MaybeSend) -> Self
+    pub fn new<Fut>(f: impl FnOnce() -> Fut + 'static + Send) -> Self
     where
-        Fut: Future<Output = T> + 'static + MaybeSend,
+        Fut: Future<Output = T> + 'static + Send,
         T: 'static,
     {
         Self::new_try(|| async { Ok(f().await) })

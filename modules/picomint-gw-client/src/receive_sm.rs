@@ -11,9 +11,9 @@ use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::ApiRequestErased;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
+use picomint_ln_common::LightningInput;
 use picomint_ln_common::contracts::IncomingContract;
 use picomint_ln_common::endpoint_constants::DECRYPTION_KEY_SHARE_ENDPOINT;
-use picomint_ln_common::{LightningInput};
 use picomint_logging::LOG_CLIENT_MODULE_GW;
 use picomint_redb::WriteTxRef;
 use tpe::{DecryptionKeyShare, aggregate_dk_shares};
@@ -227,10 +227,7 @@ async fn transition_decryption_shares_sm(
     }
 
     let client_input = ClientInput::<LightningInput> {
-        input: LightningInput::Incoming(
-            old_state.common.outpoint,
-            agg_decryption_key,
-        ),
+        input: LightningInput::Incoming(old_state.common.outpoint, agg_decryption_key),
         amount: old_state.common.contract.commitment.amount,
         keys: vec![old_state.common.refund_keypair],
     };

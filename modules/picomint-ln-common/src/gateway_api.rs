@@ -7,7 +7,7 @@ use lightning_invoice::{Bolt11Invoice, RoutingFees};
 use picomint_core::config::FederationId;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::util::SafeUrl;
-use picomint_core::{Amount, OutPoint, apply, async_trait_maybe_send};
+use picomint_core::{Amount, OutPoint};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +18,7 @@ use crate::endpoint_constants::{
 use crate::gateway_connection::GatewayError;
 use crate::{Bolt11InvoiceDescription, GatewayApi, LightningInvoice};
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 pub trait GatewayConnection: std::fmt::Debug {
     async fn routing_info(
         &self,
@@ -52,7 +52,7 @@ pub struct RealGatewayConnection {
     pub api: GatewayApi,
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl GatewayConnection for RealGatewayConnection {
     async fn routing_info(
         &self,

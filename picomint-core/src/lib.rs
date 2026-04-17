@@ -48,7 +48,6 @@ pub use anyhow;
 pub use bitcoin::hashes::Hash as BitcoinHash;
 use lightning::util::ser::Writeable;
 use lightning_types::features::Bolt11InvoiceFeatures;
-pub use macro_rules_attribute::apply;
 pub use peer_id::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;

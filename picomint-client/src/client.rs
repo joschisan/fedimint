@@ -11,6 +11,7 @@ use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1::{self, PublicKey};
 use futures::{Stream, StreamExt as _};
 use picomint_api_client::api::FederationApi;
+use picomint_api_client::config::ConsensusConfig;
 use picomint_api_client::transaction::Transaction;
 use picomint_api_client::{Endpoint, wire};
 use picomint_client_module::executor::ModuleExecutor;
@@ -22,17 +23,13 @@ use picomint_client_module::transaction::{
 use picomint_client_module::{
     ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
 };
-use picomint_api_client::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use picomint_core::encoding::Encodable as _;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::{BoxStream, FmtCompactAnyhow as _};
-use picomint_core::{
-    Amount, PeerId, TransactionId, apply, async_trait_maybe_send, maybe_add_send,
-    maybe_add_send_sync,
-};
+use picomint_core::{Amount, PeerId, TransactionId};
 use picomint_eventlog::{Event, EventKind, EventLogId, PersistedLogEntry};
 use picomint_gw_client::GatewayClientModuleV2;
 use picomint_ln_client::LightningClientModule;
@@ -72,7 +69,7 @@ pub enum LnFlavor {
 }
 
 impl LnFlavor {
-    fn as_any(&self) -> &(maybe_add_send_sync!(dyn Any)) {
+    fn as_any(&self) -> &(dyn Any + Send + Sync) {
         match self {
             LnFlavor::Regular(m) => &**m,
             LnFlavor::Gateway(m) => &**m,
@@ -190,7 +187,7 @@ impl Client {
 
     /// Returns the module at the given instance id as `&dyn Any`, or panics
     /// if the instance id doesn't match the fixed module set.
-    fn get_module_any(&self, instance: ModuleInstanceId) -> &(maybe_add_send_sync!(dyn Any)) {
+    fn get_module_any(&self, instance: ModuleInstanceId) -> &(dyn Any + Send + Sync) {
         match instance {
             wire::MINT_INSTANCE_ID => &*self.mint,
             wire::LN_INSTANCE_ID => self.ln.as_any(),
@@ -460,7 +457,7 @@ impl Client {
         &'_ self,
     ) -> anyhow::Result<ClientModuleInstance<'_, M>> {
         let tid = TypeId::of::<M>();
-        let (module_any, id): (&(maybe_add_send_sync!(dyn Any)), ModuleInstanceId) =
+        let (module_any, id): (&(dyn Any + Send + Sync), ModuleInstanceId) =
             if tid == TypeId::of::<MintClientModule>() {
                 (&*self.mint, wire::MINT_INSTANCE_ID)
             } else if tid == TypeId::of::<WalletClientModule>() {
@@ -608,7 +605,7 @@ impl Client {
         recovery_sender: watch::Sender<BTreeMap<ModuleInstanceId, RecoveryProgress>>,
         module_recoveries: BTreeMap<
             ModuleInstanceId,
-            Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
+            Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
         >,
         module_recovery_progress_receivers: BTreeMap<
             ModuleInstanceId,
@@ -645,7 +642,7 @@ impl Client {
         recovery_sender: watch::Sender<BTreeMap<ModuleInstanceId, RecoveryProgress>>,
         module_recoveries: BTreeMap<
             ModuleInstanceId,
-            Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
+            Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
         >,
         module_recovery_progress_receivers: BTreeMap<
             ModuleInstanceId,
@@ -871,9 +868,9 @@ impl Client {
     }
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ClientContextIface for Client {
-    fn get_module(&self, instance: ModuleInstanceId) -> &(maybe_add_send_sync!(dyn Any)) {
+    fn get_module(&self, instance: ModuleInstanceId) -> &(dyn Any + Send + Sync) {
         Client::get_module_any(self, instance)
     }
 

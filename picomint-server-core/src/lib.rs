@@ -18,7 +18,7 @@ use std::fmt::Debug;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiEndpoint, InputMeta, ModuleCommon, TransactionItemAmounts};
-use picomint_core::{InPoint, OutPoint, PeerId, apply, async_trait_maybe_send};
+use picomint_core::{InPoint, OutPoint, PeerId};
 use picomint_redb::{ReadTxRef, WriteTxRef};
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +30,7 @@ pub struct P2PConnectionStatus {
     pub rtt: Option<std::time::Duration>,
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 pub trait ServerModule: Debug + Sized {
     type Common: ModuleCommon;
 

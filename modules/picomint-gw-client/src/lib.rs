@@ -29,7 +29,7 @@ use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::hex::ToHex;
 use picomint_core::module::{ModuleCommon, ModuleInit};
 use picomint_core::secp256k1::Keypair;
-use picomint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send, secp256k1};
+use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
 use picomint_ln_common::config::LightningConfigConsensus;
 use picomint_ln_common::contracts::{IncomingContract, PaymentImage};
 use picomint_ln_common::gateway_api::SendPaymentPayload;
@@ -60,7 +60,7 @@ impl ModuleInit for GatewayClientInitV2 {
     type Common = LightningCommonInit;
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ClientModuleInit for GatewayClientInitV2 {
     type Module = GatewayClientModuleV2;
 
@@ -135,7 +135,7 @@ pub struct GwV2SmContext {
     pub gateway: Arc<dyn IGatewayClientV2>,
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ClientModule for GatewayClientModuleV2 {
     type Init = GatewayClientInitV2;
     type Common = LightningModuleTypes;

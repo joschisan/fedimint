@@ -1,10 +1,10 @@
 use picomint_api_client::Endpoint;
 use picomint_api_client::api::FederationApi;
+use picomint_core::NumPeers;
 use picomint_core::config::FederationId;
 use picomint_core::core::ModuleKind;
 use picomint_core::module::{CommonModuleInit, ModuleInit};
 use picomint_core::task::TaskGroup;
-use picomint_core::{NumPeers, apply, async_trait_maybe_send};
 use picomint_derive_secret::DerivableSecret;
 use picomint_logging::LOG_CLIENT;
 use picomint_redb::Database;
@@ -158,7 +158,7 @@ where
     }
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 pub trait ClientModuleInit: ModuleInit + Sized {
     type Module: ClientModule;
 

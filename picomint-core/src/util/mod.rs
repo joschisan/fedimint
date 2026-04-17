@@ -24,16 +24,15 @@ use tracing::{Instrument, Span, debug, warn};
 use url::{Host, ParseError, Url};
 
 use crate::envs::{DEBUG_SHOW_SECRETS_ENV, is_env_var_set};
-use crate::task::MaybeSend;
-use crate::{apply, async_trait_maybe_send, maybe_add_send, runtime};
+use crate::runtime;
 
 /// Future that is `Send` unless targeting WASM
-pub type BoxFuture<'a, T> = Pin<Box<maybe_add_send!(dyn Future<Output = T> + 'a)>>;
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send>>;
 
 /// Stream that is `Send` unless targeting WASM
-pub type BoxStream<'a, T> = Pin<Box<maybe_add_send!(dyn futures::Stream<Item = T> + 'a)>>;
+pub type BoxStream<'a, T> = Pin<Box<dyn futures::Stream<Item = T> + 'a + Send>>;
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 pub trait NextOrPending {
     type Output;
 
@@ -42,11 +41,11 @@ pub trait NextOrPending {
     async fn ok(&mut self) -> anyhow::Result<Self::Output>;
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl<S> NextOrPending for S
 where
-    S: futures::Stream + Unpin + MaybeSend,
-    S::Item: MaybeSend,
+    S: futures::Stream + Unpin + Send,
+    S::Item: Send,
 {
     type Output = S::Item;
 
@@ -235,7 +234,6 @@ impl FromStr for SafeUrl {
 
 /// Write out a new file (like [`std::fs::write`] but fails if file already
 /// exists)
-#[cfg(not(target_family = "wasm"))]
 pub fn write_new<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> io::Result<()> {
     let mut file = fs::File::options()
         .write(true)
@@ -245,8 +243,6 @@ pub fn write_new<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> io::Re
     file.sync_all()?;
     Ok(())
 }
-
-#[cfg(not(target_family = "wasm"))]
 pub fn write_overwrite<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> io::Result<()> {
     fs::File::options()
         .write(true)
@@ -255,8 +251,6 @@ pub fn write_overwrite<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> 
         .open(path)?
         .write_all(contents.as_ref())
 }
-
-#[cfg(not(target_family = "wasm"))]
 pub async fn write_overwrite_async<P: AsRef<Path>, C: AsRef<[u8]>>(
     path: P,
     contents: C,
@@ -270,8 +264,6 @@ pub async fn write_overwrite_async<P: AsRef<Path>, C: AsRef<[u8]>>(
         .write_all(contents.as_ref())
         .await
 }
-
-#[cfg(not(target_family = "wasm"))]
 pub async fn write_new_async<P: AsRef<Path>, C: AsRef<[u8]>>(
     path: P,
     contents: C,

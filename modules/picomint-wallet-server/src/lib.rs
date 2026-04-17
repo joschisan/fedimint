@@ -28,20 +28,17 @@ use db::{
     Signatures, TX_INFO, TX_INFO_INDEX, TxidKey, UNCONFIRMED_TX, UNSIGNED_TX,
 };
 use miniscript::descriptor::Wsh;
+use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::audit::Audit;
-use picomint_core::module::{
-    ApiEndpoint, InputMeta, TransactionItemAmounts, api_endpoint,
-};
-#[cfg(not(target_family = "wasm"))]
+use picomint_core::module::{ApiEndpoint, InputMeta, TransactionItemAmounts, api_endpoint};
 use picomint_core::task::TaskGroup;
 use picomint_core::task::sleep;
-use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId, apply, async_trait_maybe_send, util};
+use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId, util};
 use picomint_logging::LOG_MODULE_WALLET;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use picomint_server_core::ServerModule;
-use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
 pub use picomint_wallet_common as common;
 use picomint_wallet_common::config::{WalletConfig, WalletConfigPrivate};
@@ -140,7 +137,7 @@ pub fn validate_config(identity: &PeerId, cfg: &WalletConfig) -> anyhow::Result<
     Ok(())
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ServerModule for Wallet {
     type Common = WalletModuleTypes;
 

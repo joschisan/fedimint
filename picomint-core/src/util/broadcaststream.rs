@@ -7,7 +7,6 @@ use futures::{Stream, ready};
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::task::MaybeSend;
 use crate::util::BoxFuture;
 
 /// A wrapper around [`tokio::sync::broadcast::Receiver`] that implements
@@ -44,7 +43,7 @@ async fn make_future<T: Clone>(mut rx: Receiver<T>) -> (Result<T, RecvError>, Re
     (result, rx)
 }
 
-impl<T: 'static + Clone + MaybeSend> BroadcastStream<T> {
+impl<T: 'static + Clone + Send> BroadcastStream<T> {
     /// Create a new `BroadcastStream`.
     pub fn new(rx: Receiver<T>) -> Self {
         Self {
@@ -53,7 +52,7 @@ impl<T: 'static + Clone + MaybeSend> BroadcastStream<T> {
     }
 }
 
-impl<T: 'static + Clone + MaybeSend> Stream for BroadcastStream<T> {
+impl<T: 'static + Clone + Send> Stream for BroadcastStream<T> {
     type Item = Result<T, BroadcastStreamRecvError>;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let (result, rx) = ready!(Pin::new(&mut self.inner).poll(cx));
@@ -74,7 +73,7 @@ impl<T> fmt::Debug for BroadcastStream<T> {
     }
 }
 
-impl<T: 'static + Clone + MaybeSend> From<Receiver<T>> for BroadcastStream<T> {
+impl<T: 'static + Clone + Send> From<Receiver<T>> for BroadcastStream<T> {
     fn from(recv: Receiver<T>) -> Self {
         Self::new(recv)
     }

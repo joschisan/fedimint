@@ -283,10 +283,7 @@ async fn transition_preimage_sm(
     }
 
     let client_input = ClientInput::<LightningInput> {
-        input: LightningInput::Outgoing(
-            old_state.common.outpoint,
-            OutgoingWitness::Refund,
-        ),
+        input: LightningInput::Outgoing(old_state.common.outpoint, OutgoingWitness::Refund),
         amount: old_state.common.contract.amount,
         keys: vec![old_state.common.refund_keypair],
     };

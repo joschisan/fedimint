@@ -93,8 +93,6 @@ impl TaskGroupInner {
                     .duration_since(now())
                     .unwrap_or(Duration::from_millis(10))
             });
-
-            #[cfg(not(target_family = "wasm"))]
             let join_future: Pin<Box<dyn Future<Output = _> + Send>> =
                 if let Some(timeout) = timeout {
                     Box::pin(crate::runtime::timeout(timeout, join))

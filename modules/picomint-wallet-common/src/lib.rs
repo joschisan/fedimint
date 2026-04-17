@@ -16,9 +16,7 @@ use miniscript::descriptor::Wsh;
 use picomint_core::core::ModuleKind;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
-use picomint_core::{
-    NumPeersExt, PeerId, plugin_types_trait_impl_common,
-};
+use picomint_core::{NumPeersExt, PeerId, plugin_types_trait_impl_common};
 use secp256k1::ecdsa::Signature;
 use secp256k1::{PublicKey, Scalar, XOnlyPublicKey};
 use serde::{Deserialize, Serialize};

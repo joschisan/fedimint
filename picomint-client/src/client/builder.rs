@@ -20,7 +20,7 @@ use picomint_core::invite_code::InviteCode;
 use picomint_core::module::CommonModuleInit;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::FmtCompactAnyhow as _;
-use picomint_core::{NumPeers, PeerId, maybe_add_send};
+use picomint_core::{NumPeers, PeerId};
 use picomint_derive_secret::DerivableSecret;
 use picomint_gw_client::{GatewayClientInitV2, IGatewayClientV2};
 use picomint_ln_client::LightningClientInit;
@@ -272,7 +272,7 @@ impl ClientBuilder {
 
         let mut module_recoveries: BTreeMap<
             ModuleInstanceId,
-            Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
+            Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
         > = BTreeMap::new();
         let mut module_recovery_progress_receivers: BTreeMap<
             ModuleInstanceId,
@@ -481,7 +481,7 @@ async fn init_or_recover<I: ClientModuleInit>(
     log_event_added_tx: &watch::Sender<()>,
     module_recoveries: &mut BTreeMap<
         ModuleInstanceId,
-        Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
+        Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
     >,
     module_recovery_progress_receivers: &mut BTreeMap<
         ModuleInstanceId,
@@ -545,7 +545,7 @@ async fn schedule_recovery<I: ClientModuleInit>(
     log_event_added_tx: &watch::Sender<()>,
     module_recoveries: &mut BTreeMap<
         ModuleInstanceId,
-        Pin<Box<maybe_add_send!(dyn Future<Output = anyhow::Result<()>>)>>,
+        Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
     >,
     module_recovery_progress_receivers: &mut BTreeMap<
         ModuleInstanceId,

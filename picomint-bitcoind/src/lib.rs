@@ -13,7 +13,6 @@ use anyhow::{Result, format_err};
 use bitcoin::{ScriptBuf, Transaction, Txid};
 use esplora_client::{AsyncClient, Builder};
 use picomint_core::util::SafeUrl;
-use picomint_core::{apply, async_trait_maybe_send};
 
 #[cfg(feature = "bitcoincore")]
 pub mod bitcoincore;
@@ -33,7 +32,7 @@ pub type DynBitcoindRpc = Arc<dyn IBitcoindRpc + Send + Sync>;
 /// Trait that allows interacting with the Bitcoin blockchain
 ///
 /// Functions may panic if the bitcoind node is not reachable.
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 pub trait IBitcoindRpc: Debug + Send + Sync + 'static {
     /// If a transaction is included in a block, returns the block height.
     async fn get_tx_block_height(&self, txid: &Txid) -> Result<Option<u64>>;
@@ -70,7 +69,7 @@ impl EsploraClient {
     }
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl IBitcoindRpc for EsploraClient {
     async fn get_tx_block_height(&self, txid: &Txid) -> anyhow::Result<Option<u64>> {
         Ok(self

@@ -91,7 +91,6 @@ impl TaskGroup {
 
     /// Add a task to the group that waits for CTRL+C or SIGTERM, then
     /// tells the rest of the task group to shut down.
-    #[cfg(not(target_family = "wasm"))]
     pub fn install_kill_handler(&self) {
         /// Wait for CTRL+C or SIGTERM.
         async fn wait_for_shutdown_signal() {
@@ -136,11 +135,11 @@ impl TaskGroup {
     pub fn spawn<Fut, R>(
         &self,
         name: impl Into<String>,
-        f: impl FnOnce(TaskHandle) -> Fut + MaybeSend + 'static,
+        f: impl FnOnce(TaskHandle) -> Fut + Send + 'static,
     ) -> oneshot::Receiver<R>
     where
-        Fut: Future<Output = R> + MaybeSend + 'static,
-        R: MaybeSend + 'static,
+        Fut: Future<Output = R> + Send + 'static,
+        R: Send + 'static,
     {
         self.spawn_inner(name, f, false)
     }
@@ -151,11 +150,11 @@ impl TaskGroup {
     pub fn spawn_silent<Fut, R>(
         &self,
         name: impl Into<String>,
-        f: impl FnOnce(TaskHandle) -> Fut + MaybeSend + 'static,
+        f: impl FnOnce(TaskHandle) -> Fut + Send + 'static,
     ) -> oneshot::Receiver<R>
     where
-        Fut: Future<Output = R> + MaybeSend + 'static,
-        R: MaybeSend + 'static,
+        Fut: Future<Output = R> + Send + 'static,
+        R: Send + 'static,
     {
         self.spawn_inner(name, f, true)
     }
@@ -163,12 +162,12 @@ impl TaskGroup {
     fn spawn_inner<Fut, R>(
         &self,
         name: impl Into<String>,
-        f: impl FnOnce(TaskHandle) -> Fut + MaybeSend + 'static,
+        f: impl FnOnce(TaskHandle) -> Fut + Send + 'static,
         quiet: bool,
     ) -> oneshot::Receiver<R>
     where
-        Fut: Future<Output = R> + MaybeSend + 'static,
-        R: MaybeSend + 'static,
+        Fut: Future<Output = R> + Send + 'static,
+        R: Send + 'static,
     {
         let name = name.into();
         let mut guard = TaskPanicGuard {
@@ -237,10 +236,10 @@ impl TaskGroup {
     pub fn spawn_cancellable<R>(
         &self,
         name: impl Into<String>,
-        future: impl Future<Output = R> + MaybeSend + 'static,
+        future: impl Future<Output = R> + Send + 'static,
     ) -> oneshot::Receiver<Result<R, ShuttingDownError>>
     where
-        R: MaybeSend + 'static,
+        R: Send + 'static,
     {
         self.spawn(name, |handle| async move {
             let value = handle.cancel_on_shutdown(future).await;
@@ -255,10 +254,10 @@ impl TaskGroup {
     pub fn spawn_cancellable_silent<R>(
         &self,
         name: impl Into<String>,
-        future: impl Future<Output = R> + MaybeSend + 'static,
+        future: impl Future<Output = R> + Send + 'static,
     ) -> oneshot::Receiver<Result<R, ShuttingDownError>>
     where
-        R: MaybeSend + 'static,
+        R: Send + 'static,
     {
         self.spawn_silent(name, |handle| async move {
             let value = handle.cancel_on_shutdown(future).await;
@@ -284,7 +283,7 @@ impl TaskGroup {
         }
     }
 
-    #[cfg_attr(not(target_family = "wasm"), ::async_recursion::async_recursion)]
+    #[::async_recursion::async_recursion]
     #[cfg_attr(target_family = "wasm", ::async_recursion::async_recursion(?Send))]
     pub async fn join_all_inner(self, deadline: Option<SystemTime>, errors: &mut Vec<JoinError>) {
         self.inner.join_all(deadline, errors).await;
@@ -375,116 +374,6 @@ impl Future for TaskShutdownToken {
         self.0.as_mut().poll(cx)
     }
 }
-
-/// async trait that use MaybeSend
-///
-/// # Example
-///
-/// ```rust
-/// use picomint_core::{apply, async_trait_maybe_send};
-/// #[apply(async_trait_maybe_send!)]
-/// trait Foo {
-///     // methods
-/// }
-///
-/// #[apply(async_trait_maybe_send!)]
-/// impl Foo for () {
-///     // methods
-/// }
-/// ```
-#[macro_export]
-macro_rules! async_trait_maybe_send {
-    ($($tt:tt)*) => {
-        #[cfg_attr(not(target_family = "wasm"), ::async_trait::async_trait)]
-        #[cfg_attr(target_family = "wasm", ::async_trait::async_trait(?Send))]
-        $($tt)*
-    };
-}
-
-/// MaybeSync can not be used in `dyn $Trait + MaybeSend`
-///
-/// # Example
-///
-/// ```rust
-/// use std::any::Any;
-///
-/// use picomint_core::{apply, maybe_add_send};
-/// type Foo = maybe_add_send!(dyn Any);
-/// ```
-#[cfg(not(target_family = "wasm"))]
-#[macro_export]
-macro_rules! maybe_add_send {
-    ($($tt:tt)*) => {
-        $($tt)* + Send
-    };
-}
-
-/// MaybeSync can not be used in `dyn $Trait + MaybeSend`
-///
-/// # Example
-///
-/// ```rust
-/// type Foo = maybe_add_send!(dyn Any);
-/// ```
-#[cfg(target_family = "wasm")]
-#[macro_export]
-macro_rules! maybe_add_send {
-    ($($tt:tt)*) => {
-        $($tt)*
-    };
-}
-
-/// See `maybe_add_send`
-#[cfg(not(target_family = "wasm"))]
-#[macro_export]
-macro_rules! maybe_add_send_sync {
-    ($($tt:tt)*) => {
-        $($tt)* + Send + Sync
-    };
-}
-
-/// See `maybe_add_send`
-#[cfg(target_family = "wasm")]
-#[macro_export]
-macro_rules! maybe_add_send_sync {
-    ($($tt:tt)*) => {
-        $($tt)*
-    };
-}
-
-/// `MaybeSend` is no-op on wasm and `Send` on non wasm.
-///
-/// On wasm, most types don't implement `Send` because JS types can not sent
-/// between workers directly.
-#[cfg(target_family = "wasm")]
-pub trait MaybeSend {}
-
-/// `MaybeSend` is no-op on wasm and `Send` on non wasm.
-///
-/// On wasm, most types don't implement `Send` because JS types can not sent
-/// between workers directly.
-#[cfg(not(target_family = "wasm"))]
-pub trait MaybeSend: Send {}
-
-#[cfg(not(target_family = "wasm"))]
-impl<T: Send> MaybeSend for T {}
-
-#[cfg(target_family = "wasm")]
-impl<T> MaybeSend for T {}
-
-/// `MaybeSync` is no-op on wasm and `Sync` on non wasm.
-#[cfg(target_family = "wasm")]
-pub trait MaybeSync {}
-
-/// `MaybeSync` is no-op on wasm and `Sync` on non wasm.
-#[cfg(not(target_family = "wasm"))]
-pub trait MaybeSync: Sync {}
-
-#[cfg(not(target_family = "wasm"))]
-impl<T: Sync> MaybeSync for T {}
-
-#[cfg(target_family = "wasm")]
-impl<T> MaybeSync for T {}
 
 // Used in tests when sleep functionality is desired so it can be logged.
 // Must include comment describing the reason for sleeping.

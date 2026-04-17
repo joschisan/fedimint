@@ -15,7 +15,7 @@ use picomint_core::module::audit::Audit;
 use picomint_core::module::{
     api_endpoint, ApiEndpoint, ApiError, InputMeta, TransactionItemAmounts,
 };
-use picomint_core::{apply, async_trait_maybe_send, Amount, InPoint, OutPoint, PeerId};
+use picomint_core::{Amount, InPoint, OutPoint, PeerId};
 use picomint_mint_common::config::{
     consensus_denominations, MintConfig, MintConfigConsensus, MintConfigPrivate,
 };
@@ -110,7 +110,7 @@ impl Mint {
     }
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 impl ServerModule for Mint {
     type Common = MintModuleTypes;
 

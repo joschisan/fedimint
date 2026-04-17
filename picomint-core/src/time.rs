@@ -1,7 +1,5 @@
 // nosemgrep: ban-system-time-now
 use std::time::SystemTime;
-
-#[cfg(not(target_family = "wasm"))]
 pub fn now() -> SystemTime {
     // nosemgrep: ban-system-time-now
     SystemTime::now()

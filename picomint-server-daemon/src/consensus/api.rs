@@ -4,10 +4,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use anyhow::Result;
+use picomint_api_client::config::ConsensusConfig;
 use picomint_api_client::transaction::{
     ConsensusItem, Transaction, TransactionError, TransactionSubmissionOutcome,
 };
-use picomint_api_client::config::ConsensusConfig;
+use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
@@ -20,7 +21,6 @@ use picomint_core::util::FmtCompact;
 use picomint_core::{PeerId, TransactionId};
 use picomint_logging::LOG_NET_API;
 use picomint_redb::{Database, ReadTransaction};
-use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use tokio::sync::watch::{self, Receiver, Sender};
 use tracing::{debug, warn};
 

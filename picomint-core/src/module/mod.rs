@@ -31,11 +31,10 @@ use tracing::Instrument;
 // TODO: Make this module public and remove theDkgPeerMessage`pub use` below
 mod version;
 pub use self::version::*;
+use crate::Amount;
 use crate::core::ModuleInstanceId;
 use crate::encoding::{Decodable, Encodable};
-use crate::task::MaybeSend;
 use crate::util::FmtCompact;
-use crate::{Amount, apply, async_trait_maybe_send, maybe_add_send, maybe_add_send_sync};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputMeta {
@@ -196,7 +195,7 @@ impl ApiError {
     }
 }
 
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 pub trait TypedApiEndpoint {
     type State: Sync;
 
@@ -233,7 +232,7 @@ macro_rules! __api_endpoint {
     ) => {{
         struct Endpoint;
 
-        #[$crate::apply($crate::async_trait_maybe_send!)]
+        #[::async_trait::async_trait]
         impl $crate::module::TypedApiEndpoint for Endpoint {
             #[allow(deprecated)]
             const PATH: &'static str = $path;
@@ -255,10 +254,9 @@ macro_rules! __api_endpoint {
 
 pub use __api_endpoint as api_endpoint;
 
-type HandlerFnReturn<'a> =
-    Pin<Box<maybe_add_send!(dyn Future<Output = Result<Vec<u8>, ApiError>> + 'a)>>;
+type HandlerFnReturn<'a> = Pin<Box<dyn Future<Output = Result<Vec<u8>, ApiError>> + 'a + Send>>;
 type HandlerFn<M> =
-    Box<maybe_add_send_sync!(dyn for<'a> Fn(&'a M, ApiRequestErased) -> HandlerFnReturn<'a>)>;
+    Box<dyn for<'a> Fn(&'a M, ApiRequestErased) -> HandlerFnReturn<'a> + Send + Sync>;
 
 /// Definition of an API endpoint defined by a module `M`.
 pub struct ApiEndpoint<M> {
@@ -280,7 +278,7 @@ static REQ_ID: AtomicU64 = AtomicU64::new(0);
 impl ApiEndpoint<()> {
     pub fn from_typed<E: TypedApiEndpoint>() -> ApiEndpoint<E::State>
     where
-        <E as TypedApiEndpoint>::Response: MaybeSend,
+        <E as TypedApiEndpoint>::Response: Send,
         E::Param: Debug,
         E::Response: Debug,
     {
@@ -335,7 +333,7 @@ pub trait ModuleInit: Debug + Clone + Send + Sync + 'static {
 }
 
 /// Logic and constant common between server side and client side modules
-#[apply(async_trait_maybe_send!)]
+#[async_trait::async_trait]
 pub trait CommonModuleInit: Debug + Sized {
     const CONSENSUS_VERSION: ModuleConsensusVersion;
     const KIND: crate::core::ModuleKind;

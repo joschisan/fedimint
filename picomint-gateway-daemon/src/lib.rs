@@ -50,12 +50,12 @@ use picomint_gw_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
     LightningRpcError, PaymentAction,
 };
-use picomint_lnurl::VerifyResponse;
 use picomint_ln_common::Bolt11InvoiceDescription;
 use picomint_ln_common::contracts::{IncomingContract, PaymentImage};
 use picomint_ln_common::gateway_api::{
     CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
+use picomint_lnurl::VerifyResponse;
 use picomint_logging::LOG_GATEWAY;
 use picomint_redb::Database;
 use tokio::sync::RwLock;
@@ -162,11 +162,7 @@ impl AppState {
 
     /// Get the name of a federation from its client config.
     pub async fn federation_name(client: &ClientHandleArc) -> Option<String> {
-        client
-            .config()
-            .await
-            .federation_name()
-            .map(String::from)
+        client.config().await.federation_name().map(String::from)
     }
 
     /// Get info for all connected federations.
@@ -183,9 +179,7 @@ impl AppState {
     }
 
     /// Get JSON client configs for all connected federations.
-    pub async fn all_federation_configs(
-        &self,
-    ) -> BTreeMap<FederationId, serde_json::Value> {
+    pub async fn all_federation_configs(&self) -> BTreeMap<FederationId, serde_json::Value> {
         let clients = self.clients.read().await;
         let mut configs = BTreeMap::new();
         for (federation_id, client) in clients.iter() {

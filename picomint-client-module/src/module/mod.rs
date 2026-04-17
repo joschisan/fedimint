@@ -11,11 +11,8 @@ use picomint_api_client::config::ConsensusConfig;
 use picomint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
-use picomint_core::task::{MaybeSend, MaybeSync};
 use picomint_core::util::{BoxFuture, BoxStream};
-use picomint_core::{
-    Amount, PeerId, TransactionId, apply, async_trait_maybe_send, maybe_add_send_sync,
-};
+use picomint_core::{Amount, PeerId, TransactionId};
 use picomint_eventlog::{Event, EventLogId, PersistedLogEntry};
 use picomint_logging::LOG_CLIENT;
 use picomint_redb::{Database, WriteTxRef};
@@ -40,15 +37,10 @@ pub struct FinalContribution<I, O> {
 }
 
 pub type SpawnSms = Box<
-    maybe_add_send_sync!(
-        dyn for<'a> FnOnce(
-                &'a WriteTxRef<'_>,
-                TransactionId,
-                IdxRange,
-                IdxRange,
-            ) -> BoxFuture<'a, ()>
-            + 'static
-    ),
+    dyn for<'a> FnOnce(&'a WriteTxRef<'_>, TransactionId, IdxRange, IdxRange) -> BoxFuture<'a, ()>
+        + 'static
+        + Send
+        + Sync,
 >;
 
 pub mod init;
@@ -62,12 +54,12 @@ pub mod recovery;
 ///
 /// This allows lose coupling, less recompilation and better control and
 /// understanding of what functionality of the Client the modules get access to.
-#[apply(async_trait_maybe_send!)]
-pub trait ClientContextIface: MaybeSend + MaybeSync {
+#[async_trait::async_trait]
+pub trait ClientContextIface: Send + Sync {
     /// Return the module at `instance` as `&dyn Any` so the caller can
     /// downcast to the concrete module type. Panics if no module is mounted
     /// at the given instance id.
-    fn get_module(&self, instance: ModuleInstanceId) -> &(maybe_add_send_sync!(dyn Any));
+    fn get_module(&self, instance: ModuleInstanceId) -> &(dyn Any + Send + Sync);
     fn api_clone(&self) -> FederationApi;
     async fn finalize_and_submit_transaction(
         &self,
@@ -401,8 +393,8 @@ where
 }
 
 /// Picomint module client
-#[apply(async_trait_maybe_send!)]
-pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
+#[async_trait::async_trait]
+pub trait ClientModule: Debug + Send + Sync + 'static {
     type Init: ClientModuleInit;
 
     /// Common module types shared between client and server
@@ -565,4 +557,4 @@ pub trait ClientModule: Debug + MaybeSend + MaybeSync + 'static {
 // Re-export types from picomint_core
 pub use picomint_core::{IdxRange, OutPointRange, OutPointRangeIter};
 
-pub type StateGenerator<S> = Arc<maybe_add_send_sync!(dyn Fn(OutPointRange) -> Vec<S> + 'static)>;
+pub type StateGenerator<S> = Arc<dyn Fn(OutPointRange) -> Vec<S> + 'static + Send + Sync>;
