@@ -46,6 +46,7 @@ picomint-wallet-server = { workspace = true }
 futures = { workspace = true }
 group = { workspace = true }
 iroh = { workspace = true, default-features = false }
+iroh-base = { workspace = true, default-features = false, features = ["key"] }
 maud = { workspace = true }
 parity-scale-codec = { workspace = true }
 qrcode = { workspace = true }

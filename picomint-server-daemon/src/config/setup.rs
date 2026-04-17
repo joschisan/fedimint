@@ -7,10 +7,27 @@ use iroh::SecretKey;
 use picomint_core::base32::PICOMINT_PREFIX;
 use picomint_core::config::META_FEDERATION_NAME_KEY;
 use picomint_core::{PeerId, base32};
+use picomint_encoding::{Decodable, Encodable};
+use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
-use crate::config::{ConfigGenParams, ConfigGenSettings, PeerSetupCode};
+use crate::config::{ConfigGenParams, ConfigGenSettings};
+
+/// Connection information sent between peers in order to start config gen.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]
+pub struct PeerSetupCode {
+    /// Name of the peer
+    pub name: String,
+    /// Public key of the peer's single iroh endpoint (serves both p2p and
+    /// client-API traffic, demuxed by node-id on accept).
+    pub pk: iroh_base::PublicKey,
+    /// Federation name set by the leader
+    pub federation_name: Option<String>,
+    /// Total number of guardians (including the one who sets this), set by the
+    /// leader
+    pub federation_size: Option<u32>,
+}
 
 /// The state of the server while config gen is running.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

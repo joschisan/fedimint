@@ -4394,6 +4394,7 @@ dependencies = [
  "futures",
  "group",
  "iroh",
+ "iroh-base",
  "maud",
  "parity-scale-codec",
  "picomint-api-client",
