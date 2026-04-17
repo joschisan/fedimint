@@ -11,7 +11,7 @@ use anyhow::{Context, ensure};
 use group::Curve;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::bitcoin::Network;
-use picomint_core::core::ModuleInstanceId;
+use picomint_core::core::ModuleKind;
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::time::duration_since_epoch;
@@ -280,16 +280,11 @@ impl ServerModule for Lightning {
         })
     }
 
-    async fn audit(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        audit: &mut Audit,
-        module_instance_id: ModuleInstanceId,
-    ) {
+    async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
         // Both incoming and outgoing contracts represent liabilities to the federation
         // since they are obligations to issue notes.
         audit.add_items(
-            module_instance_id,
+            ModuleKind::Ln,
             dbtx.iter(&OUTGOING_CONTRACT)
                 .into_iter()
                 .map(|(outpoint, contract)| {
@@ -301,7 +296,7 @@ impl ServerModule for Lightning {
         );
 
         audit.add_items(
-            module_instance_id,
+            ModuleKind::Ln,
             dbtx.iter(&INCOMING_CONTRACT)
                 .into_iter()
                 .map(|(outpoint, contract)| {

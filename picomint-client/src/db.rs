@@ -1,6 +1,6 @@
 use picomint_api_client::config::ConsensusConfig;
 use picomint_client_module::module::recovery::RecoveryProgress;
-use picomint_core::core::ModuleInstanceId;
+use picomint_core::core::ModuleKind;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::table;
 use serde::Serialize;
@@ -81,7 +81,7 @@ impl InitState {
 
 #[derive(Debug, Encodable, Decodable, Serialize)]
 pub struct ClientModuleRecovery {
-    pub module_instance_id: ModuleInstanceId,
+    pub kind: ModuleKind,
 }
 
 picomint_core::consensus_key!(ClientModuleRecovery);

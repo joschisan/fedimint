@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use picomint_api_client::transaction::Transaction;
-use picomint_api_client::wire::{self, LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
+use picomint_api_client::wire;
 use picomint_core::module::InputMeta;
 use picomint_core::module::audit::Audit;
 use picomint_core::{InPoint, OutPoint, PeerId};
@@ -136,17 +136,13 @@ impl Server {
 
     pub async fn audit(&self, dbtx: &WriteTransaction, audit: &mut Audit) {
         self.mint
-            .audit(&dbtx.isolate(MINT_NS.to_string()), audit, MINT_INSTANCE_ID)
+            .audit(&dbtx.isolate(MINT_NS.to_string()), audit)
             .await;
         self.ln
-            .audit(&dbtx.isolate(LN_NS.to_string()), audit, LN_INSTANCE_ID)
+            .audit(&dbtx.isolate(LN_NS.to_string()), audit)
             .await;
         self.wallet
-            .audit(
-                &dbtx.isolate(WALLET_NS.to_string()),
-                audit,
-                WALLET_INSTANCE_ID,
-            )
+            .audit(&dbtx.isolate(WALLET_NS.to_string()), audit)
             .await;
     }
 }

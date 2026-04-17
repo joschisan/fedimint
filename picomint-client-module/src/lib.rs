@@ -14,7 +14,7 @@
 use std::ops::{self};
 
 use picomint_api_client::api::FederationApi;
-pub use picomint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
+pub use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::{PeerId, TransactionId};
 use picomint_eventlog::{Event, EventKind};
 use picomint_redb::Database;
@@ -65,12 +65,12 @@ impl Event for TxRejectedEvent {
 
 #[derive(Serialize, Deserialize)]
 pub struct ModuleRecoveryStarted {
-    module_id: ModuleInstanceId,
+    pub kind: ModuleKind,
 }
 
 impl ModuleRecoveryStarted {
-    pub fn new(module_id: ModuleInstanceId) -> Self {
-        Self { module_id }
+    pub fn new(kind: ModuleKind) -> Self {
+        Self { kind }
     }
 }
 
@@ -81,7 +81,7 @@ impl Event for ModuleRecoveryStarted {
 
 #[derive(Serialize, Deserialize)]
 pub struct ModuleRecoveryCompleted {
-    pub module_id: ModuleInstanceId,
+    pub kind: ModuleKind,
 }
 
 impl Event for ModuleRecoveryCompleted {
@@ -91,8 +91,6 @@ impl Event for ModuleRecoveryCompleted {
 
 /// Resources particular to a module instance
 pub struct ClientModuleInstance<'m, M: ClientModule> {
-    /// Instance id of the module
-    pub id: ModuleInstanceId,
     /// Module-specific DB
     pub db: Database,
     /// Module-specific API

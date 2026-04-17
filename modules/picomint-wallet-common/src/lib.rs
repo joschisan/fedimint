@@ -25,7 +25,7 @@ use thiserror::Error;
 pub mod config;
 pub mod endpoint_constants;
 
-pub const KIND: ModuleKind = ModuleKind::from_static_str("wallet");
+pub const KIND: ModuleKind = ModuleKind::Wallet;
 
 pub const MODULE_CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::new(1, 0);
 

@@ -1,5 +1,4 @@
 use picomint_api_client::session_outcome::{AcceptedItem, SignedSessionOutcome};
-use picomint_core::core::ModuleInstanceId;
 use picomint_core::{TransactionId, table};
 
 table!(
@@ -10,7 +9,7 @@ table!(
 
 table!(
     ACCEPTED_TRANSACTION,
-    TransactionId => Vec<ModuleInstanceId>,
+    TransactionId => (),
     "accepted-transaction",
 );
 

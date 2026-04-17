@@ -1,11 +1,8 @@
 //! Picomint Core API (common) module interface
 //!
-//! Picomint supports externally implemented modules.
-//!
-//! This (Rust) module defines common interoperability types
+//! This module defines common interoperability types
 //! and functionality that is used on both client and sever side.
 use core::fmt;
-use std::borrow::Cow;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 
@@ -123,57 +120,49 @@ impl<'de> Deserialize<'de> for OperationId {
 
 crate::consensus_key!(OperationId);
 
-/// Module instance ID
+/// Type of a module in the fixed set.
 ///
-/// This value uniquely identifies a single instance of a module in a
-/// federation.
-///
-/// In case a single [`ModuleKind`] is instantiated twice (rare, but possible),
-/// each instance will have a different id.
-///
-/// Note: We have used this type differently before, assuming each `u16`
-/// uniquly identifies a type of module in question. This function will move
-/// to a `ModuleKind` type which only identifies type of a module (mint vs
-/// wallet vs ln, etc)
-// TODO: turn in a newtype
-pub type ModuleInstanceId = u16;
-
-/// A type of a module
-///
-/// This is a short string that identifies type of a module.
-/// Authors of 3rd party modules are free to come up with a string,
-/// long enough to avoid conflicts with similar modules.
-#[derive(PartialEq, Eq, Clone, PartialOrd, Ord, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ModuleKind(Cow<'static, str>);
+/// Discriminants are also used as the `ChildId` input for per-module secret
+/// derivation and as the stable wire tag. Order matters — do not reorder.
+#[derive(
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Encodable,
+    Decodable,
+)]
+#[serde(rename_all = "lowercase")]
+#[repr(u8)]
+pub enum ModuleKind {
+    Mint = 0,
+    Ln = 1,
+    Wallet = 2,
+}
 
 impl ModuleKind {
-    pub fn clone_from_str(s: &str) -> Self {
-        Self(Cow::from(s.to_owned()))
-    }
-
-    pub const fn from_static_str(s: &'static str) -> Self {
-        Self(Cow::Borrowed(s))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mint => "mint",
+            Self::Ln => "ln",
+            Self::Wallet => "wallet",
+        }
     }
 }
 
 impl fmt::Display for ModuleKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        std::fmt::Display::fmt(&self.0, f)
+        f.write_str(self.as_str())
     }
 }
 
 impl fmt::Debug for ModuleKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        std::fmt::Display::fmt(&self.0, f)
-    }
-}
-
-impl From<&'static str> for ModuleKind {
-    fn from(val: &'static str) -> Self {
-        Self::from_static_str(val)
+        f.write_str(self.as_str())
     }
 }

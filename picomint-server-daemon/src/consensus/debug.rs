@@ -11,7 +11,7 @@ impl fmt::Debug for DebugConsensusItem<'_> {
             ConsensusItem::Module(mci) => {
                 f.write_fmt(format_args!(
                     "Module CI: module={} ci={}",
-                    mci.module_instance_id(),
+                    mci.module_kind(),
                     mci
                 ))?;
             }

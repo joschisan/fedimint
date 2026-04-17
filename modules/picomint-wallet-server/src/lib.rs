@@ -30,7 +30,7 @@ use db::{
 };
 use miniscript::descriptor::Wsh;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
-use picomint_core::core::ModuleInstanceId;
+use picomint_core::core::ModuleKind;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
@@ -486,12 +486,7 @@ impl ServerModule for Wallet {
         })
     }
 
-    async fn audit(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        audit: &mut Audit,
-        module_instance_id: ModuleInstanceId,
-    ) {
+    async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
         let items = dbtx
             .iter(&FEDERATION_WALLET)
             .into_iter()
@@ -502,7 +497,7 @@ impl ServerModule for Wallet {
                 )
             });
 
-        audit.add_items(module_instance_id, items);
+        audit.add_items(ModuleKind::Wallet, items);
     }
 
     async fn handle_api(

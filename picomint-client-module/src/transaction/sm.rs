@@ -149,7 +149,6 @@ fn log_tx_event<E: Event + Send>(
     picomint_eventlog::log_event(
         dbtx,
         ctx.client.get().log_event_added_tx(),
-        None,
         Some(operation_id),
         event,
     );

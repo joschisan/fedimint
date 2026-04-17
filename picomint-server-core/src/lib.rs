@@ -10,7 +10,6 @@ pub mod config;
 
 use std::fmt::Debug;
 
-use picomint_core::core::ModuleInstanceId;
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{
     ApiError, ApiRequestErased, InputMeta, ModuleCommon, TransactionItemAmounts,
@@ -66,12 +65,7 @@ pub trait ServerModule: Debug + Sized {
     ) -> Result<TransactionItemAmounts, <Self::Common as ModuleCommon>::OutputError>;
 
     /// Sum assets and liabilities of the module into the audit accumulator.
-    async fn audit(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        audit: &mut Audit,
-        module_instance_id: ModuleInstanceId,
-    );
+    async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit);
 
     /// Dispatch a client API request to this module. Decode the request
     /// params, run the matching handler, and return the consensus-encoded

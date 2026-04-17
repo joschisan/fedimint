@@ -6,7 +6,7 @@ use anyhow::bail;
 use bitcoin::key::Secp256k1;
 use picomint_api_client::api::{ApiScope, FederationApi};
 use picomint_api_client::config::ConsensusConfig;
-use picomint_api_client::{Endpoint, download_from_invite_code, wire};
+use picomint_api_client::{Endpoint, download_from_invite_code};
 use picomint_client_module::ModuleRecoveryStarted;
 use picomint_client_module::executor::ModuleExecutor;
 use picomint_client_module::module::init::ClientModuleInit;
@@ -15,7 +15,7 @@ use picomint_client_module::module::{ClientModule, FinalClientIface};
 use picomint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use picomint_client_module::transaction::TxSubmissionSmContext;
 use picomint_core::config::FederationId;
-use picomint_core::core::ModuleInstanceId;
+use picomint_core::core::ModuleKind;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::CommonModuleInit;
 use picomint_core::task::TaskGroup;
@@ -271,19 +271,18 @@ impl ClientBuilder {
         let num_peers = NumPeers::from(config.iroh_endpoints.len());
 
         let mut module_recoveries: BTreeMap<
-            ModuleInstanceId,
+            ModuleKind,
             Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
         > = BTreeMap::new();
         let mut module_recovery_progress_receivers: BTreeMap<
-            ModuleInstanceId,
+            ModuleKind,
             watch::Receiver<RecoveryProgress>,
         > = BTreeMap::new();
 
         let mint = init_or_recover(
             &self.mint_init,
-            wire::MINT_INSTANCE_ID,
+            ModuleKind::Mint,
             ApiScope::Mint,
-            "mint",
             config.mint.clone(),
             &db,
             &api,
@@ -302,9 +301,8 @@ impl ClientBuilder {
 
         let wallet = init_or_recover(
             &self.wallet_init,
-            wire::WALLET_INSTANCE_ID,
+            ModuleKind::Wallet,
             ApiScope::Wallet,
-            "wallet",
             config.wallet.clone(),
             &db,
             &api,
@@ -325,9 +323,8 @@ impl ClientBuilder {
             LnInit::Regular(init) => LnFlavor::Regular(
                 init_or_recover(
                     &init,
-                    wire::LN_INSTANCE_ID,
+                    ModuleKind::Ln,
                     ApiScope::Ln,
-                    "ln",
                     config.ln.clone(),
                     &db,
                     &api,
@@ -347,9 +344,8 @@ impl ClientBuilder {
             LnInit::Gateway(init) => LnFlavor::Gateway(
                 init_or_recover(
                     &init,
-                    wire::LN_INSTANCE_ID,
+                    ModuleKind::Ln,
                     ApiScope::Ln,
-                    "ln",
                     config.ln.clone(),
                     &db,
                     &api,
@@ -377,7 +373,7 @@ impl ClientBuilder {
 
         let recovery_receiver_init_val = module_recovery_progress_receivers
             .iter()
-            .map(|(module_instance_id, rx)| (*module_instance_id, *rx.borrow()))
+            .map(|(kind, rx)| (*kind, *rx.borrow()))
             .collect::<BTreeMap<_, _>>();
         let (client_recovery_progress_sender, client_recovery_progress_receiver) =
             watch::channel(recovery_receiver_init_val);
@@ -470,9 +466,8 @@ impl ClientBuilder {
 #[allow(clippy::too_many_arguments)]
 async fn init_or_recover<I: ClientModuleInit>(
     init: &I,
-    module_instance_id: ModuleInstanceId,
+    kind: ModuleKind,
     api_scope: ApiScope,
-    kind_str: &'static str,
     typed_cfg: <<I as picomint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     db: &Database,
     api: &FederationApi,
@@ -485,20 +480,19 @@ async fn init_or_recover<I: ClientModuleInit>(
     init_state: &InitState,
     log_event_added_tx: &watch::Sender<()>,
     module_recoveries: &mut BTreeMap<
-        ModuleInstanceId,
+        ModuleKind,
         Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
     >,
     module_recovery_progress_receivers: &mut BTreeMap<
-        ModuleInstanceId,
+        ModuleKind,
         watch::Receiver<RecoveryProgress>,
     >,
 ) -> anyhow::Result<Arc<<I as ClientModuleInit>::Module>> {
     if init_state.does_require_recovery() {
         schedule_recovery(
             init,
-            module_instance_id,
+            kind,
             api_scope,
-            kind_str,
             typed_cfg.clone(),
             db,
             api,
@@ -514,18 +508,18 @@ async fn init_or_recover<I: ClientModuleInit>(
         .await?;
     }
 
-    let module_db = db.isolate(format!("module-{module_instance_id}"));
+    let module_db = db.isolate(format!("module-{kind}"));
     let args = picomint_client_module::module::init::ClientModuleInitArgs {
         federation_id: fed_id,
         peer_num: num_peers.total(),
         cfg: typed_cfg.clone(),
         db: module_db.clone(),
-        module_root_secret: root_secret.derive_module_secret(module_instance_id),
+        module_root_secret: root_secret.derive_module_secret(kind),
         api: api.clone(),
         module_api: api.with_scope(api_scope),
         context: picomint_client_module::module::ClientContext::new(
             final_client,
-            module_instance_id,
+            kind,
             api_scope,
             module_db,
         ),
@@ -539,9 +533,8 @@ async fn init_or_recover<I: ClientModuleInit>(
 #[allow(clippy::too_many_arguments)]
 async fn schedule_recovery<I: ClientModuleInit>(
     init: &I,
-    module_instance_id: ModuleInstanceId,
+    kind: ModuleKind,
     api_scope: ApiScope,
-    kind_str: &'static str,
     cfg: <<I as picomint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
     db: &Database,
     api: &FederationApi,
@@ -552,25 +545,26 @@ async fn schedule_recovery<I: ClientModuleInit>(
     num_peers: NumPeers,
     log_event_added_tx: &watch::Sender<()>,
     module_recoveries: &mut BTreeMap<
-        ModuleInstanceId,
+        ModuleKind,
         Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
     >,
     module_recovery_progress_receivers: &mut BTreeMap<
-        ModuleInstanceId,
+        ModuleKind,
         watch::Receiver<RecoveryProgress>,
     >,
 ) -> anyhow::Result<()>
 where
     I: Clone,
 {
-    let existing_recovery_state = db.begin_read().await.as_ref().get(
-        &CLIENT_MODULE_RECOVERY,
-        &ClientModuleRecovery { module_instance_id },
-    );
+    let existing_recovery_state = db
+        .begin_read()
+        .await
+        .as_ref()
+        .get(&CLIENT_MODULE_RECOVERY, &ClientModuleRecovery { kind });
 
     let progress = match existing_recovery_state {
         Some(state) if state.is_done() => {
-            debug!(id = %module_instance_id, kind = %kind_str, "Module recovery already complete");
+            debug!(kind = %kind, "Module recovery already complete");
             return Ok(());
         }
         Some(state) => state.progress,
@@ -582,12 +576,11 @@ where
                 &tx,
                 log_event_added_tx.clone(),
                 None,
-                None,
-                ModuleRecoveryStarted::new(module_instance_id),
+                ModuleRecoveryStarted::new(kind),
             );
             tx.insert(
                 &CLIENT_MODULE_RECOVERY,
-                &ClientModuleRecovery { module_instance_id },
+                &ClientModuleRecovery { kind },
                 &ClientModuleRecoveryState { progress },
             );
             dbtx.commit().await;
@@ -596,7 +589,7 @@ where
     };
 
     let (progress_tx, progress_rx) = tokio::sync::watch::channel(progress);
-    let module_db = db.isolate(format!("module-{module_instance_id}"));
+    let module_db = db.isolate(format!("module-{kind}"));
     let module_api = api.with_scope(api_scope);
     let init_clone = init.clone();
     let api_clone = api.clone();
@@ -610,12 +603,12 @@ where
             num_peers,
             cfg: cfg.clone(),
             db: module_db.clone(),
-            module_root_secret: root_secret_clone.derive_module_secret(module_instance_id),
+            module_root_secret: root_secret_clone.derive_module_secret(kind),
             api: api_clone,
             module_api,
             context: picomint_client_module::module::ClientContext::new(
                 final_client_clone,
-                module_instance_id,
+                kind,
                 api_scope,
                 module_db,
             ),
@@ -627,14 +620,14 @@ where
             .inspect_err(|err| {
                 warn!(
                     target: LOG_CLIENT,
-                    module_id = module_instance_id, kind = %kind_str,
+                    kind = %kind,
                     err = %err.fmt_compact_anyhow(), "Module failed to recover"
                 );
             })
     });
 
-    module_recoveries.insert(module_instance_id, recover_fut);
-    module_recovery_progress_receivers.insert(module_instance_id, progress_rx);
+    module_recoveries.insert(kind, recover_fut);
+    module_recovery_progress_receivers.insert(kind, progress_rx);
     Ok(())
 }
 

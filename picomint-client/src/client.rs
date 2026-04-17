@@ -24,7 +24,7 @@ use picomint_client_module::{
     ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
 };
 use picomint_core::config::FederationId;
-use picomint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
+use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::encoding::Encodable as _;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
@@ -119,7 +119,7 @@ pub struct Client {
 
     /// Updates about client recovery progress
     client_recovery_progress_receiver:
-        watch::Receiver<BTreeMap<ModuleInstanceId, RecoveryProgress>>,
+        watch::Receiver<BTreeMap<ModuleKind, RecoveryProgress>>,
 
     /// Broadcast channel that pings on every committed event log insertion.
     /// `.subscribe()` hands out a fresh receiver to each waiter.
@@ -248,7 +248,7 @@ impl Client {
             let contribution = self
                 .mint
                 .create_final_inputs_and_outputs(
-                    &dbtx.isolate(format!("module-{}", wire::MINT_INSTANCE_ID)),
+                    &dbtx.isolate(format!("module-{}", ModuleKind::Mint)),
                     operation_id,
                     in_amount,
                     out_amount,
@@ -343,12 +343,12 @@ impl Client {
             let inputs = transaction
                 .inputs
                 .iter()
-                .map(|i| i.module_instance_id())
+                .map(|i| i.module_kind())
                 .collect::<Vec<_>>();
             let outputs = transaction
                 .outputs
                 .iter()
-                .map(|o| o.module_instance_id())
+                .map(|o| o.module_kind())
                 .collect::<Vec<_>>();
             warn!(
                 target: LOG_CLIENT_NET_API,
@@ -393,7 +393,7 @@ impl Client {
             )
             .await;
 
-        self.log_event_dbtx(dbtx, None, Some(operation_id), TxCreatedEvent { txid });
+        self.log_event_dbtx(dbtx, Some(operation_id), TxCreatedEvent { txid });
 
         Ok(OutPointRange::new(
             txid,
@@ -429,21 +429,21 @@ impl Client {
         &'_ self,
     ) -> anyhow::Result<ClientModuleInstance<'_, M>> {
         let tid = TypeId::of::<M>();
-        let (module_any, id, scope): (&(dyn Any + Send + Sync), ModuleInstanceId, ApiScope) =
+        let (module_any, kind, scope): (&(dyn Any + Send + Sync), ModuleKind, ApiScope) =
             if tid == TypeId::of::<MintClientModule>() {
-                (&*self.mint, wire::MINT_INSTANCE_ID, ApiScope::Mint)
+                (&*self.mint, ModuleKind::Mint, ApiScope::Mint)
             } else if tid == TypeId::of::<WalletClientModule>() {
-                (&*self.wallet, wire::WALLET_INSTANCE_ID, ApiScope::Wallet)
+                (&*self.wallet, ModuleKind::Wallet, ApiScope::Wallet)
             } else if tid == TypeId::of::<LightningClientModule>() {
                 match &self.ln {
-                    LnFlavor::Regular(m) => (&**m, wire::LN_INSTANCE_ID, ApiScope::Ln),
+                    LnFlavor::Regular(m) => (&**m, ModuleKind::Ln, ApiScope::Ln),
                     LnFlavor::Gateway(_) => {
                         bail!("LightningClientModule is not mounted on this client")
                     }
                 }
             } else if tid == TypeId::of::<GatewayClientModuleV2>() {
                 match &self.ln {
-                    LnFlavor::Gateway(m) => (&**m, wire::LN_INSTANCE_ID, ApiScope::Ln),
+                    LnFlavor::Gateway(m) => (&**m, ModuleKind::Ln, ApiScope::Ln),
                     LnFlavor::Regular(_) => {
                         bail!("GatewayClientModuleV2 is not mounted on this client")
                     }
@@ -455,9 +455,8 @@ impl Client {
         let module: &M = module_any
             .downcast_ref::<M>()
             .expect("TypeId of M was just matched");
-        let db = self.db().isolate(format!("module-{id}"));
+        let db = self.db().isolate(format!("module-{kind}"));
         Ok(ClientModuleInstance {
-            id,
             db,
             api: self.api().with_scope(scope),
             module,
@@ -479,7 +478,7 @@ impl Client {
             .get_balance(
                 &dbtx
                     .as_ref()
-                    .isolate(format!("module-{}", wire::MINT_INSTANCE_ID)),
+                    .isolate(format!("module-{}", ModuleKind::Mint)),
             )
             .await)
     }
@@ -499,7 +498,7 @@ impl Client {
                 let dbtx = db.begin_write().await;
                 let balance = mint
                     .get_balance(
-                        &dbtx.as_ref().isolate(format!("module-{}", wire::MINT_INSTANCE_ID)),
+                        &dbtx.as_ref().isolate(format!("module-{}", ModuleKind::Mint)),
                     )
                     .await;
 
@@ -547,7 +546,7 @@ impl Client {
     /// Don't use this stream for detecting completion of recovery.
     pub fn subscribe_to_recovery_progress(
         &self,
-    ) -> impl Stream<Item = (ModuleInstanceId, RecoveryProgress)> + use<> {
+    ) -> impl Stream<Item = (ModuleKind, RecoveryProgress)> + use<> {
         WatchStream::new(self.client_recovery_progress_receiver.clone())
             .flat_map(futures::stream::iter)
     }
@@ -556,19 +555,13 @@ impl Client {
         &self,
         module_kind: ModuleKind,
     ) -> anyhow::Result<()> {
-        let target_id = match module_kind.as_str() {
-            "mint" => wire::MINT_INSTANCE_ID,
-            "ln" => wire::LN_INSTANCE_ID,
-            "wallet" => wire::WALLET_INSTANCE_ID,
-            _ => anyhow::bail!("Unknown module kind {module_kind}"),
-        };
         let mut recovery_receiver = self.client_recovery_progress_receiver.clone();
         recovery_receiver
             .wait_for(|in_progress| {
                 !in_progress
                     .iter()
-                    .filter(|(instance_id, _)| **instance_id == target_id)
-                    .any(|(_id, progress)| !progress.is_done())
+                    .filter(|(kind, _)| **kind == module_kind)
+                    .any(|(_, progress)| !progress.is_done())
             })
             .await
             .context("Recovery task completed and update receiver disconnected, but the desired modules are still unavailable or failed to recover")?;
@@ -578,24 +571,18 @@ impl Client {
 
     fn spawn_module_recoveries_task(
         &self,
-        recovery_sender: watch::Sender<BTreeMap<ModuleInstanceId, RecoveryProgress>>,
+        recovery_sender: watch::Sender<BTreeMap<ModuleKind, RecoveryProgress>>,
         module_recoveries: BTreeMap<
-            ModuleInstanceId,
+            ModuleKind,
             Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
         >,
         module_recovery_progress_receivers: BTreeMap<
-            ModuleInstanceId,
+            ModuleKind,
             watch::Receiver<RecoveryProgress>,
         >,
     ) {
         let db = self.db.clone();
         let log_event_added_tx = self.log_event_added_tx.clone();
-        let module_kinds: BTreeMap<ModuleInstanceId, String> = [
-            (wire::MINT_INSTANCE_ID, "mint".to_string()),
-            (wire::LN_INSTANCE_ID, "ln".to_string()),
-            (wire::WALLET_INSTANCE_ID, "wallet".to_string()),
-        ]
-        .into();
         let task_group = self.task_group.clone();
         self.task_group
             .spawn("module recoveries", |_task_handle| async move {
@@ -605,7 +592,6 @@ impl Client {
                     recovery_sender,
                     module_recoveries,
                     module_recovery_progress_receivers,
-                    module_kinds,
                     task_group,
                 )
                 .await;
@@ -615,16 +601,15 @@ impl Client {
     async fn run_module_recoveries_task(
         db: Database,
         log_event_added_tx: watch::Sender<()>,
-        recovery_sender: watch::Sender<BTreeMap<ModuleInstanceId, RecoveryProgress>>,
+        recovery_sender: watch::Sender<BTreeMap<ModuleKind, RecoveryProgress>>,
         module_recoveries: BTreeMap<
-            ModuleInstanceId,
+            ModuleKind,
             Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
         >,
         module_recovery_progress_receivers: BTreeMap<
-            ModuleInstanceId,
+            ModuleKind,
             watch::Receiver<RecoveryProgress>,
         >,
-        module_kinds: BTreeMap<ModuleInstanceId, String>,
         task_group: TaskGroup,
     ) {
         debug!(target: LOG_CLIENT_RECOVERY, num_modules=%module_recovery_progress_receivers.len(), "Starting module recoveries");
@@ -634,22 +619,22 @@ impl Client {
         // write transaction while yielding, deadlocking the progress handler
         // that needs its own write transaction.
         let (completion_tx, completion_rx) =
-            tokio::sync::mpsc::unbounded_channel::<ModuleInstanceId>();
+            tokio::sync::mpsc::unbounded_channel::<ModuleKind>();
 
-        for (module_instance_id, f) in module_recoveries {
+        for (kind, f) in module_recoveries {
             let tx = completion_tx.clone();
             task_group.spawn(
-                format!("module {module_instance_id} recovery"),
+                format!("module {kind} recovery"),
                 move |_| async move {
                     match f.await {
                         Ok(()) => {
-                            let _ = tx.send(module_instance_id);
+                            let _ = tx.send(kind);
                         }
                         Err(err) => {
                             warn!(
                                 target: LOG_CLIENT,
                                 err = %err.fmt_compact_anyhow(),
-                                module_instance_id,
+                                kind = %kind,
                                 "Module recovery failed"
                             );
                             // Don't send completion - recovery is considered
@@ -662,29 +647,29 @@ impl Client {
         drop(completion_tx);
 
         let progress_stream = futures::stream::FuturesUnordered::new();
-        for (module_instance_id, rx) in module_recovery_progress_receivers {
+        for (kind, rx) in module_recovery_progress_receivers {
             progress_stream.push(
                 tokio_stream::wrappers::WatchStream::new(rx)
                     .fuse()
-                    .map(move |progress| (module_instance_id, Some(progress))),
+                    .map(move |progress| (kind, Some(progress))),
             );
         }
 
         let completion_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(completion_rx)
-            .map(|module_instance_id| (module_instance_id, None));
+            .map(|kind| (kind, None));
 
         let mut futures = futures::stream::select(
             futures::stream::select_all(progress_stream),
             completion_stream,
         );
 
-        while let Some((module_instance_id, progress)) = futures.next().await {
+        while let Some((kind, progress)) = futures.next().await {
             let dbtx = db.begin_write().await;
             let tx = dbtx.as_ref();
 
             let prev_progress = *recovery_sender
                 .borrow()
-                .get(&module_instance_id)
+                .get(&kind)
                 .expect("existing progress must be present");
 
             let progress = if prev_progress.is_done() {
@@ -699,7 +684,7 @@ impl Client {
             if !prev_progress.is_done() && progress.is_done() {
                 info!(
                     target: LOG_CLIENT,
-                    module_instance_id,
+                    kind = %kind,
                     progress = format!("{}/{}", progress.complete, progress.total),
                     "Recovery complete"
                 );
@@ -707,16 +692,12 @@ impl Client {
                     &tx,
                     log_event_added_tx.clone(),
                     None,
-                    None,
-                    ModuleRecoveryCompleted {
-                        module_id: module_instance_id,
-                    },
+                    ModuleRecoveryCompleted { kind },
                 );
             } else {
                 info!(
                     target: LOG_CLIENT,
-                    module_instance_id,
-                    kind = module_kinds.get(&module_instance_id).map(String::as_str).unwrap_or("unknown"),
+                    kind = %kind,
                     progress = format!("{}/{}", progress.complete, progress.total),
                     "Recovery progress"
                 );
@@ -724,13 +705,13 @@ impl Client {
 
             tx.insert(
                 &CLIENT_MODULE_RECOVERY,
-                &ClientModuleRecovery { module_instance_id },
+                &ClientModuleRecovery { kind },
                 &ClientModuleRecoveryState { progress },
             );
             dbtx.commit().await;
 
             recovery_sender.send_modify(|v| {
-                v.insert(module_instance_id, progress);
+                v.insert(kind, progress);
             });
         }
         debug!(target: LOG_CLIENT_RECOVERY, "Recovery executor stopped");
@@ -766,7 +747,6 @@ impl Client {
     pub fn log_event_dbtx<E>(
         &self,
         dbtx: &WriteTxRef<'_>,
-        module_id: Option<ModuleInstanceId>,
         operation_id: Option<OperationId>,
         event: E,
     ) where
@@ -775,7 +755,6 @@ impl Client {
         picomint_eventlog::log_event(
             dbtx,
             self.log_event_added_tx.clone(),
-            module_id,
             operation_id,
             event,
         );
@@ -785,18 +764,15 @@ impl Client {
         &self,
         dbtx: &WriteTxRef<'_>,
         kind: EventKind,
-        module: Option<(ModuleKind, ModuleInstanceId)>,
+        module: Option<ModuleKind>,
         operation_id: Option<OperationId>,
         payload: Vec<u8>,
     ) {
-        let module_id = module.as_ref().map(|m| m.1);
-        let module_kind = module.map(|m| m.0);
         picomint_eventlog::log_event_raw(
             dbtx,
             self.log_event_added_tx.clone(),
             kind,
-            module_kind,
-            module_id,
+            module,
             operation_id,
             payload,
         );

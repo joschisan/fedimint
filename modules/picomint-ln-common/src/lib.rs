@@ -43,7 +43,7 @@ pub enum LightningInvoice {
     Bolt11(Bolt11Invoice),
 }
 
-pub const KIND: ModuleKind = ModuleKind::from_static_str("ln");
+pub const KIND: ModuleKind = ModuleKind::Ln;
 pub const MODULE_CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::new(1, 0);
 
 /// Minimum contract amount to ensure the incoming contract can be claimed

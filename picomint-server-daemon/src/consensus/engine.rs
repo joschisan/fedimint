@@ -638,18 +638,12 @@ impl ConsensusEngine {
                     bail!("Transaction is already accepted");
                 }
 
-                let modules_ids = transaction
-                    .outputs
-                    .iter()
-                    .map(|o| o.module_instance_id())
-                    .collect::<Vec<_>>();
-
                 process_transaction_with_server(&self.server, tx, &transaction)
                     .await
                     .map_err(|error| anyhow!(error.to_string()))?;
 
                 debug!(target: LOG_CONSENSUS, %txid,  "Transaction accepted");
-                tx.insert(&ACCEPTED_TRANSACTION, &txid, &modules_ids);
+                tx.insert(&ACCEPTED_TRANSACTION, &txid, &());
 
                 let mut audit = Audit::default();
                 self.server.audit(tx, &mut audit).await;

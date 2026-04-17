@@ -10,7 +10,7 @@ mod rpc;
 use std::collections::BTreeMap;
 
 use anyhow::ensure;
-use picomint_core::core::ModuleInstanceId;
+use picomint_core::core::ModuleKind;
 use picomint_core::encoding::Encodable;
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
@@ -225,12 +225,7 @@ impl ServerModule for Mint {
         })
     }
 
-    async fn audit(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        audit: &mut Audit,
-        module_instance_id: ModuleInstanceId,
-    ) {
+    async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
         let items = dbtx
             .iter(&ISSUANCE_COUNTER)
             .into_iter()
@@ -241,7 +236,7 @@ impl ServerModule for Mint {
                 )
             });
 
-        audit.add_items(module_instance_id, items);
+        audit.add_items(ModuleKind::Mint, items);
     }
 
     async fn handle_api(

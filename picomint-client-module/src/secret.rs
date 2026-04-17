@@ -1,21 +1,21 @@
 use std::fmt::Debug;
 
 use picomint_core::config::FederationId;
-use picomint_core::core::ModuleInstanceId;
+use picomint_core::core::ModuleKind;
 use picomint_derive_secret::{ChildId, DerivableSecret};
 
 // Derived from federation-root-secret
 const TYPE_MODULE: ChildId = ChildId(0);
 
 pub trait DeriveableSecretClientExt {
-    fn derive_module_secret(&self, module_instance_id: ModuleInstanceId) -> DerivableSecret;
+    fn derive_module_secret(&self, kind: ModuleKind) -> DerivableSecret;
 }
 
 impl DeriveableSecretClientExt for DerivableSecret {
-    fn derive_module_secret(&self, module_instance_id: ModuleInstanceId) -> DerivableSecret {
+    fn derive_module_secret(&self, kind: ModuleKind) -> DerivableSecret {
         assert_eq!(self.level(), 0);
         self.child_key(TYPE_MODULE)
-            .child_key(ChildId(u64::from(module_instance_id)))
+            .child_key(ChildId(kind as u64))
     }
 }
 

@@ -15,16 +15,14 @@ pub fn render(audit_summary: &AuditSummary) -> Markup {
                 table class="table table-striped" {
                     thead {
                         tr {
-                            th { "ID" }
                             th { "Module Kind" }
                             th { "Net Assets (msat)" }
                         }
                     }
                     tbody {
-                        @for (module_id, module_summary) in audit_summary.module_summaries.iter() {
+                        @for (kind, module_summary) in audit_summary.module_summaries.iter() {
                             tr {
-                                td { (module_id) }
-                                td { (module_summary.kind) }
+                                td { (kind) }
                                 td { (module_summary.net_assets) }
                             }
                         }

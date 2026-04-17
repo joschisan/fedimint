@@ -54,7 +54,6 @@ async fn sanity_subscribe_operation_events() {
                     log_event_added_tx.clone(),
                     EventKind::from(format!("{i}")),
                     None,
-                    None,
                     Some(operation_id),
                     vec![],
                 );

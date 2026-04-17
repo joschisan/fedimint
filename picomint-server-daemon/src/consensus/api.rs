@@ -1,13 +1,12 @@
 //! Implements the client API through which users interact with the federation
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::Result;
 use picomint_api_client::config::ConsensusConfig;
 use picomint_api_client::transaction::{ConsensusItem, Transaction, TransactionError};
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
-use picomint_core::core::ModuleInstanceId;
 use picomint_core::endpoint_constants::{
     AWAIT_TRANSACTION_ENDPOINT, CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT,
     SUBMIT_TRANSACTION_ENDPOINT,
@@ -92,10 +91,7 @@ impl ConsensusApi {
         Ok(txid)
     }
 
-    pub async fn await_transaction(
-        &self,
-        txid: TransactionId,
-    ) -> (Vec<ModuleInstanceId>, ReadTransaction) {
+    pub async fn await_transaction(&self, txid: TransactionId) -> ((), ReadTransaction) {
         debug!(target: LOG_NET_API, %txid, "Awaiting transaction acceptance");
         self.db
             .wait_key_check(&ACCEPTED_TRANSACTION, &txid, std::convert::identity)
@@ -109,21 +105,12 @@ impl ConsensusApi {
     pub async fn federation_audit(&self) -> AuditSummary {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
-        use picomint_api_client::wire::{LN_INSTANCE_ID, MINT_INSTANCE_ID, WALLET_INSTANCE_ID};
-
         let tx = self.db.begin_write().await;
 
         let mut audit = Audit::default();
         self.server.audit(&tx, &mut audit).await;
 
-        let module_instance_id_to_kind: HashMap<ModuleInstanceId, String> = [
-            (MINT_INSTANCE_ID, "mint".to_string()),
-            (LN_INSTANCE_ID, "ln".to_string()),
-            (WALLET_INSTANCE_ID, "wallet".to_string()),
-        ]
-        .into();
-
-        AuditSummary::from_audit(&audit, &module_instance_id_to_kind)
+        AuditSummary::from_audit(&audit)
     }
 }
 

@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use picomint_core::core::ModuleInstanceId;
+use picomint_core::core::ModuleKind;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_ln_common::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
@@ -16,13 +16,6 @@ use picomint_wallet_common::{
 };
 use thiserror::Error;
 
-/// Fixed instance ids assigned to the three canonical modules. These retain
-/// compatibility with dashboards/debug tooling that still surface an instance
-/// id even after the dynamic registry is ripped.
-pub const MINT_INSTANCE_ID: ModuleInstanceId = 0;
-pub const LN_INSTANCE_ID: ModuleInstanceId = 1;
-pub const WALLET_INSTANCE_ID: ModuleInstanceId = 2;
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Input {
     Mint(MintInput),
@@ -31,11 +24,11 @@ pub enum Input {
 }
 
 impl Input {
-    pub fn module_instance_id(&self) -> ModuleInstanceId {
+    pub fn module_kind(&self) -> ModuleKind {
         match self {
-            Self::Mint(_) => MINT_INSTANCE_ID,
-            Self::Ln(_) => LN_INSTANCE_ID,
-            Self::Wallet(_) => WALLET_INSTANCE_ID,
+            Self::Mint(_) => ModuleKind::Mint,
+            Self::Ln(_) => ModuleKind::Ln,
+            Self::Wallet(_) => ModuleKind::Wallet,
         }
     }
 }
@@ -76,11 +69,11 @@ pub enum Output {
 }
 
 impl Output {
-    pub fn module_instance_id(&self) -> ModuleInstanceId {
+    pub fn module_kind(&self) -> ModuleKind {
         match self {
-            Self::Mint(_) => MINT_INSTANCE_ID,
-            Self::Ln(_) => LN_INSTANCE_ID,
-            Self::Wallet(_) => WALLET_INSTANCE_ID,
+            Self::Mint(_) => ModuleKind::Mint,
+            Self::Ln(_) => ModuleKind::Ln,
+            Self::Wallet(_) => ModuleKind::Wallet,
         }
     }
 }
@@ -121,19 +114,11 @@ pub enum ModuleConsensusItem {
 }
 
 impl ModuleConsensusItem {
-    pub fn module_instance_id(&self) -> ModuleInstanceId {
+    pub fn module_kind(&self) -> ModuleKind {
         match self {
-            Self::Mint(_) => MINT_INSTANCE_ID,
-            Self::Ln(_) => LN_INSTANCE_ID,
-            Self::Wallet(_) => WALLET_INSTANCE_ID,
-        }
-    }
-
-    pub fn module_kind(&self) -> &'static str {
-        match self {
-            Self::Mint(_) => "mint",
-            Self::Ln(_) => "ln",
-            Self::Wallet(_) => "wallet",
+            Self::Mint(_) => ModuleKind::Mint,
+            Self::Ln(_) => ModuleKind::Ln,
+            Self::Wallet(_) => ModuleKind::Wallet,
         }
     }
 }

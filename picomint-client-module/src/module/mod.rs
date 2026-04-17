@@ -7,7 +7,7 @@ use anyhow::bail;
 use bitcoin::secp256k1::PublicKey;
 use picomint_api_client::api::{ApiScope, FederationApi};
 use picomint_api_client::config::ConsensusConfig;
-use picomint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
+use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use picomint_core::util::{BoxFuture, BoxStream};
@@ -138,7 +138,7 @@ impl fmt::Debug for FinalClientIface {
 /// client through this struct.
 pub struct ClientContext<M> {
     client: FinalClientIface,
-    module_instance_id: ModuleInstanceId,
+    kind: ModuleKind,
     api_scope: ApiScope,
     module_db: Database,
     _marker: marker::PhantomData<M>,
@@ -149,7 +149,7 @@ impl<M> Clone for ClientContext<M> {
         Self {
             client: self.client.clone(),
             module_db: self.module_db.clone(),
-            module_instance_id: self.module_instance_id,
+            kind: self.kind,
             api_scope: self.api_scope,
             _marker: marker::PhantomData,
         }
@@ -168,13 +168,13 @@ where
 {
     pub fn new(
         client: FinalClientIface,
-        module_instance_id: ModuleInstanceId,
+        kind: ModuleKind,
         api_scope: ApiScope,
         module_db: Database,
     ) -> Self {
         Self {
             client,
-            module_instance_id,
+            kind,
             api_scope,
             module_db,
             _marker: marker::PhantomData,
@@ -330,10 +330,10 @@ where
     where
         E: Event + Send,
     {
-        if <E as Event>::MODULE != Some(<M as ClientModule>::kind()) {
+        if <E as Event>::MODULE != Some(self.kind) {
             warn!(
                 target: LOG_CLIENT,
-                module_kind = %<M as ClientModule>::kind(),
+                module_kind = %self.kind,
                 event_module = ?<E as Event>::MODULE,
                 "Client module logging events of different module than its own. This might become an error in the future."
             );
@@ -341,7 +341,6 @@ where
         picomint_eventlog::log_event(
             &dbtx.deisolate(),
             self.client.get().log_event_added_tx(),
-            Some(self.module_instance_id),
             Some(operation_id),
             event,
         );

@@ -22,7 +22,7 @@ use thiserror::Error;
 pub mod config;
 pub mod endpoint_constants;
 
-pub const KIND: ModuleKind = ModuleKind::from_static_str("mint");
+pub const KIND: ModuleKind = ModuleKind::Mint;
 pub const MODULE_CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::new(1, 0);
 
 /// Compact representation of a power-of-2 amount denomination

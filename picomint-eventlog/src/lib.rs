@@ -11,7 +11,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use futures::Stream;
-use picomint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
+use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::db::NativeTableDef;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::redb::ReadableTable as _;
@@ -109,7 +109,7 @@ pub struct EventLogEntry {
     pub kind: EventKind,
 
     /// Module that produced the event (if any).
-    pub module: Option<(ModuleKind, ModuleInstanceId)>,
+    pub module: Option<ModuleKind>,
 
     /// Operation this event belongs to, if any. Set by the caller of
     /// [`log_event`]; used to index the event into
@@ -124,16 +124,8 @@ pub struct EventLogEntry {
 }
 
 impl EventLogEntry {
-    pub fn module_kind(&self) -> Option<&ModuleKind> {
-        self.module.as_ref().map(|m| &m.0)
-    }
-
-    pub fn module_id(&self) -> Option<ModuleInstanceId> {
-        self.module.as_ref().map(|m| m.1)
-    }
-
     pub fn to_event<E: Event>(&self) -> Option<E> {
-        (self.module_kind() == E::MODULE.as_ref() && self.kind == E::KIND)
+        (self.module == E::MODULE && self.kind == E::KIND)
             .then(|| serde_json::from_slice(&self.payload).ok())
             .flatten()
     }
@@ -204,23 +196,16 @@ pub fn log_event_raw(
     dbtx: &WriteTxRef<'_>,
     log_event_added_tx: watch::Sender<()>,
     kind: EventKind,
-    module_kind: Option<ModuleKind>,
-    module_id: Option<ModuleInstanceId>,
+    module: Option<ModuleKind>,
     operation_id: Option<OperationId>,
     payload: Vec<u8>,
 ) {
-    assert_eq!(
-        module_kind.is_some(),
-        module_id.is_some(),
-        "Events of modules must have module_id set"
-    );
-
     let id = next_event_log_id(dbtx);
     let ts_usecs =
         u64::try_from(picomint_core::time::duration_since_epoch().as_micros()).unwrap_or(u64::MAX);
     let entry = EventLogEntry {
         kind,
-        module: module_kind.map(|kind| (kind, module_id.unwrap())),
+        module,
         operation_id,
         ts_usecs,
         payload,
@@ -253,7 +238,6 @@ pub fn log_event_raw(
 pub fn log_event<E: Event>(
     dbtx: &WriteTxRef<'_>,
     log_event_added_tx: watch::Sender<()>,
-    module_id: Option<ModuleInstanceId>,
     operation_id: Option<OperationId>,
     event: E,
 ) {
@@ -262,7 +246,6 @@ pub fn log_event<E: Event>(
         log_event_added_tx,
         E::KIND,
         E::MODULE,
-        module_id,
         operation_id,
         serde_json::to_vec(&event).expect("Serialization can't fail"),
     );
