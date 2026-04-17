@@ -74,8 +74,6 @@ pub mod invite_code;
 pub mod base32;
 /// Extendable module sysystem
 pub mod module;
-/// Peer networking
-pub mod net;
 /// `PeerId` type
 mod peer_id;
 /// Runtime (wasm32 vs native) differences handling
