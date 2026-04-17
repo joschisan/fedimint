@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod bitcoin;
+pub mod config;
 pub mod general;
 pub mod invite;
 pub mod modules;
@@ -96,12 +97,16 @@ async fn dashboard_view(
 
     let content = html! {
         div class="row gy-4" {
-            div class="col-md-6" {
+            div class="col-lg-4" {
                 (general::render(&federation_name, session_count, &guardian_names))
             }
 
-            div class="col-md-6" {
+            div class="col-lg-4" {
                 (invite::render(&invite_code, session_count))
+            }
+
+            div class="col-lg-4" {
+                (config::render())
             }
         }
 

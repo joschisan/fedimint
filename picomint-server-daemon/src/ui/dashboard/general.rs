@@ -3,8 +3,6 @@ use std::collections::BTreeMap;
 use maud::{Markup, html};
 use picomint_core::PeerId;
 
-use super::BACKUP_CONFIG_ROUTE;
-
 /// Renders the Guardian info card with federation name, session count and
 /// guardian list
 pub fn render(
@@ -35,17 +33,6 @@ pub fn render(
                             }
                         }
                     }
-                }
-
-                div class="alert alert-info mt-4" {
-                    "Download the server config — including the private keys — and store it somewhere safe. "
-                    "You can completely recover the guardian from this file."
-                }
-
-                a href=(BACKUP_CONFIG_ROUTE)
-                    download="config.json"
-                    class="btn btn-outline-primary w-100 py-2" {
-                    "Download Config"
                 }
             }
         }

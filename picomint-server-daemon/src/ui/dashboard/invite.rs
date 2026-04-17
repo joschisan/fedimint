@@ -21,9 +21,8 @@ pub fn render(invite_code: &str, session_count: u64) -> Markup {
 
                     p { "Share this with users to onboard them to your federation." }
 
-                    // QR Code
-                    div class="text-center mb-3" {
-                        div class="border rounded p-2 bg-white d-inline-block" style="width: 250px; max-width: 100%;" {
+                    div class="mb-3" {
+                        div class="border rounded p-2 bg-white" style="width: 100%;" {
                             div style="width: 100%; height: auto; overflow: hidden;" {
                                 (PreEscaped(format!(r#"<div style="width: 100%; height: auto;">{}</div>"#, qr_svg.replace("width=", "data-width=").replace("height=", "data-height=").replace("<svg", r#"<svg style="width: 100%; height: auto; display: block;""#))))
                             }
