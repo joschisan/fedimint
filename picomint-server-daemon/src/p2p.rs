@@ -167,7 +167,12 @@ impl P2PConnector {
         Ok(P2PConnection::new(connection))
     }
 
-    pub async fn accept(&self) -> anyhow::Result<(PeerId, P2PConnection)> {
+    /// Accept the next incoming connection, fully completing the QUIC
+    /// handshake. The remote node-id is compared against the pinned peer set:
+    /// a match produces [`Accepted::Peer`] for the federation-internal p2p
+    /// path; anything else is [`Accepted::Foreign`] for the public API path
+    /// (one endpoint, two logical consumers demuxed here by node-id).
+    pub async fn accept(&self) -> anyhow::Result<Accepted> {
         let connection = self
             .endpoint
             .accept()
@@ -178,15 +183,21 @@ impl P2PConnector {
 
         let node_id = connection.remote_id();
 
-        let auth_peer = self
-            .node_ids
-            .iter()
-            .find(|entry| entry.1 == &node_id)
-            .with_context(|| format!("Node id {node_id} is unknown"))?
-            .0;
+        for (peer, pk) in &self.node_ids {
+            if *pk == node_id {
+                return Ok(Accepted::Peer(*peer, P2PConnection::new(connection)));
+            }
+        }
 
-        Ok((*auth_peer, P2PConnection::new(connection)))
+        Ok(Accepted::Foreign(connection))
     }
+}
+
+/// Result of [`P2PConnector::accept`]: either a federation peer (pinned
+/// node-id) or a foreign connection (public-API client).
+pub enum Accepted {
+    Peer(PeerId, P2PConnection),
+    Foreign(Connection),
 }
 
 // ── Connection manager ──────────────────────────────────────────────────────
@@ -228,6 +239,7 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
         connector: P2PConnector,
         task_group: &TaskGroup,
         status_senders: P2PStatusSenders,
+        foreign_conn_tx: Sender<Connection>,
     ) -> Self {
         let mut connection_senders = BTreeMap::new();
         let mut connections = BTreeMap::new();
@@ -258,7 +270,7 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
 
             loop {
                 match connector.accept().await {
-                    Ok((peer, connection)) => {
+                    Ok(Accepted::Peer(peer, connection)) => {
                         if connection_senders
                             .get_mut(&peer)
                             .expect("Authenticating connectors dont return unknown peers")
@@ -267,6 +279,17 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
                             .is_err()
                         {
                             break;
+                        }
+                    }
+                    Ok(Accepted::Foreign(connection)) => {
+                        // Public API client. Drop on backpressure — the
+                        // api-layer consumer isn't running yet during DKG and
+                        // a pre-bootstrap client has no business connecting.
+                        if foreign_conn_tx.try_send(connection).is_err() {
+                            debug!(
+                                target: LOG_NET_PEER,
+                                "Dropping foreign connection: api channel full or closed"
+                            );
                         }
                     }
                     Err(err) => {

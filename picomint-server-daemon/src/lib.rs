@@ -68,6 +68,13 @@ pub async fn run_server(
     max_requests_per_connection: usize,
     cli_port: u16,
 ) -> anyhow::Result<()> {
+    // Single channel for foreign (non-peer) iroh connections — fed by the
+    // p2p accept loop's demux, drained by the consensus-phase api task.
+    // Small bound: pre-DKG there's no consumer, so incoming api attempts
+    // overflow and are dropped (no valid client should be talking to a
+    // not-yet-bootstrapped federation).
+    let (foreign_conn_tx, foreign_conn_rx) = async_channel::bounded(128);
+
     let (cfg, connections, p2p_status_receivers) = match load_server_config(&db).await {
         Some(cfg) => {
             let connector = P2PConnector::new(
@@ -88,6 +95,7 @@ pub async fn run_server(
                 connector,
                 &task_group,
                 p2p_status_senders,
+                foreign_conn_tx,
             );
 
             (cfg, connections, p2p_status_receivers)
@@ -99,6 +107,7 @@ pub async fn run_server(
                 &task_group,
                 auth.clone(),
                 cli_port,
+                foreign_conn_tx,
             ))
             .await?
         }
@@ -110,6 +119,7 @@ pub async fn run_server(
         auth,
         connections,
         p2p_status_receivers,
+        foreign_conn_rx,
         cfg,
         db,
         &task_group,
@@ -135,6 +145,7 @@ pub async fn run_config_gen(
     task_group: &TaskGroup,
     auth: ApiAuth,
     cli_port: u16,
+    foreign_conn_tx: async_channel::Sender<iroh::endpoint::Connection>,
 ) -> anyhow::Result<(
     ServerConfig,
     ReconnectP2PConnections<P2PMessage>,
@@ -205,6 +216,7 @@ pub async fn run_config_gen(
         connector,
         task_group,
         p2p_status_senders,
+        foreign_conn_tx,
     );
 
     let cfg = ServerConfig::distributed_gen(

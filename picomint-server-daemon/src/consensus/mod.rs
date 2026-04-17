@@ -13,18 +13,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
-use iroh::Endpoint;
-use iroh::endpoint::{Incoming, RecvStream, SendStream};
+use iroh::endpoint::{RecvStream, SendStream};
 use picomint_api_client::transaction::ConsensusItem;
 use picomint_api_client::wire;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::envs::is_running_in_test_env;
-use picomint_core::module::{
-    ApiAuth, ApiError, ApiMethod, IrohApiRequest, ModuleCommon, PICOMINT_ALPN,
-};
-use picomint_core::net::iroh::build_iroh_endpoint;
+use picomint_core::module::{ApiAuth, ApiError, ApiMethod, IrohApiRequest, ModuleCommon};
 use picomint_core::task::{TaskGroup, sleep};
 use picomint_core::util::FmtCompactAnyhow as _;
 use picomint_logging::{LOG_CONSENSUS, LOG_CORE, LOG_NET_API};
@@ -47,6 +43,7 @@ pub async fn run(
     auth: ApiAuth,
     connections: ReconnectP2PConnections<P2PMessage>,
     p2p_status_receivers: P2PStatusReceivers,
+    foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
     cfg: ServerConfig,
     db: Database,
     task_group: &TaskGroup,
@@ -131,14 +128,16 @@ pub async fn run(
 
     info!(target: LOG_CONSENSUS, "Starting Consensus Api...");
 
-    Box::pin(start_iroh_api(
-        cfg.private.iroh_sk.clone(),
-        consensus_api.clone(),
-        task_group,
-        max_connections,
-        max_requests_per_connection,
-    ))
-    .await?;
+    task_group.spawn_cancellable(
+        "iroh-api",
+        run_iroh_api(
+            consensus_api.clone(),
+            foreign_conn_rx,
+            task_group.clone(),
+            max_connections,
+            max_requests_per_connection,
+        ),
+    );
 
     info!(target: LOG_CONSENSUS, "Starting Submission of Module CI proposals...");
 
@@ -275,86 +274,53 @@ fn submit_module_ci_proposals<M>(
     );
 }
 
-async fn start_iroh_api(
-    secret_key: iroh::SecretKey,
-    consensus_api: Arc<ConsensusApi>,
-    task_group: &TaskGroup,
-    max_connections: usize,
-    max_requests_per_connection: usize,
-) -> anyhow::Result<()> {
-    let endpoint = build_iroh_endpoint(
-        secret_key,
-        SocketAddr::from(([0, 0, 0, 0], 0)),
-        PICOMINT_ALPN,
-    )
-    .await?;
-    task_group.spawn_cancellable(
-        "iroh-api",
-        run_iroh_api(
-            consensus_api,
-            endpoint,
-            task_group.clone(),
-            max_connections,
-            max_requests_per_connection,
-        ),
-    );
-
-    Ok(())
-}
-
 async fn run_iroh_api(
     consensus_api: Arc<ConsensusApi>,
-    endpoint: Endpoint,
+    foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
     task_group: TaskGroup,
     max_connections: usize,
     max_requests_per_connection: usize,
 ) {
     let parallel_connections_limit = Arc::new(Semaphore::new(max_connections));
 
-    loop {
-        match endpoint.accept().await {
-            Some(incoming) => {
-                if parallel_connections_limit.available_permits() == 0 {
-                    warn!(
-                        target: LOG_NET_API,
-                        limit = max_connections,
-                        "Iroh API connection limit reached, blocking new connections"
-                    );
-                }
-                let permit = parallel_connections_limit
-                    .clone()
-                    .acquire_owned()
-                    .await
-                    .expect("semaphore should not be closed");
-                task_group.spawn_cancellable_silent(
-                    "handle-iroh-connection",
-                    handle_incoming(
-                        consensus_api.clone(),
-                        task_group.clone(),
-                        incoming,
-                        permit,
-                        max_requests_per_connection,
-                    )
-                    .then(|result| async {
-                        if let Err(err) = result {
-                            warn!(target: LOG_NET_API, err = %err.fmt_compact_anyhow(), "Failed to handle iroh connection");
-                        }
-                    }),
-                );
-            }
-            None => return,
+    while let Ok(connection) = foreign_conn_rx.recv().await {
+        if parallel_connections_limit.available_permits() == 0 {
+            warn!(
+                target: LOG_NET_API,
+                limit = max_connections,
+                "Iroh API connection limit reached, blocking new connections"
+            );
         }
+        let permit = parallel_connections_limit
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore should not be closed");
+        task_group.spawn_cancellable_silent(
+            "handle-iroh-connection",
+            handle_incoming(
+                consensus_api.clone(),
+                task_group.clone(),
+                connection,
+                permit,
+                max_requests_per_connection,
+            )
+            .then(|result| async {
+                if let Err(err) = result {
+                    warn!(target: LOG_NET_API, err = %err.fmt_compact_anyhow(), "Failed to handle iroh connection");
+                }
+            }),
+        );
     }
 }
 
 async fn handle_incoming(
     consensus_api: Arc<ConsensusApi>,
     task_group: TaskGroup,
-    incoming: Incoming,
+    connection: iroh::endpoint::Connection,
     _connection_permit: tokio::sync::OwnedSemaphorePermit,
     max_requests_per_connection: usize,
 ) -> anyhow::Result<()> {
-    let connection = incoming.accept()?.await?;
     let parallel_requests_limit = Arc::new(Semaphore::new(max_requests_per_connection));
 
     loop {
