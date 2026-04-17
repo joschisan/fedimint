@@ -11,7 +11,8 @@ use tracing::{debug, info, warn};
 
 use crate::envs::{
     FM_IROH_DHT_ENABLE_ENV, FM_IROH_N0_DISCOVERY_ENABLE_ENV, FM_IROH_PKARR_PUBLISHER_ENABLE_ENV,
-    FM_IROH_PKARR_RESOLVER_ENABLE_ENV, is_env_var_set, is_env_var_set_opt,
+    FM_IROH_PKARR_RESOLVER_ENABLE_ENV, FM_IROH_RELAYS_ENABLE_ENV, is_env_var_set,
+    is_env_var_set_opt,
 };
 
 pub async fn build_iroh_endpoint(
@@ -21,7 +22,13 @@ pub async fn build_iroh_endpoint(
     iroh_relays: Vec<SafeUrl>,
     alpn: &[u8],
 ) -> Result<Endpoint, anyhow::Error> {
-    let relay_mode = if iroh_relays.is_empty() {
+    let relay_mode = if !is_env_var_set_opt(FM_IROH_RELAYS_ENABLE_ENV).unwrap_or(true) {
+        warn!(
+            target: LOG_NET_IROH,
+            "Iroh relays are disabled"
+        );
+        RelayMode::Disabled
+    } else if iroh_relays.is_empty() {
         RelayMode::Default
     } else {
         RelayMode::Custom(
