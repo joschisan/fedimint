@@ -14,7 +14,8 @@ use picomint_core::core::ModuleKind;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
 use picomint_core::secp256k1::PublicKey;
-use picomint_core::{plugin_types_trait_impl_common, Amount};
+use picomint_core::module::ModuleCommon;
+use picomint_core::Amount;
 use serde::{Deserialize, Serialize};
 use tbs::{BlindedMessage, Message};
 use thiserror::Error;
@@ -158,16 +159,14 @@ pub fn nonce_message(nonce: PublicKey) -> Message {
     tbs::Message::from_bytes_sha256(&nonce.serialize())
 }
 
-plugin_types_trait_impl_common!(
-    KIND,
-    MintModuleTypes,
-    MintConfigConsensus,
-    MintInput,
-    MintOutput,
-    MintConsensusItem,
-    MintInputError,
-    MintOutputError
-);
+impl ModuleCommon for MintModuleTypes {
+    type ClientConfig = MintConfigConsensus;
+    type Input = MintInput;
+    type Output = MintOutput;
+    type ConsensusItem = MintConsensusItem;
+    type InputError = MintInputError;
+    type OutputError = MintOutputError;
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum MintInputError {

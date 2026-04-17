@@ -70,10 +70,6 @@ pub mod endpoint_constants;
 pub mod envs;
 /// Federation invite code
 pub mod invite_code;
-pub mod log;
-/// Common macros
-#[macro_use]
-pub mod macros;
 /// Base 32 encoding
 pub mod base32;
 /// Extendable module sysystem

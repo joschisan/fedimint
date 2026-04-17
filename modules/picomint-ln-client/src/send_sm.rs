@@ -8,14 +8,14 @@ use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::util::SafeUrl;
 use picomint_core::util::backoff_util::api_networking_backoff;
-use picomint_core::{OutPoint, crit, secp256k1, util};
+use picomint_core::{OutPoint, secp256k1, util};
 use picomint_ln_common::contracts::OutgoingContract;
 use picomint_ln_common::{LightningInput, OutgoingWitness};
 use picomint_logging::LOG_CLIENT_MODULE_LN;
 use picomint_redb::WriteTxRef;
 use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
-use tracing::instrument;
+use tracing::{error, instrument};
 
 use crate::api::LightningFederationApi;
 use crate::events::{SendPaymentStatus, SendPaymentUpdateEvent};
@@ -259,7 +259,7 @@ async fn await_preimage_sm(
         return Some(preimage);
     }
 
-    crit!(target: LOG_CLIENT_MODULE_LN, "Federation returned invalid preimage {:?}", preimage);
+    error!(target: LOG_CLIENT_MODULE_LN, "Federation returned invalid preimage {:?}", preimage);
 
     pending().await
 }

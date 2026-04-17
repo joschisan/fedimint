@@ -16,7 +16,8 @@ use miniscript::descriptor::Wsh;
 use picomint_core::core::ModuleKind;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
-use picomint_core::{NumPeersExt, PeerId, plugin_types_trait_impl_common};
+use picomint_core::module::ModuleCommon;
+use picomint_core::{NumPeersExt, PeerId};
 use secp256k1::ecdsa::Signature;
 use secp256k1::{PublicKey, Scalar, XOnlyPublicKey};
 use serde::{Deserialize, Serialize};
@@ -117,16 +118,14 @@ impl CommonModuleInit for WalletCommonInit {
 
 pub struct WalletModuleTypes;
 
-plugin_types_trait_impl_common!(
-    KIND,
-    WalletModuleTypes,
-    WalletConfigConsensus,
-    WalletInput,
-    WalletOutput,
-    WalletConsensusItem,
-    WalletInputError,
-    WalletOutputError
-);
+impl ModuleCommon for WalletModuleTypes {
+    type ClientConfig = WalletConfigConsensus;
+    type Input = WalletInput;
+    type Output = WalletOutput;
+    type ConsensusItem = WalletConsensusItem;
+    type InputError = WalletInputError;
+    type OutputError = WalletOutputError;
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub enum WalletConsensusItem {

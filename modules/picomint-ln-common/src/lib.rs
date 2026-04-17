@@ -23,7 +23,8 @@ pub use gateway_connection::GatewayApi;
 use picomint_core::core::ModuleKind;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
-use picomint_core::{Amount, OutPoint, plugin_types_trait_impl_common};
+use picomint_core::module::ModuleCommon;
+use picomint_core::{Amount, OutPoint};
 mod gateway_connection;
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
@@ -142,13 +143,11 @@ impl CommonModuleInit for LightningCommonInit {
 
 pub struct LightningModuleTypes;
 
-plugin_types_trait_impl_common!(
-    KIND,
-    LightningModuleTypes,
-    LightningConfigConsensus,
-    LightningInput,
-    LightningOutput,
-    LightningConsensusItem,
-    LightningInputError,
-    LightningOutputError
-);
+impl ModuleCommon for LightningModuleTypes {
+    type ClientConfig = LightningConfigConsensus;
+    type Input = LightningInput;
+    type Output = LightningOutput;
+    type ConsensusItem = LightningConsensusItem;
+    type InputError = LightningInputError;
+    type OutputError = LightningOutputError;
+}

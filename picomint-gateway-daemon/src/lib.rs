@@ -44,7 +44,7 @@ use picomint_core::secp256k1::PublicKey;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::{FmtCompact, Spanned};
-use picomint_core::{Amount, PeerId, crit};
+use picomint_core::{Amount, PeerId};
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_gw_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -59,7 +59,7 @@ use picomint_lnurl::VerifyResponse;
 use picomint_logging::LOG_GATEWAY;
 use picomint_redb::Database;
 use tokio::sync::RwLock;
-use tracing::{info_span, warn};
+use tracing::{error, info_span, warn};
 
 use crate::db::{
     REGISTERED_INCOMING_CONTRACT, RegisteredIncomingContract as DbRegisteredIncomingContract,
@@ -145,7 +145,7 @@ impl AppState {
         let config = client.config().await;
 
         if config.ln.network != network {
-            crit!(
+            error!(
                 target: LOG_GATEWAY,
                 %federation_id,
                 %network,
