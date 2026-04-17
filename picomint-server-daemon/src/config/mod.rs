@@ -12,7 +12,6 @@ use picomint_core::invite_code::InviteCode;
 use picomint_core::module::CORE_CONSENSUS_VERSION;
 use picomint_core::setup_code::PeerSetupCode;
 use picomint_core::task::sleep;
-use picomint_core::util::SafeUrl;
 use picomint_core::{NumPeersExt, PeerId, secp256k1, timing};
 use picomint_ln_common::config::LightningConfigPrivate;
 use picomint_logging::LOG_NET_PEER_DKG;
@@ -87,10 +86,6 @@ pub struct ConfigGenSettings {
     pub p2p_addr: SocketAddr,
     /// Bind address for our UI connection (always http)
     pub ui_addr: SocketAddr,
-    /// Optional URL of the Iroh DNS server
-    pub iroh_dns: Option<SafeUrl>,
-    /// Optional URLs of the Iroh relays to register on
-    pub iroh_relays: Vec<SafeUrl>,
     /// Bitcoin network for the federation
     pub network: bitcoin::Network,
 }

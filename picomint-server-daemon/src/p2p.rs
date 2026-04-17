@@ -16,11 +16,10 @@ use iroh::{Endpoint, PublicKey, SecretKey, Watcher as _};
 use picomint_api_client::session_outcome::SignedSessionOutcome;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::PICOMINT_ALPN;
-use picomint_core::net::STANDARD_PICOMINT_P2P_PORT;
 use picomint_core::net::iroh::build_iroh_endpoint;
 use picomint_core::task::{TaskGroup, sleep};
 use picomint_core::util::backoff_util::{FibonacciBackoff, api_networking_backoff};
-use picomint_core::util::{FmtCompactAnyhow, SafeUrl};
+use picomint_core::util::FmtCompactAnyhow;
 use picomint_core::{PeerId, secp256k1};
 use picomint_logging::{LOG_CONSENSUS, LOG_NET_PEER};
 use picomint_server_core::P2PConnectionStatus;
@@ -60,17 +59,6 @@ pub enum DkgMessageG2 {
 /// Maximum size of a p2p message in bytes. The largest message we expect to
 /// receive is a signed session outcome.
 const MAX_P2P_MESSAGE_SIZE: usize = 10_000_000;
-
-/// Parse the host and port from a p2p `picomint://` url.
-pub fn parse_p2p(url: &SafeUrl) -> anyhow::Result<String> {
-    anyhow::ensure!(url.scheme() == "picomint", "p2p url has invalid scheme");
-
-    let host = url.host_str().context("p2p url is missing host")?;
-
-    let port = url.port().unwrap_or(STANDARD_PICOMINT_P2P_PORT);
-
-    Ok(format!("{host}:{port}"))
-}
 
 /// Thin wrapper over an iroh [`Connection`] that sends and receives
 /// consensus-encoded p2p messages.

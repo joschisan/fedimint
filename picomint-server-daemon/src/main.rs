@@ -73,25 +73,13 @@ struct ServerOpts {
     #[arg(long = "ui-addr", env = "UI_ADDR", default_value = "127.0.0.1:3000")]
     ui_addr: SocketAddr,
 
-    /// Port for the CLI admin API (always binds 127.0.0.1, never public)
-    #[arg(long, env = "CLI_PORT", default_value = "3030")]
-    cli_port: u16,
-
     /// Password for the web UI (setup and dashboard)
     #[arg(long, env = "UI_PASSWORD")]
     ui_password: String,
 
-    /// Optional URL of the Iroh DNS server
-    #[arg(long, env = "IROH_DNS")]
-    iroh_dns: Option<SafeUrl>,
-
-    /// Optional URLs of the Iroh relays to use for registering
-    #[arg(long, env = "IROH_RELAY", value_delimiter = ',')]
-    iroh_relays: Vec<SafeUrl>,
-
-    /// Enable tokio console logging
-    #[arg(long = "tokio-console-addr", env = "TOKIO_CONSOLE_ADDR")]
-    tokio_console_addr: Option<SocketAddr>,
+    /// Port for the CLI admin API (always binds 127.0.0.1, never public)
+    #[arg(long, env = "CLI_PORT", default_value = "3030")]
+    cli_port: u16,
 
     /// Maximum number of concurrent Iroh API connections
     #[arg(long, env = "MAX_CONNECTIONS", default_value = "1000")]
@@ -108,9 +96,7 @@ async fn main() -> anyhow::Result<Infallible> {
 
     let server_opts = ServerOpts::parse();
 
-    let mut tracing_builder = TracingSetup::default();
-    tracing_builder.tokio_console_bind(server_opts.tokio_console_addr);
-    tracing_builder.init().unwrap();
+    TracingSetup::default().init().unwrap();
 
     info!("Starting picomint-server-daemon (version: {picomint_version})");
 
@@ -123,8 +109,6 @@ async fn main() -> anyhow::Result<Infallible> {
     let settings = ConfigGenSettings {
         p2p_addr: server_opts.p2p_addr,
         ui_addr: server_opts.ui_addr,
-        iroh_dns: server_opts.iroh_dns.clone(),
-        iroh_relays: server_opts.iroh_relays.clone(),
         network: server_opts.bitcoin_network,
     };
 
@@ -199,8 +183,6 @@ async fn main() -> anyhow::Result<Infallible> {
     }
 
     debug!(target: LOG_CORE, "Shutdown complete");
-
-    picomint_logging::shutdown();
 
     drop(timing_total_runtime);
 

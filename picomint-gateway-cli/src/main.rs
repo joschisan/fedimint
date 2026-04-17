@@ -28,7 +28,7 @@ use serde_json::Value;
 #[command(version)]
 struct Cli {
     /// Gateway admin API address
-    #[arg(short, long, default_value = "http://127.0.0.1:8176")]
+    #[arg(short, long, default_value = "http://127.0.0.1:3030")]
     address: String,
 
     #[command(subcommand)]

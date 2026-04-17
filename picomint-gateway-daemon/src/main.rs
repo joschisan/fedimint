@@ -58,21 +58,17 @@ pub struct GatewayOpts {
     #[arg(long = "data-dir", env = "DATA_DIR")]
     pub data_dir: PathBuf,
 
-    /// Public API listen address
-    #[arg(long = "api-addr", env = "API_ADDR", default_value = "0.0.0.0:8080")]
-    pub api_addr: SocketAddr,
-
-    /// Port for the CLI admin API (always binds 127.0.0.1, never public)
-    #[arg(long = "cli-port", env = "CLI_PORT", default_value = "3030")]
-    pub cli_port: u16,
-
-    /// Network address and port for the lightning P2P interface (BOLT)
-    #[arg(long = "ldk-addr", env = "LDK_ADDR", default_value = "0.0.0.0:9735")]
-    pub ldk_addr: SocketAddr,
-
     /// Bitcoin network this gateway will be running on
     #[arg(long = "network", env = "BITCOIN_NETWORK")]
     pub network: Network,
+
+    /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
+    #[arg(long, env = "ESPLORA_URL")]
+    pub esplora_url: Option<SafeUrl>,
+
+    /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
+    #[arg(long, env = "BITCOIND_URL")]
+    pub bitcoind_url: Option<SafeUrl>,
 
     /// The username to use when connecting to bitcoind
     #[arg(long, env = "BITCOIND_USERNAME")]
@@ -82,13 +78,17 @@ pub struct GatewayOpts {
     #[arg(long, env = "BITCOIND_PASSWORD")]
     pub bitcoind_password: Option<String>,
 
-    /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
-    #[arg(long, env = "BITCOIND_URL")]
-    pub bitcoind_url: Option<SafeUrl>,
+    /// Public API listen address
+    #[arg(long = "api-addr", env = "API_ADDR", default_value = "0.0.0.0:8080")]
+    pub api_addr: SocketAddr,
 
-    /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
-    #[arg(long, env = "ESPLORA_URL")]
-    pub esplora_url: Option<SafeUrl>,
+    /// Network address and port for the lightning P2P interface (BOLT)
+    #[arg(long = "ldk-addr", env = "LDK_ADDR", default_value = "0.0.0.0:9735")]
+    pub ldk_addr: SocketAddr,
+
+    /// Port for the CLI admin API (always binds 127.0.0.1, never public)
+    #[arg(long = "cli-port", env = "CLI_PORT", default_value = "3030")]
+    pub cli_port: u16,
 
     /// Base routing fee in millisatoshis for Lightning payments
     #[arg(long, env = "ROUTING_FEE_BASE_MSAT", default_value_t = 2000)]

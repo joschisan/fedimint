@@ -8,26 +8,12 @@ readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
 
-[features]
-telemetry = [
-    "tracing-opentelemetry",
-    "opentelemetry-otlp",
-    "opentelemetry_sdk",
-    "console-subscriber",
-    "opentelemetry",
-]
-
 [lib]
 name = "picomint_logging"
 path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-console-subscriber = { workspace = true, optional = true }
-opentelemetry = { workspace = true, optional = true }
-opentelemetry-otlp = { workspace = true, optional = true }
-opentelemetry_sdk = { workspace = true, optional = true }
-tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [lints]

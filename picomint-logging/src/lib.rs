@@ -19,7 +19,7 @@ use std::{env, io};
 
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Layer};
+use tracing_subscriber::EnvFilter;
 
 pub const LOG_CONSENSUS: &str = "fm::consensus";
 pub const LOG_CORE: &str = "fm::core";
@@ -63,29 +63,15 @@ pub const LOG_BITCOIND_CORE: &str = "fm::bitcoind::bitcoincore";
 pub const LOG_BITCOIND: &str = "fm::bitcoind";
 pub const LOG_BITCOIN: &str = "fm::bitcoin";
 
-/// Global tracer provider for proper shutdown
-#[cfg(feature = "telemetry")]
-static TRACER_PROVIDER: std::sync::OnceLock<opentelemetry_sdk::trace::SdkTracerProvider> =
-    std::sync::OnceLock::new();
-
 /// Consolidates the setup of server tracing into a helper
 #[derive(Default)]
 pub struct TracingSetup {
     base_level: Option<String>,
     extra_directives: Option<String>,
-    #[cfg(feature = "telemetry")]
-    tokio_console_bind: Option<std::net::SocketAddr>,
     with_file: Option<File>,
 }
 
 impl TracingSetup {
-    /// Setup a console server for tokio logging <https://docs.rs/console-subscriber>
-    #[cfg(feature = "telemetry")]
-    pub fn tokio_console_bind(&mut self, address: Option<std::net::SocketAddr>) -> &mut Self {
-        self.tokio_console_bind = address;
-        self
-    }
-
     pub fn with_file(&mut self, file: Option<File>) -> &mut Self {
         self.with_file = file;
         self
@@ -137,36 +123,12 @@ impl TracingSetup {
 
         let fmt_layer = tracing_subscriber::fmt::layer()
             .with_thread_names(false) // can be enabled for debugging
-            .with_writer(fmt_writer)
-            .with_filter(filter_layer);
-
-        let console_opt = || -> Option<Box<dyn Layer<_> + Send + Sync + 'static>> {
-            #[cfg(feature = "telemetry")]
-            if let Some(l) = self.tokio_console_bind {
-                let tracer = console_subscriber::ConsoleLayer::builder()
-                    .retention(std::time::Duration::from_mins(1))
-                    .server_addr(l)
-                    .spawn()
-                    // tokio-console cares only about these layers, so we filter separately for it
-                    .with_filter(EnvFilter::new("tokio=trace,runtime=trace"));
-                return Some(tracer.boxed());
-            }
-            None
-        };
+            .with_writer(fmt_writer);
 
         tracing_subscriber::registry()
+            .with(filter_layer)
             .with(fmt_layer)
-            .with(console_opt())
             .try_init()?;
         Ok(())
-    }
-}
-
-pub fn shutdown() {
-    #[cfg(feature = "telemetry")]
-    if let Some(provider) = TRACER_PROVIDER.get()
-        && let Err(e) = provider.shutdown()
-    {
-        eprintln!("Error shutting down tracer provider: {e}");
     }
 }

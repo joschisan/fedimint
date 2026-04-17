@@ -39,7 +39,7 @@ picomint-core = { workspace = true }
 picomint-derive-secret = { workspace = true }
 picomint-ln-common = { workspace = true }
 picomint-ln-server = { workspace = true }
-picomint-logging = { workspace = true, features = ["telemetry"] }
+picomint-logging = { workspace = true }
 picomint-mint-common = { workspace = true }
 picomint-mint-server = { workspace = true }
 picomint-redb = { workspace = true }

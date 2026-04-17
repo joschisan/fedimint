@@ -19,7 +19,7 @@ Picomint runs over [Iroh](https://iroh.computer/) (QUIC + hole-punching), uses [
 Download the reference compose file:
 
 ```bash
-curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker/server/docker-compose.yml
+curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-server/docker-compose.yml
 ```
 
 Edit `UI_PASSWORD` to a strong password, then:
@@ -28,16 +28,16 @@ Edit `UI_PASSWORD` to a strong password, then:
 docker-compose up -d
 ```
 
-The UI is available at [http://localhost:8174](http://localhost:8174). Forward it over SSH if the daemon runs remotely:
+The UI is available at [http://localhost:3000](http://localhost:3000). Forward it over SSH if the daemon runs remotely:
 
 ```bash
-ssh -NL 8174:127.0.0.1:8174 <your_server>
+ssh -NL 3000:127.0.0.1:3000 <your_server>
 ```
 
 ## Deploy a Lightning gateway
 
 ```bash
-curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker/gateway/docker-compose.yml
+curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-gateway/docker-compose.yml
 docker-compose up -d
 ```
 
@@ -85,16 +85,14 @@ The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works fr
 |------------------------------|----------|-------------------|--------------------------------------------|
 | `DATA_DIR`                   | yes      |                   | Directory for the redb database file       |
 | `BITCOIN_NETWORK`            | yes      | `regtest`         | `bitcoin`, `testnet`, `signet`, `regtest`  |
-| `UI_PASSWORD`                | yes      |                   | Password for the web UI                    |
 | `ESPLORA_URL`                | one of   |                   | Esplora HTTP URL, e.g. `https://mempool.space/api` |
 | `BITCOIND_URL`               | one of   |                   | Bitcoin Core RPC URL                       |
 | `BITCOIND_USERNAME`          | if RPC   |                   | Bitcoin Core RPC user                      |
 | `BITCOIND_PASSWORD`          | if RPC   |                   | Bitcoin Core RPC password                  |
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
 | `UI_ADDR`                    | no       | `127.0.0.1:3000`  | Web UI listen address                      |
+| `UI_PASSWORD`                | yes      |                   | Password for the web UI                    |
 | `CLI_PORT`                   | no       | `3030`            | Admin CLI port (always 127.0.0.1)          |
-| `IROH_DNS`                   | no       |                   | Override Iroh DNS server                   |
-| `IROH_RELAY`                 | no       |                   | Comma-separated list of Iroh relay URLs    |
 | `MAX_CONNECTIONS`            | no       | `1000`            | Max concurrent Iroh API connections        |
 | `MAX_REQUESTS_PER_CONNECTION`| no       | `50`              | Max parallel requests per Iroh connection  |
 
@@ -111,8 +109,8 @@ The admin CLI always binds to `127.0.0.1` (hardcoded), so `docker exec` works fr
 | `BITCOIND_USERNAME`        | if RPC   |                   | Bitcoin Core RPC user                       |
 | `BITCOIND_PASSWORD`        | if RPC   |                   | Bitcoin Core RPC password                   |
 | `API_ADDR`                 | no       | `0.0.0.0:8080`    | Public API listen address                   |
-| `CLI_PORT`                 | no       | `3030`            | Admin CLI port (always 127.0.0.1)           |
 | `LDK_ADDR`                 | no       | `0.0.0.0:9735`    | LDK Lightning P2P listen address (BOLT)     |
+| `CLI_PORT`                 | no       | `3030`            | Admin CLI port (always 127.0.0.1)           |
 | `ROUTING_FEE_BASE_MSAT`    | no       | `2000`            | Lightning base routing fee (msat)           |
 | `ROUTING_FEE_PPM`          | no       | `3000`            | Lightning routing fee rate (ppm)            |
 | `TRANSACTION_FEE_BASE_MSAT`| no       | `2000`            | Federation transaction base fee (msat)      |

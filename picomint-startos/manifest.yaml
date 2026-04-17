@@ -57,11 +57,11 @@ interfaces:
     description: Initial setup and dashboard for this guardian
     tor-config:
       port-mapping:
-        80: "8175"
+        80: "3000"
     lan-config:
       443:
         ssl: true
-        internal: 8175
+        internal: 3000
     ui: true
     protocols:
       - http

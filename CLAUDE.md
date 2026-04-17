@@ -33,6 +33,7 @@ Picomint is a minimalist fork of Fedimint — two binaries (federation guardian 
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-core::encoding`
 - Storage: redb only. No RocksDB. No migrations (types implement redb's `Key`/`Value` directly via macros in `picomint-redb`)
 - Transport: Iroh-only (QUIC + hole-punching). No TLS/websocket/DNS announcements
+- Each guardian binds exactly one iroh `Endpoint` (one secret key, one node id) for both federation p2p and the public client API; the accept loop demuxes by remote node-id (peer set → P2P path, otherwise → public API path).
 
 ### Admin CLIs
 - Both CLIs are thin HTTP clients. They POST JSON to the daemon's admin port (`CLI_PORT` env, always bound to 127.0.0.1; default `3030`).
