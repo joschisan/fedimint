@@ -11,12 +11,12 @@ use bitcoin::hashes::sha256;
 use bls12_381::{G1Projective, G2Projective, Scalar};
 use futures::FutureExt;
 use futures::future::select_all;
+use iroh::endpoint::presets::N0;
 use iroh::endpoint::{Connection, RecvStream};
 use iroh::{Endpoint, PublicKey, SecretKey, Watcher as _};
 use picomint_api_client::session_outcome::SignedSessionOutcome;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::PICOMINT_ALPN;
-use picomint_core::net::iroh::build_iroh_endpoint;
 use picomint_core::task::{TaskGroup, sleep};
 use picomint_core::util::backoff_util::{FibonacciBackoff, api_networking_backoff};
 use picomint_core::util::FmtCompactAnyhow;
@@ -132,7 +132,12 @@ impl P2PConnector {
             .expect("Our public key is not part of the keyset")
             .0;
 
-        let endpoint = build_iroh_endpoint(secret_key, p2p_addr, PICOMINT_ALPN).await?;
+        let endpoint = Endpoint::builder(N0)
+            .secret_key(secret_key)
+            .alpns(vec![PICOMINT_ALPN.to_vec()])
+            .bind_addr(p2p_addr)?
+            .bind()
+            .await?;
 
         Ok(Self {
             node_ids: node_ids
