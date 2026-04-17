@@ -289,17 +289,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-recursion"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b43422f69d8ff38f95f1b2bb76517c91589a924d1559a0e935d7c8ce0274c11"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.104",
-]
-
-[[package]]
 name = "async-stream"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4384,7 +4373,6 @@ dependencies = [
  "assert_matches",
  "async-channel",
  "async-lock",
- "async-recursion",
  "async-trait",
  "backon",
  "backtrace",
@@ -4421,12 +4409,10 @@ dependencies = [
  "picomint-logging",
  "rand 0.8.5",
  "redb",
- "scopeguard",
  "secp256k1",
  "serde",
  "serde_json",
  "serdect",
- "slotmap",
  "strum 0.27.1",
  "strum_macros 0.27.1",
  "subtle",
@@ -4435,6 +4421,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-test",
+ "tokio-util",
  "tracing",
  "url",
  "wasm-bindgen-futures",
@@ -6293,15 +6280,6 @@ name = "slab"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
-
-[[package]]
-name = "slotmap"
-version = "1.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbff4acf519f630b3a3ddcfaea6c06b42174d9a44bc70c620e9ed1649d58b82a"
-dependencies = [
- "version_check",
-]
 
 [[package]]
 name = "smallvec"

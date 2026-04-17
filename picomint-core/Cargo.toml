@@ -20,7 +20,6 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 async-channel = { workspace = true }
-async-recursion = { workspace = true }
 async-trait = { workspace = true }
 backon = { workspace = true }
 backtrace = { workspace = true }
@@ -52,17 +51,16 @@ miniscript = { workspace = true, features = ["serde"] }
 n0-future = { workspace = true }
 rand = { workspace = true }
 redb = { workspace = true }
-scopeguard = { workspace = true }
 secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serdect = { workspace = true }
-slotmap = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 subtle = { workspace = true }
 thiserror = { workspace = true }
 threshold_crypto = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }
 z32 = { workspace = true }

@@ -1,43 +1,50 @@
 #![cfg_attr(target_family = "wasm", allow(dead_code))]
 
-mod inner;
-
 /// Just-in-time initialization
 pub mod jit;
 pub mod waiter;
 
 use std::future::Future;
-use std::pin::{Pin, pin};
-use std::sync::Arc;
-use std::time::SystemTime;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use anyhow::bail;
-use futures::future::{self, Either};
-use inner::TaskGroupInner;
-use picomint_core::time::now;
 use picomint_logging::{LOG_TASK, LOG_TEST};
-use scopeguard::defer;
 use thiserror::Error;
-use tokio::sync::{oneshot, watch};
-use tracing::{debug, info, trace};
+use tokio::signal;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
+use tracing::info;
 
 use crate::runtime;
-// TODO: stop using `task::*`, and use `runtime::*` in the code
-// lots of churn though
 pub use crate::runtime::*;
-/// A group of task working together
+
+/// A group of tasks that can be shut down cooperatively.
 ///
-/// Using this struct it is possible to spawn one or more
-/// main thread collaborating, which can cooperatively gracefully
-/// shut down, either due to external request, or failure of
-/// one of them.
+/// Thin facade over [`TaskTracker`] (join all tasks on shutdown) and
+/// [`CancellationToken`] (broadcast a shutdown signal). No panic cascade —
+/// a panicked task ends on its own and siblings keep running.
 ///
-/// Each thread should periodically check [`TaskHandle`] or rely
-/// on condition like channel disconnection to detect when it is time
-/// to finish.
+/// TODO: remove this type entirely. Target end state:
+/// - Spawning only happens in each binary's `main.rs` via a local
+///   `TaskTracker` + root `CancellationToken`. No "spawn capability"
+///   parameter is threaded through lower layers.
+/// - Subsystems expose `run(token: CancellationToken) -> impl Future`
+///   (or `serve(...)` etc.) that the top level spawns. They return
+///   futures/objects; they do not spawn internally.
+/// - Two legitimate "wait for subset" cases use a local `TaskTracker`
+///   + child token: the AlephBFT session scope and the `run_config_gen`
+///   setup phase. One acceptable leak below `main`: `run_iroh_api`'s
+///   per-connection fan-out needs a `TaskTracker` passed in.
+/// - Client library holds `CancellationToken` + `Vec<JoinHandle<()>>`
+///   in its `Client` struct. `impl Drop` cancels the token and aborts
+///   the handles. No tracker on the client — OS-kill is the normal
+///   case and join is impossible across mobile process termination.
+/// - Add `panic = "abort"` to the daemon binaries' release profile
+///   to compensate for the lost panic cascade.
 #[derive(Clone, Default, Debug)]
 pub struct TaskGroup {
-    inner: Arc<TaskGroupInner>,
+    tracker: TaskTracker,
+    token: CancellationToken,
 }
 
 impl TaskGroup {
@@ -47,40 +54,29 @@ impl TaskGroup {
 
     pub fn make_handle(&self) -> TaskHandle {
         TaskHandle {
-            inner: self.inner.clone(),
+            token: self.token.clone(),
         }
     }
 
-    /// Create a sub-group
-    ///
-    /// Task subgroup works like an independent [`TaskGroup`], but the parent
-    /// `TaskGroup` will propagate the shut down signal to a sub-group.
-    ///
-    /// In contrast to using the parent group directly, a subgroup allows
-    /// calling [`Self::join_all`] and detecting any panics on just a
-    /// subset of tasks.
-    ///
-    /// The code create a subgroup is responsible for calling
-    /// [`Self::join_all`]. If it won't, the parent subgroup **will not**
-    /// detect any panics in the tasks spawned by the subgroup.
+    /// Create a sub-group that shares nothing with the parent except a
+    /// child cancellation token — canceling the parent cancels the child,
+    /// but the sub-group's tracker is independent so `join_all` on it
+    /// waits only for its own tasks.
     pub fn make_subgroup(&self) -> Self {
-        let new_tg = Self::new();
-        self.inner.add_subgroup(new_tg.clone());
-        new_tg
+        Self {
+            tracker: TaskTracker::new(),
+            token: self.token.child_token(),
+        }
     }
 
-    /// Is task group shutting down?
     pub fn is_shutting_down(&self) -> bool {
-        self.inner.is_shutting_down()
+        self.token.is_cancelled()
     }
 
-    /// Tell all tasks in the group to shut down. This only initiates the
-    /// shutdown process, it does not wait for the tasks to shut down.
     pub fn shutdown(&self) {
-        self.inner.shutdown();
+        self.token.cancel();
     }
 
-    /// Tell all tasks in the group to shut down and wait for them to finish.
     pub async fn shutdown_join_all(
         self,
         join_timeout: impl Into<Option<Duration>>,
@@ -89,13 +85,9 @@ impl TaskGroup {
         self.join_all(join_timeout.into()).await
     }
 
-    /// Add a task to the group that waits for CTRL+C or SIGTERM, then
-    /// tells the rest of the task group to shut down.
     pub fn install_kill_handler(&self) {
-        /// Wait for CTRL+C or SIGTERM.
-        async fn wait_for_shutdown_signal() {
-            use tokio::signal;
-
+        let token = self.token.clone();
+        runtime::spawn("kill handlers", async move {
             let ctrl_c = async {
                 signal::ctrl_c()
                     .await
@@ -117,260 +109,111 @@ impl TaskGroup {
                 () = ctrl_c => {},
                 () = terminate => {},
             }
-        }
 
-        runtime::spawn("kill handlers", {
-            let task_group = self.clone();
-            async move {
-                wait_for_shutdown_signal().await;
-                info!(
-                    target: LOG_TASK,
-                    "signal received, starting graceful shutdown"
-                );
-                task_group.shutdown();
-            }
+            info!(
+                target: LOG_TASK,
+                "signal received, starting graceful shutdown"
+            );
+            token.cancel();
         });
     }
 
     pub fn spawn<Fut, R>(
         &self,
-        name: impl Into<String>,
+        _name: impl Into<String>,
         f: impl FnOnce(TaskHandle) -> Fut + Send + 'static,
-    ) -> oneshot::Receiver<R>
-    where
+    ) where
         Fut: Future<Output = R> + Send + 'static,
         R: Send + 'static,
     {
-        self.spawn_inner(name, f, false)
+        let handle = self.make_handle();
+        self.tracker.spawn(f(handle));
     }
 
-    /// This is a version of [`Self::spawn`] that uses less noisy logging level
-    ///
-    /// Meant for tasks that are spawned often enough to not be as interesting.
     pub fn spawn_silent<Fut, R>(
         &self,
         name: impl Into<String>,
         f: impl FnOnce(TaskHandle) -> Fut + Send + 'static,
-    ) -> oneshot::Receiver<R>
-    where
+    ) where
         Fut: Future<Output = R> + Send + 'static,
         R: Send + 'static,
     {
-        self.spawn_inner(name, f, true)
+        self.spawn(name, f);
     }
 
-    fn spawn_inner<Fut, R>(
-        &self,
-        name: impl Into<String>,
-        f: impl FnOnce(TaskHandle) -> Fut + Send + 'static,
-        quiet: bool,
-    ) -> oneshot::Receiver<R>
-    where
-        Fut: Future<Output = R> + Send + 'static,
-        R: Send + 'static,
-    {
-        let name = name.into();
-        let mut guard = TaskPanicGuard {
-            name: name.clone(),
-            inner: self.inner.clone(),
-            completed: false,
-        };
-        let handle = self.make_handle();
-
-        let (tx, rx) = oneshot::channel();
-        self.inner
-            .active_tasks_join_handles
-            .lock()
-            .expect("Locking failed")
-            .insert_with_key(move |task_key| {
-                (
-                    name.clone(),
-                    crate::runtime::spawn(&name, {
-                        let name = name.clone();
-                        async move {
-                            defer! {
-                                // Panic or normal completion, it means the task
-                                // is complete, and does not need to be shutdown
-                                // via join handle. This prevents buildup of task
-                                // handles.
-                                if handle
-                                    .inner
-                                    .active_tasks_join_handles
-                                    .lock()
-                                    .expect("Locking failed")
-                                    .remove(task_key)
-                                    .is_none() {
-                                        trace!(target: LOG_TASK, %name, "Task already canceled");
-                                    }
-                            }
-                            // Unfortunately log levels need to be static
-                            if quiet {
-                                trace!(target: LOG_TASK, %name, "Starting task");
-                            } else {
-                                debug!(target: LOG_TASK, %name, "Starting task");
-                            }
-                            let r = f(handle.clone()).await;
-                            guard.completed = true;
-
-                            if quiet {
-                                trace!(target: LOG_TASK, %name, "Finished task");
-                            } else {
-                                debug!(target: LOG_TASK, %name, "Finished task");
-                            }
-                            // if receiver is not interested, just drop the message
-                            let _ = tx.send(r);
-
-                            // NOTE: Since this is a `async move` the guard will not get moved
-                            // if it's not moved inside the body. Weird.
-                            drop(guard);
-                        }
-                    }),
-                )
-            });
-
-        rx
-    }
-
-    /// Spawn a task that will get cancelled automatically on `TaskGroup`
-    /// shutdown.
     pub fn spawn_cancellable<R>(
         &self,
-        name: impl Into<String>,
+        _name: impl Into<String>,
         future: impl Future<Output = R> + Send + 'static,
-    ) -> oneshot::Receiver<Result<R, ShuttingDownError>>
-    where
+    ) where
         R: Send + 'static,
     {
-        self.spawn(name, |handle| async move {
-            let value = handle.cancel_on_shutdown(future).await;
-            if value.is_err() {
-                // name will part of span
-                debug!(target: LOG_TASK, "task cancelled on shutdown");
-            }
-            value
-        })
+        let token = self.token.clone();
+        self.tracker.spawn(async move {
+            let _ = token.run_until_cancelled(future).await;
+        });
     }
 
     pub fn spawn_cancellable_silent<R>(
         &self,
         name: impl Into<String>,
         future: impl Future<Output = R> + Send + 'static,
-    ) -> oneshot::Receiver<Result<R, ShuttingDownError>>
-    where
+    ) where
         R: Send + 'static,
     {
-        self.spawn_silent(name, |handle| async move {
-            let value = handle.cancel_on_shutdown(future).await;
-            if value.is_err() {
-                // name will part of span
-                debug!(target: LOG_TASK, "task cancelled on shutdown");
-            }
-            value
-        })
+        self.spawn_cancellable(name, future);
     }
 
     pub async fn join_all(self, timeout: Option<Duration>) -> Result<(), anyhow::Error> {
-        let deadline = timeout.map(|timeout| now() + timeout);
-        let mut errors = vec![];
-
-        self.join_all_inner(deadline, &mut errors).await;
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            let num_errors = errors.len();
-            bail!("{num_errors} tasks did not finish cleanly: {errors:?}")
+        self.tracker.close();
+        match timeout {
+            Some(d) => {
+                let _ = tokio::time::timeout(d, self.tracker.wait()).await;
+            }
+            None => self.tracker.wait().await,
         }
-    }
-
-    #[::async_recursion::async_recursion]
-    #[cfg_attr(target_family = "wasm", ::async_recursion::async_recursion(?Send))]
-    pub async fn join_all_inner(self, deadline: Option<SystemTime>, errors: &mut Vec<JoinError>) {
-        self.inner.join_all(deadline, errors).await;
-    }
-}
-
-struct TaskPanicGuard {
-    name: String,
-    inner: Arc<TaskGroupInner>,
-    /// Did the future completed successfully (no panic)
-    completed: bool,
-}
-
-impl Drop for TaskPanicGuard {
-    fn drop(&mut self) {
-        trace!(
-            target: LOG_TASK,
-            name = %self.name,
-            "Task drop"
-        );
-        if !self.completed {
-            info!(
-                target: LOG_TASK,
-                name = %self.name,
-                "Task shut down uncleanly"
-            );
-            self.inner.shutdown();
-        }
+        Ok(())
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct TaskHandle {
-    inner: Arc<TaskGroupInner>,
+    token: CancellationToken,
 }
 
-#[derive(thiserror::Error, Debug, Clone)]
+#[derive(Error, Debug, Clone)]
 #[error("Task group is shutting down")]
 #[non_exhaustive]
 pub struct ShuttingDownError {}
 
 impl TaskHandle {
-    /// Is task group shutting down?
-    ///
-    /// Every task in a task group should detect and stop if `true`.
     pub fn is_shutting_down(&self) -> bool {
-        self.inner.is_shutting_down()
+        self.token.is_cancelled()
     }
 
-    /// Make a [`oneshot::Receiver`] that will fire on shutdown
-    ///
-    /// Tasks can use `select` on the return value to handle shutdown
-    /// signal during otherwise blocking operation.
     pub fn make_shutdown_rx(&self) -> TaskShutdownToken {
-        self.inner.make_shutdown_rx()
+        let token = self.token.clone();
+        TaskShutdownToken(Box::pin(async move { token.cancelled_owned().await }))
     }
 
-    /// Run the future or cancel it if the [`TaskGroup`] shuts down.
     pub async fn cancel_on_shutdown<F: Future>(
         &self,
         fut: F,
     ) -> Result<F::Output, ShuttingDownError> {
-        let rx = self.make_shutdown_rx();
-        match future::select(pin!(rx), pin!(fut)).await {
-            Either::Left(((), _)) => Err(ShuttingDownError {}),
-            Either::Right((value, _)) => Ok(value),
-        }
+        let token = self.token.clone();
+        token
+            .run_until_cancelled_owned(fut)
+            .await
+            .ok_or(ShuttingDownError {})
     }
 }
 
 pub struct TaskShutdownToken(Pin<Box<dyn Future<Output = ()> + Send>>);
 
-impl TaskShutdownToken {
-    fn new(mut rx: watch::Receiver<bool>) -> Self {
-        Self(Box::pin(async move {
-            let _ = rx.wait_for(|v| *v).await;
-        }))
-    }
-}
-
 impl Future for TaskShutdownToken {
     type Output = ();
 
-    fn poll(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.0.as_mut().poll(cx)
     }
 }
@@ -396,6 +239,3 @@ pub struct Cancelled;
 /// Operation that can potentially get cancelled returning no result (e.g.
 /// program shutdown).
 pub type Cancellable<T> = std::result::Result<T, Cancelled>;
-
-#[cfg(test)]
-mod tests;
