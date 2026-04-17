@@ -20,10 +20,6 @@ pub mod auth;
 pub mod dashboard;
 pub mod setup;
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::Duration;
-
-use axum::extract::State;
 use axum::response::{Html, IntoResponse};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
@@ -31,23 +27,11 @@ use maud::{DOCTYPE, Markup, PreEscaped, html};
 use picomint_core::hex::ToHex;
 use picomint_core::module::ApiAuth;
 use picomint_core::secp256k1::rand::{Rng, thread_rng};
-use serde::{Deserialize, Serialize};
-use tokio::net::TcpStream;
-use tokio::time::timeout;
+use serde::Deserialize;
 
 // Common route constants shared between setup and dashboard.
 pub const ROOT_ROUTE: &str = "/";
 pub const LOGIN_ROUTE: &str = "/login";
-pub const CONNECTIVITY_CHECK_ROUTE: &str = "/ui/connectivity-check";
-pub const DOWNLOAD_BACKUP_ROUTE: &str = "/download-backup";
-
-/// Archive of the guardian config files that can be downloaded from the
-/// dashboard to restore this guardian on a new machine.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GuardianConfigBackup {
-    #[serde(with = "picomint_core::hex::serde")]
-    pub tar_archive_bytes: Vec<u8>,
-}
 
 /// Generic state wrapper for the setup and dashboard axum routers. Holds the
 /// concrete API handle plus a random per-process auth cookie pair used to
@@ -148,7 +132,6 @@ fn card_layout(col_class: &str, header: &str, content: Markup) -> Markup {
                         }
                     }
                 }
-                (connectivity_widget())
                 script src="/assets/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous" {}
             }
         }
@@ -218,67 +201,8 @@ pub fn dashboard_layout(content: Markup, version: &str) -> Markup {
                         span class="text-muted" { "Version " (version) }
                     }
                 }
-                (connectivity_widget())
                 script src="/assets/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous" {}
             }
         }
     }
-}
-
-/// Fixed-position div that loads the connectivity status fragment via htmx.
-pub fn connectivity_widget() -> Markup {
-    html! {
-        div
-            style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1050;"
-            hx-get=(CONNECTIVITY_CHECK_ROUTE)
-            hx-trigger="load, every 30s"
-            hx-swap="innerHTML"
-        {}
-    }
-}
-
-async fn check_tcp_connect(addr: SocketAddr) -> bool {
-    timeout(Duration::from_secs(3), TcpStream::connect(addr))
-        .await
-        .is_ok_and(|r| r.is_ok())
-}
-
-/// Handler that checks internet connectivity by attempting TCP connections
-/// to well-known anycast IPs and returns an HTML fragment.
-///
-/// Manually checks the auth cookie to avoid `UserAuth`'s redirect, which would
-/// cause htmx to swap the entire login page into the widget.
-pub async fn connectivity_check_handler<Api: Send + Sync + 'static>(
-    State(state): State<UiState<Api>>,
-    jar: CookieJar,
-) -> Html<String> {
-    let authenticated = jar
-        .get(&state.auth_cookie_name)
-        .is_some_and(|c| c.value() == state.auth_cookie_value);
-
-    if !authenticated {
-        return Html(String::new());
-    }
-
-    let check_1 = check_tcp_connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 443));
-    let check_2 = check_tcp_connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53));
-
-    let (r1, r2) = tokio::join!(check_1, check_2);
-    let is_connected = r1 || r2;
-
-    let markup = if is_connected {
-        html! {
-            span class="badge bg-success" style="font-size: 0.75rem;" {
-                "Internet connection OK"
-            }
-        }
-    } else {
-        html! {
-            span class="badge bg-danger" style="font-size: 0.75rem;" {
-                "Internet connection unavailable"
-            }
-        }
-    };
-
-    Html(markup.into_string())
 }

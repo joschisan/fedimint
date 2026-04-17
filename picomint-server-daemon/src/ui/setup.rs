@@ -14,8 +14,7 @@ use crate::config::setup::SetupApi;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::auth::UserAuth;
 use crate::ui::{
-    CONNECTIVITY_CHECK_ROUTE, LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState,
-    connectivity_check_handler, copiable_text, login_form, login_submit_response,
+    LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState, copiable_text, login_form, login_submit_response,
     single_card_layout,
 };
 
@@ -493,10 +492,6 @@ pub fn router(api: Arc<SetupApi>) -> Router {
         .route(ADD_SETUP_CODE_ROUTE, post(post_add_setup_code))
         .route(RESET_SETUP_CODES_ROUTE, post(post_reset_setup_codes))
         .route(START_DKG_ROUTE, post(post_start_dkg))
-        .route(
-            CONNECTIVITY_CHECK_ROUTE,
-            get(connectivity_check_handler::<Arc<SetupApi>>),
-        )
         .with_static_routes()
         .with_state(UiState::new(api))
 }

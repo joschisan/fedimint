@@ -72,7 +72,6 @@ sha3 = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 subtle = { workspace = true }
-tar = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
