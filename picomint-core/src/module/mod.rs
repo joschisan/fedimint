@@ -215,14 +215,11 @@ pub trait TypedApiEndpoint {
 /// # Example
 ///
 /// ```rust
-/// # use picomint_core::module::ApiVersion;
 /// # use picomint_core::module::{api_endpoint, ApiEndpoint};
-/// # use picomint_core::core::ModuleInstanceId;
 /// struct State;
 ///
 /// let _: ApiEndpoint<State> = api_endpoint! {
 ///     "/foobar",
-///     ApiVersion::new(0, 3),
 ///     async |state: &State, params: ()| -> i32 {
 ///         Ok(0)
 ///     }
@@ -232,9 +229,6 @@ pub trait TypedApiEndpoint {
 macro_rules! __api_endpoint {
     (
         $path:expr_2021,
-        // Api Version this endpoint was introduced in, at the current consensus level
-        // Currently for documentation purposes only.
-        $version_introduced:expr_2021,
         async |$state:ident: &$state_ty:ty, $param:ident: $param_ty:ty| -> $resp_ty:ty $body:block
     ) => {{
         struct Endpoint;
@@ -251,10 +245,6 @@ macro_rules! __api_endpoint {
                 $state: &'state Self::State,
                 $param: Self::Param,
             ) -> ::std::result::Result<Self::Response, $crate::module::ApiError> {
-                {
-                    // just to enforce the correct type
-                    const __API_VERSION: $crate::module::ApiVersion = $version_introduced;
-                }
                 $body
             }
         }

@@ -30,8 +30,6 @@
 //!
 //! [`CoreConsensusVersion`] and [`ModuleConsensusVersion`] are used for
 //! consensus versioning.
-use std::cmp;
-
 use serde::{Deserialize, Serialize};
 
 use crate::encoding::{Decodable, Encodable};
@@ -108,64 +106,3 @@ impl ModuleConsensusVersion {
     }
 }
 
-/// Api version supported by a core server or a client/server module at a given
-/// [`ModuleConsensusVersion`].
-///
-/// Changing [`ModuleConsensusVersion`] implies resetting the api versioning.
-///
-/// For a client and server to be able to communicate with each other:
-///
-/// * The client needs API version support for the [`ModuleConsensusVersion`]
-///   that the server is currently running with.
-/// * Within that [`ModuleConsensusVersion`] during handshake negotiation
-///   process client and server must find at least one `Api::major` version
-///   where client's `minor` is lower or equal server's `major` version.
-///
-/// A practical module implementation needs to implement large range of version
-/// backward compatibility on both client and server side to accommodate end
-/// user client devices receiving updates at a pace hard to control, and
-/// technical and coordination challenges of upgrading servers.
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Decodable, Encodable)]
-pub struct ApiVersion {
-    /// Major API version
-    ///
-    /// Each time [`ModuleConsensusVersion`] is incremented, this number (and
-    /// `minor` number as well) should be reset to `0`.
-    ///
-    /// Should be incremented each time the API was changed in a
-    /// backward-incompatible ways (while resetting `minor` to `0`).
-    pub major: u32,
-    /// Minor API version
-    ///
-    /// * For clients this means *minimum* supported minor version of the
-    ///   `major` version required by client implementation
-    /// * For servers this means *maximum* supported minor version of the
-    ///   `major` version implemented by the server implementation
-    pub minor: u32,
-}
-
-impl ApiVersion {
-    pub const fn new(major: u32, minor: u32) -> Self {
-        Self { major, minor }
-    }
-}
-
-/// ```
-/// use picomint_core::module::ApiVersion;
-/// assert!(ApiVersion { major: 3, minor: 3 } < ApiVersion { major: 4, minor: 0 });
-/// assert!(ApiVersion { major: 3, minor: 3 } < ApiVersion { major: 3, minor: 5 });
-/// assert!(ApiVersion { major: 3, minor: 3 } == ApiVersion { major: 3, minor: 3 });
-/// ```
-impl cmp::PartialOrd for ApiVersion {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl cmp::Ord for ApiVersion {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        self.major
-            .cmp(&other.major)
-            .then(self.minor.cmp(&other.minor))
-    }
-}

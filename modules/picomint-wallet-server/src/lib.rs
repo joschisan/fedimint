@@ -32,7 +32,7 @@ use picomint_core::core::ModuleInstanceId;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{
-    ApiEndpoint, ApiVersion, InputMeta, TransactionItemAmounts, api_endpoint,
+    ApiEndpoint, InputMeta, TransactionItemAmounts, api_endpoint,
 };
 #[cfg(not(target_family = "wasm"))]
 use picomint_core::task::TaskGroup;
@@ -221,8 +221,6 @@ impl ServerModule for Wallet {
         input: &WalletInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, WalletInputError> {
-        let input = input.as_v0_ref();
-
         if dbtx
             .insert(&SPENT_OUTPUT, &input.output_index, &())
             .is_some()
@@ -374,8 +372,6 @@ impl ServerModule for Wallet {
         output: &WalletOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, WalletOutputError> {
-        let output = output.as_v0_ref();
-
         if output.value < self.cfg.consensus.dust_limit {
             return Err(WalletOutputError::UnderDustLimit);
         }
@@ -515,7 +511,6 @@ impl ServerModule for Wallet {
         vec![
             api_endpoint! {
                 CONSENSUS_BLOCK_COUNT_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Wallet, _params: ()| -> u64 {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
@@ -526,7 +521,6 @@ impl ServerModule for Wallet {
             },
             api_endpoint! {
                 CONSENSUS_FEERATE_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Wallet, _params: ()| -> Option<u64> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
@@ -537,7 +531,6 @@ impl ServerModule for Wallet {
             },
             api_endpoint! {
                 FEDERATION_WALLET_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Wallet, _params: ()| -> Option<FederationWallet> {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
@@ -546,7 +539,6 @@ impl ServerModule for Wallet {
             },
             api_endpoint! {
                 SEND_FEE_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Wallet, _params: ()| -> Option<Amount> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
@@ -557,7 +549,6 @@ impl ServerModule for Wallet {
             },
             api_endpoint! {
                 RECEIVE_FEE_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Wallet, _params: ()| -> Option<Amount> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
@@ -568,7 +559,6 @@ impl ServerModule for Wallet {
             },
             api_endpoint! {
                 TRANSACTION_ID_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Wallet, params: OutPoint| -> Option<Txid> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
@@ -579,7 +569,6 @@ impl ServerModule for Wallet {
             },
             api_endpoint! {
                 OUTPUT_INFO_SLICE_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Wallet, params: (u64, u64)| -> Vec<OutputInfo> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
@@ -590,7 +579,6 @@ impl ServerModule for Wallet {
             },
             api_endpoint! {
                 PENDING_TRANSACTION_CHAIN_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Wallet, _params: ()| -> Vec<TxInfo> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;
@@ -601,7 +589,6 @@ impl ServerModule for Wallet {
             },
             api_endpoint! {
                 TRANSACTION_CHAIN_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Wallet, _params: ()| -> Vec<TxInfo> {
                     let db = module.db.clone();
                     let dbtx = db.begin_write().await;

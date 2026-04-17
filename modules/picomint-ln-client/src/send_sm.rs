@@ -10,7 +10,7 @@ use picomint_core::util::SafeUrl;
 use picomint_core::util::backoff_util::api_networking_backoff;
 use picomint_core::{OutPoint, crit, secp256k1, util};
 use picomint_ln_common::contracts::OutgoingContract;
-use picomint_ln_common::{LightningInput, LightningInputV0, OutgoingWitness};
+use picomint_ln_common::{LightningInput, OutgoingWitness};
 use picomint_logging::LOG_CLIENT_MODULE_LN;
 use picomint_redb::WriteTxRef;
 use secp256k1::Keypair;
@@ -212,10 +212,10 @@ async fn transition_gateway_send_payment_sm(
         }
         Err(signature) => {
             let client_input = ClientInput::<LightningInput> {
-                input: LightningInput::V0(LightningInputV0::Outgoing(
+                input: LightningInput::Outgoing(
                     old_state.common.outpoint,
                     OutgoingWitness::Cancel(signature),
-                )),
+                ),
                 amount: old_state.common.contract.amount,
                 keys: vec![old_state.common.refund_keypair],
             };
@@ -283,10 +283,10 @@ async fn transition_preimage_sm(
     }
 
     let client_input = ClientInput::<LightningInput> {
-        input: LightningInput::V0(LightningInputV0::Outgoing(
+        input: LightningInput::Outgoing(
             old_state.common.outpoint,
             OutgoingWitness::Refund,
-        )),
+        ),
         amount: old_state.common.contract.amount,
         keys: vec![old_state.common.refund_keypair],
     };

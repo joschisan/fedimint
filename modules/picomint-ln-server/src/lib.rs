@@ -14,7 +14,7 @@ use picomint_core::bitcoin::Network;
 use picomint_core::core::ModuleInstanceId;
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{
-    ApiEndpoint, ApiError, ApiVersion, InputMeta, TransactionItemAmounts, api_endpoint,
+    ApiEndpoint, ApiError, InputMeta, TransactionItemAmounts, api_endpoint,
 };
 use picomint_core::task::timeout;
 use picomint_core::time::duration_since_epoch;
@@ -32,8 +32,8 @@ use picomint_ln_common::endpoint_constants::{
     OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
 };
 use picomint_ln_common::{
-    ContractId, LightningConsensusItem, LightningInput, LightningInputError, LightningInputV0,
-    LightningModuleTypes, LightningOutput, LightningOutputError, LightningOutputV0,
+    ContractId, LightningConsensusItem, LightningInput, LightningInputError,
+    LightningModuleTypes, LightningOutput, LightningOutputError,
     OutgoingWitness,
 };
 use picomint_logging::LOG_MODULE_LN;
@@ -164,8 +164,8 @@ impl ServerModule for Lightning {
         input: &LightningInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, LightningInputError> {
-        let (pub_key, amount) = match input.as_v0_ref() {
-            LightningInputV0::Outgoing(outpoint, outgoing_witness) => {
+        let (pub_key, amount) = match input {
+            LightningInput::Outgoing(outpoint, outgoing_witness) => {
                 let contract = dbtx
                     .remove(&OUTGOING_CONTRACT, outpoint)
                     .ok_or(LightningInputError::UnknownContract)?;
@@ -202,7 +202,7 @@ impl ServerModule for Lightning {
 
                 (pub_key, contract.amount)
             }
-            LightningInputV0::Incoming(outpoint, agg_decryption_key) => {
+            LightningInput::Incoming(outpoint, agg_decryption_key) => {
                 let contract = dbtx
                     .remove(&INCOMING_CONTRACT, outpoint)
                     .ok_or(LightningInputError::UnknownContract)?;
@@ -243,13 +243,13 @@ impl ServerModule for Lightning {
         output: &LightningOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, LightningOutputError> {
-        let amount = match output.as_v0_ref() {
-            LightningOutputV0::Outgoing(contract) => {
+        let amount = match output {
+            LightningOutput::Outgoing(contract) => {
                 dbtx.insert(&OUTGOING_CONTRACT, &outpoint, contract);
 
                 contract.amount
             }
-            LightningOutputV0::Incoming(contract) => {
+            LightningOutput::Incoming(contract) => {
                 if !contract.verify() {
                     return Err(LightningOutputError::InvalidContract);
                 }
@@ -325,7 +325,6 @@ impl ServerModule for Lightning {
         vec![
             api_endpoint! {
                 CONSENSUS_BLOCK_COUNT_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Lightning, _params : () | -> u64 {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
@@ -335,7 +334,6 @@ impl ServerModule for Lightning {
             },
             api_endpoint! {
                 AWAIT_INCOMING_CONTRACT_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Lightning, params: (ContractId, u64) | -> Option<OutPoint> {
                     let db = module.db.clone();
 
@@ -344,7 +342,6 @@ impl ServerModule for Lightning {
             },
             api_endpoint! {
                 AWAIT_PREIMAGE_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Lightning, params: (OutPoint, u64)| -> Option<[u8; 32]> {
                     let db = module.db.clone();
 
@@ -353,7 +350,6 @@ impl ServerModule for Lightning {
             },
             api_endpoint! {
                 DECRYPTION_KEY_SHARE_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Lightning, params: OutPoint| -> DecryptionKeyShare {
                     let share = module
                         .db
@@ -367,7 +363,6 @@ impl ServerModule for Lightning {
             },
             api_endpoint! {
                 OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Lightning, outpoint: OutPoint| -> Option<(ContractId, u64)> {
                     let db = module.db.clone();
 
@@ -376,7 +371,6 @@ impl ServerModule for Lightning {
             },
             api_endpoint! {
                 AWAIT_INCOMING_CONTRACTS_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Lightning, params: (u64, u64)| -> (Vec<IncomingContract>, u64) {
                     let db = module.db.clone();
 
@@ -389,7 +383,6 @@ impl ServerModule for Lightning {
             },
             api_endpoint! {
                 GATEWAYS_ENDPOINT,
-                ApiVersion::new(0, 0),
                 async |module: &Lightning, _params : () | -> Vec<SafeUrl> {
                     let db = module.db.clone();
 

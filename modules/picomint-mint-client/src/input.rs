@@ -81,7 +81,7 @@ async fn transition_pending_sm(
         .spendable_notes
         .iter()
         .map(|spendable_note| ClientInput::<MintInput> {
-            input: MintInput::new_v0(spendable_note.note()),
+            input: MintInput { note: spendable_note.note() },
             keys: vec![spendable_note.keypair],
             amount: spendable_note.amount(),
         })

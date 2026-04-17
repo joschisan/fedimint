@@ -34,7 +34,7 @@ use picomint_ln_common::config::LightningConfigConsensus;
 use picomint_ln_common::contracts::{IncomingContract, PaymentImage};
 use picomint_ln_common::gateway_api::SendPaymentPayload;
 use picomint_ln_common::{
-    LightningCommonInit, LightningInvoice, LightningModuleTypes, LightningOutput, LightningOutputV0,
+    LightningCommonInit, LightningInvoice, LightningModuleTypes, LightningOutput,
 };
 use receive_sm::{ReceiveSMState, ReceiveStateMachine};
 use secp256k1::schnorr::Signature;
@@ -296,7 +296,7 @@ impl GatewayClientModuleV2 {
         let refund_keypair = self.keypair;
 
         let client_output = ClientOutput::<LightningOutput> {
-            output: LightningOutput::V0(LightningOutputV0::Incoming(contract.clone())),
+            output: LightningOutput::Incoming(contract.clone()),
             amount: contract.commitment.amount,
         };
 
@@ -369,7 +369,7 @@ impl GatewayClientModuleV2 {
         let refund_keypair = self.keypair;
 
         let client_output = ClientOutput::<LightningOutput> {
-            output: LightningOutput::V0(LightningOutputV0::Incoming(contract.clone())),
+            output: LightningOutput::Incoming(contract.clone()),
             amount: contract.commitment.amount,
         };
 

@@ -17,7 +17,7 @@ use picomint_core::core::ModuleKind;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
 use picomint_core::{
-    NumPeersExt, PeerId, extensible_associated_module_type, plugin_types_trait_impl_common,
+    NumPeersExt, PeerId, plugin_types_trait_impl_common,
 };
 use secp256k1::ecdsa::Signature;
 use secp256k1::{PublicKey, Scalar, XOnlyPublicKey};
@@ -153,31 +153,27 @@ impl std::fmt::Display for WalletConsensusItem {
     }
 }
 
-extensible_associated_module_type!(WalletInput, WalletInputV0);
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct WalletInputV0 {
+pub struct WalletInput {
     pub output_index: u64,
     pub tweak: PublicKey,
     pub fee: bitcoin::Amount,
 }
 
-impl std::fmt::Display for WalletInputV0 {
+impl std::fmt::Display for WalletInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Wallet PegIn for output index {}", self.output_index)
     }
 }
 
-extensible_associated_module_type!(WalletOutput, WalletOutputV0);
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct WalletOutputV0 {
+pub struct WalletOutput {
     pub destination: StandardScript,
     pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 
-impl std::fmt::Display for WalletOutputV0 {
+impl std::fmt::Display for WalletOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Wallet PegOut {}", self.value)
     }

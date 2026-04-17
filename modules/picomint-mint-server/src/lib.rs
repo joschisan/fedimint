@@ -13,7 +13,7 @@ use picomint_core::core::ModuleInstanceId;
 use picomint_core::encoding::Encodable;
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{
-    api_endpoint, ApiEndpoint, ApiError, ApiVersion, InputMeta, TransactionItemAmounts,
+    api_endpoint, ApiEndpoint, ApiError, InputMeta, TransactionItemAmounts,
 };
 use picomint_core::{apply, async_trait_maybe_send, Amount, InPoint, OutPoint, PeerId};
 use picomint_mint_common::config::{
@@ -133,8 +133,6 @@ impl ServerModule for Mint {
         input: &MintInput,
         _in_point: InPoint,
     ) -> Result<InputMeta, MintInputError> {
-        let input = input.as_v0_ref();
-
         let pk = self
             .cfg
             .consensus
@@ -188,8 +186,6 @@ impl ServerModule for Mint {
         output: &MintOutput,
         outpoint: OutPoint,
     ) -> Result<TransactionItemAmounts, MintOutputError> {
-        let output = output.as_v0_ref();
-
         let signature = self
             .cfg
             .private
@@ -253,7 +249,6 @@ impl ServerModule for Mint {
         vec![
             api_endpoint! {
                 SIGNATURE_SHARES_ENDPOINT,
-                ApiVersion::new(0, 1),
                 async |module: &Mint, range: picomint_core::OutPointRange| -> Vec<BlindedSignatureShare> {
                     let db = module.db.clone();
 
@@ -266,7 +261,6 @@ impl ServerModule for Mint {
             },
             api_endpoint! {
                 SIGNATURE_SHARES_RECOVERY_ENDPOINT,
-                ApiVersion::new(0, 1),
                 async |module: &Mint, messages: Vec<tbs::BlindedMessage>| -> Vec<BlindedSignatureShare> {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
@@ -275,7 +269,6 @@ impl ServerModule for Mint {
             },
             api_endpoint! {
                 RECOVERY_SLICE_ENDPOINT,
-                ApiVersion::new(0, 1),
                 async |module: &Mint, range: (u64, u64)| -> Vec<RecoveryItem> {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
@@ -284,7 +277,6 @@ impl ServerModule for Mint {
             },
             api_endpoint! {
                 RECOVERY_SLICE_HASH_ENDPOINT,
-                ApiVersion::new(0, 1),
                 async |module: &Mint, range: (u64, u64)| -> bitcoin::hashes::sha256::Hash {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;
@@ -293,7 +285,6 @@ impl ServerModule for Mint {
             },
             api_endpoint! {
                 RECOVERY_COUNT_ENDPOINT,
-                ApiVersion::new(0, 1),
                 async |module: &Mint, _params: ()| -> u64 {
                     let db = module.db.clone();
                     let tx = db.begin_read().await;

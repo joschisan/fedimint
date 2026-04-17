@@ -14,7 +14,7 @@ use picomint_core::endpoint_constants::{
     SUBMIT_TRANSACTION_ENDPOINT,
 };
 use picomint_core::module::audit::{Audit, AuditSummary};
-use picomint_core::module::{ApiAuth, ApiEndpoint, ApiVersion, api_endpoint};
+use picomint_core::module::{ApiAuth, ApiEndpoint, api_endpoint};
 use picomint_core::task::TaskGroup;
 use picomint_core::util::FmtCompact;
 use picomint_core::{PeerId, TransactionId};
@@ -130,7 +130,6 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
     vec![
         api_endpoint! {
             SUBMIT_TRANSACTION_ENDPOINT,
-            ApiVersion::new(0, 0),
             async |picomint: &ConsensusApi, transaction: Transaction| -> TransactionSubmissionOutcome {
                 // we return an inner error if and only if the submitted transaction is
                 // invalid and will be rejected if we were to submit it to consensus
@@ -139,7 +138,6 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
         },
         api_endpoint! {
             AWAIT_TRANSACTION_ENDPOINT,
-            ApiVersion::new(0, 0),
             async |picomint: &ConsensusApi, tx_hash: TransactionId| -> TransactionId {
                 picomint.await_transaction(tx_hash).await;
 
@@ -148,14 +146,12 @@ pub fn server_endpoints() -> Vec<ApiEndpoint<ConsensusApi>> {
         },
         api_endpoint! {
             CLIENT_CONFIG_ENDPOINT,
-            ApiVersion::new(0, 0),
             async |picomint: &ConsensusApi, _v: ()| -> ConsensusConfig {
                 Ok(picomint.client_cfg.clone())
             }
         },
         api_endpoint! {
             LIVENESS_ENDPOINT,
-            ApiVersion::new(0, 0),
             async |_picomint: &ConsensusApi, _v: ()| -> () {
                 Ok(())
             }

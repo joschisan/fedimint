@@ -8,7 +8,7 @@ use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::Keypair;
 use picomint_core::{Amount, OutPoint};
 use picomint_ln_common::contracts::OutgoingContract;
-use picomint_ln_common::{LightningInput, LightningInputV0, LightningInvoice, OutgoingWitness};
+use picomint_ln_common::{LightningInput, LightningInvoice, OutgoingWitness};
 use picomint_redb::WriteTxRef;
 use serde::{Deserialize, Serialize};
 
@@ -207,10 +207,10 @@ async fn transition_send_payment_sm(
                 .await;
 
             let client_input = ClientInput::<LightningInput> {
-                input: LightningInput::V0(LightningInputV0::Outgoing(
+                input: LightningInput::Outgoing(
                     old_state.common.outpoint,
                     OutgoingWitness::Claim(payment_response.preimage),
-                )),
+                ),
                 amount: old_state.common.contract.amount,
                 keys: vec![old_state.common.claim_keypair],
             };

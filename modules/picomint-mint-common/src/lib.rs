@@ -14,7 +14,7 @@ use picomint_core::core::ModuleKind;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
 use picomint_core::secp256k1::PublicKey;
-use picomint_core::{extensible_associated_module_type, plugin_types_trait_impl_common, Amount};
+use picomint_core::{plugin_types_trait_impl_common, Amount};
 use serde::{Deserialize, Serialize};
 use tbs::{BlindedMessage, Message};
 use thiserror::Error;
@@ -103,51 +103,31 @@ impl CommonModuleInit for MintCommonInit {
     type ClientConfig = MintConfigConsensus;
 }
 
-extensible_associated_module_type!(MintInput, MintInputV0);
-
-impl MintInput {
-    pub fn new_v0(note: Note) -> Self {
-        Self::V0(MintInputV0 { note })
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct MintInputV0 {
+pub struct MintInput {
     pub note: Note,
 }
 
-impl std::fmt::Display for MintInputV0 {
+impl std::fmt::Display for MintInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Mint Note {}", self.note.denomination)
     }
 }
 
-extensible_associated_module_type!(MintOutput, MintOutputV0);
-
-impl MintOutput {
-    pub fn new_v0(denomination: Denomination, nonce: BlindedMessage, tweak: [u8; 16]) -> Self {
-        MintOutput::V0(MintOutputV0 {
-            denomination,
-            nonce,
-            tweak,
-        })
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct MintOutputV0 {
+pub struct MintOutput {
     pub denomination: Denomination,
     pub nonce: BlindedMessage,
     pub tweak: [u8; 16],
 }
 
-impl MintOutputV0 {
+impl MintOutput {
     pub fn amount(&self) -> Amount {
         self.denomination.amount()
     }
 }
 
-impl std::fmt::Display for MintOutputV0 {
+impl std::fmt::Display for MintOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Mint Note {}", self.denomination)
     }

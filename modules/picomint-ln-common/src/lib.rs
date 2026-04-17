@@ -24,7 +24,7 @@ use picomint_core::core::ModuleKind;
 use picomint_core::encoding::{Decodable, Encodable};
 use picomint_core::module::{CommonModuleInit, ModuleConsensusVersion};
 use picomint_core::{
-    Amount, OutPoint, extensible_associated_module_type, plugin_types_trait_impl_common,
+    Amount, OutPoint, plugin_types_trait_impl_common,
 };
 mod gateway_connection;
 use lightning_invoice::Bolt11Invoice;
@@ -57,10 +57,8 @@ pub struct ContractId(pub sha256::Hash);
 
 picomint_core::consensus_key!(ContractId);
 
-extensible_associated_module_type!(LightningInput, LightningInputV0);
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub enum LightningInputV0 {
+pub enum LightningInput {
     Outgoing(OutPoint, OutgoingWitness),
     Incoming(OutPoint, AggregateDecryptionKey),
 }
@@ -72,24 +70,22 @@ pub enum OutgoingWitness {
     Cancel(Signature),
 }
 
-impl std::fmt::Display for LightningInputV0 {
+impl std::fmt::Display for LightningInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LightningInputV0",)
+        write!(f, "LightningInput",)
     }
 }
 
-extensible_associated_module_type!(LightningOutput, LightningOutputV0);
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub enum LightningOutputV0 {
+pub enum LightningOutput {
     Outgoing(OutgoingContract),
     Incoming(IncomingContract),
 }
 
-impl std::fmt::Display for LightningOutputV0 {
+impl std::fmt::Display for LightningOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LightningOutputV0")
+        write!(f, "LightningOutput")
     }
 }
 

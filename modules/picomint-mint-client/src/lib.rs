@@ -599,7 +599,7 @@ fn build_inputs(notes: &[SpendableNote]) -> Vec<ClientInput<MintInput>> {
     notes
         .iter()
         .map(|spendable_note| ClientInput {
-            input: MintInput::new_v0(spendable_note.note()),
+            input: MintInput { note: spendable_note.note() },
             keys: vec![spendable_note.keypair],
             amount: spendable_note.amount(),
         })

@@ -40,7 +40,7 @@ use picomint_ln_common::gateway_api::{
 };
 use picomint_ln_common::{
     Bolt11InvoiceDescription, GatewayApi, LightningCommonInit, LightningInvoice,
-    LightningModuleTypes, LightningOutput, LightningOutputV0, MINIMUM_INCOMING_CONTRACT_AMOUNT,
+    LightningModuleTypes, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT,
     lnurl, tweak,
 };
 use picomint_redb::WriteTxRef;
@@ -396,7 +396,7 @@ impl LightningClientModule {
         };
 
         let client_output = ClientOutput::<LightningOutput> {
-            output: LightningOutput::V0(LightningOutputV0::Outgoing(contract.clone())),
+            output: LightningOutput::Outgoing(contract.clone()),
             amount: contract.amount,
         };
 

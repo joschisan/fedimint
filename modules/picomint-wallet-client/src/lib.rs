@@ -38,8 +38,8 @@ use picomint_logging::LOG_CLIENT_MODULE_WALLET;
 use picomint_redb::Database;
 use picomint_wallet_common::config::WalletConfigConsensus;
 use picomint_wallet_common::{
-    StandardScript, WalletCommonInit, WalletInput, WalletInputV0, WalletModuleTypes, WalletOutput,
-    WalletOutputV0, descriptor, is_potential_receive,
+    StandardScript, WalletCommonInit, WalletInput, WalletModuleTypes, WalletOutput, descriptor,
+    is_potential_receive,
 };
 use receive_sm::{ReceiveSMCommon, ReceiveSMState, ReceiveStateMachine};
 use secp256k1::Keypair;
@@ -197,11 +197,11 @@ impl WalletClientModule {
             .ok_or(SendError::UnsupportedAddress)?;
 
         let client_output = ClientOutput::<WalletOutput> {
-            output: WalletOutput::V0(WalletOutputV0 {
+            output: WalletOutput {
                 destination,
                 value,
                 fee,
-            }),
+            },
             amount: Amount::from_sats((value + fee).to_sat()),
         };
 
@@ -308,11 +308,11 @@ impl WalletClientModule {
         let operation_id = OperationId::new_random();
 
         let client_input = ClientInput::<WalletInput> {
-            input: WalletInput::V0(WalletInputV0 {
+            input: WalletInput {
                 output_index,
                 fee,
                 tweak: self.derive_tweak(address_index).public_key(),
-            }),
+            },
             keys: vec![self.derive_tweak(address_index)],
             amount: Amount::from_sats((value - fee).to_sat()),
         };

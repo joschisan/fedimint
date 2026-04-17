@@ -29,7 +29,11 @@ impl NoteIssuanceRequest {
     }
 
     pub fn output(&self) -> MintOutput {
-        MintOutput::new_v0(self.denomination, self.blinded_message(), self.tweak)
+        MintOutput {
+            denomination: self.denomination,
+            nonce: self.blinded_message(),
+            tweak: self.tweak,
+        }
     }
 
     pub fn finalize(&self, signature: BlindedSignature) -> SpendableNote {
