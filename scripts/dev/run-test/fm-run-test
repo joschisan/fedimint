@@ -76,18 +76,42 @@ FM_RUN_TEST_TIMEOUT_SOFT=${FM_RUN_TEST_TIMEOUT:-310}
 
 set +e
 
+# We use process substitution `> >(ts ...)` instead of a pipe `| ts ...` to
+# prevent orphan daemon processes from blocking the script indefinitely.
+#
+# The test command spawns daemon processes (fedimintd, bitcoind, etc.) via
+# devimint. Many of these daemons call setsid() to create new sessions/process
+# groups. When `timeout` fires, it sends signals to its child's process group,
+# but daemons in different groups survive as orphans.
+#
+# With a pipeline (`timeout ... "$@" 2>&1 | ts`), bash waits for ALL pipeline
+# components to finish. Orphan daemons inherit the pipe's write-end FD through
+# the fork chain. After timeout kills the main test and exits, the pipe's write
+# end stays open (held by orphans), so `ts` blocks on read() waiting for EOF.
+# Since bash waits for `ts`, the pipeline never completes: `exit_status=$?` is
+# never reached, the error handler never fires, and GNU parallel's hard timeout
+# eventually kills the entire job — with no diagnostic output.
+#
+# With process substitution (`timeout ... "$@" > >(ts ...) 2>&1`), bash only
+# waits for the main command (`command time ... timeout`), not for the `ts`
+# process inside `>(...)`. When timeout kills the test and exits, bash
+# immediately proceeds to capture exit_status — regardless of whether orphan
+# daemons are still holding the FIFO write end open and keeping `ts` alive in
+# the background. The error handler can run and print diagnostics within the
+# time budget before parallel's hard timeout.
 command time -q --format="$time_fmt" -o "$time_out_path" \
     timeout -k 10 "$FM_RUN_TEST_TIMEOUT_SOFT" \
-    "$@" 2>&1 | ts -i "%.S" | ts -s "%M:%S" > "$test_out_path"; exit_status=$?
+    "$@" > >(ts -i "%.S" | ts -s "%M:%S" > "$test_out_path") 2>&1; exit_status=$?
 
 set -e
 
 if [ $exit_status -ne 0 ]; then
     if grep -q "please upgrade to gatewayd" "$FM_RUN_TEST_TMPDIR"/devimint-*/logs/gatewayd-lnd.log 2>/dev/null; then
         echo "## RERUN $test_name$version_str - known old gatewayd bug."
+        # See comment above for why process substitution is used here.
         command time -q --format="$time_fmt" -o "$time_out_path" \
             timeout -k 10 "$FM_RUN_TEST_TIMEOUT_SOFT" \
-            "$@" 2>&1 | ts -i "%.S" | ts -s "%M:%S" > "$test_out_path"
+            "$@" > >(ts -i "%.S" | ts -s "%M:%S" > "$test_out_path") 2>&1
     else
       exit $exit_status
     fi
