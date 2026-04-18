@@ -16,37 +16,8 @@ use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 use super::issuance_sm::verify_blind_shares;
 use super::NoteIssuanceRequest;
 
-#[async_trait::async_trait]
-pub trait MintFederationApi {
-    async fn signature_shares(
-        &self,
-        txid: TransactionId,
-        issuance_requests: Vec<NoteIssuanceRequest>,
-        tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
-    ) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>>;
-
-    async fn signature_shares_recovery(
-        &self,
-        issuance_requests: Vec<NoteIssuanceRequest>,
-        tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
-    ) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>>;
-
-    async fn fetch_recovery_count(&self) -> anyhow::Result<u64>;
-
-    async fn fetch_recovery_slice_hash(&self, start: u64, end: u64) -> sha256::Hash;
-
-    async fn fetch_recovery_slice(
-        &self,
-        peer: PeerId,
-        timeout: Duration,
-        start: u64,
-        end: u64,
-    ) -> anyhow::Result<Vec<RecoveryItem>>;
-}
-
-#[async_trait::async_trait]
-impl MintFederationApi for FederationApi {
-    async fn signature_shares(
+impl FederationApi {
+    pub async fn signature_shares(
         &self,
         txid: TransactionId,
         issuance_requests: Vec<NoteIssuanceRequest>,
@@ -67,7 +38,7 @@ impl MintFederationApi for FederationApi {
         .await
     }
 
-    async fn signature_shares_recovery(
+    pub async fn signature_shares_recovery(
         &self,
         issuance_requests: Vec<NoteIssuanceRequest>,
         tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
@@ -92,7 +63,7 @@ impl MintFederationApi for FederationApi {
         .await
     }
 
-    async fn fetch_recovery_count(&self) -> anyhow::Result<u64> {
+    pub async fn recovery_count(&self) -> anyhow::Result<u64> {
         self.request_current_consensus::<u64>(
             RECOVERY_COUNT_ENDPOINT.to_string(),
             ApiRequestErased::default(),
@@ -101,7 +72,7 @@ impl MintFederationApi for FederationApi {
         .map_err(|e| anyhow::anyhow!("{}", e))
     }
 
-    async fn fetch_recovery_slice_hash(&self, start: u64, end: u64) -> sha256::Hash {
+    pub async fn recovery_slice_hash(&self, start: u64, end: u64) -> sha256::Hash {
         self.request_current_consensus_retry(
             RECOVERY_SLICE_HASH_ENDPOINT.to_owned(),
             ApiRequestErased::new((start, end)),
@@ -109,7 +80,7 @@ impl MintFederationApi for FederationApi {
         .await
     }
 
-    async fn fetch_recovery_slice(
+    pub async fn recovery_slice(
         &self,
         peer: PeerId,
         timeout: Duration,

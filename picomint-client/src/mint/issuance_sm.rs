@@ -9,7 +9,6 @@ use picomint_core::mint::{verify_note, Denomination};
 use picomint_redb::WriteTxRef;
 use tbs::{aggregate_signature_shares, BlindedSignatureShare, PublicKeyShare};
 
-use crate::mint::api::MintFederationApi;
 use super::client_db::NOTE;
 use super::events::{IssuanceComplete, OutputFailureEvent};
 use super::{MintSmContext, NoteIssuanceRequest, SpendableNote};

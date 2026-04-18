@@ -52,7 +52,6 @@ use rand::seq::IteratorRandom;
 use tbs::AggregatePublicKey;
 use thiserror::Error;
 
-use self::api::MintFederationApi;
 pub use self::ecash::ECash;
 use self::issuance::NoteIssuanceRequest;
 use self::issuance_sm::IssuanceStateMachine;
@@ -109,7 +108,7 @@ impl ClientModuleInit for MintClientInit {
         } else {
             RecoveryState {
                 next_index: 0,
-                total_items: args.module_api().fetch_recovery_count().await?,
+                total_items: args.module_api().recovery_count().await?,
                 requests: BTreeMap::new(),
                 nonces: BTreeSet::new(),
             }
@@ -128,7 +127,7 @@ impl ClientModuleInit for MintClientInit {
             let api = args.module_api().clone();
             let end = std::cmp::min(start + SLICE_SIZE, state.total_items);
 
-            async move { (start, end, api.fetch_recovery_slice_hash(start, end).await) }
+            async move { (start, end, api.recovery_slice_hash(start, end).await) }
         })
         .buffered(PARALLEL_HASH_REQUESTS)
         .map(|(start, end, hash)| {
@@ -865,7 +864,7 @@ async fn download_slice_with_hash(
         let start_time = picomint_core::time::now();
 
         if let Ok(data) = module_api
-            .fetch_recovery_slice(peer, TIMEOUT, start, end)
+            .recovery_slice(peer, TIMEOUT, start, end)
             .await
         {
             let elapsed = picomint_core::time::now()
