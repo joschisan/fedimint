@@ -4,7 +4,7 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
 
 use super::FinalReceiveState;
-use super::events::CompleteLightningPaymentEvent;
+use super::events::CompleteEvent;
 use crate::{
     GwV2SmContext, InterceptPaymentResponse, PaymentAction, Preimage, await_receive_from_log,
 };
@@ -119,11 +119,7 @@ async fn transition_completion_sm(
     old_state: CompleteStateMachine,
 ) -> Option<CompleteStateMachine> {
     ctx.client_ctx
-        .log_event(
-            dbtx,
-            old_state.common.operation_id,
-            CompleteLightningPaymentEvent,
-        )
+        .log_event(dbtx, old_state.common.operation_id, CompleteEvent)
         .await;
 
     None

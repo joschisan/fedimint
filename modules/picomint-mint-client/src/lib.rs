@@ -700,6 +700,16 @@ impl MintClientModule {
             )
             .await;
 
+        self.client_ctx
+            .log_event(
+                &tx,
+                operation_id,
+                ReissueEvent {
+                    txid: finalize_range.txid(),
+                },
+            )
+            .await;
+
         dbtx.commit().await;
 
         await_output_finalisation(&self.client_ctx, operation_id, caller_range).await;
@@ -746,7 +756,7 @@ impl MintClientModule {
             .log_event(
                 dbtx,
                 operation_id,
-                SendPaymentEvent {
+                SendEvent {
                     amount,
                     ecash: picomint_base32::encode(&ecash),
                 },
@@ -817,7 +827,8 @@ impl MintClientModule {
             .log_event(
                 &tx,
                 operation_id,
-                ReceivePaymentEvent {
+                ReceiveEvent {
+                    txid,
                     amount: ecash.amount(),
                 },
             )
@@ -923,7 +934,7 @@ async fn await_output_finalisation(
     use futures::StreamExt as _;
 
     let mut stream =
-        client_ctx.subscribe_operation_events_typed::<events::OutputFinalisedEvent>(operation_id);
+        client_ctx.subscribe_operation_events_typed::<events::OutputFinalEvent>(operation_id);
     while let Some(ev) = stream.next().await {
         if ev.range == range {
             return;

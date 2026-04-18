@@ -6,7 +6,7 @@ use picomint_redb::WriteTxRef;
 
 use crate::WalletClientContext;
 use crate::api::WalletFederationApi;
-use crate::events::{SendPaymentStatus, SendPaymentUpdateEvent};
+use crate::events::{SendConfirmEvent, SendFailureEvent};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
@@ -69,21 +69,18 @@ async fn transition_funding_sm(
     result: AwaitFundingResult,
     old_state: SendStateMachine,
 ) -> Option<SendStateMachine> {
-    let status = match result {
-        AwaitFundingResult::Success(txid) => SendPaymentStatus::Success(txid),
-        AwaitFundingResult::Aborted(_) => SendPaymentStatus::Aborted,
-        AwaitFundingResult::Failure => {
-            return None;
+    match result {
+        AwaitFundingResult::Success(txid) => {
+            ctx.client_ctx
+                .log_event(dbtx, old_state.operation_id, SendConfirmEvent { txid })
+                .await;
         }
-    };
-
-    ctx.client_ctx
-        .log_event(
-            dbtx,
-            old_state.operation_id,
-            SendPaymentUpdateEvent { status },
-        )
-        .await;
+        AwaitFundingResult::Aborted(_) | AwaitFundingResult::Failure => {
+            ctx.client_ctx
+                .log_event(dbtx, old_state.operation_id, SendFailureEvent)
+                .await;
+        }
+    }
 
     None
 }

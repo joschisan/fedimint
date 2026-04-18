@@ -18,7 +18,7 @@ use secp256k1::schnorr::Signature;
 use tracing::{error, instrument};
 
 use crate::api::LightningFederationApi;
-use crate::events::{SendPaymentStatus, SendPaymentUpdateEvent};
+use crate::events::{SendRefundEvent, SendSuccessEvent};
 use crate::{LightningClientContext, LightningInvoice};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -57,17 +57,6 @@ pub enum SendSMState {
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// State machine that requests the lightning gateway to pay an invoice on
 /// behalf of a federation client.
-
-async fn send_update_event_sm(
-    ctx: &LightningClientContext,
-    dbtx: &WriteTxRef<'_>,
-    operation_id: OperationId,
-    status: SendPaymentStatus,
-) {
-    ctx.client_ctx
-        .log_event(dbtx, operation_id, SendPaymentUpdateEvent { status })
-        .await;
-}
 
 impl StateMachine for SendStateMachine {
     const TABLE_NAME: &'static str = "send-sm";
@@ -185,13 +174,13 @@ async fn transition_gateway_send_payment_sm(
 ) -> Option<SendStateMachine> {
     match gateway_response {
         Ok(preimage) => {
-            send_update_event_sm(
-                &ctx,
-                dbtx,
-                old_state.common.operation_id,
-                SendPaymentStatus::Success(preimage),
-            )
-            .await;
+            ctx.client_ctx
+                .log_event(
+                    dbtx,
+                    old_state.common.operation_id,
+                    SendSuccessEvent { preimage },
+                )
+                .await;
         }
         Err(signature) => {
             let client_input = ClientInput::<LightningInput> {
@@ -203,7 +192,8 @@ async fn transition_gateway_send_payment_sm(
                 keys: vec![old_state.common.refund_keypair],
             };
 
-            ctx.client_ctx
+            let range = ctx
+                .client_ctx
                 .claim_inputs(
                     dbtx,
                     ClientInputBundle::new(vec![client_input]),
@@ -212,13 +202,15 @@ async fn transition_gateway_send_payment_sm(
                 .await
                 .expect("Cannot claim input, additional funding needed");
 
-            send_update_event_sm(
-                &ctx,
-                dbtx,
-                old_state.common.operation_id,
-                SendPaymentStatus::Refunded,
-            )
-            .await;
+            ctx.client_ctx
+                .log_event(
+                    dbtx,
+                    old_state.common.operation_id,
+                    SendRefundEvent {
+                        txid: range.txid(),
+                    },
+                )
+                .await;
         }
     }
 
@@ -253,13 +245,13 @@ async fn transition_preimage_sm(
     preimage: Option<[u8; 32]>,
 ) -> Option<SendStateMachine> {
     if let Some(preimage) = preimage {
-        send_update_event_sm(
-            &ctx,
-            dbtx,
-            old_state.common.operation_id,
-            SendPaymentStatus::Success(preimage),
-        )
-        .await;
+        ctx.client_ctx
+            .log_event(
+                dbtx,
+                old_state.common.operation_id,
+                SendSuccessEvent { preimage },
+            )
+            .await;
 
         return None;
     }
@@ -270,7 +262,8 @@ async fn transition_preimage_sm(
         keys: vec![old_state.common.refund_keypair],
     };
 
-    ctx.client_ctx
+    let range = ctx
+        .client_ctx
         .claim_inputs(
             dbtx,
             ClientInputBundle::new(vec![client_input]),
@@ -279,13 +272,15 @@ async fn transition_preimage_sm(
         .await
         .expect("Cannot claim input, additional funding needed");
 
-    send_update_event_sm(
-        &ctx,
-        dbtx,
-        old_state.common.operation_id,
-        SendPaymentStatus::Refunded,
-    )
-    .await;
+    ctx.client_ctx
+        .log_event(
+            dbtx,
+            old_state.common.operation_id,
+            SendRefundEvent {
+                txid: range.txid(),
+            },
+        )
+        .await;
 
     None
 }

@@ -1,71 +1,54 @@
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, Txid};
+use picomint_core::TransactionId;
 use picomint_core::core::ModuleKind;
 use picomint_eventlog::{Event, EventKind};
 use serde::{Deserialize, Serialize};
 
-/// Event emitted when a pegout (send to onchain) operation is initiated.
+/// Emitted when a pegout (send to onchain) operation is initiated.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SendPaymentEvent {
+pub struct SendEvent {
+    pub txid: TransactionId,
     pub address: Address<NetworkUnchecked>,
     pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 
-impl Event for SendPaymentEvent {
+impl Event for SendEvent {
     const MODULE: Option<ModuleKind> = Some(picomint_wallet_common::KIND);
-    const KIND: EventKind = EventKind::from_static("payment-send");
+    const KIND: EventKind = EventKind::from_static("send");
 }
 
-/// Status of a send (pegout) operation.
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
-pub enum SendPaymentStatus {
-    /// The pegout was successful, includes the bitcoin transaction ID.
-    Success(Txid),
-    /// The pegout was aborted.
-    Aborted,
-}
-
-/// Event emitted when a send (pegout) operation reaches a final state.
+/// Emitted when the pegout is observed on bitcoin with a confirmed txid.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SendPaymentUpdateEvent {
-    pub status: SendPaymentStatus,
+pub struct SendConfirmEvent {
+    pub txid: Txid,
 }
 
-impl Event for SendPaymentUpdateEvent {
+impl Event for SendConfirmEvent {
     const MODULE: Option<ModuleKind> = Some(picomint_wallet_common::KIND);
-    const KIND: EventKind = EventKind::from_static("payment-send-update");
+    const KIND: EventKind = EventKind::from_static("send-confirm");
 }
 
-/// Event emitted when a receive (pegin) operation is initiated.
+/// Emitted when the pegout fails to reach onchain confirmation.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ReceivePaymentEvent {
+pub struct SendFailureEvent;
+
+impl Event for SendFailureEvent {
+    const MODULE: Option<ModuleKind> = Some(picomint_wallet_common::KIND);
+    const KIND: EventKind = EventKind::from_static("send-failure");
+}
+
+/// Emitted when a pegin operation is initiated.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ReceiveEvent {
+    pub txid: TransactionId,
     pub address: Address<NetworkUnchecked>,
     pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 
-impl Event for ReceivePaymentEvent {
+impl Event for ReceiveEvent {
     const MODULE: Option<ModuleKind> = Some(picomint_wallet_common::KIND);
-    const KIND: EventKind = EventKind::from_static("payment-receive");
-}
-
-/// Status of a receive (pegin) operation.
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
-pub enum ReceivePaymentStatus {
-    /// The pegin was successful.
-    Success,
-    /// The pegin was aborted.
-    Aborted,
-}
-
-/// Event emitted when a receive (pegin) operation reaches a final state.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ReceivePaymentUpdateEvent {
-    pub status: ReceivePaymentStatus,
-}
-
-impl Event for ReceivePaymentUpdateEvent {
-    const MODULE: Option<ModuleKind> = Some(picomint_wallet_common::KIND);
-    const KIND: EventKind = EventKind::from_static("payment-receive-update");
+    const KIND: EventKind = EventKind::from_static("receive");
 }

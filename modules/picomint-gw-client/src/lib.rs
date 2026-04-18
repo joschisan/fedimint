@@ -14,8 +14,8 @@ use async_trait::async_trait;
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::Message;
 use events::{
-    CompleteLightningPaymentEvent, ReceivePaymentStatus, ReceivePaymentUpdateEvent,
-    SendPaymentStatus, SendPaymentUpdateEvent,
+    CompleteEvent, ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent,
+    SendCancelEvent, SendEvent, SendSuccessEvent,
 };
 use lightning_invoice::Bolt11Invoice;
 use picomint_api_client::api::FederationApi;
@@ -162,7 +162,6 @@ impl ClientModule for GatewayClientModuleV2 {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Decodable, Encodable)]
 pub enum FinalReceiveState {
-    Rejected,
     Success([u8; 32]),
     Refunded,
     Failure,
@@ -251,8 +250,19 @@ impl GatewayClientModuleV2 {
                     contract: payload.contract.clone(),
                     max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM_V2),
                     min_contract_amount,
-                    invoice: payload.invoice,
+                    invoice: payload.invoice.clone(),
                     claim_keypair: self.keypair,
+                },
+            )
+            .await;
+
+        self.client_ctx
+            .log_event(
+                &tx,
+                operation_id,
+                SendEvent {
+                    outpoint: payload.outpoint,
+                    invoice: payload.invoice,
                 },
             )
             .await;
@@ -263,19 +273,19 @@ impl GatewayClientModuleV2 {
     }
 
     pub async fn subscribe_send(&self, operation_id: OperationId) -> Result<[u8; 32], Signature> {
-        let status =
-            await_event::<SendPaymentUpdateEvent, _>(&self.client_ctx, operation_id, |ev| {
-                Some(ev.status.clone())
-            })
-            .await;
+        use futures::StreamExt as _;
 
-        match status {
-            SendPaymentStatus::Success(preimage) => Ok(preimage),
-            SendPaymentStatus::Cancelled(signature) => {
+        let mut stream = self.client_ctx.subscribe_operation_events(operation_id);
+        while let Some(entry) = stream.next().await {
+            if let Some(ev) = entry.to_event::<SendSuccessEvent>() {
+                return Ok(ev.preimage);
+            }
+            if let Some(ev) = entry.to_event::<SendCancelEvent>() {
                 warn!("Outgoing lightning payment is cancelled");
-                Err(signature)
+                return Err(ev.signature);
             }
         }
+        unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
     pub async fn relay_incoming_htlc(
@@ -324,7 +334,7 @@ impl GatewayClientModuleV2 {
                 &tx,
                 ReceiveStateMachine {
                     operation_id,
-                    contract,
+                    contract: contract.clone(),
                     outpoint,
                     refund_keypair,
                 },
@@ -342,6 +352,17 @@ impl GatewayClientModuleV2 {
                         htlc_id,
                     },
                     state: CompleteSMState::Pending,
+                },
+            )
+            .await;
+
+        self.client_ctx
+            .log_event(
+                &tx,
+                operation_id,
+                ReceiveEvent {
+                    txid: outpoint.txid,
+                    amount: contract.commitment.amount,
                 },
             )
             .await;
@@ -394,9 +415,20 @@ impl GatewayClientModuleV2 {
                 &tx,
                 ReceiveStateMachine {
                     operation_id,
-                    contract,
+                    contract: contract.clone(),
                     outpoint,
                     refund_keypair,
+                },
+            )
+            .await;
+
+        self.client_ctx
+            .log_event(
+                &tx,
+                operation_id,
+                ReceiveEvent {
+                    txid: outpoint.txid,
+                    amount: contract.commitment.amount,
                 },
             )
             .await;
@@ -407,27 +439,18 @@ impl GatewayClientModuleV2 {
     }
 
     pub async fn await_receive(&self, operation_id: OperationId) -> FinalReceiveState {
-        let status =
-            await_event::<ReceivePaymentUpdateEvent, _>(&self.client_ctx, operation_id, |ev| {
-                Some(ev.status.clone())
-            })
-            .await;
-
-        match status {
-            ReceivePaymentStatus::Success(preimage) => FinalReceiveState::Success(preimage),
-            ReceivePaymentStatus::Rejected => FinalReceiveState::Rejected,
-            ReceivePaymentStatus::Refunded => FinalReceiveState::Refunded,
-            ReceivePaymentStatus::Failure => FinalReceiveState::Failure,
-        }
+        await_receive_from_log(&self.client_ctx, operation_id).await
     }
 
     /// For the given `OperationId`, this function will wait until the Complete
     /// state machine has finished.
     pub async fn await_completion(&self, operation_id: OperationId) {
-        await_event::<CompleteLightningPaymentEvent, _>(&self.client_ctx, operation_id, |_| {
-            Some(())
-        })
-        .await;
+        use futures::StreamExt as _;
+
+        let mut stream = self
+            .client_ctx
+            .subscribe_operation_events_typed::<CompleteEvent>(operation_id);
+        stream.next().await;
     }
 }
 
@@ -435,38 +458,21 @@ pub(crate) async fn await_receive_from_log(
     client_ctx: &ClientContext<GatewayClientModuleV2>,
     operation_id: OperationId,
 ) -> FinalReceiveState {
-    let status = await_event::<ReceivePaymentUpdateEvent, _>(client_ctx, operation_id, |ev| {
-        Some(ev.status.clone())
-    })
-    .await;
-
-    match status {
-        ReceivePaymentStatus::Success(preimage) => FinalReceiveState::Success(preimage),
-        ReceivePaymentStatus::Rejected => FinalReceiveState::Rejected,
-        ReceivePaymentStatus::Refunded => FinalReceiveState::Refunded,
-        ReceivePaymentStatus::Failure => FinalReceiveState::Failure,
-    }
-}
-
-/// Tail the op-scoped sublog, yielding the first match of `predicate` applied
-/// to an event of type `E`.
-async fn await_event<E, T>(
-    client_ctx: &ClientContext<GatewayClientModuleV2>,
-    operation_id: OperationId,
-    predicate: impl Fn(&E) -> Option<T>,
-) -> T
-where
-    E: picomint_eventlog::Event + Send + 'static,
-{
     use futures::StreamExt as _;
 
-    let mut stream = client_ctx.subscribe_operation_events_typed::<E>(operation_id);
-    while let Some(ev) = stream.next().await {
-        if let Some(out) = predicate(&ev) {
-            return out;
+    let mut stream = client_ctx.subscribe_operation_events(operation_id);
+    while let Some(entry) = stream.next().await {
+        if let Some(ev) = entry.to_event::<ReceiveSuccessEvent>() {
+            return FinalReceiveState::Success(ev.preimage);
+        }
+        if entry.to_event::<ReceiveRefundEvent>().is_some() {
+            return FinalReceiveState::Refunded;
+        }
+        if entry.to_event::<ReceiveFailureEvent>().is_some() {
+            return FinalReceiveState::Failure;
         }
     }
-    unreachable!("subscribe_operation_events_typed only ends at client shutdown")
+    unreachable!("subscribe_operation_events only ends at client shutdown")
 }
 
 /// An interface between module implementation and the general `Gateway`

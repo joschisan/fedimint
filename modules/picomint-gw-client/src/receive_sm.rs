@@ -18,7 +18,7 @@ use picomint_redb::WriteTxRef;
 use tpe::{DecryptionKeyShare, aggregate_dk_shares};
 use tracing::warn;
 
-use super::events::{ReceivePaymentStatus, ReceivePaymentUpdateEvent};
+use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent};
 use crate::GwV2SmContext;
 
 /// State machine that handles the relay of an incoming Lightning payment.
@@ -109,13 +109,7 @@ async fn transition_decryption_shares_sm(
             .collect(),
         Err(_) => {
             ctx.client_ctx
-                .log_event(
-                    dbtx,
-                    old_state.operation_id,
-                    ReceivePaymentUpdateEvent {
-                        status: ReceivePaymentStatus::Rejected,
-                    },
-                )
+                .log_event(dbtx, old_state.operation_id, ReceiveFailureEvent)
                 .await;
 
             return None;
@@ -131,13 +125,7 @@ async fn transition_decryption_shares_sm(
         warn!(target: LOG_CLIENT_MODULE_GW, "Failed to obtain decryption key. Client config's public keys are inconsistent");
 
         ctx.client_ctx
-            .log_event(
-                dbtx,
-                old_state.operation_id,
-                ReceivePaymentUpdateEvent {
-                    status: ReceivePaymentStatus::Failure,
-                },
-            )
+            .log_event(dbtx, old_state.operation_id, ReceiveFailureEvent)
             .await;
 
         return None;
@@ -151,9 +139,7 @@ async fn transition_decryption_shares_sm(
             .log_event(
                 dbtx,
                 old_state.operation_id,
-                ReceivePaymentUpdateEvent {
-                    status: ReceivePaymentStatus::Success(preimage),
-                },
+                ReceiveSuccessEvent { preimage },
             )
             .await;
 
@@ -166,7 +152,8 @@ async fn transition_decryption_shares_sm(
         keys: vec![old_state.refund_keypair],
     };
 
-    ctx.client_ctx
+    let range = ctx
+        .client_ctx
         .claim_inputs(
             dbtx,
             ClientInputBundle::new(vec![client_input]),
@@ -179,8 +166,8 @@ async fn transition_decryption_shares_sm(
         .log_event(
             dbtx,
             old_state.operation_id,
-            ReceivePaymentUpdateEvent {
-                status: ReceivePaymentStatus::Refunded,
+            ReceiveRefundEvent {
+                txid: range.txid(),
             },
         )
         .await;

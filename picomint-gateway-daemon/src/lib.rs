@@ -418,7 +418,6 @@ impl AppState {
             FinalReceiveState::Success(preimage) => Ok(preimage),
             FinalReceiveState::Failure => Err("Payment has failed".to_string()),
             FinalReceiveState::Refunded => Err("Payment has been refunded".to_string()),
-            FinalReceiveState::Rejected => Err("Payment has been rejected".to_string()),
         }?;
 
         Ok(VerifyResponse {

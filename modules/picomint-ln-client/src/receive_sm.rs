@@ -13,7 +13,7 @@ use tracing::instrument;
 
 use crate::LightningClientContext;
 use crate::api::LightningFederationApi;
-use crate::events::ReceivePaymentEvent;
+use crate::events::{ReceiveEvent, ReceiveExpiryEvent};
 
 /// State machine that waits on the receipt of a Lightning payment. Terminates
 /// when the incoming contract is either claimed or expires.
@@ -64,7 +64,12 @@ async fn transition_incoming_contract_sm(
     old_state: ReceiveStateMachine,
     outpoint: Option<OutPoint>,
 ) -> Option<ReceiveStateMachine> {
-    let outpoint = outpoint?;
+    let Some(outpoint) = outpoint else {
+        ctx.client_ctx
+            .log_event(dbtx, old_state.operation_id, ReceiveExpiryEvent)
+            .await;
+        return None;
+    };
 
     let client_input = ClientInput::<LightningInput> {
         input: LightningInput::Incoming(outpoint, old_state.agg_decryption_key),
@@ -72,7 +77,8 @@ async fn transition_incoming_contract_sm(
         keys: vec![old_state.claim_keypair],
     };
 
-    ctx.client_ctx
+    let range = ctx
+        .client_ctx
         .claim_inputs(
             dbtx,
             ClientInputBundle::new(vec![client_input]),
@@ -85,7 +91,8 @@ async fn transition_incoming_contract_sm(
         .log_event(
             dbtx,
             old_state.operation_id,
-            ReceivePaymentEvent {
+            ReceiveEvent {
+                txid: range.txid(),
                 amount: old_state.contract.commitment.amount,
             },
         )

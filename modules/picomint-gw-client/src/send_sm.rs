@@ -11,7 +11,7 @@ use picomint_redb::WriteTxRef;
 use serde::{Deserialize, Serialize};
 
 use super::FinalReceiveState;
-use super::events::{SendPaymentStatus, SendPaymentUpdateEvent};
+use super::events::{SendCancelEvent, SendSuccessEvent};
 use crate::GwV2SmContext;
 
 /// State machine that handles the relay of an outgoing Lightning payment.
@@ -43,7 +43,6 @@ pub enum Cancelled {
     Underfunded,
     RegistrationError(String),
     FinalizationError(String),
-    Rejected,
     Refunded,
     Failure,
     LightningRpcError(String),
@@ -104,7 +103,6 @@ async fn send_payment_sm(
         .map_err(|e| Cancelled::RegistrationError(e.to_string()))?
     {
         Some((final_receive_state, target_federation)) => match final_receive_state {
-            FinalReceiveState::Rejected => Err(Cancelled::Rejected),
             FinalReceiveState::Success(preimage) => Ok(PaymentResponse {
                 preimage,
                 target_federation: Some(target_federation),
@@ -134,16 +132,6 @@ async fn transition_send_payment_sm(
 ) -> Option<SendStateMachine> {
     match result {
         Ok(payment_response) => {
-            ctx.client_ctx
-                .log_event(
-                    dbtx,
-                    old_state.operation_id,
-                    SendPaymentUpdateEvent {
-                        status: SendPaymentStatus::Success(payment_response.preimage),
-                    },
-                )
-                .await;
-
             let client_input = ClientInput::<LightningInput> {
                 input: LightningInput::Outgoing(
                     old_state.outpoint,
@@ -153,7 +141,8 @@ async fn transition_send_payment_sm(
                 keys: vec![old_state.claim_keypair],
             };
 
-            ctx.client_ctx
+            let range = ctx
+                .client_ctx
                 .claim_inputs(
                     dbtx,
                     ClientInputBundle::new(vec![client_input]),
@@ -161,6 +150,17 @@ async fn transition_send_payment_sm(
                 )
                 .await
                 .expect("Cannot claim input, additional funding needed");
+
+            ctx.client_ctx
+                .log_event(
+                    dbtx,
+                    old_state.operation_id,
+                    SendSuccessEvent {
+                        preimage: payment_response.preimage,
+                        txid: range.txid(),
+                    },
+                )
+                .await;
         }
         Err(_) => {
             let signature = ctx
@@ -171,9 +171,7 @@ async fn transition_send_payment_sm(
                 .log_event(
                     dbtx,
                     old_state.operation_id,
-                    SendPaymentUpdateEvent {
-                        status: SendPaymentStatus::Cancelled(signature),
-                    },
+                    SendCancelEvent { signature },
                 )
                 .await;
         }

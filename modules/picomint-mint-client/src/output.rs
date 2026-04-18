@@ -12,7 +12,7 @@ use tbs::{aggregate_signature_shares, BlindedSignatureShare, PublicKeyShare};
 
 use crate::api::MintV2ModuleApi;
 use crate::client_db::NOTE;
-use crate::events::OutputFinalisedEvent;
+use crate::events::{OutputFailureEvent, OutputFinalEvent};
 use crate::{MintSmContext, NoteIssuanceRequest};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -83,6 +83,9 @@ async fn transition_outcome_ready_sm(
     old_state: MintOutputStateMachine,
 ) -> Option<MintOutputStateMachine> {
     let Ok(signature_shares) = signature_shares else {
+        ctx.client_ctx
+            .log_event(dbtx, old_state.operation_id, OutputFailureEvent)
+            .await;
         return None;
     };
 
@@ -102,6 +105,9 @@ async fn transition_outcome_ready_sm(
             .expect("No aggregated pk found for denomination");
 
         if !verify_note(spendable_note.note(), pk) {
+            ctx.client_ctx
+                .log_event(dbtx, old_state.operation_id, OutputFailureEvent)
+                .await;
             return None;
         }
 
@@ -110,11 +116,7 @@ async fn transition_outcome_ready_sm(
 
     if let Some(range) = old_state.range {
         ctx.client_ctx
-            .log_event(
-                dbtx,
-                old_state.operation_id,
-                OutputFinalisedEvent { range },
-            )
+            .log_event(dbtx, old_state.operation_id, OutputFinalEvent { range })
             .await;
     }
 

@@ -48,7 +48,7 @@ use thiserror::Error;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
 
 use crate::api::LightningFederationApi;
-use crate::events::SendPaymentEvent;
+use crate::events::SendEvent;
 use crate::receive_sm::ReceiveStateMachine;
 use crate::send_sm::{SendSMCommon, SendSMState, SendStateMachine};
 
@@ -444,7 +444,8 @@ impl LightningClientModule {
             .log_event(
                 &tx,
                 operation_id,
-                SendPaymentEvent {
+                SendEvent {
+                    txid: range.txid(),
                     amount: send_fee.add_to(amount),
                     fee: send_fee.fee(amount),
                 },

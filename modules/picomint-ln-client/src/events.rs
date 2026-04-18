@@ -1,48 +1,61 @@
 use picomint_core::Amount;
+use picomint_core::TransactionId;
 use picomint_core::core::ModuleKind;
 use picomint_eventlog::{Event, EventKind};
 use serde::{Deserialize, Serialize};
 
-/// Event emitted when a send operation is created.
+/// Emitted when a send operation is created.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SendPaymentEvent {
+pub struct SendEvent {
+    pub txid: TransactionId,
     pub amount: Amount,
     pub fee: Amount,
 }
 
-impl Event for SendPaymentEvent {
+impl Event for SendEvent {
     const MODULE: Option<ModuleKind> = Some(picomint_ln_common::KIND);
-    const KIND: EventKind = EventKind::from_static("payment-send");
+    const KIND: EventKind = EventKind::from_static("send");
 }
 
-/// Status of a send operation.
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
-pub enum SendPaymentStatus {
-    /// The payment was successful, includes the preimage as proof of payment.
-    Success([u8; 32]),
-    /// The payment has been refunded.
-    Refunded,
-}
-
-/// Event emitted when a send operation reaches a final state.
+/// Emitted when the payment successfully resolves and the preimage is known.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SendPaymentUpdateEvent {
-    pub status: SendPaymentStatus,
+pub struct SendSuccessEvent {
+    pub preimage: [u8; 32],
 }
 
-impl Event for SendPaymentUpdateEvent {
+impl Event for SendSuccessEvent {
     const MODULE: Option<ModuleKind> = Some(picomint_ln_common::KIND);
-    const KIND: EventKind = EventKind::from_static("payment-send-update");
+    const KIND: EventKind = EventKind::from_static("send-success");
 }
 
-/// Event emitted when a receive operation successfully completes and
-/// transitions to the claiming state.
+/// Emitted when the payment fails and funds are refunded via a new claim tx.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ReceivePaymentEvent {
+pub struct SendRefundEvent {
+    pub txid: TransactionId,
+}
+
+impl Event for SendRefundEvent {
+    const MODULE: Option<ModuleKind> = Some(picomint_ln_common::KIND);
+    const KIND: EventKind = EventKind::from_static("send-refund");
+}
+
+/// Emitted when a receive operation successfully claims the incoming contract.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ReceiveEvent {
+    pub txid: TransactionId,
     pub amount: Amount,
 }
 
-impl Event for ReceivePaymentEvent {
+impl Event for ReceiveEvent {
     const MODULE: Option<ModuleKind> = Some(picomint_ln_common::KIND);
-    const KIND: EventKind = EventKind::from_static("payment-receive");
+    const KIND: EventKind = EventKind::from_static("receive");
+}
+
+/// Emitted when the incoming contract expires before a payment arrives.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ReceiveExpiryEvent;
+
+impl Event for ReceiveExpiryEvent {
+    const MODULE: Option<ModuleKind> = Some(picomint_ln_common::KIND);
+    const KIND: EventKind = EventKind::from_static("receive-expiry");
 }

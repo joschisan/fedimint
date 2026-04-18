@@ -19,7 +19,7 @@ use api::WalletFederationApi;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
 use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
-use events::{ReceivePaymentEvent, SendPaymentEvent};
+use events::{ReceiveEvent, SendEvent};
 use picomint_api_client::api::{FederationApi, FederationResult};
 use picomint_client_module::executor::ModuleExecutor;
 use picomint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
@@ -233,7 +233,8 @@ impl WalletClientModule {
             .log_event(
                 &tx,
                 operation_id,
-                SendPaymentEvent {
+                SendEvent {
+                    txid: range.txid(),
                     address,
                     value,
                     fee,
@@ -327,7 +328,8 @@ impl WalletClientModule {
             .log_event(
                 &tx,
                 operation_id,
-                ReceivePaymentEvent {
+                ReceiveEvent {
+                    txid: range.txid(),
                     address: self.derive_address(address_index).as_unchecked().clone(),
                     value,
                     fee,
