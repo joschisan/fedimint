@@ -38,12 +38,12 @@ use picomint_client_module::transaction::{
 };
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::{ModuleCommon, ModuleInit};
 use picomint_core::secp256k1::rand::{thread_rng, Rng};
 use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_core::{Amount, PeerId};
 use picomint_derive_secret::DerivableSecret;
+use picomint_encoding::{Decodable, Encodable};
 use picomint_mint_common::config::{client_denominations, MintConfigConsensus};
 use picomint_mint_common::{
     Denomination, MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, RecoveryItem,
@@ -341,32 +341,24 @@ impl ClientModule for MintClientModule {
         mut output_amount: Amount,
     ) -> anyhow::Result<picomint_client_module::module::FinalContribution<MintInput, MintOutput>>
     {
-        let funding_notes = self
+        let mut spendable_notes = self
             .select_funding_input(dbtx, output_amount.saturating_sub(input_amount))
             .await
             .context("Insufficient funds")?;
 
-        for note in &funding_notes {
+        for note in &spendable_notes {
             self.remove_spendable_note(dbtx, note).await;
         }
 
-        input_amount += funding_notes.iter().map(SpendableNote::amount).sum();
+        input_amount += spendable_notes.iter().map(SpendableNote::amount).sum();
 
-        output_amount += self.cfg.input_fee * funding_notes.len() as u64;
+        output_amount += self.cfg.input_fee * spendable_notes.len() as u64;
 
         assert!(output_amount <= input_amount);
 
-        let (input_notes, output_amounts) = self
-            .rebalance(dbtx, self.cfg.output_fee, input_amount - output_amount)
+        let output_amounts = self
+            .select_output_denominations(dbtx, self.cfg.output_fee, input_amount - output_amount)
             .await;
-
-        for note in &input_notes {
-            self.remove_spendable_note(dbtx, note).await;
-        }
-
-        input_amount += input_notes.iter().map(SpendableNote::amount).sum();
-
-        output_amount += self.cfg.input_fee * input_notes.len() as u64;
 
         output_amount += output_amounts
             .iter()
@@ -374,11 +366,6 @@ impl ClientModule for MintClientModule {
             .sum();
 
         assert!(output_amount <= input_amount);
-
-        let mut spendable_notes = funding_notes
-            .into_iter()
-            .chain(input_notes)
-            .collect::<Vec<SpendableNote>>();
 
         // We sort the notes by denomination to minimize the leaked information.
         spendable_notes.sort_by_key(|note| note.denomination);
@@ -515,52 +502,32 @@ impl MintClientModule {
         None
     }
 
-    async fn rebalance(
+    async fn select_output_denominations(
         &self,
         dbtx: &WriteTxRef<'_>,
         output_fee: Amount,
         mut excess_input: Amount,
-    ) -> (Vec<SpendableNote>, Vec<Denomination>) {
+    ) -> Vec<Denomination> {
         let n_denominations = self.get_count_by_denomination_dbtx(dbtx).await;
 
-        let mut notes: Vec<SpendableNote> = dbtx
-            .iter(&NOTE)
-            .into_iter()
-            .map(|(note, ())| note)
-            .collect();
-        notes.sort_by(|a, b| b.denomination.cmp(&a.denomination));
-        let mut notes = notes.into_iter();
-
-        let mut input_notes = Vec::new();
         let mut output_denominations = Vec::new();
 
         for d in client_denominations() {
-            let n_denomination = n_denominations.get(&d).copied().unwrap_or(0);
-
-            let n_missing = TARGET_PER_DENOMINATION.saturating_sub(n_denomination as usize);
+            let n_missing = TARGET_PER_DENOMINATION
+                .saturating_sub(n_denominations.get(&d).copied().unwrap_or(0) as usize);
 
             for _ in 0..n_missing {
                 match excess_input.checked_sub(d.amount() + output_fee) {
-                    Some(remaining_excess) => excess_input = remaining_excess,
-                    None => match notes.next() {
-                        Some(note) => {
-                            if note.amount() <= d.amount() + output_fee {
-                                break;
-                            }
-
-                            excess_input += note.amount() - (d.amount() + output_fee);
-
-                            input_notes.push(note);
-                        }
-                        None => break,
-                    },
+                    Some(remaining) => {
+                        excess_input = remaining;
+                        output_denominations.push(d);
+                    }
+                    None => return output_denominations,
                 }
-
-                output_denominations.push(d);
             }
         }
 
-        (input_notes, output_denominations)
+        output_denominations
     }
 }
 
@@ -632,17 +599,16 @@ impl MintClientModule {
     pub async fn send(&self, amount: Amount) -> Result<ECash, SendECashError> {
         let amount = round_to_multiple(amount, client_denominations().next().unwrap().amount());
 
-        let module_db = self.client_ctx.module_db();
-        let maybe_ecash = {
-            let dbtx = module_db.begin_write().await;
-            let ecash = self
-                .send_ecash_dbtx(&dbtx.as_ref(), amount)
-                .await
-                .expect("Infallible");
-            dbtx.commit().await;
-            ecash
-        };
-        if let Some(ecash) = maybe_ecash {
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+
+        let ecash = self
+            .send_ecash_dbtx(&dbtx.as_ref(), amount)
+            .await
+            .expect("Infallible");
+
+        dbtx.commit().await;
+
+        if let Some(ecash) = ecash {
             return Ok(ecash);
         }
 
