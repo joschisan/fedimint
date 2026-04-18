@@ -11,7 +11,7 @@ use tokio::sync::watch;
 use tracing::debug;
 
 use crate::executor::{StateMachine, StateTransition as SmStateTransition};
-use crate::{TxAcceptedEvent, TxRejectedEvent};
+use crate::{TxAcceptEvent, TxRejectEvent};
 
 /// State machine that (re-)submits a transaction until it is either accepted
 /// or rejected by the federation.
@@ -95,7 +95,7 @@ async fn transition_tx_rejected_sm(
         dbtx,
         ctx.log_event_added_tx.clone(),
         Some(old_state.operation_id),
-        TxRejectedEvent {
+        TxRejectEvent {
             txid: old_state.transaction.tx_hash(),
             error,
         },
@@ -113,7 +113,7 @@ async fn transition_tx_accepted_sm(
         dbtx,
         ctx.log_event_added_tx.clone(),
         Some(old_state.operation_id),
-        TxAcceptedEvent {
+        TxAcceptEvent {
             txid: old_state.transaction.tx_hash(),
         },
     );

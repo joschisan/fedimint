@@ -34,33 +34,23 @@ pub mod secret;
 pub mod transaction;
 
 #[derive(Serialize, Deserialize)]
-pub struct TxCreatedEvent {
+pub struct TxAcceptEvent {
     pub txid: TransactionId,
 }
 
-impl Event for TxCreatedEvent {
+impl Event for TxAcceptEvent {
     const MODULE: Option<ModuleKind> = None;
-    const KIND: EventKind = EventKind::from_static("tx-created");
+    const KIND: EventKind = EventKind::from_static("tx-accept");
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct TxAcceptedEvent {
-    pub txid: TransactionId,
-}
-
-impl Event for TxAcceptedEvent {
-    const MODULE: Option<ModuleKind> = None;
-    const KIND: EventKind = EventKind::from_static("tx-accepted");
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct TxRejectedEvent {
+pub struct TxRejectEvent {
     pub txid: TransactionId,
     pub error: String,
 }
-impl Event for TxRejectedEvent {
+impl Event for TxRejectEvent {
     const MODULE: Option<ModuleKind> = None;
-    const KIND: EventKind = EventKind::from_static("tx-rejected");
+    const KIND: EventKind = EventKind::from_static("tx-reject");
 }
 
 #[derive(Serialize, Deserialize)]

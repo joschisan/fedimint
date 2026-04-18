@@ -20,7 +20,7 @@ use tracing::warn;
 
 use self::init::ClientModuleInit;
 use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
-use crate::{TxAcceptedEvent, TxRejectedEvent};
+use crate::{TxAcceptEvent, TxRejectEvent};
 
 /// Return type of [`ClientModule::create_final_inputs_and_outputs`]. The
 /// primary module contributes inputs/outputs to balance a partial
@@ -237,12 +237,12 @@ where
     ) -> Result<(), String> {
         let mut stream = self.subscribe_operation_events(operation_id);
         while let Some(entry) = stream.next().await {
-            if let Some(ev) = entry.to_event::<TxAcceptedEvent>()
+            if let Some(ev) = entry.to_event::<TxAcceptEvent>()
                 && ev.txid == query_txid
             {
                 return Ok(());
             }
-            if let Some(ev) = entry.to_event::<TxRejectedEvent>()
+            if let Some(ev) = entry.to_event::<TxRejectEvent>()
                 && ev.txid == query_txid
             {
                 return Err(ev.error);

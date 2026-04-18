@@ -19,7 +19,7 @@ use picomint_client_module::module::recovery::RecoveryProgress;
 use picomint_client_module::module::{ClientModule, FinalizeTransaction, IdxRange, OutPointRange};
 use picomint_client_module::transaction::{TransactionBuilder, TxSubmissionStateMachine};
 use picomint_client_module::{
-    ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
+    ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptEvent, TxRejectEvent,
 };
 use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleKind, OperationId};
@@ -387,13 +387,6 @@ impl Client {
             )
             .await;
 
-        picomint_eventlog::log_event(
-            dbtx,
-            self.log_event_added_tx.clone(),
-            Some(operation_id),
-            TxCreatedEvent { txid },
-        );
-
         Ok(OutPointRange::new(
             txid,
             IdxRange::from(primary_output_range),
@@ -407,12 +400,12 @@ impl Client {
     ) -> Result<(), String> {
         let mut stream = self.subscribe_operation_events(operation_id);
         while let Some(entry) = stream.next().await {
-            if let Some(ev) = entry.to_event::<TxAcceptedEvent>()
+            if let Some(ev) = entry.to_event::<TxAcceptEvent>()
                 && ev.txid == query_txid
             {
                 return Ok(());
             }
-            if let Some(ev) = entry.to_event::<TxRejectedEvent>()
+            if let Some(ev) = entry.to_event::<TxRejectEvent>()
                 && ev.txid == query_txid
             {
                 return Err(ev.error);
