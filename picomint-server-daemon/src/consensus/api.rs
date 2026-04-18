@@ -11,9 +11,9 @@ use picomint_core::endpoint_constants::{
 };
 use picomint_core::module::audit::{Audit, AuditSummary};
 use picomint_core::module::{ApiError, ApiRequestErased};
-use picomint_server_core::handler;
 
 use crate::consensus::rpc;
+use crate::handler;
 use picomint_core::PeerId;
 use picomint_core::task::TaskGroup;
 use picomint_logging::LOG_NET_API;

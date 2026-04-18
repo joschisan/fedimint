@@ -1,12 +1,12 @@
-//! Freestanding API handlers for [`crate::Wallet`].
+//! Freestanding API handlers for [`super::Wallet`].
 
 use bitcoin::{Amount, Txid};
 use picomint_core::OutPoint;
 use picomint_core::module::ApiError;
 use picomint_wallet_common::{FederationWallet, OutputInfo, TxInfo};
 
-use crate::Wallet;
-use crate::db::FEDERATION_WALLET;
+use super::Wallet;
+use super::db::FEDERATION_WALLET;
 
 pub async fn consensus_block_count(wallet: &Wallet, _: ()) -> Result<u64, ApiError> {
     let tx = wallet.db.begin_read().await;

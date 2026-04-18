@@ -26,17 +26,19 @@ use picomint_ln_common::endpoint_constants::{
     OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
 };
 use picomint_ln_common::{
-    LightningConsensusItem, LightningInput, LightningInputError, LightningModuleTypes,
-    LightningOutput, LightningOutputError, OutgoingWitness,
+    LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
+    LightningOutputError, OutgoingWitness,
 };
 use picomint_logging::LOG_MODULE_LN;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
-use picomint_server_core::config::{PeerHandleOps, eval_poly_g1};
-use picomint_server_core::{handler, ServerModule};
 use tpe::{PublicKeyShare, SecretKeyShare};
 use tracing::trace;
 
-use crate::db::{
+use crate::config::dkg::DkgHandle;
+use crate::config::poly::eval_poly_g1;
+use crate::handler;
+
+use self::db::{
     BLOCK_COUNT_VOTE, DECRYPTION_KEY_SHARE, GATEWAY, INCOMING_CONTRACT, INCOMING_CONTRACT_INDEX,
     INCOMING_CONTRACT_OUTPOINT, INCOMING_CONTRACT_STREAM, INCOMING_CONTRACT_STREAM_INDEX,
     OUTGOING_CONTRACT, PREIMAGE, UNIX_TIME_VOTE,
@@ -45,7 +47,7 @@ use crate::db::{
 /// Run DKG for the lightning module, producing a fresh `LightningConfig` for
 /// this peer.
 pub async fn distributed_gen(
-    peers: &(dyn PeerHandleOps + Send + Sync),
+    peers: &DkgHandle<'_>,
     network: Network,
 ) -> anyhow::Result<LightningConfig> {
     let (polynomial, sks) = peers.run_dkg_g1().await?;
@@ -105,11 +107,8 @@ impl Lightning {
     }
 }
 
-#[async_trait::async_trait]
-impl ServerModule for Lightning {
-    type Common = LightningModuleTypes;
-
-    async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<LightningConsensusItem> {
+impl Lightning {
+    pub async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<LightningConsensusItem> {
         // We reduce the time granularity to deduplicate votes more often and not save
         // one consensus item every second.
         let mut items = vec![LightningConsensusItem::UnixTimeVote(
@@ -124,7 +123,7 @@ impl ServerModule for Lightning {
         items
     }
 
-    async fn process_consensus_item(
+    pub async fn process_consensus_item(
         &self,
         dbtx: &WriteTxRef<'_>,
         consensus_item: LightningConsensusItem,
@@ -150,7 +149,7 @@ impl ServerModule for Lightning {
         }
     }
 
-    async fn process_input(
+    pub async fn process_input(
         &self,
         dbtx: &WriteTxRef<'_>,
         input: &LightningInput,
@@ -229,7 +228,7 @@ impl ServerModule for Lightning {
         })
     }
 
-    async fn process_output(
+    pub async fn process_output(
         &self,
         dbtx: &WriteTxRef<'_>,
         output: &LightningOutput,
@@ -280,7 +279,7 @@ impl ServerModule for Lightning {
         })
     }
 
-    async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
+    pub async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
         // Both incoming and outgoing contracts represent liabilities to the federation
         // since they are obligations to issue notes.
         audit.add_items(
@@ -308,7 +307,7 @@ impl ServerModule for Lightning {
         );
     }
 
-    async fn handle_api(
+    pub async fn handle_api(
         &self,
         method: &str,
         req: ApiRequestErased,

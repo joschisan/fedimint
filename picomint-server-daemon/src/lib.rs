@@ -44,9 +44,30 @@ use picomint_bitcoin_rpc::BitcoinBackend;
 use picomint_core::task::TaskGroup;
 use picomint_logging::LOG_CONSENSUS;
 use picomint_redb::Database;
-pub use picomint_server_core as core;
 use tokio::net::TcpListener;
 use tracing::info;
+
+/// Dispatch helper for module `handle_api` match arms.
+///
+/// `handler!(fn_name, self, req).await` decodes `req` into the parameter type
+/// of `rpc::fn_name`, calls `rpc::fn_name(self, param).await`, and
+/// consensus-encodes the response. Each module has a `mod rpc` submodule with
+/// one `async fn name(module: &Self, param: P) -> Result<R, ApiError>` per
+/// endpoint.
+#[macro_export]
+macro_rules! handler {
+    ($func:ident, $self:expr, $req:expr) => {
+        async move {
+            let param = $req
+                .to_typed()
+                .map_err(|e| ::picomint_core::module::ApiError::bad_request(e.to_string()))?;
+            let resp = rpc::$func($self, param).await?;
+            ::std::result::Result::Ok(
+                ::picomint_encoding::Encodable::consensus_encode_to_vec(&resp),
+            )
+        }
+    };
+}
 
 use crate::config::db::{load_server_config, store_server_config};
 use crate::config::setup::SetupApi;

@@ -9,7 +9,7 @@ use crate::consensus::api::ConsensusApi;
 use crate::ui::auth::UserAuth;
 use crate::ui::{ROOT_ROUTE, UiState};
 
-// LNv2 route constants
+// LN route constants
 pub const LN_ADD_ROUTE: &str = "/ln/add";
 pub const LN_REMOVE_ROUTE: &str = "/ln/remove";
 
@@ -19,8 +19,8 @@ pub struct GatewayForm {
     pub gateway_url: SafeUrl,
 }
 
-// Function to render the Lightning V2 module UI section
-pub async fn render(lightning: &picomint_ln_server::Lightning) -> Markup {
+// Function to render the Lightning module UI section
+pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
     let gateways = lightning.gateways_ui().await;
     let consensus_block_count = lightning.consensus_block_count_ui().await;
     let consensus_unix_time = lightning.consensus_unix_time_ui().await;
@@ -30,7 +30,7 @@ pub async fn render(lightning: &picomint_ln_server::Lightning) -> Markup {
 
     html! {
         div class="card h-100" {
-            div class="card-header dashboard-header" { "Lightning V2" }
+            div class="card-header dashboard-header" { "Lightning" }
             div class="card-body" {
                 // Consensus status information
                 div class="mb-4" {
@@ -57,7 +57,7 @@ pub async fn render(lightning: &picomint_ln_server::Lightning) -> Markup {
                             div class="h-100" {
                                 @if gateways.is_empty() {
                                     div class="text-center p-4" {
-                                        p { "You need a Lightning gateway to connect to your federation and then add its URL here in the dashboard to enable V2 Lightning payments for your users. You can either run your own gateway or reach out to the Picomint team on " a href="https://chat.picomint.org/" { "Discord" } " - we are running our own gateway and are happy to get you started." }
+                                        p { "You need a Lightning gateway to connect to your federation and then add its URL here in the dashboard to enable Lightning payments for your users. You can either run your own gateway or reach out to the Picomint team on " a href="https://chat.picomint.org/" { "Discord" } " - we are running our own gateway and are happy to get you started." }
                                     }
                                 } @else {
                                     div class="table-responsive" {

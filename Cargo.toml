@@ -25,18 +25,14 @@ members = [
     "picomint-bitcoin-rpc",
     "picomint-server-cli",
     "picomint-server-cli-core",
-    "picomint-server-core",
     "picomint-server-daemon",
     "modules/picomint-gw-client",
     "modules/picomint-ln-client",
     "modules/picomint-ln-common",
-    "modules/picomint-ln-server",
     "modules/picomint-mint-client",
     "modules/picomint-mint-common",
-    "modules/picomint-mint-server",
     "modules/picomint-wallet-client",
     "modules/picomint-wallet-common",
-    "modules/picomint-wallet-server",
 ]
 resolver = "2"
 
@@ -120,20 +116,16 @@ picomint-gw-client = { path = "./modules/picomint-gw-client", version = "=0.1.0"
 picomint-lnurl = { path = "./picomint-lnurl", version = "=0.1.0" }
 picomint-ln-client = { path = "./modules/picomint-ln-client", version = "=0.1.0" }
 picomint-ln-common = { path = "./modules/picomint-ln-common", version = "=0.1.0" }
-picomint-ln-server = { path = "./modules/picomint-ln-server", version = "=0.1.0" }
 picomint-logging = { path = "./picomint-logging", version = "=0.1.0" }
 picomint-mint-client = { path = "./modules/picomint-mint-client", version = "=0.1.0" }
 picomint-mint-common = { path = "./modules/picomint-mint-common", version = "=0.1.0" }
-picomint-mint-server = { path = "./modules/picomint-mint-server", version = "=0.1.0" }
 picomint-redb = { path = "./picomint-redb", version = "=0.1.0" }
 picomint-bitcoin-rpc = { path = "./picomint-bitcoin-rpc", version = "=0.1.0" }
 picomint-server-cli = { path = "./picomint-server-cli", version = "=0.1.0" }
 picomint-server-cli-core = { path = "./picomint-server-cli-core", version = "=0.1.0" }
-picomint-server-core = { path = "./picomint-server-core", version = "=0.1.0" }
 picomint-server-daemon = { path = "./picomint-server-daemon", version = "=0.1.0" }
 picomint-wallet-client = { path = "./modules/picomint-wallet-client", version = "=0.1.0" }
 picomint-wallet-common = { path = "./modules/picomint-wallet-common", version = "=0.1.0" }
-picomint-wallet-server = { path = "./modules/picomint-wallet-server", version = "=0.1.0" }
 fs2 = "0.4.3"
 futures = "0.3.32"
 futures-util = "0.3.30"

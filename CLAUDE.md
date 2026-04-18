@@ -18,16 +18,15 @@ Picomint is a minimalist fork of Fedimint — two binaries (federation guardian 
 
 ### Crates
 - `picomint-core` — shared types, encoding, networking primitives, db traits
-- `picomint-server-daemon` — federation guardian binary (consensus via AlephBFT)
+- `picomint-server-daemon` — federation guardian binary (consensus via AlephBFT); owns the concrete mint/ln/wallet server-side module code under `src/consensus/{mint,ln,wallet}/`
 - `picomint-server-cli` — admin CLI for the server daemon (HTTP-over-localhost)
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
 - `picomint-gateway-cli` — admin CLI for the gateway daemon
 - `picomint-client` — client library
 - `picomint-client-module` — client module traits + per-module state machines
-- `picomint-server-core` — `ServerModule` trait + concrete module set
 - `picomint-redb` — redb-based database layer
 - `picomint-api-client` — client-side API transport (Iroh-only)
-- `modules/picomint-{mint,wallet,ln,gw}-*` — the three active modules
+- `modules/picomint-{mint,wallet,ln,gw}-{common,client}` — per-module wire types and client-side logic
 
 ### Wire + storage
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-core::encoding`

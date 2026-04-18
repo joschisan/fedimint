@@ -7,7 +7,7 @@ use group::ff::Field;
 use picomint_core::bitcoin::hashes::sha256;
 use picomint_encoding::Encodable as _;
 use picomint_core::{NumPeers, PeerId};
-use picomint_server_core::config::{g2, scalar};
+use crate::config::poly::{g2, scalar};
 use rand::rngs::OsRng;
 use tracing::trace;
 
@@ -207,7 +207,7 @@ mod tests {
 
     use group::Curve;
     use picomint_core::{NumPeersExt, PeerId};
-    use picomint_server_core::config::{eval_poly_g2, g2};
+    use crate::config::poly::{eval_poly_g2, g2};
 
     use super::{DkgG2, DkgStepG2};
 

@@ -22,9 +22,17 @@ use tokio::time::sleep;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
 use picomint_core::{PeerId, secp256k1};
 use picomint_logging::{LOG_CONSENSUS, LOG_NET_PEER};
-use picomint_server_core::P2PConnectionStatus;
+use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tracing::{Instrument, debug, info, info_span, warn};
+
+/// P2P connection status for a peer. `None` in a status channel means the peer
+/// is currently disconnected.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct P2PConnectionStatus {
+    /// Round-trip time (only available for iroh connections)
+    pub rtt: Option<std::time::Duration>,
+}
 
 // ── P2P message types ───────────────────────────────────────────────────────
 

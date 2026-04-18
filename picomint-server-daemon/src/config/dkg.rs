@@ -1,25 +1,47 @@
 use std::collections::BTreeMap;
 
 use anyhow::Context;
-use async_trait::async_trait;
 use bls12_381::{G1Projective, G2Projective, Scalar};
 use picomint_core::{NumPeers, PeerId};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::LOG_NET_PEER_DKG;
-use picomint_server_core::config::PeerHandleOps;
 use tracing::info;
 
 use super::dkg_g1::run_dkg_g1;
 use super::dkg_g2::run_dkg_g2;
-use super::peer_handle::PeerHandle;
-use crate::p2p::{P2PMessage, Recipient};
+use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
-#[async_trait]
-impl PeerHandleOps for PeerHandle<'_> {
-    fn num_peers(&self) -> NumPeers {
+/// A handle passed to DKG routines. Encapsulates the peer-id + p2p connection
+/// machinery each module needs to run distributed key generation or exchange
+/// arbitrary data with the other guardians.
+#[non_exhaustive]
+pub struct DkgHandle<'a> {
+    #[doc(hidden)]
+    pub num_peers: NumPeers,
+    #[doc(hidden)]
+    pub identity: PeerId,
+    #[doc(hidden)]
+    pub connections: &'a ReconnectP2PConnections<P2PMessage>,
+}
+
+impl<'a> DkgHandle<'a> {
+    pub fn new(
+        num_peers: NumPeers,
+        identity: PeerId,
+        connections: &'a ReconnectP2PConnections<P2PMessage>,
+    ) -> Self {
+        Self {
+            num_peers,
+            identity,
+            connections,
+        }
+    }
+
+    pub fn num_peers(&self) -> NumPeers {
         self.num_peers
     }
 
-    async fn run_dkg_g1(&self) -> anyhow::Result<(Vec<G1Projective>, Scalar)> {
+    pub async fn run_dkg_g1(&self) -> anyhow::Result<(Vec<G1Projective>, Scalar)> {
         info!(
             target: LOG_NET_PEER_DKG,
             "Running distributed key generation for group G1..."
@@ -28,7 +50,7 @@ impl PeerHandleOps for PeerHandle<'_> {
         run_dkg_g1(self.num_peers, self.identity, self.connections).await
     }
 
-    async fn run_dkg_g2(&self) -> anyhow::Result<(Vec<G2Projective>, Scalar)> {
+    pub async fn run_dkg_g2(&self) -> anyhow::Result<(Vec<G2Projective>, Scalar)> {
         info!(
             target: LOG_NET_PEER_DKG,
             "Running distributed key generation for group G2..."
@@ -37,7 +59,13 @@ impl PeerHandleOps for PeerHandle<'_> {
         run_dkg_g2(self.num_peers, self.identity, self.connections).await
     }
 
-    async fn exchange_bytes(&self, bytes: Vec<u8>) -> anyhow::Result<BTreeMap<PeerId, Vec<u8>>> {
+    /// Exchange a `DkgPeerMsg::Module(Vec<u8>)` with all peers. All peers must
+    /// be online and submit a response. The caller's message is included in
+    /// the returned map under its own `PeerId`.
+    pub async fn exchange_bytes(
+        &self,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<BTreeMap<PeerId, Vec<u8>>> {
         info!(
             target: LOG_NET_PEER_DKG,
             "Exchanging raw bytes..."
@@ -68,5 +96,16 @@ impl PeerHandleOps for PeerHandle<'_> {
         }
 
         Ok(peer_data)
+    }
+
+    pub async fn exchange_encodable<T: Encodable + Decodable + Send + Sync>(
+        &self,
+        data: T,
+    ) -> anyhow::Result<BTreeMap<PeerId, T>> {
+        let mut decoded = BTreeMap::new();
+        for (k, bytes) in self.exchange_bytes(data.consensus_encode_to_vec()).await? {
+            decoded.insert(k, T::consensus_decode_exact(&bytes)?);
+        }
+        Ok(decoded)
     }
 }

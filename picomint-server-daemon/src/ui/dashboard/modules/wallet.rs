@@ -1,7 +1,7 @@
 use maud::{Markup, PreEscaped, html};
 
-// Function to render the Wallet v2 module UI section
-pub async fn render(wallet: &picomint_wallet_server::Wallet) -> Markup {
+// Function to render the Wallet module UI section
+pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
     let network = wallet.network_ui();
     let federation_wallet = wallet.federation_wallet_ui().await;
     let consensus_block_count = wallet.consensus_block_count_ui().await;
@@ -33,7 +33,7 @@ pub async fn render(wallet: &picomint_wallet_server::Wallet) -> Markup {
         div class="row gy-4 mt-2" {
             div class="col-12" {
                 div class="card h-100" {
-                    div class="card-header dashboard-header" { "Wallet V2" }
+                    div class="card-header dashboard-header" { "Wallet" }
                     div class="card-body" {
                         div class="mb-4" {
                             table class="table" {

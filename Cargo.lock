@@ -4107,7 +4107,6 @@ dependencies = [
  "picomint-gateway-cli-core",
  "picomint-gw-client",
  "picomint-ln-common",
- "picomint-ln-server",
  "picomint-lnurl",
  "picomint-logging",
  "picomint-mint-client",
@@ -4235,25 +4234,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-ln-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "group",
- "picomint-bitcoin-rpc",
- "picomint-core",
- "picomint-encoding",
- "picomint-ln-common",
- "picomint-logging",
- "picomint-redb",
- "picomint-server-core",
- "picomint-tpe",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "picomint-lnurl"
 version = "0.1.0"
 dependencies = [
@@ -4310,23 +4290,6 @@ dependencies = [
  "picomint-tbs",
  "serde",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "picomint-mint-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "fedimint-threshold-crypto",
- "picomint-core",
- "picomint-encoding",
- "picomint-mint-common",
- "picomint-redb",
- "picomint-server-core",
- "picomint-tbs",
- "tokio",
 ]
 
 [[package]]
@@ -4387,20 +4350,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-server-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bls12_381",
- "group",
- "picomint-core",
- "picomint-encoding",
- "picomint-redb",
- "serde",
-]
-
-[[package]]
 name = "picomint-server-daemon"
 version = "0.1.0"
 dependencies = [
@@ -4414,11 +4363,13 @@ dependencies = [
  "chrono",
  "clap",
  "fedimint-aleph-bft",
+ "fedimint-threshold-crypto",
  "futures",
  "group",
  "iroh",
  "iroh-base",
  "maud",
+ "miniscript",
  "parity-scale-codec",
  "picomint-api-client",
  "picomint-base32",
@@ -4426,17 +4377,16 @@ dependencies = [
  "picomint-core",
  "picomint-encoding",
  "picomint-ln-common",
- "picomint-ln-server",
  "picomint-logging",
  "picomint-mint-common",
- "picomint-mint-server",
  "picomint-redb",
  "picomint-server-cli-core",
- "picomint-server-core",
+ "picomint-tbs",
+ "picomint-tpe",
  "picomint-wallet-common",
- "picomint-wallet-server",
  "qrcode",
  "rand 0.8.5",
+ "secp256k1",
  "serde",
  "serde_json",
  "test-log",
@@ -4515,28 +4465,6 @@ dependencies = [
  "secp256k1",
  "serde",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "picomint-wallet-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "miniscript",
- "picomint-bitcoin-rpc",
- "picomint-core",
- "picomint-encoding",
- "picomint-logging",
- "picomint-redb",
- "picomint-server-core",
- "picomint-wallet-common",
- "rand 0.8.5",
- "secp256k1",
- "serde",
- "tokio",
- "tracing",
 ]
 
 [[package]]

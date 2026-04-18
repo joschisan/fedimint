@@ -23,24 +23,24 @@ use picomint_mint_common::endpoint_constants::{
     SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
 };
 use picomint_mint_common::{
-    verify_note, Denomination, MintConsensusItem, MintInput, MintInputError, MintModuleTypes,
-    MintOutput, MintOutputError, RecoveryItem,
+    verify_note, Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput,
+    MintOutputError, RecoveryItem,
 };
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
-use picomint_server_core::config::{eval_poly_g2, PeerHandleOps};
-use picomint_server_core::{handler, ServerModule};
 use tbs::{derive_pk_share, AggregatePublicKey, PublicKeyShare};
 use threshold_crypto::group::Curve;
 
-use crate::db::{
+use crate::config::dkg::DkgHandle;
+use crate::config::poly::eval_poly_g2;
+use crate::handler;
+
+use self::db::{
     NoteNonceKey, BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER,
     NOTE_NONCE, RECOVERY_ITEM,
 };
 
 /// Run DKG for the mint module, producing a fresh `MintConfig` for this peer.
-pub async fn distributed_gen(
-    peers: &(dyn PeerHandleOps + Send + Sync),
-) -> anyhow::Result<MintConfig> {
+pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<MintConfig> {
     let mut tbs_sks = BTreeMap::new();
     let mut tbs_agg_pks = BTreeMap::new();
     let mut tbs_pks = BTreeMap::new();
@@ -109,15 +109,12 @@ impl Mint {
     }
 }
 
-#[async_trait::async_trait]
-impl ServerModule for Mint {
-    type Common = MintModuleTypes;
-
-    async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<MintConsensusItem> {
+impl Mint {
+    pub async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<MintConsensusItem> {
         Vec::new()
     }
 
-    async fn process_consensus_item(
+    pub async fn process_consensus_item(
         &self,
         _dbtx: &WriteTxRef<'_>,
         consensus_item: MintConsensusItem,
@@ -126,7 +123,7 @@ impl ServerModule for Mint {
         match consensus_item {}
     }
 
-    async fn process_input(
+    pub async fn process_input(
         &self,
         dbtx: &WriteTxRef<'_>,
         input: &MintInput,
@@ -179,7 +176,7 @@ impl ServerModule for Mint {
         })
     }
 
-    async fn process_output(
+    pub async fn process_output(
         &self,
         dbtx: &WriteTxRef<'_>,
         output: &MintOutput,
@@ -225,7 +222,7 @@ impl ServerModule for Mint {
         })
     }
 
-    async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
+    pub async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
         let items = dbtx
             .iter(&ISSUANCE_COUNTER)
             .into_iter()
@@ -239,7 +236,7 @@ impl ServerModule for Mint {
         audit.add_items(ModuleKind::Mint, items);
     }
 
-    async fn handle_api(
+    pub async fn handle_api(
         &self,
         method: &str,
         req: ApiRequestErased,

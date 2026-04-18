@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use maud::{Markup, html};
 use picomint_core::PeerId;
-use picomint_server_core::P2PConnectionStatus;
+use crate::p2p::P2PConnectionStatus;
 
 pub fn render(p2p_connection_status: &BTreeMap<PeerId, Option<P2PConnectionStatus>>) -> Markup {
     html! {

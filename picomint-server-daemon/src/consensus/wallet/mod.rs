@@ -23,8 +23,8 @@ use bitcoin::sighash::{EcdsaSighashType, SighashCache};
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, Sequence, Transaction, TxIn, TxOut, Txid};
 use common::config::WalletConfigConsensus;
-use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletModuleTypes, WalletOutput};
-use db::{
+use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
+use self::db::{
     BLOCK_COUNT_VOTE, FEDERATION_WALLET, FEE_RATE_VOTE, OUTPUT, Output, SIGNATURES, SPENT_OUTPUT,
     Signatures, TX_INFO, TX_INFO_INDEX, TxidKey, UNCONFIRMED_TX, UNSIGNED_TX,
 };
@@ -40,9 +40,10 @@ use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_logging::LOG_MODULE_WALLET;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
-use picomint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
-use picomint_server_core::{handler, ServerModule};
-pub use picomint_wallet_common as common;
+use picomint_wallet_common as common;
+
+use crate::config::dkg::DkgHandle;
+use crate::handler;
 use picomint_wallet_common::config::{WalletConfig, WalletConfigPrivate};
 use picomint_wallet_common::endpoint_constants::{
     CONSENSUS_BLOCK_COUNT_ENDPOINT, CONSENSUS_FEERATE_ENDPOINT, FEDERATION_WALLET_ENDPOINT,
@@ -107,7 +108,7 @@ fn pending_txs_unordered(dbtx: &WriteTxRef<'_>) -> Vec<FederationTx> {
 /// Run DKG for the wallet module, producing a fresh `WalletConfig` for this
 /// peer.
 pub async fn distributed_gen(
-    peers: &(dyn PeerHandleOps + Send + Sync),
+    peers: &DkgHandle<'_>,
     network: Network,
 ) -> anyhow::Result<WalletConfig> {
     let (bitcoin_sk, bitcoin_pk) = secp256k1::generate_keypair(&mut OsRng);
@@ -139,11 +140,8 @@ pub fn validate_config(identity: &PeerId, cfg: &WalletConfig) -> anyhow::Result<
     Ok(())
 }
 
-#[async_trait::async_trait]
-impl ServerModule for Wallet {
-    type Common = WalletModuleTypes;
-
-    async fn consensus_proposal(&self, dbtx: &ReadTxRef<'_>) -> Vec<WalletConsensusItem> {
+impl Wallet {
+    pub async fn consensus_proposal(&self, dbtx: &ReadTxRef<'_>) -> Vec<WalletConsensusItem> {
         let mut items: Vec<WalletConsensusItem> = dbtx
             .iter(&UNSIGNED_TX)
             .into_iter()
@@ -191,7 +189,7 @@ impl ServerModule for Wallet {
         items
     }
 
-    async fn process_consensus_item(
+    pub async fn process_consensus_item(
         &self,
         dbtx: &WriteTxRef<'_>,
         consensus_item: WalletConsensusItem,
@@ -214,7 +212,7 @@ impl ServerModule for Wallet {
         }
     }
 
-    async fn process_input(
+    pub async fn process_input(
         &self,
         dbtx: &WriteTxRef<'_>,
         input: &WalletInput,
@@ -365,7 +363,7 @@ impl ServerModule for Wallet {
         })
     }
 
-    async fn process_output(
+    pub async fn process_output(
         &self,
         dbtx: &WriteTxRef<'_>,
         output: &WalletOutput,
@@ -487,7 +485,7 @@ impl ServerModule for Wallet {
         })
     }
 
-    async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
+    pub async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
         let items = dbtx
             .iter(&FEDERATION_WALLET)
             .into_iter()
@@ -501,7 +499,7 @@ impl ServerModule for Wallet {
         audit.add_items(ModuleKind::Wallet, items);
     }
 
-    async fn handle_api(
+    pub async fn handle_api(
         &self,
         method: &str,
         req: ApiRequestErased,

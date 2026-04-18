@@ -1,5 +1,5 @@
-use picomint_redb::table;
 use picomint_redb::Database;
+use picomint_redb::table;
 
 use crate::config::ServerConfig;
 
@@ -17,9 +17,11 @@ pub async fn load_server_config(db: &Database) -> Option<ServerConfig> {
 
 pub async fn store_server_config(db: &Database, cfg: &ServerConfig) {
     let tx = db.begin_write().await;
+
     assert!(
         tx.insert(&SERVER_CONFIG, &(), cfg).is_none(),
         "Server config already present in database"
     );
+
     tx.commit().await;
 }

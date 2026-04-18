@@ -6,7 +6,7 @@ use picomint_wallet_common::TxInfo;
 use secp256k1::ecdsa::Signature;
 use serde::Serialize;
 
-use crate::{FederationTx, FederationWallet};
+use super::{FederationTx, FederationWallet};
 
 #[derive(Clone, Debug, Encodable, Decodable, Serialize)]
 pub struct Output(pub bitcoin::OutPoint, pub TxOut);

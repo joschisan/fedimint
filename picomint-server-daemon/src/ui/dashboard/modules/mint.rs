@@ -1,7 +1,7 @@
 use maud::{Markup, PreEscaped, html};
 
-// Function to render the Mint V2 module UI section
-pub async fn render(mint: &picomint_mint_server::Mint) -> Markup {
+// Function to render the Mint module UI section
+pub async fn render(mint: &crate::consensus::mint::Mint) -> Markup {
     let distribution = mint.note_distribution_ui().await;
 
     let labels: Vec<String> = distribution.keys().map(|d| format!("2^{}", d.0)).collect();
@@ -9,7 +9,7 @@ pub async fn render(mint: &picomint_mint_server::Mint) -> Markup {
 
     html! {
         div class="card h-100" {
-            div class="card-header dashboard-header" { "Mint V2" }
+            div class="card-header dashboard-header" { "Mint" }
             div class="card-body" {
                 @if distribution.is_empty() {
                     p class="text-muted mb-0" { "No notes have been issued yet." }

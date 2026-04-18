@@ -3,14 +3,13 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
+use dkg::DkgHandle;
 use futures::future::select_all;
-use peer_handle::PeerHandle;
 use picomint_api_client::config::ConsensusConfig;
 pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::{ApiAuth, CORE_CONSENSUS_VERSION};
-use tokio::time::sleep;
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
 use picomint_ln_common::config::LightningConfigPrivate;
 use picomint_logging::LOG_NET_PEER_DKG;
@@ -20,6 +19,7 @@ use rand::rngs::OsRng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
 use tokio::select;
+use tokio::time::sleep;
 use tracing::{error, info, warn};
 
 use crate::config::setup::PeerSetupCode;
@@ -30,7 +30,7 @@ pub mod db;
 pub mod dkg;
 pub mod dkg_g1;
 pub mod dkg_g2;
-pub mod peer_handle;
+pub mod poly;
 pub mod setup;
 
 /// How many concurrent Iroh API connections the server will accept.
@@ -203,9 +203,9 @@ impl ServerConfig {
             bail!("Peer ids are not indexed from 0");
         }
 
-        picomint_mint_server::validate_config(identity, &self.mint_config())?;
-        picomint_ln_server::validate_config(identity, &self.ln_config())?;
-        picomint_wallet_server::validate_config(identity, &self.wallet_config())?;
+        crate::consensus::mint::validate_config(identity, &self.mint_config())?;
+        crate::consensus::ln::validate_config(identity, &self.ln_config())?;
+        crate::consensus::wallet::validate_config(identity, &self.wallet_config())?;
 
         Ok(())
     }
@@ -292,7 +292,7 @@ impl ServerConfig {
             "Running config generation..."
         );
 
-        let handle = PeerHandle::new(
+        let handle = DkgHandle::new(
             params.peer_ids().to_num_peers(),
             params.identity,
             &connections,
@@ -300,26 +300,28 @@ impl ServerConfig {
 
         let (broadcast_sk, broadcast_pk) = secp256k1::generate_keypair(&mut OsRng);
 
-        use picomint_server_core::config::PeerHandleOpsExt as _;
         let broadcast_public_keys = handle.exchange_encodable(broadcast_pk).await?;
 
         info!(
             target: LOG_NET_PEER_DKG,
             "Running config generation for module of kind mint..."
         );
-        let mint = picomint_mint_server::distributed_gen(&handle).await?;
+
+        let mint = crate::consensus::mint::distributed_gen(&handle).await?;
 
         info!(
             target: LOG_NET_PEER_DKG,
             "Running config generation for module of kind ln..."
         );
-        let ln = picomint_ln_server::distributed_gen(&handle, params.network).await?;
+
+        let ln = crate::consensus::ln::distributed_gen(&handle, params.network).await?;
 
         info!(
             target: LOG_NET_PEER_DKG,
             "Running config generation for module of kind wallet..."
         );
-        let wallet = picomint_wallet_server::distributed_gen(&handle, params.network).await?;
+
+        let wallet = crate::consensus::wallet::distributed_gen(&handle, params.network).await?;
 
         let cfg = ServerConfig::from(
             params.clone(),

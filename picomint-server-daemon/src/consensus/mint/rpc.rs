@@ -1,8 +1,8 @@
-//! Freestanding API handlers for [`crate::Mint`].
+//! Freestanding API handlers for [`super::Mint`].
 //!
 //! Each function matches one endpoint constant in
 //! `picomint_mint_common::endpoint_constants` and is dispatched from
-//! `Mint::handle_api` via `picomint_server_core::handler!`.
+//! `Mint::handle_api` via the `handler!` macro.
 
 use bitcoin::hashes::sha256;
 use picomint_core::{OutPoint, TransactionId};
@@ -12,8 +12,8 @@ use picomint_mint_common::RecoveryItem;
 use picomint_redb::ReadTransaction;
 use tbs::{BlindedMessage, BlindedSignatureShare};
 
-use crate::Mint;
-use crate::db::{BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, RECOVERY_ITEM};
+use super::Mint;
+use super::db::{BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, RECOVERY_ITEM};
 
 pub async fn signature_shares(
     mint: &Mint,
@@ -67,7 +67,7 @@ pub async fn recovery_slice_hash(
 
 pub async fn recovery_count(mint: &Mint, _: ()) -> Result<u64, ApiError> {
     let tx = mint.db.begin_read().await;
-    Ok(crate::get_recovery_count(&tx))
+    Ok(super::get_recovery_count(&tx))
 }
 
 fn collect_signature_shares(tx: &ReadTransaction, txid: TransactionId) -> Vec<BlindedSignatureShare> {

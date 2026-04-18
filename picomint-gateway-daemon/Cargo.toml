@@ -49,7 +49,6 @@ tracing = { workspace = true, features = ["log"] }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
-picomint-ln-server = { workspace = true }
 itertools = { workspace = true }
 tpe = { workspace = true }
 

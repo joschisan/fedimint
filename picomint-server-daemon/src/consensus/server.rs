@@ -1,9 +1,7 @@
 //! Concrete `Server` container for the fixed module set.
 //!
-//! Holds typed instances of the three canonical modules and match-dispatches on
-//! the wire enum variant. There is no dyn dispatch: the server-side module
-//! trait (`IServerModule`) has been deleted and replaced with direct calls to
-//! the concrete `ServerModule` impls on `Mint`, `Lightning`, and `Wallet`.
+//! Holds typed instances of the three canonical modules and match-dispatches
+//! on the wire enum variant directly — no trait indirection.
 
 use std::sync::Arc;
 
@@ -12,11 +10,11 @@ use picomint_api_client::wire;
 use picomint_core::module::InputMeta;
 use picomint_core::module::audit::Audit;
 use picomint_core::{InPoint, OutPoint, PeerId};
-use picomint_ln_server::Lightning;
-use picomint_mint_server::Mint;
 use picomint_redb::{WriteTransaction, WriteTxRef};
-use picomint_server_core::ServerModule;
-use picomint_wallet_server::Wallet;
+
+use crate::consensus::ln::Lightning;
+use crate::consensus::mint::Mint;
+use crate::consensus::wallet::Wallet;
 
 /// Per-module database isolation namespaces. Each `Server` method scopes its
 /// view through [`picomint_redb::ReadTxRef::isolate`] / [`WriteTxRef::isolate`]

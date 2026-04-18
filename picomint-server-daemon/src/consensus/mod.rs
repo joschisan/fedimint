@@ -3,9 +3,12 @@ pub mod api;
 pub mod db;
 pub mod debug;
 pub mod engine;
+pub mod ln;
+pub mod mint;
 mod rpc;
 pub mod server;
 pub mod transaction;
+pub mod wallet;
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -21,12 +24,11 @@ use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::envs::is_running_in_test_env;
-use picomint_core::module::{ApiAuth, ApiError, ApiMethod, IrohApiRequest, ModuleCommon};
+use picomint_core::module::{ApiAuth, ApiError, ApiMethod, IrohApiRequest};
 use picomint_core::task::TaskGroup;
 use tokio::time::sleep;
 use picomint_logging::{LOG_CONSENSUS, LOG_CORE, LOG_NET_API};
 use picomint_redb::Database;
-use picomint_server_core::ServerModule;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
 use tracing::{info, warn};
@@ -34,6 +36,7 @@ use tracing::{info, warn};
 use crate::config::ServerConfig;
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::engine::ConsensusEngine;
+use crate::consensus::server::{LN_NS, MINT_NS, Server, WALLET_NS};
 use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
 
 /// How many txs can be stored in memory before blocking the API
@@ -74,27 +77,27 @@ pub async fn run(
     let _num_peers = NumPeers::from(cfg.consensus.iroh_endpoints.len());
 
     info!(target: LOG_CORE, "Initialise module mint...");
-    let mint = Arc::new(picomint_mint_server::Mint::new(
+    let mint = Arc::new(crate::consensus::mint::Mint::new(
         cfg.mint_config(),
-        db.isolate("mint".to_string()),
+        db.isolate(MINT_NS.to_string()),
     ));
 
     info!(target: LOG_CORE, "Initialise module ln...");
-    let ln = Arc::new(picomint_ln_server::Lightning::new(
+    let ln = Arc::new(crate::consensus::ln::Lightning::new(
         cfg.ln_config(),
-        db.isolate("ln".to_string()),
+        db.isolate(LN_NS.to_string()),
         bitcoin_rpc_connection.clone(),
     ));
 
     info!(target: LOG_CORE, "Initialise module wallet...");
-    let wallet = Arc::new(picomint_wallet_server::Wallet::new(
+    let wallet = Arc::new(crate::consensus::wallet::Wallet::new(
         cfg.wallet_config(),
-        db.isolate("wallet".to_string()),
+        db.isolate(WALLET_NS.to_string()),
         task_group,
         bitcoin_rpc_connection.clone(),
     ));
 
-    let server = crate::consensus::server::Server { mint, ln, wallet };
+    let server = Server { mint, ln, wallet };
 
     let client_cfg = cfg.consensus.clone();
 
@@ -134,30 +137,50 @@ pub async fn run(
 
     info!(target: LOG_CONSENSUS, "Starting Submission of Module CI proposals...");
 
-    submit_module_ci_proposals(
-        task_group,
-        "mint",
-        consensus_api.server.mint.clone(),
-        db.clone(),
-        submission_sender.clone(),
-        wire::ModuleConsensusItem::Mint,
-    );
-    submit_module_ci_proposals(
-        task_group,
-        "ln",
-        consensus_api.server.ln.clone(),
-        db.clone(),
-        submission_sender.clone(),
-        wire::ModuleConsensusItem::Ln,
-    );
-    submit_module_ci_proposals(
-        task_group,
-        "wallet",
-        consensus_api.server.wallet.clone(),
-        db.clone(),
-        submission_sender.clone(),
-        wire::ModuleConsensusItem::Wallet,
-    );
+    task_group.spawn("citem_proposals", {
+        let server = consensus_api.server.clone();
+        let db = db.clone();
+        let submission_sender = submission_sender.clone();
+        move |task_handle| async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            while !task_handle.is_shutting_down() {
+                let tx = db.begin_read().await;
+                for item in server
+                    .mint
+                    .consensus_proposal(&tx.isolate(MINT_NS.to_string()))
+                    .await
+                {
+                    submission_sender
+                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Mint(item)))
+                        .await
+                        .ok();
+                }
+                for item in server
+                    .ln
+                    .consensus_proposal(&tx.isolate(LN_NS.to_string()))
+                    .await
+                {
+                    submission_sender
+                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
+                        .await
+                        .ok();
+                }
+                for item in server
+                    .wallet
+                    .consensus_proposal(&tx.isolate(WALLET_NS.to_string()))
+                    .await
+                {
+                    submission_sender
+                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
+                            item,
+                        )))
+                        .await
+                        .ok();
+                }
+                interval.tick().await;
+            }
+        }
+    });
 
     if let Some((ui_addr, auth)) = ui_config {
         let ui_service =
@@ -221,51 +244,6 @@ pub async fn run(
     .await?;
 
     Ok(())
-}
-
-const CONSENSUS_PROPOSAL_TIMEOUT: Duration = Duration::from_secs(30);
-
-fn submit_module_ci_proposals<M>(
-    task_group: &TaskGroup,
-    namespace: &'static str,
-    module: Arc<M>,
-    db: Database,
-    submission_sender: async_channel::Sender<ConsensusItem>,
-    wrap: fn(<M::Common as ModuleCommon>::ConsensusItem) -> wire::ModuleConsensusItem,
-) where
-    M: ServerModule + Send + Sync + 'static,
-{
-    let mut interval = tokio::time::interval(Duration::from_secs(1));
-
-    task_group.spawn(
-        format!("citem_proposals_{namespace}"),
-        move |task_handle| async move {
-            while !task_handle.is_shutting_down() {
-                let tx = db.begin_read().await;
-                let view = tx.isolate(namespace.to_string());
-                match tokio::time::timeout(
-                    CONSENSUS_PROPOSAL_TIMEOUT,
-                    module.consensus_proposal(&view),
-                )
-                .await
-                {
-                    Ok(items) => {
-                        for item in items {
-                            let _ = submission_sender
-                                .send(ConsensusItem::Module(wrap(item)))
-                                .await;
-                        }
-                    }
-                    Err(_) => warn!(
-                        target: LOG_CONSENSUS,
-                        namespace,
-                        "Module failed to propose consensus items on time",
-                    ),
-                }
-                interval.tick().await;
-            }
-        },
-    );
 }
 
 async fn run_iroh_api(

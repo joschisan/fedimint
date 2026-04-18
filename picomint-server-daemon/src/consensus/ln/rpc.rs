@@ -1,4 +1,4 @@
-//! Freestanding API handlers for [`crate::Lightning`].
+//! Freestanding API handlers for [`super::Lightning`].
 
 use std::time::Duration;
 
@@ -10,8 +10,8 @@ use picomint_ln_common::ContractId;
 use picomint_ln_common::contracts::IncomingContract;
 use tpe::DecryptionKeyShare;
 
-use crate::Lightning;
-use crate::db::{
+use super::Lightning;
+use super::db::{
     DECRYPTION_KEY_SHARE, GATEWAY, INCOMING_CONTRACT_OUTPOINT, INCOMING_CONTRACT_STREAM,
     INCOMING_CONTRACT_STREAM_INDEX, OUTGOING_CONTRACT, PREIMAGE,
 };
