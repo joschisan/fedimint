@@ -356,11 +356,11 @@ impl ClientModule for MintClientModule {
 
         assert!(output_amount <= input_amount);
 
-        let output_amounts = self
+        let mut denominations = self
             .select_output_denominations(dbtx, self.cfg.output_fee, input_amount - output_amount)
             .await;
 
-        output_amount += output_amounts
+        output_amount += denominations
             .iter()
             .map(|denomination| denomination.amount() + self.cfg.output_fee)
             .sum();
@@ -371,14 +371,6 @@ impl ClientModule for MintClientModule {
         spendable_notes.sort_by_key(|note| note.denomination);
 
         let inputs = build_inputs(&spendable_notes);
-
-        let mut denominations = represent_amount_with_fees(
-            input_amount.saturating_sub(output_amount),
-            self.cfg.output_fee,
-        )
-        .into_iter()
-        .chain(output_amounts)
-        .collect::<Vec<Denomination>>();
 
         // We sort the amounts to minimize the leaked information.
         denominations.sort();
@@ -511,6 +503,7 @@ impl MintClientModule {
 
         let mut output_denominations = Vec::new();
 
+        // Rebalance per-tier reserves up to TARGET_PER_DENOMINATION, smallest->largest.
         for d in client_denominations() {
             let n_missing = TARGET_PER_DENOMINATION
                 .saturating_sub(n_denominations.get(&d).copied().unwrap_or(0) as usize);
@@ -521,7 +514,20 @@ impl MintClientModule {
                         excess_input = remaining;
                         output_denominations.push(d);
                     }
-                    None => return output_denominations,
+                    None => break,
+                }
+            }
+        }
+
+        // Absorb remaining excess as change, largest->smallest.
+        for d in client_denominations().rev() {
+            for _ in 0.. {
+                match excess_input.checked_sub(d.amount() + output_fee) {
+                    Some(remaining) => {
+                        excess_input = remaining;
+                        output_denominations.push(d);
+                    }
+                    None => break,
                 }
             }
         }
@@ -568,9 +574,8 @@ impl MintClientModule {
     /// Count the `ECash` notes in the client's database by denomination.
     pub async fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
         let dbtx = self.client_ctx.module_db().begin_write().await;
-        let counts = self.get_count_by_denomination_dbtx(&dbtx.as_ref()).await;
-        drop(dbtx);
-        counts
+
+        self.get_count_by_denomination_dbtx(&dbtx.as_ref()).await
     }
 
     async fn get_count_by_denomination_dbtx(
@@ -621,35 +626,37 @@ impl MintClientModule {
 
         let target_denominations = represent_amount(amount);
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
-        let tx = dbtx.as_ref();
-
-        let mut input_amount = Amount::ZERO;
         let mut output_amount: Amount = target_denominations
             .iter()
             .map(|denomination| denomination.amount() + self.cfg.output_fee)
             .sum();
 
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+
         let mut spendable_notes = self
-            .select_funding_input(&tx, output_amount.saturating_sub(input_amount))
+            .select_funding_input(&dbtx.as_ref(), output_amount)
             .await
             .ok_or(SendECashError::InsufficientBalance)?;
 
         for note in &spendable_notes {
-            self.remove_spendable_note(&tx, note).await;
+            self.remove_spendable_note(&dbtx.as_ref(), note).await;
         }
 
-        input_amount += spendable_notes.iter().map(SpendableNote::amount).sum();
+        let input_amount = spendable_notes.iter().map(SpendableNote::amount).sum();
 
         output_amount += self.cfg.input_fee * spendable_notes.len() as u64;
 
         assert!(output_amount <= input_amount);
 
-        let output_amounts = self
-            .select_output_denominations(&tx, self.cfg.output_fee, input_amount - output_amount)
+        let mut denominations = self
+            .select_output_denominations(
+                &dbtx.as_ref(),
+                self.cfg.output_fee,
+                input_amount - output_amount,
+            )
             .await;
 
-        output_amount += output_amounts
+        output_amount += denominations
             .iter()
             .map(|denomination| denomination.amount() + self.cfg.output_fee)
             .sum();
@@ -660,38 +667,33 @@ impl MintClientModule {
 
         let inputs = build_inputs(&spendable_notes);
 
-        let mut denominations = represent_amount_with_fees(
-            input_amount.saturating_sub(output_amount),
-            self.cfg.output_fee,
-        )
-        .into_iter()
-        .chain(output_amounts)
-        .chain(target_denominations)
-        .collect::<Vec<Denomination>>();
+        denominations.extend(target_denominations);
 
         denominations.sort();
 
         let (issuance_requests, outputs) = self.build_issuance(denominations).await;
 
+        let input = self
+            .client_ctx
+            .make_client_inputs(ClientInputBundle::new(inputs));
+
+        let output = self
+            .client_ctx
+            .make_client_outputs(ClientOutputBundle::new(outputs));
+
         let tx_builder = TransactionBuilder::new()
-            .with_inputs(
-                self.client_ctx
-                    .make_client_inputs(ClientInputBundle::new(inputs)),
-            )
-            .with_outputs(
-                self.client_ctx
-                    .make_client_outputs(ClientOutputBundle::new(outputs)),
-            );
+            .with_inputs(input)
+            .with_outputs(output);
 
         let txid = self
             .client_ctx
-            .submit_tx_builder_dbtx(&tx, operation_id, tx_builder)
+            .submit_tx_builder_dbtx(&dbtx.as_ref(), operation_id, tx_builder)
             .await
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
         self.output_executor
             .add_state_machine_dbtx(
-                &tx,
+                &dbtx.as_ref(),
                 MintOutputStateMachine {
                     operation_id,
                     txid: Some(txid),
@@ -702,7 +704,7 @@ impl MintClientModule {
 
         self.input_executor
             .add_state_machine_dbtx(
-                &tx,
+                &dbtx.as_ref(),
                 InputStateMachine {
                     operation_id,
                     txid,
@@ -712,7 +714,7 @@ impl MintClientModule {
             .await;
 
         self.client_ctx
-            .log_event(&tx, operation_id, ReissueEvent { txid })
+            .log_event(&dbtx.as_ref(), operation_id, ReissueEvent { txid })
             .await;
 
         dbtx.commit().await;
@@ -950,27 +952,6 @@ pub enum ReceiveECashError {
 
 fn round_to_multiple(amount: Amount, min_denomiation: Amount) -> Amount {
     Amount::from_msats(amount.msats.next_multiple_of(min_denomiation.msats))
-}
-
-fn represent_amount_with_fees(
-    mut remaining_amount: Amount,
-    output_fee: Amount,
-) -> Vec<Denomination> {
-    let mut denominations = Vec::new();
-
-    // Add denominations with a greedy algorithm
-    for denomination in client_denominations().rev() {
-        let n_add = remaining_amount / (denomination.amount() + output_fee);
-
-        denominations.extend(std::iter::repeat_n(denomination, n_add as usize));
-
-        remaining_amount -= n_add * (denomination.amount() + output_fee);
-    }
-
-    // We sort the notes by amount to minimize the leaked information.
-    denominations.sort();
-
-    denominations
 }
 
 fn represent_amount(mut remaining_amount: Amount) -> Vec<Denomination> {
