@@ -220,7 +220,7 @@ impl Client {
         operation_id: OperationId,
         mut partial_transaction: TransactionBuilder,
     ) -> anyhow::Result<(
-        Transaction,
+        TransactionBuilder,
         Option<picomint_client_module::module::SpawnSms>,
         Range<u64>, // primary input range
         Range<u64>, // primary output range (today's change_range)
@@ -273,10 +273,8 @@ impl Client {
 
         assert!(input_amount >= output_amount, "Transaction is underfunded");
 
-        let tx = partial_transaction.build(&self.secp_ctx);
-
         Ok((
-            tx,
+            partial_transaction,
             spawn_sms,
             primary_input_start..primary_input_end,
             primary_output_start..primary_output_end,
@@ -325,9 +323,42 @@ impl Client {
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
-        let (transaction, spawn_sms, primary_input_range, primary_output_range) = self
+        let (tx_builder, spawn_sms, primary_input_range, primary_output_range) = self
             .finalize_transaction(dbtx, operation_id, tx_builder)
             .await?;
+
+        let txid = self
+            .submit_tx_builder_dbtx(dbtx, operation_id, tx_builder)
+            .await?;
+
+        if let Some(spawn_sms) = spawn_sms {
+            spawn_sms(
+                dbtx,
+                txid,
+                IdxRange::from(primary_input_range),
+                IdxRange::from(primary_output_range.clone()),
+            )
+            .await;
+        }
+
+        Ok(OutPointRange::new(
+            txid,
+            IdxRange::from(primary_output_range),
+        ))
+    }
+
+    /// Build a [`TransactionBuilder`] into a wire [`Transaction`], verify its
+    /// size, and spawn the [`TxSubmissionStateMachine`] that drives it to the
+    /// federation. Does **not** call the primary module's
+    /// `create_final_inputs_and_outputs` — the caller is responsible for
+    /// producing a fully funded/balanced builder.
+    pub async fn submit_tx_builder_dbtx(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        operation_id: OperationId,
+        tx_builder: TransactionBuilder,
+    ) -> anyhow::Result<TransactionId> {
+        let transaction = tx_builder.build(&self.secp_ctx);
 
         if transaction.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
             let inputs = transaction
@@ -360,18 +391,8 @@ impl Client {
             %txid,
             %operation_id,
             ?transaction,
-            "Finalized and submitting transaction",
+            "Submitting transaction",
         );
-
-        if let Some(spawn_sms) = spawn_sms {
-            spawn_sms(
-                dbtx,
-                txid,
-                IdxRange::from(primary_input_range),
-                IdxRange::from(primary_output_range.clone()),
-            )
-            .await;
-        }
 
         self.tx_submission_executor
             .add_state_machine_dbtx(
@@ -383,10 +404,7 @@ impl Client {
             )
             .await;
 
-        Ok(OutPointRange::new(
-            txid,
-            IdxRange::from(primary_output_range),
-        ))
+        Ok(txid)
     }
 
     pub async fn await_tx_accepted(
@@ -794,6 +812,15 @@ impl FinalizeTransaction for Client {
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange> {
         Client::finalize_and_submit_transaction_inner(self, dbtx, operation_id, tx_builder).await
+    }
+
+    async fn submit_tx_builder_dbtx(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        operation_id: OperationId,
+        tx_builder: TransactionBuilder,
+    ) -> anyhow::Result<TransactionId> {
+        Client::submit_tx_builder_dbtx(self, dbtx, operation_id, tx_builder).await
     }
 }
 

@@ -620,54 +620,102 @@ impl MintClientModule {
 
         let operation_id = OperationId::new_random();
 
-        let (issuance_requests, outputs) = self.build_issuance(represent_amount(amount)).await;
-        let output_count = outputs.len() as u64;
-        let output_bundle = self
-            .client_ctx
-            .make_client_outputs(ClientOutputBundle::new(outputs));
+        let target_denominations = represent_amount(amount);
 
-        // Subscribe before submitting so we cannot miss the finalisation event.
         let dbtx = self.client_ctx.module_db().begin_write().await;
         let tx = dbtx.as_ref();
 
-        let finalize_range = self
+        let mut input_amount = Amount::ZERO;
+        let mut output_amount: Amount = target_denominations
+            .iter()
+            .map(|denomination| denomination.amount() + self.cfg.output_fee)
+            .sum();
+
+        let mut spendable_notes = self
+            .select_funding_input(&tx, output_amount.saturating_sub(input_amount))
+            .await
+            .ok_or(SendECashError::InsufficientBalance)?;
+
+        for note in &spendable_notes {
+            self.remove_spendable_note(&tx, note).await;
+        }
+
+        input_amount += spendable_notes.iter().map(SpendableNote::amount).sum();
+
+        output_amount += self.cfg.input_fee * spendable_notes.len() as u64;
+
+        assert!(output_amount <= input_amount);
+
+        let output_amounts = self
+            .select_output_denominations(&tx, self.cfg.output_fee, input_amount - output_amount)
+            .await;
+
+        output_amount += output_amounts
+            .iter()
+            .map(|denomination| denomination.amount() + self.cfg.output_fee)
+            .sum();
+
+        assert!(output_amount <= input_amount);
+
+        spendable_notes.sort_by_key(|note| note.denomination);
+
+        let inputs = build_inputs(&spendable_notes);
+
+        let mut denominations = represent_amount_with_fees(
+            input_amount.saturating_sub(output_amount),
+            self.cfg.output_fee,
+        )
+        .into_iter()
+        .chain(output_amounts)
+        .chain(target_denominations)
+        .collect::<Vec<Denomination>>();
+
+        denominations.sort();
+
+        let (issuance_requests, outputs) = self.build_issuance(denominations).await;
+        let issuance_count = issuance_requests.len() as u64;
+
+        let tx_builder = TransactionBuilder::new()
+            .with_inputs(self.client_ctx.make_client_inputs(ClientInputBundle::new(inputs)))
+            .with_outputs(self.client_ctx.make_client_outputs(ClientOutputBundle::new(outputs)));
+
+        let txid = self
             .client_ctx
-            .finalize_and_submit_transaction_dbtx(
-                &tx,
-                operation_id,
-                TransactionBuilder::new().with_outputs(output_bundle),
-            )
+            .submit_tx_builder_dbtx(&tx, operation_id, tx_builder)
             .await
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
-        // Caller's outputs come first — output indices 0..output_count.
-        let caller_range =
-            OutPointRange::new(finalize_range.txid(), IdxRange::from(0..output_count));
+        let output_range = OutPointRange::new(txid, IdxRange::from(0..issuance_count));
 
         self.output_executor
             .add_state_machine_dbtx(
                 &tx,
                 MintOutputStateMachine {
                     operation_id,
-                    range: Some(caller_range),
+                    range: Some(output_range),
                     issuance_requests,
                 },
             )
             .await;
 
-        self.client_ctx
-            .log_event(
+        self.input_executor
+            .add_state_machine_dbtx(
                 &tx,
-                operation_id,
-                ReissueEvent {
-                    txid: finalize_range.txid(),
+                InputStateMachine {
+                    operation_id,
+                    txid,
+                    spendable_notes,
                 },
             )
             .await;
 
+        self.client_ctx
+            .log_event(&tx, operation_id, ReissueEvent { txid })
+            .await;
+
         dbtx.commit().await;
 
-        await_output_finalisation(&self.client_ctx, operation_id, caller_range).await;
+        await_output_finalisation(&self.client_ctx, operation_id, output_range).await;
 
         Box::pin(self.send(amount)).await
     }

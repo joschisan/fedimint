@@ -72,6 +72,13 @@ pub trait FinalizeTransaction: Send + Sync {
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<OutPointRange>;
+
+    async fn submit_tx_builder_dbtx(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        operation_id: OperationId,
+        tx_builder: TransactionBuilder,
+    ) -> anyhow::Result<TransactionId>;
 }
 
 /// Lazily-set, `Weak<dyn FinalizeTransaction>` handle used to break the
@@ -219,6 +226,21 @@ where
         self.client
             .get()
             .finalize_and_submit_transaction_dbtx(&dbtx.deisolate(), operation_id, tx_builder)
+            .await
+    }
+
+    /// Submit an already-funded/balanced [`TransactionBuilder`] directly,
+    /// bypassing the primary module's `create_final_inputs_and_outputs`. The
+    /// caller is responsible for every input and output.
+    pub async fn submit_tx_builder_dbtx(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        operation_id: OperationId,
+        tx_builder: TransactionBuilder,
+    ) -> anyhow::Result<TransactionId> {
+        self.client
+            .get()
+            .submit_tx_builder_dbtx(&dbtx.deisolate(), operation_id, tx_builder)
             .await
     }
 
