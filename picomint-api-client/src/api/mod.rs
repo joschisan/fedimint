@@ -19,7 +19,7 @@ use picomint_core::endpoint_constants::{
 use picomint_core::module::{
     ApiError, ApiMethod, ApiRequestErased, IrohApiRequest, PICOMINT_ALPN,
 };
-use picomint_core::runtime::sleep;
+use tokio::time::sleep;
 use picomint_core::util::backoff_util::api_networking_backoff;
 use picomint_core::{NumPeersExt, PeerId, TransactionId, util};
 use picomint_logging::LOG_CLIENT_NET_API;
@@ -135,7 +135,7 @@ impl FederationApi {
 
         for (peer_id, node_id) in &peers {
             let (tx, rx) = watch::channel(None);
-            picomint_core::runtime::spawn("picomint-api-client-connection", {
+            tokio::spawn({
                 let endpoint = endpoint.clone();
                 let node_id = *node_id;
                 async move { connection_task(node_id, endpoint, tx).await }

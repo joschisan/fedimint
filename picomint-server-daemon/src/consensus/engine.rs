@@ -8,9 +8,9 @@ use picomint_api_client::session_outcome::{AcceptedItem, SessionOutcome, SignedS
 use picomint_api_client::transaction::ConsensusItem;
 use picomint_encoding::Decodable;
 use picomint_core::module::audit::Audit;
-use picomint_core::runtime::spawn;
 use picomint_core::secp256k1::schnorr;
-use picomint_core::task::{TaskGroup, TaskHandle, sleep};
+use picomint_core::task::{TaskGroup, TaskHandle};
+use tokio::time::sleep;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_redb::{Database, ReadTransaction, WriteTransaction};
 use rand::Rng;
@@ -164,9 +164,7 @@ impl ConsensusEngine {
         let (signed_outcomes_sender, signed_outcomes_receiver) = async_channel::unbounded();
         let (signatures_sender, signatures_receiver) = async_channel::unbounded();
 
-        let aleph_handle = spawn(
-            "aleph run session",
-            aleph_bft::run_session(
+        let aleph_handle = tokio::spawn(aleph_bft::run_session(
                 config,
                 aleph_bft::LocalIO::new(
                     DataProvider::new(self.submission_receiver.clone()),
@@ -183,8 +181,7 @@ impl ConsensusEngine {
                 Keychain::new(&self.cfg),
                 Spawner::new(self.task_group.make_subgroup()),
                 aleph_bft::Terminator::create_root(terminator_receiver, "Terminator"),
-            ),
-        );
+            ));
 
         let signed_session_outcome = self
             .complete_signed_session_outcome(

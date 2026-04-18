@@ -4,7 +4,7 @@ use bitcoin::address::NetworkUnchecked;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
 use picomint_core::invite_code::InviteCode;
-use picomint_core::{Amount, BitcoinAmountOrAll, PeerId, secp256k1};
+use picomint_core::{Amount, PeerId, secp256k1};
 use serde::{Deserialize, Serialize};
 
 /// Filename of the gateway's admin CLI Unix socket, inside `DATA_DIR`.
@@ -131,7 +131,7 @@ pub struct LdkOnchainReceiveResponse {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LdkOnchainSendRequest {
     pub address: bitcoin::Address<NetworkUnchecked>,
-    pub amount: BitcoinAmountOrAll,
+    pub amount: bitcoin::Amount,
     pub sats_per_vbyte: u64,
 }
 

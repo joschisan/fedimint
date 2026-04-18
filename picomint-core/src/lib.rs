@@ -57,6 +57,8 @@ use picomint_encoding::{Decodable, Encodable};
 
 /// Bitcoin amount types
 mod amount;
+/// Base 32 encoding
+pub mod base32;
 /// Federation configuration
 pub mod config;
 /// Fundamental types
@@ -66,14 +68,10 @@ pub mod endpoint_constants;
 pub mod envs;
 /// Federation invite code
 pub mod invite_code;
-/// Base 32 encoding
-pub mod base32;
 /// Extendable module sysystem
 pub mod module;
 /// `PeerId` type
 mod peer_id;
-/// Runtime (wasm32 vs native) differences handling
-pub mod runtime;
 /// Task handling, including wasm safe logic
 pub mod task;
 /// Time handling, wasm safe functionality
@@ -201,100 +199,6 @@ impl<'de> Deserialize<'de> for ChainId {
         D: Deserializer<'de>,
     {
         bitcoin::BlockHash::deserialize(deserializer).map(Self)
-    }
-}
-
-/// Amount of bitcoin to send, or `All` to send all available funds
-#[derive(Debug, Eq, PartialEq, Copy, Hash, Clone)]
-pub enum BitcoinAmountOrAll {
-    All,
-    Amount(bitcoin::Amount),
-}
-
-impl std::fmt::Display for BitcoinAmountOrAll {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::All => write!(f, "all"),
-            Self::Amount(amount) => write!(f, "{amount}"),
-        }
-    }
-}
-
-impl FromStr for BitcoinAmountOrAll {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("all") {
-            Ok(Self::All)
-        } else {
-            let amount = Amount::from_str(s)?;
-            Ok(Self::Amount(amount.try_into()?))
-        }
-    }
-}
-
-// Custom serde to handle both "all" and numbers/strings
-impl<'de> Deserialize<'de> for BitcoinAmountOrAll {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        use serde::de::Error;
-
-        struct Visitor;
-
-        impl serde::de::Visitor<'_> for Visitor {
-            type Value = BitcoinAmountOrAll;
-
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(f, "a bitcoin amount as number or 'all'")
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                if v.eq_ignore_ascii_case("all") {
-                    Ok(BitcoinAmountOrAll::All)
-                } else {
-                    let sat: u64 = v.parse().map_err(E::custom)?;
-                    Ok(BitcoinAmountOrAll::Amount(bitcoin::Amount::from_sat(sat)))
-                }
-            }
-
-            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                Ok(BitcoinAmountOrAll::Amount(bitcoin::Amount::from_sat(v)))
-            }
-
-            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                if v < 0 {
-                    return Err(E::custom("amount cannot be negative"));
-                }
-                Ok(BitcoinAmountOrAll::Amount(bitcoin::Amount::from_sat(
-                    v as u64,
-                )))
-            }
-        }
-
-        deserializer.deserialize_any(Visitor)
-    }
-}
-
-impl Serialize for BitcoinAmountOrAll {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::All => serializer.serialize_str("all"),
-            Self::Amount(a) => serializer.serialize_u64(a.to_sat()),
-        }
     }
 }
 
@@ -578,6 +482,3 @@ pub fn format_hex(data: &[u8], f: &mut std::fmt::Formatter) -> std::fmt::Result 
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

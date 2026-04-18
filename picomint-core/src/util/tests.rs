@@ -4,10 +4,10 @@ use std::time::Duration;
 use anyhow::anyhow;
 use assert_matches::assert_matches;
 use futures::FutureExt;
-use picomint_core::runtime::Elapsed;
+use tokio::time::error::Elapsed;
+use tokio::time::timeout;
 
 use super::{NextOrPending, SafeUrl, backoff_util, retry};
-use crate::runtime::timeout;
 
 #[test]
 fn test_safe_url() {

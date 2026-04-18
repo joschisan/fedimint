@@ -2,7 +2,6 @@ use std::ops;
 use std::sync::Arc;
 use std::time::Duration;
 
-use picomint_core::runtime;
 use picomint_logging::LOG_CLIENT;
 use tracing::{debug, warn};
 
@@ -59,8 +58,8 @@ impl Drop for ClientHandle {
 
         debug!(target: LOG_CLIENT, "Shutting down the Client on last handle drop");
         // nosemgrep: ban-raw-block-on
-        runtime::block_in_place(|| {
-            runtime::block_on(async {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
                 if let Err(err) = task_group
                     .shutdown_join_all(Some(Duration::from_secs(30)))
                     .await

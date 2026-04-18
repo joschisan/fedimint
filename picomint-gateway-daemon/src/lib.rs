@@ -580,7 +580,7 @@ impl IGatewayClientV2 for AppState {
                     }
                 }
             }
-            picomint_core::runtime::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 

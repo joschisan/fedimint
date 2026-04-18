@@ -30,4 +30,5 @@ miniscript = { workspace = true }
 rand = { workspace = true }
 secp256k1 = { workspace = true }
 serde = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }

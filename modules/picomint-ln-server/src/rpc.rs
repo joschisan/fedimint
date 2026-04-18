@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use picomint_core::OutPoint;
 use picomint_core::module::ApiError;
-use picomint_core::task::timeout;
+use tokio::time::timeout;
 use picomint_core::util::SafeUrl;
 use picomint_ln_common::ContractId;
 use picomint_ln_common::contracts::IncomingContract;

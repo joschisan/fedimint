@@ -10,7 +10,7 @@ pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::{ApiAuth, CORE_CONSENSUS_VERSION};
-use picomint_core::task::sleep;
+use tokio::time::sleep;
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
 use picomint_ln_common::config::LightningConfigPrivate;
 use picomint_logging::LOG_NET_PEER_DKG;

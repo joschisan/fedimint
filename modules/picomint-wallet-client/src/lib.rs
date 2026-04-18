@@ -31,7 +31,9 @@ use picomint_client_module::transaction::{
 use picomint_core::core::OperationId;
 use picomint_encoding::Encodable;
 use picomint_core::module::{ModuleCommon, ModuleInit};
-use picomint_core::task::{TaskGroup, block_in_place, sleep};
+use picomint_core::task::TaskGroup;
+use tokio::task::block_in_place;
+use tokio::time::sleep;
 use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_derive_secret::{ChildId, DerivableSecret};
 use picomint_logging::LOG_CLIENT_MODULE_WALLET;

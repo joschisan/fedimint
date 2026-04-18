@@ -12,7 +12,6 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
-use picomint_core::BitcoinAmountOrAll;
 use picomint_core::base32::{self, PICOMINT_PREFIX};
 use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
@@ -352,24 +351,14 @@ async fn ldk_onchain_send(
     Json(payload): Json<LdkOnchainSendRequest>,
 ) -> Result<Json<LdkOnchainSendResponse>, CliError> {
     let onchain = state.node.onchain_payment();
-    let retain_reserves = false;
     let checked_address = payload.address.clone().assume_checked();
-    let txid = match payload.amount {
-        BitcoinAmountOrAll::All => onchain
-            .send_all_to_address(
-                &checked_address,
-                retain_reserves,
-                FeeRate::from_sat_per_vb(payload.sats_per_vbyte),
-            )
-            .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
-        BitcoinAmountOrAll::Amount(amount_sats) => onchain
-            .send_to_address(
-                &checked_address,
-                amount_sats.to_sat(),
-                FeeRate::from_sat_per_vb(payload.sats_per_vbyte),
-            )
-            .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?,
-    };
+    let txid = onchain
+        .send_to_address(
+            &checked_address,
+            payload.amount.to_sat(),
+            FeeRate::from_sat_per_vb(payload.sats_per_vbyte),
+        )
+        .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?;
     info!(target: LOG_GATEWAY, txid = %txid, "Sent onchain transaction");
     Ok(Json(LdkOnchainSendResponse { txid }))
 }
@@ -430,7 +419,7 @@ async fn ldk_invoice_pay(
                 }
             }
         }
-        picomint_core::runtime::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
     Ok(Json(LdkInvoicePayResponse {

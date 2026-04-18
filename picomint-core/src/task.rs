@@ -1,19 +1,17 @@
 #![cfg_attr(target_family = "wasm", allow(dead_code))]
 
-
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use picomint_logging::{LOG_TASK, LOG_TEST};
 use thiserror::Error;
 use tokio::signal;
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::info;
-
-use crate::runtime;
-pub use crate::runtime::*;
 
 /// A group of tasks that can be shut down cooperatively.
 ///
@@ -84,7 +82,8 @@ impl TaskGroup {
 
     pub fn install_kill_handler(&self) {
         let token = self.token.clone();
-        runtime::spawn("kill handlers", async move {
+
+        tokio::spawn(async move {
             let ctrl_c = async {
                 signal::ctrl_c()
                     .await

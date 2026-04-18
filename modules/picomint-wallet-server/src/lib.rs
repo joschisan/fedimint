@@ -35,7 +35,7 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::task::TaskGroup;
-use picomint_core::task::sleep;
+use tokio::time::sleep;
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId, util};
 use picomint_logging::LOG_MODULE_WALLET;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};

@@ -17,7 +17,7 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_core::config::FederationId;
-use picomint_core::{Amount, BitcoinAmountOrAll};
+use picomint_core::Amount;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, FederationBalanceRequest, FederationConfigRequest, FederationJoinRequest,
     LdkChannelCloseRequest, LdkChannelOpenRequest, LdkInvoiceCreateRequest, LdkInvoicePayRequest,
@@ -106,7 +106,7 @@ enum LdkOnchainCommands {
         #[arg(long)]
         address: bitcoin::Address<NetworkUnchecked>,
         #[arg(long)]
-        amount: BitcoinAmountOrAll,
+        amount: bitcoin::Amount,
         #[arg(long)]
         sats_per_vbyte: u64,
     },

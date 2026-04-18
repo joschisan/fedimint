@@ -4250,6 +4250,7 @@ dependencies = [
  "picomint-redb",
  "picomint-server-core",
  "picomint-tpe",
+ "tokio",
  "tracing",
 ]
 
@@ -4497,6 +4498,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 
@@ -4532,6 +4534,7 @@ dependencies = [
  "rand 0.8.5",
  "secp256k1",
  "serde",
+ "tokio",
  "tracing",
 ]
 

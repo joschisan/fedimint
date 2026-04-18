@@ -19,7 +19,6 @@ use tracing::{debug, warn};
 use url::{Host, ParseError, Url};
 
 use crate::envs::{DEBUG_SHOW_SECRETS_ENV, is_env_var_set};
-use crate::runtime;
 
 /// Future that is `Send` unless targeting WASM
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send>>;
@@ -339,7 +338,7 @@ where
                         "{} failed, retrying",
                         op_name,
                     );
-                    runtime::sleep(interval).await;
+                    tokio::time::sleep(interval).await;
                 } else {
                     warn!(
                         target: LOG_CORE,

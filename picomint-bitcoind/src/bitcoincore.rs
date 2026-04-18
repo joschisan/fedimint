@@ -2,8 +2,8 @@ use bitcoin::{Address, ScriptBuf, Txid};
 use bitcoincore_rpc::json::ImportDescriptors;
 use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
 use bitcoincore_rpc::{Auth, Error as RpcError, RpcApi};
-use picomint_core::task::block_in_place;
-use picomint_core::util::{SafeUrl};
+use picomint_core::util::SafeUrl;
+use tokio::task::block_in_place;
 use picomint_logging::LOG_BITCOIND_CORE;
 use tracing::{debug, warn};
 
