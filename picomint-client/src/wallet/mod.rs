@@ -14,34 +14,33 @@ mod send_sm;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::anyhow;
-use bitcoin::address::NetworkUnchecked;
-use bitcoin::{Address, ScriptBuf};
-use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
-use events::{ReceiveEvent, SendEvent};
 use crate::api::{FederationApi, FederationResult};
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
+use anyhow::anyhow;
+use bitcoin::address::NetworkUnchecked;
+use bitcoin::{Address, ScriptBuf};
+use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
+use events::{ReceiveEvent, SendEvent};
 use picomint_core::core::OperationId;
-use picomint_encoding::Encodable;
 use picomint_core::task::TaskGroup;
-use tokio::task::block_in_place;
-use tokio::time::sleep;
-use picomint_core::{Amount, OutPoint, TransactionId};
-use picomint_derive_secret::{ChildId, DerivableSecret};
-use picomint_logging::LOG_CLIENT_MODULE_WALLET;
-use picomint_redb::Database;
 use picomint_core::wallet::config::WalletConfigConsensus;
 use picomint_core::wallet::{
-    StandardScript, WalletInput, WalletOutput, descriptor,
-    is_potential_receive,
+    StandardScript, WalletInput, WalletOutput, descriptor, is_potential_receive,
 };
+use picomint_core::{Amount, OutPoint, TransactionId};
+use picomint_derive_secret::{ChildId, DerivableSecret};
+use picomint_encoding::Encodable;
+use picomint_logging::LOG_CLIENT_MODULE_WALLET;
+use picomint_redb::Database;
 use secp256k1::Keypair;
 use send_sm::SendStateMachine;
 use thiserror::Error;
+use tokio::task::block_in_place;
+use tokio::time::sleep;
 use tracing::warn;
 
 /// Number of output info entries to scan per batch.

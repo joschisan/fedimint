@@ -2,10 +2,10 @@ use crate::executor::StateMachine;
 use crate::transaction::{ClientInput, ClientInputBundle};
 use picomint_core::OutPoint;
 use picomint_core::core::OperationId;
-use picomint_core::secp256k1::Keypair;
-use picomint_encoding::{Decodable, Encodable};
 use picomint_core::ln::LightningInput;
 use picomint_core::ln::contracts::IncomingContract;
+use picomint_core::secp256k1::Keypair;
+use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
 use tpe::AggregateDecryptionKey;
 

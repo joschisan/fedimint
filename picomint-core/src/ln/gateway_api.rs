@@ -10,13 +10,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::FederationId;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
-use crate::util::SafeUrl;
-use crate::{Amount, OutPoint};
 use crate::ln::endpoint_constants::{
     CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
 };
 use crate::ln::gateway_connection::GatewayError;
 use crate::ln::{Bolt11InvoiceDescription, GatewayApi, LightningInvoice};
+use crate::util::SafeUrl;
+use crate::{Amount, OutPoint};
 
 #[async_trait::async_trait]
 pub trait GatewayConnection: std::fmt::Debug {

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
-use picomint_core::config::ConsensusConfig;
 use picomint_bip39::Mnemonic;
 use picomint_client::{Client, ClientBuilder, RootSecret};
+use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::invite_code::InviteCode;
 use picomint_redb::Database;

@@ -144,7 +144,9 @@ impl SetupApi {
             && existing_local_parameters.federation_name == federation_name
             && existing_local_parameters.federation_size == federation_size
         {
-            return Ok(picomint_base32::encode(&existing_local_parameters.setup_code()));
+            return Ok(picomint_base32::encode(
+                &existing_local_parameters.setup_code(),
+            ));
         }
 
         ensure!(!name.is_empty(), "The guardian name is empty");

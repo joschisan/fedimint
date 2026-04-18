@@ -5,11 +5,11 @@ use async_stream::stream;
 use bitcoincore_rpc::RpcApi;
 use futures::StreamExt;
 use picomint_client::ClientHandleArc;
-use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_client::wallet::WalletClientModule;
 use picomint_client::wallet::events::{
     ReceiveEvent, SendConfirmEvent, SendEvent, SendFailureEvent,
 };
+use picomint_eventlog::{EventLogEntry, EventLogId};
 use tokio::task::block_in_place;
 use tracing::info;
 

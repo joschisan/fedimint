@@ -15,6 +15,10 @@ mod rpc;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use self::db::{
+    BLOCK_COUNT_VOTE, FEDERATION_WALLET, FEE_RATE_VOTE, OUTPUT, Output, SIGNATURES, SPENT_OUTPUT,
+    Signatures, TX_INFO, TX_INFO_INDEX, TxidKey, UNCONFIRMED_TX, UNSIGNED_TX,
+};
 use anyhow::{Context, anyhow, bail, ensure};
 use bitcoin::absolute::LockTime;
 use bitcoin::hashes::{Hash, sha256};
@@ -24,23 +28,19 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, Sequence, Transaction, TxIn, TxOut, Txid};
 use common::config::WalletConfigConsensus;
 use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
-use self::db::{
-    BLOCK_COUNT_VOTE, FEDERATION_WALLET, FEE_RATE_VOTE, OUTPUT, Output, SIGNATURES, SPENT_OUTPUT,
-    Signatures, TX_INFO, TX_INFO_INDEX, TxidKey, UNCONFIRMED_TX, UNSIGNED_TX,
-};
 use miniscript::descriptor::Wsh;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
+use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::core::ModuleKind;
-use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::task::TaskGroup;
-use tokio::time::sleep;
-use picomint_core::backoff::{Retryable, networking_backoff};
+use picomint_core::wallet as common;
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::LOG_MODULE_WALLET;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
-use picomint_core::wallet as common;
+use tokio::time::sleep;
 
 use crate::config::dkg::DkgHandle;
 use crate::handler;

@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
+use crate::{Amount, PeerId};
 use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
 use picomint_encoding::{Decodable, Encodable};
-use crate::{Amount, PeerId};
 use secp256k1::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 

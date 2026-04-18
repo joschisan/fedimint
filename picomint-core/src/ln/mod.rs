@@ -127,4 +127,3 @@ impl std::fmt::Display for LightningConsensusItem {
         }
     }
 }
-

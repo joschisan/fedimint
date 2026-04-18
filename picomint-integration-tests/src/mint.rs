@@ -2,11 +2,11 @@ use std::pin::pin;
 
 use async_stream::stream;
 use futures::StreamExt;
+use picomint_client::mint::{MintClientModule, ReceiveEvent, SendEvent};
 use picomint_client::{ClientHandleArc, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_eventlog::{EventLogEntry, EventLogId};
-use picomint_client::mint::{MintClientModule, ReceiveEvent, SendEvent};
 use tracing::info;
 
 use crate::env::TestEnv;
@@ -146,7 +146,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
     assert_eq!(op, operation_id);
 
     assert!(
-        await_tx_outcome(&client_receive, operation_id).await.is_err(),
+        await_tx_outcome(&client_receive, operation_id)
+            .await
+            .is_err(),
         "double-spend receive should be rejected",
     );
 

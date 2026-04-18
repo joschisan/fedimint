@@ -1,8 +1,8 @@
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
+use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::table;
-use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 
 table!(
     ROOT_ENTROPY,

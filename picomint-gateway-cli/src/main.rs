@@ -16,8 +16,8 @@ use hyper::Request;
 use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use picomint_core::config::FederationId;
 use picomint_core::Amount;
+use picomint_core::config::FederationId;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, FederationBalanceRequest, FederationConfigRequest, FederationJoinRequest,
     LdkChannelCloseRequest, LdkChannelOpenRequest, LdkInvoiceCreateRequest, LdkInvoicePayRequest,
@@ -425,7 +425,12 @@ async fn main() -> Result<()> {
         } => match module {
             ModuleCommands::Mint(cmd) => match cmd {
                 MintCommands::Count => {
-                    request(d, ROUTE_MODULE_MINT_COUNT, MintCountRequest { federation_id }).await?
+                    request(
+                        d,
+                        ROUTE_MODULE_MINT_COUNT,
+                        MintCountRequest { federation_id },
+                    )
+                    .await?
                 }
                 MintCommands::Send { amount } => {
                     request(

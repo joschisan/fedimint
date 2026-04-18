@@ -2,15 +2,15 @@ use core::fmt;
 use std::marker;
 use std::sync::{Arc, OnceLock, Weak};
 
-use futures::StreamExt as _;
 use crate::Client;
 use crate::api::{ApiScope, FederationApi};
+use futures::StreamExt as _;
+use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
 use picomint_core::util::{BoxFuture, BoxStream};
-use picomint_core::TransactionId;
 use picomint_eventlog::{EVENT_LOG, Event, EventLogId, PersistedLogEntry};
 use picomint_logging::LOG_CLIENT;
 use picomint_redb::{Database, WriteTxRef};
@@ -311,5 +311,3 @@ impl<M> ClientContext<M> {
         picomint_eventlog::log_event(&dbtx.deisolate(), Some(operation_id), event);
     }
 }
-
-

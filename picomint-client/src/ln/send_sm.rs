@@ -1,16 +1,16 @@
+use crate::executor::StateMachine;
+use crate::transaction::{ClientInput, ClientInputBundle};
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
-use crate::executor::StateMachine;
-use crate::transaction::{ClientInput, ClientInputBundle};
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
+use picomint_core::ln::contracts::OutgoingContract;
+use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::util::SafeUrl;
 use picomint_core::{OutPoint, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::ln::contracts::OutgoingContract;
-use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_logging::LOG_CLIENT_MODULE_LN;
 use picomint_redb::WriteTxRef;
 use secp256k1::Keypair;
@@ -263,6 +263,10 @@ async fn transition_preimage_sm(
         .expect("Cannot claim input, additional funding needed");
 
     ctx.client_ctx
-        .log_event(dbtx, old_state.common.operation_id, SendRefundEvent { txid })
+        .log_event(
+            dbtx,
+            old_state.common.operation_id,
+            SendRefundEvent { txid },
+        )
         .await;
 }

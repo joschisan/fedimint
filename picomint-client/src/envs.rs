@@ -5,7 +5,6 @@ use tracing::warn;
 
 pub const DISCOVER_API_VERSION_TIMEOUT_ENV: &str = "DISCOVER_API_VERSION_TIMEOUT";
 pub fn get_discover_api_version_timeout() -> Duration {
-
     if let Ok(s) = std::env::var(DISCOVER_API_VERSION_TIMEOUT_ENV) {
         match FromStr::from_str(&s) {
             Ok(secs) => return Duration::from_secs(secs),

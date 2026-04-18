@@ -3,8 +3,8 @@ use std::io::Write;
 
 use aleph_bft::Keychain as KeychainTrait;
 use bitcoin::hashes::Hash;
-use picomint_encoding::Encodable;
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
+use picomint_encoding::Encodable;
 use secp256k1::hashes::sha256;
 use secp256k1::{Keypair, Message, PublicKey, schnorr};
 

@@ -14,23 +14,16 @@ mod send_sm;
 
 use std::sync::Arc;
 
-use bitcoin::hashes::{Hash, sha256};
-use bitcoin::secp256k1;
-use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
-use lightning_invoice::{Bolt11Invoice, Currency};
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
+use bitcoin::hashes::{Hash, sha256};
+use bitcoin::secp256k1;
+use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
+use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_encoding::Encodable;
-use picomint_core::secp256k1::SECP256K1;
-use picomint_core::task::TaskGroup;
-use picomint_core::time::duration_since_epoch;
-use picomint_core::util::SafeUrl;
-use picomint_core::{Amount, OutPoint, PeerId};
-use picomint_derive_secret::{ChildId, DerivableSecret};
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use picomint_core::ln::gateway_api::{
@@ -40,6 +33,13 @@ use picomint_core::ln::{
     Bolt11InvoiceDescription, GatewayApi, LightningInvoice, LightningOutput,
     MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl, tweak,
 };
+use picomint_core::secp256k1::SECP256K1;
+use picomint_core::task::TaskGroup;
+use picomint_core::time::duration_since_epoch;
+use picomint_core::util::SafeUrl;
+use picomint_core::{Amount, OutPoint, PeerId};
+use picomint_derive_secret::{ChildId, DerivableSecret};
+use picomint_encoding::Encodable;
 use picomint_redb::WriteTxRef;
 use secp256k1::{Keypair, PublicKey, Scalar, SecretKey, ecdh};
 use thiserror::Error;

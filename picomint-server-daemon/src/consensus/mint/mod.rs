@@ -11,23 +11,23 @@ use std::collections::BTreeMap;
 
 use anyhow::ensure;
 use picomint_core::core::ModuleKind;
-use picomint_encoding::Encodable;
-use picomint_core::module::audit::Audit;
-use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
-use picomint_core::{Amount, InPoint, OutPoint, PeerId};
 use picomint_core::mint::config::{
-    consensus_denominations, MintConfig, MintConfigConsensus, MintConfigPrivate,
+    MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
 };
 use picomint_core::mint::endpoint_constants::{
     RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
     SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
 };
 use picomint_core::mint::{
-    verify_note, Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput,
-    MintOutputError, RecoveryItem,
+    Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError,
+    RecoveryItem, verify_note,
 };
+use picomint_core::module::audit::Audit;
+use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
+use picomint_core::{Amount, InPoint, OutPoint, PeerId};
+use picomint_encoding::Encodable;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
-use tbs::{derive_pk_share, AggregatePublicKey, PublicKeyShare};
+use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 use threshold_crypto::group::Curve;
 
 use crate::config::dkg::DkgHandle;
@@ -35,8 +35,8 @@ use crate::config::poly::eval_poly_g2;
 use crate::handler;
 
 use self::db::{
-    NoteNonceKey, BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER,
-    NOTE_NONCE, RECOVERY_ITEM,
+    BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER, NOTE_NONCE,
+    NoteNonceKey, RECOVERY_ITEM,
 };
 
 /// Run DKG for the mint module, producing a fresh `MintConfig` for this peer.

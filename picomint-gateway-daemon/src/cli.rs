@@ -12,28 +12,27 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
+use picomint_client::gw::Preimage;
+use picomint_client::mint::MintClientModule;
 use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
-    ChannelInfo, FederationBalanceRequest, FederationBalanceResponse, FederationConfigRequest,
-    FederationConfigResponse, FederationInviteResponse, FederationJoinRequest,
-    FederationListResponse, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
-    LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest,
+    CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
+    FederationConfigRequest, FederationConfigResponse, FederationInviteResponse,
+    FederationJoinRequest, FederationListResponse, InfoResponse, LdkBalancesResponse,
+    LdkChannelCloseRequest, LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest,
     LdkInvoiceCreateRequest, LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
     LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MintReceiveRequest,
     MintReceiveResponse, MintSendRequest, MintSendResponse, MnemonicResponse, PeerInfo,
     ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
-    CLI_SOCKET_FILENAME, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_INFO,
-    ROUTE_LDK_BALANCES,
+    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES,
     ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_RECEIVE,
     WalletReceiveRequest, WalletReceiveResponse,
 };
-use picomint_client::gw::Preimage;
 use picomint_logging::LOG_GATEWAY;
-use picomint_client::mint::MintClientModule;
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
 use tower_http::cors::CorsLayer;
@@ -546,7 +545,6 @@ async fn federation_balance(
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let balance_msat = client
-        
         .get_balance()
         .await
         .map_err(|e| CliError::internal(format!("Failed to read balance: {e}")))?;
@@ -576,8 +574,7 @@ async fn module_mint_send(
     let client = state
         .select_client(payload.federation_id)
         .await
-        .ok_or(CliError::bad_request("Federation not connected"))?
-        ;
+        .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let mint_module = client
         .get_first_module::<MintClientModule>()
@@ -599,9 +596,8 @@ async fn module_mint_receive(
     State(state): State<AppState>,
     Json(payload): Json<MintReceiveRequest>,
 ) -> Result<Json<MintReceiveResponse>, CliError> {
-    let ecash: picomint_client::mint::ECash =
-        picomint_base32::decode(&payload.notes)
-            .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
+    let ecash: picomint_client::mint::ECash = picomint_base32::decode(&payload.notes)
+        .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
 
     let federation_id = ecash
         .mint()
@@ -613,7 +609,6 @@ async fn module_mint_receive(
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let mint = client
-        
         .get_first_module::<MintClientModule>()
         .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
     let amount = ecash.amount();
@@ -638,7 +633,6 @@ async fn module_wallet_receive(
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let wallet_module = client
-        
         .get_first_module::<picomint_client::wallet::WalletClientModule>()
         .map_err(|_| CliError::internal("No wallet module found"))?;
 

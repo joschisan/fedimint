@@ -106,17 +106,7 @@ picomint_redb::consensus_key!(OperationId);
 /// Discriminants are also used as the `ChildId` input for per-module secret
 /// derivation and as the stable wire tag. Order matters — do not reorder.
 #[derive(
-    Copy,
-    Clone,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    Encodable,
-    Decodable,
+    Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Encodable, Decodable,
 )]
 pub enum ModuleKind {
     Mint,

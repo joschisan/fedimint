@@ -87,9 +87,7 @@ impl AuditSummary {
         Self {
             net_assets: calculate_net_assets(audit.items.iter())
                 .expect("We'd have crashed already if there was an overflow"),
-            module_summaries: generate_module_summaries(
-                audit.items.iter().chain(&placeholders),
-            ),
+            module_summaries: generate_module_summaries(audit.items.iter().chain(&placeholders)),
         }
     }
 }
@@ -165,9 +163,24 @@ fn creates_audit_summary_from_audit() {
     let expected_audit_summary = AuditSummary {
         net_assets: 0,
         module_summaries: BTreeMap::from_iter([
-            (ModuleKind::Mint, ModuleSummary { net_assets: -49_899_000 }),
-            (ModuleKind::Ln, ModuleSummary { net_assets: -101_000 }),
-            (ModuleKind::Wallet, ModuleSummary { net_assets: 50_000_000 }),
+            (
+                ModuleKind::Mint,
+                ModuleSummary {
+                    net_assets: -49_899_000,
+                },
+            ),
+            (
+                ModuleKind::Ln,
+                ModuleSummary {
+                    net_assets: -101_000,
+                },
+            ),
+            (
+                ModuleKind::Wallet,
+                ModuleSummary {
+                    net_assets: 50_000_000,
+                },
+            ),
         ]),
     };
 

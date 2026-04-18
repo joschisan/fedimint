@@ -11,20 +11,16 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{Future, StreamExt};
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, PublicKey};
-use picomint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
-use picomint_encoding::{Decodable, Encodable};
-use picomint_core::endpoint_constants::{
-    LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
-};
-use picomint_core::module::{
-    ApiError, ApiMethod, ApiRequestErased, IrohApiRequest, PICOMINT_ALPN,
-};
-use tokio::time::sleep;
 use picomint_core::backoff::{BackoffBuilder, Retryable, networking_backoff};
+use picomint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
+use picomint_core::endpoint_constants::{LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT};
+use picomint_core::module::{ApiError, ApiMethod, ApiRequestErased, IrohApiRequest, PICOMINT_ALPN};
 use picomint_core::{NumPeersExt, PeerId};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::LOG_CLIENT_NET_API;
 use thiserror::Error;
 use tokio::sync::watch;
+use tokio::time::sleep;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, instrument, trace, warn};
 
@@ -450,10 +446,7 @@ impl FederationApi {
 
     /// Submit a transaction and await the final outcome. The server long-
     /// polls until the tx is either accepted or becomes invalid.
-    pub async fn submit_transaction(
-        &self,
-        tx: Transaction,
-    ) -> Result<(), TransactionError> {
+    pub async fn submit_transaction(&self, tx: Transaction) -> Result<(), TransactionError> {
         self.request_current_consensus_retry(
             SUBMIT_TRANSACTION_ENDPOINT.to_owned(),
             ApiRequestErased::new(tx),

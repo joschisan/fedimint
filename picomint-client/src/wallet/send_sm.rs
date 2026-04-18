@@ -39,7 +39,12 @@ impl StateMachine for SendStateMachine {
             return AwaitFundingResult::Aborted(error);
         }
 
-        match ctx.client_ctx.module_api().wallet_tx_id(self.outpoint).await {
+        match ctx
+            .client_ctx
+            .module_api()
+            .wallet_tx_id(self.outpoint)
+            .await
+        {
             Some(txid) => AwaitFundingResult::Success(txid),
             None => AwaitFundingResult::Failure,
         }

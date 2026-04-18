@@ -1,27 +1,27 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use anyhow::bail;
-use bitcoin::key::Secp256k1;
 use crate::api::{ApiScope, FederationApi};
-use picomint_core::config::ConsensusConfig;
-use crate::{Endpoint, download_from_invite_code};
 use crate::executor::ModuleExecutor;
+use crate::gw::{GatewayClientInit, IGatewayClient};
+use crate::ln::LightningClientInit;
+use crate::mint::MintClientInit;
 use crate::module::LateClient;
 use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use crate::transaction::TxSubmissionSmContext;
+use crate::wallet::WalletClientInit;
+use crate::{Endpoint, download_from_invite_code};
+use anyhow::bail;
+use bitcoin::key::Secp256k1;
+use picomint_core::PeerId;
+use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::ModuleKind;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
-use picomint_core::PeerId;
 use picomint_derive_secret::DerivableSecret;
-use crate::gw::{GatewayClientInit, IGatewayClient};
-use crate::ln::LightningClientInit;
 use picomint_logging::LOG_CLIENT;
-use crate::mint::MintClientInit;
 use picomint_redb::Database;
-use crate::wallet::WalletClientInit;
 use tracing::{debug, trace};
 
 use super::handle::ClientHandle;
@@ -417,7 +417,12 @@ impl ClientPreview {
         let pre_root_secret = pre_root_secret.to_inner(self.config.calculate_federation_id());
 
         self.inner
-            .init(self.connectors, db_no_decoders, pre_root_secret, self.config)
+            .init(
+                self.connectors,
+                db_no_decoders,
+                pre_root_secret,
+                self.config,
+            )
             .await
     }
 }

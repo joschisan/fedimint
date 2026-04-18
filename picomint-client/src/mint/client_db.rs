@@ -5,8 +5,8 @@ use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::table;
 
-use super::issuance::NoteIssuanceRequest;
 use super::SpendableNote;
+use super::issuance::NoteIssuanceRequest;
 
 // Tracks that a `receive(ecash)` has been started for this deterministic
 // [`OperationId`]. Used to make `receive` idempotent.

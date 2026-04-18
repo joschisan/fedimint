@@ -21,29 +21,27 @@ use std::convert::Infallible;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use anyhow::Context as _;
-use bitcoin_hashes::sha256;
-use client_db::{RecoveryState, NOTE, RECEIVE_OPERATION, RECOVERY_STATE};
-pub use events::*;
-use futures::StreamExt;
 use crate::api::FederationApi;
 use crate::module::ClientContext;
-use picomint_core::task::TaskGroup;
-use picomint_redb::Database;
 use crate::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
+use anyhow::Context as _;
+use bitcoin_hashes::sha256;
+use client_db::{NOTE, RECEIVE_OPERATION, RECOVERY_STATE, RecoveryState};
+pub use events::*;
+use futures::StreamExt;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::secp256k1::rand::{thread_rng, Rng};
+use picomint_core::mint::config::{MintConfigConsensus, client_denominations};
+use picomint_core::mint::{Denomination, MintInput, MintOutput, Note, RecoveryItem};
+use picomint_core::secp256k1::rand::{Rng, thread_rng};
 use picomint_core::secp256k1::{Keypair, PublicKey};
+use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, PeerId};
 use picomint_derive_secret::DerivableSecret;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::mint::config::{client_denominations, MintConfigConsensus};
-use picomint_core::mint::{
-    Denomination, MintInput, MintOutput, Note, RecoveryItem,
-};
+use picomint_redb::Database;
 use picomint_redb::WriteTxRef;
 use rand::seq::IteratorRandom;
 use tbs::AggregatePublicKey;
@@ -98,8 +96,7 @@ impl MintClientInit {
         module_api: &FederationApi,
         module_root_secret: &DerivableSecret,
     ) -> anyhow::Result<()> {
-        let mut state = if let Some(state) = db.begin_read().await.get(&RECOVERY_STATE, &())
-        {
+        let mut state = if let Some(state) = db.begin_read().await.get(&RECOVERY_STATE, &()) {
             state
         } else {
             RecoveryState {
@@ -127,13 +124,7 @@ impl MintClientInit {
         })
         .buffered(PARALLEL_HASH_REQUESTS)
         .map(|(start, end, hash)| {
-            download_slice_with_hash(
-                module_api.clone(),
-                peer_selector.clone(),
-                start,
-                end,
-                hash,
-            )
+            download_slice_with_hash(module_api.clone(), peer_selector.clone(), start, end, hash)
         })
         .buffered(PARALLEL_SLICE_REQUESTS);
 
@@ -155,11 +146,8 @@ impl MintClientInit {
                         if !issuance::check_tweak(*tweak, tweak_filter) {
                             continue;
                         }
-                        let output_secret = issuance::output_secret(
-                            *denomination,
-                            *tweak,
-                            module_root_secret,
-                        );
+                        let output_secret =
+                            issuance::output_secret(*denomination, *tweak, module_root_secret);
 
                         if !issuance::check_nonce(&output_secret, *nonce_hash) {
                             continue;
@@ -174,11 +162,7 @@ impl MintClientInit {
 
                         state.requests.insert(
                             computed_nonce_hash,
-                            NoteIssuanceRequest::new(
-                                *denomination,
-                                *tweak,
-                                module_root_secret,
-                            ),
+                            NoteIssuanceRequest::new(*denomination, *tweak, module_root_secret),
                         );
                     }
                     RecoveryItem::Input { nonce_hash } => {
@@ -207,10 +191,7 @@ impl MintClientInit {
                     issuance_requests: state.requests.into_values().collect(),
                 };
 
-                crate::executor::ModuleExecutor::add_state_machine_unstarted(
-                    &tx, sm,
-                )
-                .await;
+                crate::executor::ModuleExecutor::add_state_machine_unstarted(&tx, sm).await;
 
                 dbtx.commit().await;
 
@@ -240,15 +221,17 @@ impl MintClientInit {
 
         let filter = issuance::tweak_filter(module_root_secret);
 
-        tokio::task::spawn_blocking(move || loop {
-            let tweak: [u8; 16] = thread_rng().r#gen();
+        tokio::task::spawn_blocking(move || {
+            loop {
+                let tweak: [u8; 16] = thread_rng().r#gen();
 
-            if !issuance::check_tweak(tweak, filter) {
-                continue;
-            }
+                if !issuance::check_tweak(tweak, filter) {
+                    continue;
+                }
 
-            if tweak_sender.send_blocking(tweak).is_err() {
-                return;
+                if tweak_sender.send_blocking(tweak).is_err() {
+                    return;
+                }
             }
         });
 
@@ -313,8 +296,7 @@ impl MintClientModule {
         operation_id: OperationId,
         mut input_amount: Amount,
         mut output_amount: Amount,
-    ) -> anyhow::Result<crate::module::FinalContribution<MintInput, MintOutput>>
-    {
+    ) -> anyhow::Result<crate::module::FinalContribution<MintInput, MintOutput>> {
         let mut spendable_notes = self
             .select_funding_input(dbtx, output_amount.saturating_sub(input_amount))
             .await
@@ -845,10 +827,7 @@ async fn download_slice_with_hash(
         let peer = peer_selector.choose_peer();
         let start_time = picomint_core::time::now();
 
-        if let Ok(data) = module_api
-            .recovery_slice(peer, TIMEOUT, start, end)
-            .await
-        {
+        if let Ok(data) = module_api.recovery_slice(peer, TIMEOUT, start, end).await {
             let elapsed = picomint_core::time::now()
                 .duration_since(start_time)
                 .unwrap_or_default();

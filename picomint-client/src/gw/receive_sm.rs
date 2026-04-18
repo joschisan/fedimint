@@ -1,25 +1,25 @@
 use std::collections::BTreeMap;
 
-use anyhow::anyhow;
 use crate::api::ServerError;
-use crate::query::FilterMapThreshold;
 use crate::executor::StateMachine;
+use crate::query::FilterMapThreshold;
 use crate::transaction::{ClientInput, ClientInputBundle};
+use anyhow::anyhow;
 use picomint_core::core::OperationId;
+use picomint_core::ln::LightningInput;
+use picomint_core::ln::contracts::IncomingContract;
+use picomint_core::ln::endpoint_constants::DECRYPTION_KEY_SHARE_ENDPOINT;
 use picomint_core::module::ApiRequestErased;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::ln::LightningInput;
-use picomint_core::ln::contracts::IncomingContract;
-use picomint_core::ln::endpoint_constants::DECRYPTION_KEY_SHARE_ENDPOINT;
 use picomint_logging::LOG_CLIENT_MODULE_GW;
 use picomint_redb::WriteTxRef;
 use tpe::{DecryptionKeyShare, aggregate_dk_shares};
 use tracing::warn;
 
-use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent};
 use super::GwSmContext;
+use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent};
 
 /// State machine that handles the relay of an incoming Lightning payment.
 /// Terminates once decryption shares are either invalid, produce a valid
@@ -54,14 +54,16 @@ impl StateMachine for ReceiveStateMachine {
                 FilterMapThreshold::new(
                     move |peer_id, share: DecryptionKeyShare| {
                         if !contract.verify_decryption_share(
-                            tpe_pks.get(&peer_id).ok_or(ServerError::InternalClientError(
-                                anyhow!("Missing TPE PK for peer {peer_id}?!"),
-                            ))?,
+                            tpe_pks
+                                .get(&peer_id)
+                                .ok_or(ServerError::InternalClientError(anyhow!(
+                                    "Missing TPE PK for peer {peer_id}?!"
+                                )))?,
                             &share,
                         ) {
-                            return Err(crate::api::ServerError::InvalidResponse(
-                                anyhow!("Invalid decryption share"),
-                            ));
+                            return Err(crate::api::ServerError::InvalidResponse(anyhow!(
+                                "Invalid decryption share"
+                            )));
                         }
 
                         Ok(share)

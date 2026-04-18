@@ -2,17 +2,17 @@ use crate::executor::StateMachine;
 use crate::transaction::{ClientInput, ClientInputBundle};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
+use picomint_core::ln::contracts::OutgoingContract;
+use picomint_core::ln::{LightningInput, LightningInvoice, OutgoingWitness};
 use picomint_core::secp256k1::Keypair;
 use picomint_core::{Amount, OutPoint};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::ln::contracts::OutgoingContract;
-use picomint_core::ln::{LightningInput, LightningInvoice, OutgoingWitness};
 use picomint_redb::WriteTxRef;
 use serde::{Deserialize, Serialize};
 
 use super::FinalReceiveState;
-use super::events::{SendCancelEvent, SendSuccessEvent};
 use super::GwSmContext;
+use super::events::{SendCancelEvent, SendSuccessEvent};
 
 /// State machine that handles the relay of an outgoing Lightning payment.
 /// Terminates after the payment either succeeds (claim inputs + success event)

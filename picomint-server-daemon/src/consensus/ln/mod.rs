@@ -12,11 +12,6 @@ use group::Curve;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::bitcoin::Network;
 use picomint_core::core::ModuleKind;
-use picomint_core::module::audit::Audit;
-use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
-use picomint_core::time::duration_since_epoch;
-use picomint_core::util::SafeUrl;
-use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
@@ -29,6 +24,11 @@ use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError, OutgoingWitness,
 };
+use picomint_core::module::audit::Audit;
+use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
+use picomint_core::time::duration_since_epoch;
+use picomint_core::util::SafeUrl;
+use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_logging::LOG_MODULE_LN;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tpe::{PublicKeyShare, SecretKeyShare};
@@ -320,7 +320,9 @@ impl Lightning {
             OUTGOING_CONTRACT_EXPIRATION_ENDPOINT => {
                 handler!(outgoing_contract_expiration, self, req).await
             }
-            AWAIT_INCOMING_CONTRACTS_ENDPOINT => handler!(await_incoming_contracts, self, req).await,
+            AWAIT_INCOMING_CONTRACTS_ENDPOINT => {
+                handler!(await_incoming_contracts, self, req).await
+            }
             GATEWAYS_ENDPOINT => handler!(gateways, self, req).await,
             other => Err(ApiError::not_found(other.to_string())),
         }

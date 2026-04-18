@@ -162,8 +162,7 @@ impl<'m, M> ClientModuleInstance<'m, M> {
     }
 }
 
-impl<M> std::ops::Deref for ClientModuleInstance<'_, M>
-{
+impl<M> std::ops::Deref for ClientModuleInstance<'_, M> {
     type Target = M;
 
     fn deref(&self) -> &Self::Target {

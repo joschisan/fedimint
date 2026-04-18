@@ -1,20 +1,20 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use bitcoin_hashes::sha256;
 use crate::api::{FederationApi, ServerError};
 use crate::query::FilterMapThreshold;
-use picomint_core::module::ApiRequestErased;
-use picomint_core::{NumPeersExt, PeerId, TransactionId};
+use bitcoin_hashes::sha256;
 use picomint_core::mint::endpoint_constants::{
     RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
     SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
 };
 use picomint_core::mint::{Denomination, RecoveryItem};
+use picomint_core::module::ApiRequestErased;
+use picomint_core::{NumPeersExt, PeerId, TransactionId};
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
-use super::issuance_sm::verify_blind_shares;
 use super::NoteIssuanceRequest;
+use super::issuance_sm::verify_blind_shares;
 
 impl FederationApi {
     pub async fn signature_shares(

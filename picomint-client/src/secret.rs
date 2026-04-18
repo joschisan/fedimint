@@ -12,8 +12,7 @@ pub trait DeriveableSecretClientExt {
 impl DeriveableSecretClientExt for DerivableSecret {
     fn derive_module_secret(&self, kind: ModuleKind) -> DerivableSecret {
         assert_eq!(self.level(), 0);
-        self.child_key(TYPE_MODULE)
-            .child_key(ChildId(kind as u64))
+        self.child_key(TYPE_MODULE).child_key(ChildId(kind as u64))
     }
 }
 

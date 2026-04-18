@@ -170,4 +170,3 @@ impl ApiError {
         Self::new(500, message)
     }
 }
-

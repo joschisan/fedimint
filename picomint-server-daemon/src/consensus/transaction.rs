@@ -1,6 +1,6 @@
-use picomint_core::transaction::{TRANSACTION_OVERFLOW_ERROR, TransactionError};
 use picomint_core::Amount;
 use picomint_core::module::TransactionItemAmounts;
+use picomint_core::transaction::{TRANSACTION_OVERFLOW_ERROR, TransactionError};
 
 #[derive(Clone, Debug, Default)]
 pub struct FundingVerifier {

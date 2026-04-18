@@ -5,10 +5,10 @@
 //! `Mint::handle_api` via the `handler!` macro.
 
 use bitcoin::hashes::sha256;
+use picomint_core::mint::RecoveryItem;
+use picomint_core::module::ApiError;
 use picomint_core::{OutPoint, TransactionId};
 use picomint_encoding::Encodable as _;
-use picomint_core::module::ApiError;
-use picomint_core::mint::RecoveryItem;
 use picomint_redb::ReadTransaction;
 use tbs::{BlindedMessage, BlindedSignatureShare};
 
@@ -49,18 +49,12 @@ pub async fn signature_shares_recovery(
     Ok(shares)
 }
 
-pub async fn recovery_slice(
-    mint: &Mint,
-    range: (u64, u64),
-) -> Result<Vec<RecoveryItem>, ApiError> {
+pub async fn recovery_slice(mint: &Mint, range: (u64, u64)) -> Result<Vec<RecoveryItem>, ApiError> {
     let tx = mint.db.begin_read().await;
     Ok(collect_recovery_slice(&tx, range))
 }
 
-pub async fn recovery_slice_hash(
-    mint: &Mint,
-    range: (u64, u64),
-) -> Result<sha256::Hash, ApiError> {
+pub async fn recovery_slice_hash(mint: &Mint, range: (u64, u64)) -> Result<sha256::Hash, ApiError> {
     let tx = mint.db.begin_read().await;
     Ok(collect_recovery_slice(&tx, range).consensus_hash::<sha256::Hash>())
 }
@@ -70,7 +64,10 @@ pub async fn recovery_count(mint: &Mint, _: ()) -> Result<u64, ApiError> {
     Ok(super::get_recovery_count(&tx))
 }
 
-fn collect_signature_shares(tx: &ReadTransaction, txid: TransactionId) -> Vec<BlindedSignatureShare> {
+fn collect_signature_shares(
+    tx: &ReadTransaction,
+    txid: TransactionId,
+) -> Vec<BlindedSignatureShare> {
     tx.range(
         &BLINDED_SIGNATURE_SHARE,
         OutPoint { txid, out_idx: 0 }..OutPoint {

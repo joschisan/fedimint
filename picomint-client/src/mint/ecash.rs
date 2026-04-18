@@ -1,6 +1,6 @@
+use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::Amount;
 
 use super::SpendableNote;
 

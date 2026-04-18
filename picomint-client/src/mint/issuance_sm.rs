@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
-use anyhow::ensure;
 use crate::executor::StateMachine;
+use anyhow::ensure;
 use picomint_core::core::OperationId;
+use picomint_core::mint::{Denomination, verify_note};
 use picomint_core::{PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::mint::{verify_note, Denomination};
 use picomint_redb::WriteTxRef;
-use tbs::{aggregate_signature_shares, BlindedSignatureShare, PublicKeyShare};
+use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use super::client_db::NOTE;
 use super::events::{IssuanceComplete, OutputFailureEvent};

@@ -1,8 +1,8 @@
 use picomint_core::Amount;
 use picomint_core::TransactionId;
 use picomint_core::core::ModuleKind;
-use picomint_eventlog::{Event, EventKind};
 use picomint_core::mint::KIND;
+use picomint_eventlog::{Event, EventKind};
 use serde::{Deserialize, Serialize};
 
 /// Emitted when e-cash is sent out-of-band.

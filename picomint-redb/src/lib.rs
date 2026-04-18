@@ -1009,8 +1009,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use crate::table;
-
     use super::*;
 
     table!(USERS, u64 => String, "users");

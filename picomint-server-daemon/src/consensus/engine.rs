@@ -4,18 +4,18 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use async_channel::Receiver;
-use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
-use picomint_core::transaction::ConsensusItem;
-use picomint_encoding::Decodable;
 use picomint_core::module::audit::Audit;
 use picomint_core::secp256k1::schnorr;
+use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_core::task::{TaskGroup, TaskHandle};
-use tokio::time::sleep;
+use picomint_core::transaction::ConsensusItem;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
+use picomint_encoding::Decodable;
 use picomint_redb::{Database, ReadTransaction, WriteTransaction};
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use tokio::sync::watch;
+use tokio::time::sleep;
 use tracing::{debug, error, info, instrument, trace};
 
 use crate::LOG_CONSENSUS;
@@ -165,23 +165,23 @@ impl ConsensusEngine {
         let (signatures_sender, signatures_receiver) = async_channel::unbounded();
 
         let aleph_handle = tokio::spawn(aleph_bft::run_session(
-                config,
-                aleph_bft::LocalIO::new(
-                    DataProvider::new(self.submission_receiver.clone()),
-                    FinalizationHandler::new(unit_data_sender),
-                    BackupWriter::new(self.db.clone()).await,
-                    BackupReader::new(self.db.clone()),
-                ),
-                Network::new(
-                    connections.clone(),
-                    signed_outcomes_sender,
-                    signatures_sender,
-                    self.db.clone(),
-                ),
-                Keychain::new(&self.cfg),
-                Spawner::new(self.task_group.make_subgroup()),
-                aleph_bft::Terminator::create_root(terminator_receiver, "Terminator"),
-            ));
+            config,
+            aleph_bft::LocalIO::new(
+                DataProvider::new(self.submission_receiver.clone()),
+                FinalizationHandler::new(unit_data_sender),
+                BackupWriter::new(self.db.clone()).await,
+                BackupReader::new(self.db.clone()),
+            ),
+            Network::new(
+                connections.clone(),
+                signed_outcomes_sender,
+                signatures_sender,
+                self.db.clone(),
+            ),
+            Keychain::new(&self.cfg),
+            Spawner::new(self.task_group.make_subgroup()),
+            aleph_bft::Terminator::create_root(terminator_receiver, "Terminator"),
+        ));
 
         let signed_session_outcome = self
             .complete_signed_session_outcome(

@@ -1,8 +1,8 @@
 use bitcoin::{TxOut, Txid};
-use picomint_encoding::{Decodable, Encodable};
 use picomint_core::PeerId;
-use picomint_redb::table;
 use picomint_core::wallet::TxInfo;
+use picomint_encoding::{Decodable, Encodable};
+use picomint_redb::table;
 use secp256k1::ecdsa::Signature;
 use serde::Serialize;
 

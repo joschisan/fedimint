@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 use std::iter::once;
 
+use crate::config::poly::{g1, scalar};
 use anyhow::{Context, bail, ensure};
 use bls12_381::{G1Projective, Scalar};
 use group::ff::Field;
 use picomint_core::bitcoin::hashes::sha256;
-use picomint_encoding::Encodable as _;
 use picomint_core::{NumPeers, PeerId};
-use crate::config::poly::{g1, scalar};
+use picomint_encoding::Encodable as _;
 use rand::rngs::OsRng;
 use tracing::trace;
 
@@ -205,9 +205,9 @@ enum DkgStepG1 {
 mod tests {
     use std::collections::{BTreeMap, VecDeque};
 
+    use crate::config::poly::{eval_poly_g1, g1};
     use group::Curve;
     use picomint_core::{NumPeersExt, PeerId};
-    use crate::config::poly::{eval_poly_g1, g1};
 
     use super::{DkgG1, DkgStepG1};
 

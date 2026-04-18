@@ -189,10 +189,7 @@ impl<S: StateMachine> Inner<S> {
 
             let tx = self.db.begin_write().await;
 
-            match state
-                .transition(&self.context, &tx.as_ref(), outcome)
-                .await
-            {
+            match state.transition(&self.context, &tx.as_ref(), outcome).await {
                 Some(new_state) => {
                     tx.insert(&table::<S>(), &id, &new_state);
                     tx.commit().await;

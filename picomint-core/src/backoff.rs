@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-pub use backon::{BackoffBuilder, FibonacciBackoff, Retryable};
 use backon::FibonacciBuilder;
+pub use backon::{BackoffBuilder, FibonacciBackoff, Retryable};
 
 /// Fibonacci backoff builder with jitter for network-facing retry loops.
 ///

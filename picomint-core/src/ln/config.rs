@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
+use crate::{Amount, PeerId};
 pub use bitcoin::Network;
 use picomint_encoding::{Decodable, Encodable};
-use crate::{Amount, PeerId};
 use serde::{Deserialize, Serialize};
 use tpe::{AggregatePublicKey, PublicKeyShare, SecretKeyShare};
 

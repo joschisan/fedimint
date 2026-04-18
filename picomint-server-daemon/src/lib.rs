@@ -62,9 +62,9 @@ macro_rules! handler {
                 .to_typed()
                 .map_err(|e| ::picomint_core::module::ApiError::bad_request(e.to_string()))?;
             let resp = rpc::$func($self, param).await?;
-            ::std::result::Result::Ok(
-                ::picomint_encoding::Encodable::consensus_encode_to_vec(&resp),
-            )
+            ::std::result::Result::Ok(::picomint_encoding::Encodable::consensus_encode_to_vec(
+                &resp,
+            ))
         }
     };
 }
@@ -221,8 +221,7 @@ pub async fn run_config_gen(
             )
             .await?;
 
-            let (p2p_status_senders, p2p_status_receivers) =
-                p2p_status_channels(connector.peers());
+            let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
 
             let connections = ReconnectP2PConnections::<P2PMessage>::new(
                 cg_params.identity,
@@ -257,8 +256,7 @@ pub async fn run_config_gen(
             )
             .await?;
 
-            let (p2p_status_senders, p2p_status_receivers) =
-                p2p_status_channels(connector.peers());
+            let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
 
             let connections = ReconnectP2PConnections::<P2PMessage>::new(
                 cfg.private.identity,

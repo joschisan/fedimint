@@ -6,12 +6,12 @@
 use std::collections::BTreeMap;
 use std::io::Write;
 
+use bitcoin::hashes::Hash as BitcoinHash;
+use bitcoin::hashes::sha256;
 use bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective, Scalar, pairing};
 use group::ff::Field;
 use group::{Curve, Group};
 use hex::encode;
-use bitcoin::hashes::Hash as BitcoinHash;
-use bitcoin::hashes::sha256;
 use picomint_encoding::{Decodable, Encodable};
 use rand::SeedableRng;
 

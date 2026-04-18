@@ -79,4 +79,3 @@ async fn test_next_or_pending() {
         Err(Elapsed { .. })
     );
 }
-

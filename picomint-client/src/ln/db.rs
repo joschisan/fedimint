@@ -1,8 +1,8 @@
 use picomint_core::core::OperationId;
-use picomint_encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::PublicKey;
-use picomint_redb::table;
 use picomint_core::util::SafeUrl;
+use picomint_encoding::{Decodable, Encodable};
+use picomint_redb::table;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct GatewayKey(pub PublicKey);

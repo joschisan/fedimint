@@ -1,8 +1,8 @@
-use picomint_encoding::{Decodable, Encodable};
-use picomint_core::secp256k1::PublicKey;
 use picomint_core::OutPoint;
-use picomint_redb::table;
 use picomint_core::mint::{Denomination, RecoveryItem};
+use picomint_core::secp256k1::PublicKey;
+use picomint_encoding::{Decodable, Encodable};
+use picomint_redb::table;
 use tbs::{BlindedMessage, BlindedSignatureShare};
 
 /// Newtype wrapper used as the key of [`NOTE_NONCE`] so we can give it a redb

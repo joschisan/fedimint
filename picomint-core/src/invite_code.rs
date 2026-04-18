@@ -11,8 +11,8 @@ use iroh_base::PublicKey;
 use serde::{Deserialize, Serialize};
 
 use crate::config::FederationId;
-use picomint_encoding::{Decodable, Encodable};
 use crate::{NumPeersExt, PeerId};
+use picomint_encoding::{Decodable, Encodable};
 
 /// Information required for client to join Federation
 ///

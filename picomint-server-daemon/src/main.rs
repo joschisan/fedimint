@@ -14,7 +14,7 @@ use clap::{ArgGroup, Parser};
 use futures::FutureExt as _;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
 use picomint_core::task::TaskGroup;
-use picomint_core::util::{SafeUrl};
+use picomint_core::util::SafeUrl;
 use picomint_logging::{LOG_CORE, TracingSetup};
 use picomint_server_daemon::config::ConfigGenSettings;
 use picomint_server_daemon::{DB_FILE, run_server};
@@ -77,7 +77,6 @@ struct ServerOpts {
     /// unused otherwise.
     #[arg(long, env = "UI_PASSWORD")]
     ui_password: Option<String>,
-
 }
 
 #[tokio::main]
@@ -96,7 +95,9 @@ async fn main() -> anyhow::Result<Infallible> {
         (Some(addr), Some(password)) => Some((addr, picomint_core::module::ApiAuth::new(password))),
         (None, _) => None,
         (Some(_), None) => {
-            panic!("UI_ADDR is set but UI_PASSWORD is not; refusing to start the web UI without a password")
+            panic!(
+                "UI_ADDR is set but UI_PASSWORD is not; refusing to start the web UI without a password"
+            )
         }
     };
 
@@ -146,9 +147,7 @@ async fn main() -> anyhow::Result<Infallible> {
     root_task_group.spawn_cancellable("main", async move {
         run_server(settings, db, task_group, bitcoin_backend, data_dir)
             .await
-            .unwrap_or_else(|err| {
-                panic!("Main task returned error: {err:#}")
-            });
+            .unwrap_or_else(|err| panic!("Main task returned error: {err:#}"));
     });
 
     let shutdown_future = root_task_group

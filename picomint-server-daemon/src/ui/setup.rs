@@ -530,8 +530,10 @@ async fn post_restore_config(
         Ok(Some(field)) => match field.bytes().await {
             Ok(b) => b,
             Err(e) => {
-                return Html(restore_form_content(Some(&format!("Read failed: {e}"))).into_string())
-                    .into_response();
+                return Html(
+                    restore_form_content(Some(&format!("Read failed: {e}"))).into_string(),
+                )
+                .into_response();
             }
         },
         Ok(None) => {
@@ -539,10 +541,8 @@ async fn post_restore_config(
                 .into_response();
         }
         Err(e) => {
-            return Html(
-                restore_form_content(Some(&format!("Upload failed: {e}"))).into_string(),
-            )
-            .into_response();
+            return Html(restore_form_content(Some(&format!("Upload failed: {e}"))).into_string())
+                .into_response();
         }
     };
 

@@ -37,23 +37,23 @@ use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
 use picomint_client::ClientHandleArc;
-use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
-use picomint_core::invite_code::InviteCode;
-use picomint_core::secp256k1::PublicKey;
-use picomint_core::secp256k1::schnorr::Signature;
-use picomint_core::time::duration_since_epoch;
-use picomint_core::{Amount, PeerId};
-use picomint_gateway_cli_core::FederationInfo;
 use picomint_client::gw::{
     EXPIRATION_DELTA_MINIMUM, FinalReceiveState, GatewayClientModule, IGatewayClient,
     LightningRpcError, PaymentAction,
 };
+use picomint_core::config::FederationId;
+use picomint_core::core::OperationId;
+use picomint_core::invite_code::InviteCode;
 use picomint_core::ln::Bolt11InvoiceDescription;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 use picomint_core::ln::gateway_api::{
     CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
+use picomint_core::secp256k1::PublicKey;
+use picomint_core::secp256k1::schnorr::Signature;
+use picomint_core::time::duration_since_epoch;
+use picomint_core::{Amount, PeerId};
+use picomint_gateway_cli_core::FederationInfo;
 use picomint_lnurl::VerifyResponse;
 use picomint_logging::LOG_GATEWAY;
 use picomint_redb::Database;
@@ -100,10 +100,7 @@ impl std::fmt::Debug for AppState {
 
 impl AppState {
     /// Retrieves a client for a given federation.
-    pub async fn select_client(
-        &self,
-        federation_id: FederationId,
-    ) -> Option<ClientHandleArc> {
+    pub async fn select_client(&self, federation_id: FederationId) -> Option<ClientHandleArc> {
         self.clients.read().await.get(&federation_id).cloned()
     }
 
@@ -434,9 +431,7 @@ impl AppState {
             .await
             .as_ref()
             .get(&REGISTERED_INCOMING_CONTRACT, &payment_image)
-            .context(
-                "Incoming payment error: No corresponding decryption contract available",
-            )?;
+            .context("Incoming payment error: No corresponding decryption contract available")?;
 
         if registered_incoming_contract.incoming_amount_msats != amount_msats {
             return Err(anyhow::anyhow!(

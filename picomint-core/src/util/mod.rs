@@ -82,9 +82,14 @@ impl picomint_encoding::Encodable for SafeUrl {
 
 impl picomint_encoding::Decodable for SafeUrl {
     fn consensus_decode<R: std::io::Read>(r: &mut R) -> std::io::Result<Self> {
-        String::consensus_decode(r)?.parse().map_err(|e: url::ParseError| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("invalid SafeUrl: {e}"))
-        })
+        String::consensus_decode(r)?
+            .parse()
+            .map_err(|e: url::ParseError| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("invalid SafeUrl: {e}"),
+                )
+            })
     }
 }
 

@@ -18,19 +18,19 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use iroh::endpoint::{RecvStream, SendStream};
-use picomint_core::transaction::ConsensusItem;
-use picomint_core::wire;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
-use picomint_encoding::{Decodable, Encodable};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::module::{ApiAuth, ApiError, ApiMethod, IrohApiRequest};
 use picomint_core::task::TaskGroup;
-use tokio::time::sleep;
+use picomint_core::transaction::ConsensusItem;
+use picomint_core::wire;
+use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::{LOG_CONSENSUS, LOG_CORE, LOG_NET_API};
 use picomint_redb::Database;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
+use tokio::time::sleep;
 use tracing::{info, warn};
 
 use crate::config::ServerConfig;

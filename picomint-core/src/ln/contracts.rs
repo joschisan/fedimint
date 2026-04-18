@@ -1,6 +1,6 @@
+use crate::Amount;
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1;
-use crate::Amount;
 use picomint_encoding::{Decodable, Encodable};
 use secp256k1::schnorr::Signature;
 use secp256k1::{Message, PublicKey, SecretKey};

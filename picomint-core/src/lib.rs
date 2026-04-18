@@ -38,13 +38,13 @@
 
 extern crate self as picomint_core;
 
-use std::fmt::Debug;
 pub use amount::*;
 /// Mostly re-exported for [`Decodable`] macros.
 pub use anyhow;
 pub use bitcoin::hashes::Hash as BitcoinHash;
 pub use peer_id::*;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 pub use {bitcoin, hex, secp256k1};
 
 use picomint_encoding::{Decodable, Encodable};

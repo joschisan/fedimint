@@ -11,10 +11,10 @@ use bitcoincore_rpc::RpcApi;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use picomint_bip39::Mnemonic;
+use picomint_client::wallet::WalletClientModule;
 use picomint_client::{Client, ClientHandleArc, RootSecret};
 use picomint_core::Amount;
 use picomint_core::invite_code::InviteCode;
-use picomint_client::wallet::WalletClientModule;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;
@@ -257,8 +257,7 @@ async fn build_client(
     let connectors = endpoint;
 
     let mnemonic = Mnemonic::generate(12)?;
-    let root_secret =
-        RootSecret::StandardDoubleDerive(picomint_bip39::to_root_secret(&mnemonic));
+    let root_secret = RootSecret::StandardDoubleDerive(picomint_bip39::to_root_secret(&mnemonic));
 
     let client = builder
         .preview(connectors, &invite_code)

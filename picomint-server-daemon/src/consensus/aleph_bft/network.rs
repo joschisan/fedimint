@@ -1,10 +1,10 @@
 use async_channel::Sender;
 use bitcoin::hashes::{Hash, sha256};
 use parity_scale_codec::{Decode, Encode, IoReader};
-use picomint_core::session_outcome::SignedSessionOutcome;
 use picomint_core::PeerId;
-use picomint_encoding::Encodable;
 use picomint_core::secp256k1::schnorr;
+use picomint_core::session_outcome::SignedSessionOutcome;
+use picomint_encoding::Encodable;
 use picomint_logging::LOG_CONSENSUS;
 use picomint_redb::Database;
 use tracing::error;

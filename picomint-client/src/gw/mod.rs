@@ -9,6 +9,10 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use crate::api::FederationApi;
+use crate::executor::ModuleExecutor;
+use crate::module::ClientContext;
+use crate::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
@@ -18,22 +22,18 @@ use events::{
     SendCancelEvent, SendEvent, SendSuccessEvent,
 };
 use lightning_invoice::Bolt11Invoice;
-use crate::api::FederationApi;
-use crate::executor::ModuleExecutor;
-use crate::module::ClientContext;
-use crate::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_encoding::{Decodable, Encodable};
 use picomint_core::hex::ToHex;
-use picomint_core::secp256k1::Keypair;
-use picomint_core::task::TaskGroup;
-use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
-use picomint_derive_secret::DerivableSecret;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 use picomint_core::ln::gateway_api::SendPaymentPayload;
 use picomint_core::ln::{LightningInvoice, LightningOutput};
+use picomint_core::secp256k1::Keypair;
+use picomint_core::task::TaskGroup;
+use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
+use picomint_derive_secret::DerivableSecret;
+use picomint_encoding::{Decodable, Encodable};
 use receive_sm::ReceiveStateMachine;
 use secp256k1::schnorr::Signature;
 use send_sm::SendStateMachine;
@@ -84,11 +84,8 @@ impl GatewayClientInit {
             sm_context.clone(),
             task_group.clone(),
         );
-        let complete_executor = ModuleExecutor::new(
-            context.module_db().clone(),
-            sm_context,
-            task_group.clone(),
-        );
+        let complete_executor =
+            ModuleExecutor::new(context.module_db().clone(), sm_context, task_group.clone());
 
         Ok(GatewayClientModule {
             federation_id,
@@ -127,7 +124,6 @@ pub struct GwSmContext {
     pub tpe_pks: BTreeMap<PeerId, PublicKeyShare>,
     pub gateway: Arc<dyn IGatewayClient>,
 }
-
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Decodable, Encodable)]
 pub enum FinalReceiveState {

@@ -1,12 +1,12 @@
-use bitcoin_hashes::{hash160, sha256, Hash};
-use picomint_encoding::{Decodable, Encodable};
+use bitcoin_hashes::{Hash, hash160, sha256};
+use picomint_core::mint::{Denomination, MintOutput, nonce_message};
 use picomint_core::secp256k1::rand::Rng;
 use picomint_core::secp256k1::{Keypair, PublicKey, SECP256K1};
 use picomint_derive_secret::{ChildId, DerivableSecret};
-use picomint_core::mint::{nonce_message, Denomination, MintOutput};
-use tbs::{blind_message, unblind_signature, BlindedMessage, BlindedSignature, BlindingKey};
+use picomint_encoding::{Decodable, Encodable};
+use tbs::{BlindedMessage, BlindedSignature, BlindingKey, blind_message, unblind_signature};
 
-use super::{thread_rng, SpendableNote};
+use super::{SpendableNote, thread_rng};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct NoteIssuanceRequest {

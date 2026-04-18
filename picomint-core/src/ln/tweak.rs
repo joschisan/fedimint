@@ -1,6 +1,6 @@
+use crate::secp256k1::ecdh;
 use bitcoin::key::Keypair;
 use bitcoin::secp256k1::{self, PublicKey};
-use crate::secp256k1::ecdh;
 use rand;
 
 pub fn generate(static_pk: PublicKey) -> ([u8; 32], PublicKey) {

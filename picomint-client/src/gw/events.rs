@@ -1,8 +1,8 @@
 use picomint_core::core::ModuleKind;
+use picomint_core::ln::LightningInvoice;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_eventlog::{Event, EventKind};
-use picomint_core::ln::LightningInvoice;
 use serde::{Deserialize, Serialize};
 
 const KIND: ModuleKind = picomint_core::ln::KIND;

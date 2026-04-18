@@ -1,9 +1,9 @@
 use bitcoin::key::Keypair;
 use bitcoin::secp256k1;
 use itertools::multiunzip;
+use picomint_core::Amount;
 use picomint_core::transaction::Transaction;
 use picomint_core::wire;
-use picomint_core::Amount;
 use picomint_logging::LOG_CLIENT;
 use secp256k1::Secp256k1;
 use tracing::warn;

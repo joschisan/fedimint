@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
-use picomint_core::transaction::Transaction;
-use picomint_core::wire;
 use picomint_core::module::InputMeta;
 use picomint_core::module::audit::Audit;
+use picomint_core::transaction::Transaction;
+use picomint_core::wire;
 use picomint_core::{InPoint, OutPoint, PeerId};
 use picomint_redb::{WriteTransaction, WriteTxRef};
 

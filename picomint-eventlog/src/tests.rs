@@ -23,11 +23,8 @@ async fn sanity_subscribe_operation_events() {
             let db = db.clone();
             let event_notify = event_notify.clone();
             async move {
-                let mut stream = Box::pin(subscribe_operation_events(
-                    db,
-                    event_notify,
-                    operation_id,
-                ));
+                let mut stream =
+                    Box::pin(subscribe_operation_events(db, event_notify, operation_id));
                 while let Some(entry) = stream.next().await {
                     info!("{entry:?}");
                     assert_eq!(

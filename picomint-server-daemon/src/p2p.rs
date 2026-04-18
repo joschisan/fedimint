@@ -14,16 +14,16 @@ use futures::future::select_all;
 use iroh::endpoint::presets::N0;
 use iroh::endpoint::{Connection, RecvStream};
 use iroh::{Endpoint, PublicKey, SecretKey, Watcher as _};
-use picomint_core::session_outcome::SignedSessionOutcome;
-use picomint_encoding::{Decodable, Encodable};
-use picomint_core::module::PICOMINT_ALPN;
-use picomint_core::task::TaskGroup;
-use tokio::time::sleep;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
+use picomint_core::module::PICOMINT_ALPN;
+use picomint_core::session_outcome::SignedSessionOutcome;
+use picomint_core::task::TaskGroup;
 use picomint_core::{PeerId, secp256k1};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::{LOG_CONSENSUS, LOG_NET_PEER};
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
+use tokio::time::sleep;
 use tracing::{Instrument, debug, info, info_span, warn};
 
 /// P2P connection status for a peer. `None` in a status channel means the peer

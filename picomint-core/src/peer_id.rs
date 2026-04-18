@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use picomint_redb::consensus_key;
 use picomint_encoding::{Decodable, Encodable};
+use picomint_redb::consensus_key;
 
 #[derive(
     Debug,

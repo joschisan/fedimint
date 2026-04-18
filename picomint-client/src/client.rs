@@ -3,32 +3,32 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Formatter};
 use std::sync::Arc;
 
+use crate::Endpoint;
+use crate::api::{ApiScope, FederationApi};
+use crate::executor::ModuleExecutor;
+use crate::gw::GatewayClientModule;
+use crate::ln::LightningClientModule;
+use crate::mint::MintClientModule;
+use crate::transaction::{TransactionBuilder, TxSubmissionStateMachine};
+use crate::wallet::WalletClientModule;
+use crate::{ClientModuleInstance, TxAcceptEvent, TxRejectEvent};
 use anyhow::bail;
 use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1;
 use futures::{Stream, StreamExt as _};
-use crate::api::{ApiScope, FederationApi};
 use picomint_core::config::ConsensusConfig;
-use picomint_core::transaction::Transaction;
-use crate::Endpoint;
-use picomint_core::wire;
-use crate::executor::ModuleExecutor;
-use crate::transaction::{TransactionBuilder, TxSubmissionStateMachine};
-use crate::{ClientModuleInstance, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleKind, OperationId};
-use picomint_encoding::Encodable as _;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
+use picomint_core::transaction::Transaction;
 use picomint_core::util::BoxStream;
+use picomint_core::wire;
 use picomint_core::{Amount, PeerId, TransactionId};
+use picomint_encoding::Encodable as _;
 use picomint_eventlog::{EventLogId, PersistedLogEntry};
-use crate::gw::GatewayClientModule;
-use crate::ln::LightningClientModule;
 use picomint_logging::LOG_CLIENT_NET_API;
-use crate::mint::MintClientModule;
 use picomint_redb::{Database, WriteTxRef};
-use crate::wallet::WalletClientModule;
 use tracing::{debug, warn};
 
 use crate::ClientBuilder;
@@ -191,10 +191,7 @@ impl Client {
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         mut partial_transaction: TransactionBuilder,
-    ) -> anyhow::Result<(
-        TransactionBuilder,
-        Option<crate::module::SpawnSms>,
-    )> {
+    ) -> anyhow::Result<(TransactionBuilder, Option<crate::module::SpawnSms>)> {
         let (in_amount, out_amount) = self.transaction_builder_get_balance(&partial_transaction);
 
         let mut spawn_sms: Option<crate::module::SpawnSms> = None;
@@ -221,12 +218,10 @@ impl Client {
                 .map(crate::transaction::ClientOutput::into_wire)
                 .collect();
 
-            partial_transaction = partial_transaction.with_inputs(
-                crate::transaction::ClientInputBundle::new(wire_inputs),
-            );
-            partial_transaction = partial_transaction.with_outputs(
-                crate::transaction::ClientOutputBundle::new(wire_outputs),
-            );
+            partial_transaction = partial_transaction
+                .with_inputs(crate::transaction::ClientInputBundle::new(wire_inputs));
+            partial_transaction = partial_transaction
+                .with_outputs(crate::transaction::ClientOutputBundle::new(wire_outputs));
             spawn_sms = Some(contribution.spawn_sms);
         }
 
@@ -433,11 +428,7 @@ impl Client {
         let dbtx = self.db().begin_write().await;
         Ok(self
             .mint
-            .get_balance(
-                &dbtx
-                    .as_ref()
-                    .isolate("mint".to_string()),
-            )
+            .get_balance(&dbtx.as_ref().isolate("mint".to_string()))
             .await)
     }
 

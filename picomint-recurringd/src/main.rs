@@ -11,11 +11,6 @@ use bitcoin::secp256k1::{self, PublicKey};
 use clap::Parser;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
-use picomint_encoding::Encodable;
-use picomint_core::secp256k1::Scalar;
-use picomint_core::time::duration_since_epoch;
-use picomint_core::util::SafeUrl;
-use picomint_core::{Amount, BitcoinHash};
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 use picomint_core::ln::gateway_api::{
     GatewayConnection, PaymentFee, RealGatewayConnection, RoutingInfo,
@@ -24,6 +19,11 @@ use picomint_core::ln::lnurl::LnurlRequest;
 use picomint_core::ln::{
     Bolt11InvoiceDescription, GatewayApi, MINIMUM_INCOMING_CONTRACT_AMOUNT, tweak,
 };
+use picomint_core::secp256k1::Scalar;
+use picomint_core::time::duration_since_epoch;
+use picomint_core::util::SafeUrl;
+use picomint_core::{Amount, BitcoinHash};
+use picomint_encoding::Encodable;
 use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
 use picomint_logging::TracingSetup;
 use serde::{Deserialize, Serialize};

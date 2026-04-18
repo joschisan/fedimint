@@ -17,9 +17,9 @@
 use std::fs::File;
 use std::{env, io};
 
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 
 pub const LOG_CONSENSUS: &str = "fm::consensus";
 pub const LOG_CORE: &str = "fm::core";

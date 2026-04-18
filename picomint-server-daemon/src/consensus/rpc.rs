@@ -1,8 +1,8 @@
 //! Freestanding API handlers for [`crate::consensus::api::ConsensusApi`].
 
 use picomint_core::config::ConsensusConfig;
-use picomint_core::transaction::{Transaction, TransactionError};
 use picomint_core::module::ApiError;
+use picomint_core::transaction::{Transaction, TransactionError};
 
 use crate::consensus::api::ConsensusApi;
 
