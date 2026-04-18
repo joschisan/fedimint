@@ -1,14 +1,14 @@
 //! Freestanding API handlers for [`super::Mint`].
 //!
 //! Each function matches one endpoint constant in
-//! `picomint_mint_common::endpoint_constants` and is dispatched from
+//! `picomint_core::mint::endpoint_constants` and is dispatched from
 //! `Mint::handle_api` via the `handler!` macro.
 
 use bitcoin::hashes::sha256;
 use picomint_core::{OutPoint, TransactionId};
 use picomint_encoding::Encodable as _;
 use picomint_core::module::ApiError;
-use picomint_mint_common::RecoveryItem;
+use picomint_core::mint::RecoveryItem;
 use picomint_redb::ReadTransaction;
 use tbs::{BlindedMessage, BlindedSignatureShare};
 

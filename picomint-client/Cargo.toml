@@ -22,27 +22,33 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+aquamarine = { workspace = true }
+async-channel = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
 bitcoin = { workspace = true, features = ["rand-std"] }
-picomint-api-client = { workspace = true }
-picomint-client-module = { workspace = true }
+bitcoin_hashes = { workspace = true }
+lightning-invoice = { workspace = true }
+picomint-base32 = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-derive-secret = { workspace = true }
 picomint-eventlog = { workspace = true }
-picomint-gw-client = { workspace = true }
-picomint-ln-client = { workspace = true }
-picomint-ln-common = { workspace = true }
+picomint-lnurl = { workspace = true }
 picomint-logging = { workspace = true }
-picomint-mint-client = { workspace = true }
 picomint-redb = { workspace = true }
-picomint-wallet-client = { workspace = true }
 futures = { workspace = true }
+iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false }
+itertools = { workspace = true }
+rand = { workspace = true }
+secp256k1 = { workspace = true }
 serde = { workspace = true }
-tokio = { workspace = true }
+tbs = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time", "macros", "rt"] }
 tokio-stream = { workspace = true }
+tpe = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

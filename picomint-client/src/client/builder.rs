@@ -4,16 +4,15 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use bitcoin::key::Secp256k1;
-use picomint_api_client::api::{ApiScope, FederationApi};
-use picomint_api_client::config::ConsensusConfig;
-use picomint_api_client::{Endpoint, download_from_invite_code};
-use picomint_client_module::ModuleRecoveryStarted;
-use picomint_client_module::executor::ModuleExecutor;
-use picomint_client_module::module::init::ClientModuleInit;
-use picomint_client_module::module::recovery::RecoveryProgress;
-use picomint_client_module::module::{ClientModule, FinalClientIface};
-use picomint_client_module::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
-use picomint_client_module::transaction::TxSubmissionSmContext;
+use crate::api::{ApiScope, FederationApi};
+use picomint_core::config::ConsensusConfig;
+use crate::{Endpoint, download_from_invite_code};
+use crate::executor::ModuleExecutor;
+use crate::module::init::ClientModuleInit;
+use crate::module::recovery::RecoveryProgress;
+use crate::module::{ClientModule, FinalClientIface};
+use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
+use crate::transaction::TxSubmissionSmContext;
 use picomint_core::config::FederationId;
 use picomint_core::core::ModuleKind;
 use picomint_core::invite_code::InviteCode;
@@ -21,12 +20,12 @@ use picomint_core::module::CommonModuleInit;
 use picomint_core::task::TaskGroup;
 use picomint_core::{NumPeers, PeerId};
 use picomint_derive_secret::DerivableSecret;
-use picomint_gw_client::{GatewayClientInit, IGatewayClient};
-use picomint_ln_client::LightningClientInit;
+use crate::gw::{GatewayClientInit, IGatewayClient};
+use crate::ln::LightningClientInit;
 use picomint_logging::LOG_CLIENT;
-use picomint_mint_client::MintClientInit;
+use crate::mint::MintClientInit;
 use picomint_redb::Database;
-use picomint_wallet_client::WalletClientInit;
+use crate::wallet::WalletClientInit;
 use tokio::sync::watch;
 use tracing::{debug, trace, warn};
 
@@ -502,7 +501,7 @@ async fn init_or_recover<I: ClientModuleInit>(
     }
 
     let module_db = db.isolate(format!("module-{kind}"));
-    let args = picomint_client_module::module::init::ClientModuleInitArgs {
+    let args = crate::module::init::ClientModuleInitArgs {
         federation_id: fed_id,
         peer_num: num_peers.total(),
         cfg: typed_cfg.clone(),
@@ -510,7 +509,7 @@ async fn init_or_recover<I: ClientModuleInit>(
         module_root_secret: root_secret.derive_module_secret(kind),
         api: api.clone(),
         module_api: api.with_scope(api_scope),
-        context: picomint_client_module::module::ClientContext::new(
+        context: crate::module::ClientContext::new(
             final_client,
             kind,
             api.clone(),
@@ -569,7 +568,6 @@ where
             let progress = RecoveryProgress::none();
             let dbtx = db.begin_write().await;
             let tx = dbtx.as_ref();
-            picomint_eventlog::log_event(&tx, None, ModuleRecoveryStarted::new(kind));
             tx.insert(
                 &CLIENT_MODULE_RECOVERY,
                 &ClientModuleRecovery { kind },
@@ -592,7 +590,7 @@ where
     let full_config_clone = full_config.clone();
 
     let recover_fut = Box::pin(async move {
-        let args = picomint_client_module::module::init::ClientModuleRecoverArgs {
+        let args = crate::module::init::ClientModuleRecoverArgs {
             federation_id: fed_id,
             num_peers,
             cfg: cfg.clone(),
@@ -600,7 +598,7 @@ where
             module_root_secret: root_secret_clone.derive_module_secret(kind),
             api: api_clone.clone(),
             module_api,
-            context: picomint_client_module::module::ClientContext::new(
+            context: crate::module::ClientContext::new(
                 final_client_clone,
                 kind,
                 api_clone,

@@ -7,11 +7,11 @@ use picomint_client::ClientHandleArc;
 use picomint_core::Amount;
 use picomint_core::util::SafeUrl;
 use picomint_eventlog::{EventLogEntry, EventLogId};
-use picomint_ln_client::LightningClientModule;
-use picomint_ln_client::events::{
+use picomint_client::ln::LightningClientModule;
+use picomint_client::ln::events::{
     ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent,
 };
-use picomint_ln_common::Bolt11InvoiceDescription;
+use picomint_core::ln::Bolt11InvoiceDescription;
 use tracing::info;
 
 use crate::cli;

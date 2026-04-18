@@ -14,7 +14,7 @@ use futures::future::select_all;
 use iroh::endpoint::presets::N0;
 use iroh::endpoint::{Connection, RecvStream};
 use iroh::{Endpoint, PublicKey, SecretKey, Watcher as _};
-use picomint_api_client::session_outcome::SignedSessionOutcome;
+use picomint_core::session_outcome::SignedSessionOutcome;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::PICOMINT_ALPN;
 use picomint_core::task::TaskGroup;

@@ -5,11 +5,9 @@ members = [
     "crypto/picomint-hkdf",
     "crypto/picomint-tbs",
     "crypto/picomint-tpe",
-    "picomint-api-client",
     "picomint-base32",
     "picomint-bip39",
     "picomint-client",
-    "picomint-client-module",
     "picomint-core",
     "picomint-derive",
     "picomint-encoding",
@@ -26,13 +24,6 @@ members = [
     "picomint-server-cli",
     "picomint-server-cli-core",
     "picomint-server-daemon",
-    "modules/picomint-gw-client",
-    "modules/picomint-ln-client",
-    "modules/picomint-ln-common",
-    "modules/picomint-mint-client",
-    "modules/picomint-mint-common",
-    "modules/picomint-wallet-client",
-    "modules/picomint-wallet-common",
 ]
 resolver = "2"
 
@@ -100,11 +91,9 @@ esplora-client = { version = "0.12.3", default-features = false, features = [
     "tokio",
 ] }
 
-picomint-api-client = { path = "./picomint-api-client", version = "=0.1.0" }
 picomint-base32 = { path = "./picomint-base32", version = "=0.1.0" }
 picomint-bip39 = { path = "./picomint-bip39", version = "=0.1.0" }
 picomint-client = { path = "./picomint-client", version = "=0.1.0" }
-picomint-client-module = { path = "./picomint-client-module", version = "=0.1.0" }
 picomint-core = { path = "./picomint-core", version = "=0.1.0" }
 picomint-derive = { path = "./picomint-derive", version = "=0.1.0" }
 picomint-derive-secret = { path = "./crypto/picomint-derive-secret", version = "=0.1.0" }
@@ -112,20 +101,13 @@ picomint-encoding = { path = "./picomint-encoding", version = "=0.1.0" }
 picomint-eventlog = { path = "./picomint-eventlog", version = "=0.1.0" }
 picomint-gateway-cli-core = { path = "./picomint-gateway-cli-core", version = "=0.1.0" }
 picomint-gateway-daemon = { path = "./picomint-gateway-daemon", version = "=0.1.0" }
-picomint-gw-client = { path = "./modules/picomint-gw-client", version = "=0.1.0" }
 picomint-lnurl = { path = "./picomint-lnurl", version = "=0.1.0" }
-picomint-ln-client = { path = "./modules/picomint-ln-client", version = "=0.1.0" }
-picomint-ln-common = { path = "./modules/picomint-ln-common", version = "=0.1.0" }
 picomint-logging = { path = "./picomint-logging", version = "=0.1.0" }
-picomint-mint-client = { path = "./modules/picomint-mint-client", version = "=0.1.0" }
-picomint-mint-common = { path = "./modules/picomint-mint-common", version = "=0.1.0" }
 picomint-redb = { path = "./picomint-redb", version = "=0.1.0" }
 picomint-bitcoin-rpc = { path = "./picomint-bitcoin-rpc", version = "=0.1.0" }
 picomint-server-cli = { path = "./picomint-server-cli", version = "=0.1.0" }
 picomint-server-cli-core = { path = "./picomint-server-cli-core", version = "=0.1.0" }
 picomint-server-daemon = { path = "./picomint-server-daemon", version = "=0.1.0" }
-picomint-wallet-client = { path = "./modules/picomint-wallet-client", version = "=0.1.0" }
-picomint-wallet-common = { path = "./modules/picomint-wallet-common", version = "=0.1.0" }
 fs2 = "0.4.3"
 futures = "0.3.32"
 futures-util = "0.3.30"
@@ -147,7 +129,7 @@ jsonrpsee-core = "0.24.9"
 jsonrpsee-types = "0.24.8"
 ldk-node = { version = "0.6.1", package = "fedimint-ldk-node" }
 lightning = "0.1.3"
-lightning-invoice = { version = "0.33.2", features = ["std"] }
+lightning-invoice = { version = "0.33.2", features = ["serde", "std"] }
 lightning-types = "0.2.0"
 lockable = "0.1.1"
 macro_rules_attribute = "0.2.2"

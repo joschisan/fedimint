@@ -62,16 +62,28 @@ pub mod endpoint_constants;
 pub mod envs;
 /// Federation invite code
 pub mod invite_code;
+/// Lightning module wire types / helpers (shared between client and server).
+pub mod ln;
+/// Mint module wire types / helpers (shared between client and server).
+pub mod mint;
 /// Extendable module sysystem
 pub mod module;
 /// `PeerId` type
 mod peer_id;
+/// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
+pub mod session_outcome;
 /// Task handling, including wasm safe logic
 pub mod task;
 /// Time handling, wasm safe functionality
 pub mod time;
+/// Wire-level Transaction and ConsensusItem types.
+pub mod transaction;
 /// General purpose utilities
 pub mod util;
+/// Wallet module wire types / helpers (shared between client and server).
+pub mod wallet;
+/// Static wire enums over the fixed module set.
+pub mod wire;
 
 /// Atomic BFT unit containing consensus items
 

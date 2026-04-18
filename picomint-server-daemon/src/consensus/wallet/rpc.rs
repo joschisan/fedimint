@@ -3,7 +3,7 @@
 use bitcoin::{Amount, Txid};
 use picomint_core::OutPoint;
 use picomint_core::module::ApiError;
-use picomint_wallet_common::{FederationWallet, OutputInfo, TxInfo};
+use picomint_core::wallet::{FederationWallet, OutputInfo, TxInfo};
 
 use super::Wallet;
 use super::db::FEDERATION_WALLET;

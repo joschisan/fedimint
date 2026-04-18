@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use picomint_api_client::transaction::Transaction;
-use picomint_api_client::wire;
+use picomint_core::transaction::Transaction;
+use picomint_core::wire;
 use picomint_core::module::InputMeta;
 use picomint_core::module::audit::Audit;
 use picomint_core::{InPoint, OutPoint, PeerId};
@@ -122,8 +122,8 @@ pub async fn process_transaction_with_server(
     server: &Server,
     tx: &WriteTransaction,
     transaction: &Transaction,
-) -> Result<(), picomint_api_client::transaction::TransactionError> {
-    use picomint_api_client::transaction::TransactionError;
+) -> Result<(), picomint_core::transaction::TransactionError> {
+    use picomint_core::transaction::TransactionError;
 
     use crate::consensus::transaction::FundingVerifier;
 

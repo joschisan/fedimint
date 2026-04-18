@@ -15,14 +15,14 @@ use picomint_encoding::Encodable;
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::{Amount, InPoint, OutPoint, PeerId};
-use picomint_mint_common::config::{
+use picomint_core::mint::config::{
     consensus_denominations, MintConfig, MintConfigConsensus, MintConfigPrivate,
 };
-use picomint_mint_common::endpoint_constants::{
+use picomint_core::mint::endpoint_constants::{
     RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
     SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
 };
-use picomint_mint_common::{
+use picomint_core::mint::{
     verify_note, Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput,
     MintOutputError, RecoveryItem,
 };

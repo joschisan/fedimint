@@ -1,4 +1,4 @@
-use picomint_api_client::transaction::{TRANSACTION_OVERFLOW_ERROR, TransactionError};
+use picomint_core::transaction::{TRANSACTION_OVERFLOW_ERROR, TransactionError};
 use picomint_core::Amount;
 use picomint_core::module::TransactionItemAmounts;
 

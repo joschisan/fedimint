@@ -1,5 +1,5 @@
-use picomint_api_client::config::ConsensusConfig;
-use picomint_client_module::module::recovery::RecoveryProgress;
+use picomint_core::config::ConsensusConfig;
+use crate::module::recovery::RecoveryProgress;
 use picomint_core::core::ModuleKind;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::table;

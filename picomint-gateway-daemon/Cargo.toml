@@ -18,21 +18,15 @@ async-trait = { workspace = true }
 axum = { workspace = true, features = ["json"] }
 bitcoin = { workspace = true }
 clap = { workspace = true }
-picomint-api-client = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-bip39 = { workspace = true }
 picomint-client = { workspace = true }
-picomint-client-module = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-gateway-cli-core = { workspace = true }
-picomint-gw-client = { workspace = true }
 picomint-lnurl = { workspace = true }
-picomint-ln-common = { workspace = true }
 picomint-logging = { workspace = true }
-picomint-mint-client = { workspace = true }
 picomint-redb = { workspace = true }
-picomint-wallet-client = { workspace = true }
 hex = { workspace = true }
 iroh = { workspace = true, default-features = false }
 ldk-node = { workspace = true }

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use picomint_api_client::transaction::ConsensusItem;
+use picomint_core::transaction::ConsensusItem;
 
 /// A newtype for a nice [`fmt::Debug`] of a [`ConsensusItem`]
 pub struct DebugConsensusItem<'ci>(pub &'ci ConsensusItem);

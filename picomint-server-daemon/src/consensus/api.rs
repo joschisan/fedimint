@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use picomint_api_client::config::ConsensusConfig;
-use picomint_api_client::transaction::{ConsensusItem, Transaction, TransactionError};
+use picomint_core::config::ConsensusConfig;
+use picomint_core::transaction::{ConsensusItem, Transaction, TransactionError};
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::endpoint_constants::{
     CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,

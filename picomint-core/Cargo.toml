@@ -23,8 +23,11 @@ async-trait = { workspace = true }
 backon = { workspace = true }
 bech32 = { workspace = true }
 bitcoin = { workspace = true }
+bitcoin_hashes = { workspace = true }
 bitcoin-units = { workspace = true }
 bls12_381 = { workspace = true }
+lightning-invoice = { workspace = true }
+miniscript = { workspace = true, features = ["serde"] }
 picomint-base32 = { workspace = true }
 picomint-derive = { workspace = true }
 picomint-encoding = { workspace = true }
@@ -41,13 +44,16 @@ lightning-types = { workspace = true }
 n0-future = { workspace = true }
 rand = { workspace = true }
 redb = { workspace = true }
+reqwest = { workspace = true }
 secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serdect = { workspace = true }
 subtle = { workspace = true }
+tbs = { workspace = true }
 thiserror = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
+tpe = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }
 

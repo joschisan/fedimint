@@ -16,12 +16,12 @@ use picomint_core::secp256k1::Scalar;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, BitcoinHash};
-use picomint_ln_common::contracts::{IncomingContract, PaymentImage};
-use picomint_ln_common::gateway_api::{
+use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
+use picomint_core::ln::gateway_api::{
     GatewayConnection, PaymentFee, RealGatewayConnection, RoutingInfo,
 };
-use picomint_ln_common::lnurl::LnurlRequest;
-use picomint_ln_common::{
+use picomint_core::ln::lnurl::LnurlRequest;
+use picomint_core::ln::{
     Bolt11InvoiceDescription, GatewayApi, MINIMUM_INCOMING_CONTRACT_AMOUNT, tweak,
 };
 use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};

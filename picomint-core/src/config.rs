@@ -9,7 +9,13 @@ use hex::FromHex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::PeerId;
+use crate::ln::config::LightningConfigConsensus;
+use crate::mint::config::MintConfigConsensus;
+use crate::module::CoreConsensusVersion;
+use crate::wallet::config::WalletConfigConsensus;
 use picomint_encoding::{Decodable, Encodable};
+use secp256k1::PublicKey;
 
 // TODO: make configurable
 /// This limits the RAM consumption of a AlephBFT Unit to roughly 50kB
@@ -143,4 +149,41 @@ pub const META_FEDERATION_NAME_KEY: &str = "federation_name";
 pub fn load_from_file<T: DeserializeOwned>(path: &Path) -> Result<T, anyhow::Error> {
     let file = std::fs::File::open(path)?;
     Ok(serde_json::from_reader(file)?)
+}
+
+/// Federation-wide config. Produced by DKG on the server side, served to
+/// clients via the [`CLIENT_CONFIG_ENDPOINT`], and stored in both the server
+/// and client databases. Byte-for-byte identical on every peer.
+///
+/// [`CLIENT_CONFIG_ENDPOINT`]: crate::endpoint_constants::CLIENT_CONFIG_ENDPOINT
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
+pub struct ConsensusConfig {
+    /// Agreed on core consensus version
+    pub version: CoreConsensusVersion,
+    /// Public keys for the atomic broadcast to authenticate messages
+    pub broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
+    /// Number of rounds per session
+    pub broadcast_rounds_per_session: u16,
+    /// Public keys + names for every peer's single iroh endpoint (p2p + api).
+    pub iroh_endpoints: BTreeMap<PeerId, PeerEndpoint>,
+    /// Free-form federation metadata (federation name, etc.)
+    pub meta: BTreeMap<String, String>,
+    /// Mint module config
+    pub mint: MintConfigConsensus,
+    /// Lightning module config
+    pub ln: LightningConfigConsensus,
+    /// Wallet module config
+    pub wallet: WalletConfigConsensus,
+}
+
+picomint_redb::consensus_value!(ConsensusConfig);
+
+impl ConsensusConfig {
+    pub fn calculate_federation_id(&self) -> FederationId {
+        FederationId(self.iroh_endpoints.consensus_hash())
+    }
+
+    pub fn federation_name(&self) -> Option<String> {
+        self.meta.get(META_FEDERATION_NAME_KEY).cloned()
+    }
 }

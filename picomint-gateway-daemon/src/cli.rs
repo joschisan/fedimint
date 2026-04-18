@@ -31,9 +31,9 @@ use picomint_gateway_cli_core::{
     ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_RECEIVE,
     WalletReceiveRequest, WalletReceiveResponse,
 };
-use picomint_gw_client::Preimage;
+use picomint_client::gw::Preimage;
 use picomint_logging::LOG_GATEWAY;
-use picomint_mint_client::MintClientModule;
+use picomint_client::mint::MintClientModule;
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
 use tower_http::cors::CorsLayer;
@@ -78,8 +78,8 @@ impl IntoResponse for CliError {
     }
 }
 
-impl From<picomint_gw_client::LightningRpcError> for CliError {
-    fn from(e: picomint_gw_client::LightningRpcError) -> Self {
+impl From<picomint_client::gw::LightningRpcError> for CliError {
+    fn from(e: picomint_client::gw::LightningRpcError) -> Self {
         Self::internal(e)
     }
 }
@@ -599,7 +599,7 @@ async fn module_mint_receive(
     State(state): State<AppState>,
     Json(payload): Json<MintReceiveRequest>,
 ) -> Result<Json<MintReceiveResponse>, CliError> {
-    let ecash: picomint_mint_client::ECash =
+    let ecash: picomint_client::mint::ECash =
         picomint_base32::decode(&payload.notes)
             .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
 
@@ -639,7 +639,7 @@ async fn module_wallet_receive(
 
     let wallet_module = client
         
-        .get_first_module::<picomint_wallet_client::WalletClientModule>()
+        .get_first_module::<picomint_client::wallet::WalletClientModule>()
         .map_err(|_| CliError::internal("No wallet module found"))?;
 
     let address = wallet_module.receive().await;

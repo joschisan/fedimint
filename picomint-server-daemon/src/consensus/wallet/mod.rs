@@ -40,17 +40,17 @@ use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_logging::LOG_MODULE_WALLET;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
-use picomint_wallet_common as common;
+use picomint_core::wallet as common;
 
 use crate::config::dkg::DkgHandle;
 use crate::handler;
-use picomint_wallet_common::config::{WalletConfig, WalletConfigPrivate};
-use picomint_wallet_common::endpoint_constants::{
+use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
+use picomint_core::wallet::endpoint_constants::{
     CONSENSUS_BLOCK_COUNT_ENDPOINT, CONSENSUS_FEERATE_ENDPOINT, FEDERATION_WALLET_ENDPOINT,
     OUTPUT_INFO_SLICE_ENDPOINT, PENDING_TRANSACTION_CHAIN_ENDPOINT, RECEIVE_FEE_ENDPOINT,
     SEND_FEE_ENDPOINT, TRANSACTION_CHAIN_ENDPOINT, TRANSACTION_ID_ENDPOINT,
 };
-use picomint_wallet_common::{
+use picomint_core::wallet::{
     FederationWallet, TxInfo, WalletInputError, WalletOutputError, descriptor,
     is_potential_receive, tweak_public_key,
 };

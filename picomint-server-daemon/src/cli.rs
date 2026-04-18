@@ -155,13 +155,13 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
 
     async fn wallet_pending_tx_chain(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Vec<picomint_wallet_common::TxInfo>>, CliError> {
+    ) -> Result<Json<Vec<picomint_core::wallet::TxInfo>>, CliError> {
         Ok(Json(api.server.wallet.pending_tx_chain_ui().await))
     }
 
     async fn wallet_tx_chain(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Vec<picomint_wallet_common::TxInfo>>, CliError> {
+    ) -> Result<Json<Vec<picomint_core::wallet::TxInfo>>, CliError> {
         Ok(Json(api.server.wallet.tx_chain_ui().await))
     }
 

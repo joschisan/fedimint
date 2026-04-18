@@ -5,16 +5,16 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use dkg::DkgHandle;
 use futures::future::select_all;
-use picomint_api_client::config::ConsensusConfig;
+use picomint_core::config::ConsensusConfig;
 pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::{ApiAuth, CORE_CONSENSUS_VERSION};
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
-use picomint_ln_common::config::LightningConfigPrivate;
+use picomint_core::ln::config::LightningConfigPrivate;
 use picomint_logging::LOG_NET_PEER_DKG;
-use picomint_mint_common::config::{MintConfig, MintConfigPrivate};
-use picomint_wallet_common::config::{WalletConfig, WalletConfigPrivate};
+use picomint_core::mint::config::{MintConfig, MintConfigPrivate};
+use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
 use rand::rngs::OsRng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
@@ -129,7 +129,7 @@ impl ServerConfig {
         broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
         broadcast_secret_key: SecretKey,
         mint: MintConfig,
-        ln: picomint_ln_common::config::LightningConfig,
+        ln: picomint_core::ln::config::LightningConfig,
         wallet: WalletConfig,
     ) -> Self {
         let consensus = ConsensusConfig {
@@ -172,8 +172,8 @@ impl ServerConfig {
         }
     }
 
-    pub fn ln_config(&self) -> picomint_ln_common::config::LightningConfig {
-        picomint_ln_common::config::LightningConfig {
+    pub fn ln_config(&self) -> picomint_core::ln::config::LightningConfig {
+        picomint_core::ln::config::LightningConfig {
             private: self.private.ln.clone(),
             consensus: self.consensus.ln.clone(),
         }

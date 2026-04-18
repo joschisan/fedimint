@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use async_channel::Receiver;
-use picomint_api_client::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
-use picomint_api_client::transaction::ConsensusItem;
+use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
+use picomint_core::transaction::ConsensusItem;
 use picomint_encoding::Decodable;
 use picomint_core::module::audit::Audit;
 use picomint_core::secp256k1::schnorr;

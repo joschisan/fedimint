@@ -22,8 +22,8 @@ name = "tbs"
 path = "benches/tbs.rs"
 
 [dependencies]
+bitcoin = { workspace = true }
 bls12_381 = { workspace = true }
-picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-redb = { workspace = true }
 group = { workspace = true }

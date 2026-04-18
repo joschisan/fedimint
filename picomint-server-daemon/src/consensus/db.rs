@@ -1,4 +1,4 @@
-use picomint_api_client::session_outcome::{AcceptedItem, SignedSessionOutcome};
+use picomint_core::session_outcome::{AcceptedItem, SignedSessionOutcome};
 use picomint_core::TransactionId;
 use picomint_redb::table;
 

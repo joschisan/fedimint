@@ -22,7 +22,6 @@ picomint-base32 = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-lnurl = { workspace = true }
-picomint-ln-common = { workspace = true }
 picomint-logging = { workspace = true }
 lightning-invoice = { workspace = true }
 serde = { workspace = true }

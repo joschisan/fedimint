@@ -9,17 +9,16 @@ use anyhow::{Context as _, bail};
 use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1;
 use futures::{Stream, StreamExt as _};
-use picomint_api_client::api::{ApiScope, FederationApi};
-use picomint_api_client::config::ConsensusConfig;
-use picomint_api_client::transaction::Transaction;
-use picomint_api_client::{Endpoint, wire};
-use picomint_client_module::executor::ModuleExecutor;
-use picomint_client_module::module::recovery::RecoveryProgress;
-use picomint_client_module::module::{ClientModule, FinalizeTransaction};
-use picomint_client_module::transaction::{TransactionBuilder, TxSubmissionStateMachine};
-use picomint_client_module::{
-    ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptEvent, TxRejectEvent,
-};
+use crate::api::{ApiScope, FederationApi};
+use picomint_core::config::ConsensusConfig;
+use picomint_core::transaction::Transaction;
+use crate::Endpoint;
+use picomint_core::wire;
+use crate::executor::ModuleExecutor;
+use crate::module::recovery::RecoveryProgress;
+use crate::module::{ClientModule, FinalizeTransaction};
+use crate::transaction::{TransactionBuilder, TxSubmissionStateMachine};
+use crate::{ClientModuleInstance, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleKind, OperationId};
 use picomint_encoding::Encodable as _;
@@ -28,12 +27,12 @@ use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
 use picomint_core::{Amount, PeerId, TransactionId};
 use picomint_eventlog::{EventLogId, PersistedLogEntry};
-use picomint_gw_client::GatewayClientModule;
-use picomint_ln_client::LightningClientModule;
+use crate::gw::GatewayClientModule;
+use crate::ln::LightningClientModule;
 use picomint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
-use picomint_mint_client::MintClientModule;
+use crate::mint::MintClientModule;
 use picomint_redb::{Database, WriteTxRef};
-use picomint_wallet_client::WalletClientModule;
+use crate::wallet::WalletClientModule;
 use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, info, warn};
@@ -59,7 +58,7 @@ impl LnFlavor {
     fn input_fee(
         &self,
         amount: Amount,
-        input: &picomint_ln_common::LightningInput,
+        input: &picomint_core::ln::LightningInput,
     ) -> Option<Amount> {
         match self {
             LnFlavor::Regular(m) => m.input_fee(amount, input),
@@ -70,7 +69,7 @@ impl LnFlavor {
     fn output_fee(
         &self,
         amount: Amount,
-        output: &picomint_ln_common::LightningOutput,
+        output: &picomint_core::ln::LightningOutput,
     ) -> Option<Amount> {
         match self {
             LnFlavor::Regular(m) => m.output_fee(amount, output),
@@ -220,11 +219,11 @@ impl Client {
         mut partial_transaction: TransactionBuilder,
     ) -> anyhow::Result<(
         TransactionBuilder,
-        Option<picomint_client_module::module::SpawnSms>,
+        Option<crate::module::SpawnSms>,
     )> {
         let (in_amount, out_amount) = self.transaction_builder_get_balance(&partial_transaction);
 
-        let mut spawn_sms: Option<picomint_client_module::module::SpawnSms> = None;
+        let mut spawn_sms: Option<crate::module::SpawnSms> = None;
 
         if in_amount != out_amount {
             let contribution = self
@@ -240,19 +239,19 @@ impl Client {
             let wire_inputs = contribution
                 .inputs
                 .into_iter()
-                .map(picomint_client_module::transaction::ClientInput::into_wire)
+                .map(crate::transaction::ClientInput::into_wire)
                 .collect();
             let wire_outputs = contribution
                 .outputs
                 .into_iter()
-                .map(picomint_client_module::transaction::ClientOutput::into_wire)
+                .map(crate::transaction::ClientOutput::into_wire)
                 .collect();
 
             partial_transaction = partial_transaction.with_inputs(
-                picomint_client_module::transaction::ClientInputBundle::new(wire_inputs),
+                crate::transaction::ClientInputBundle::new(wire_inputs),
             );
             partial_transaction = partial_transaction.with_outputs(
-                picomint_client_module::transaction::ClientOutputBundle::new(wire_outputs),
+                crate::transaction::ClientOutputBundle::new(wire_outputs),
             );
             spawn_sms = Some(contribution.spawn_sms);
         }
@@ -668,7 +667,6 @@ impl Client {
                     progress = format!("{}/{}", progress.complete, progress.total),
                     "Recovery complete"
                 );
-                picomint_eventlog::log_event(&tx, None, ModuleRecoveryCompleted { kind });
             } else {
                 info!(
                     target: LOG_CLIENT,

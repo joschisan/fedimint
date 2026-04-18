@@ -6,7 +6,7 @@ use picomint_client::{ClientHandleArc, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_eventlog::{EventLogEntry, EventLogId};
-use picomint_mint_client::{MintClientModule, ReceiveEvent, SendEvent};
+use picomint_client::mint::{MintClientModule, ReceiveEvent, SendEvent};
 use tracing::info;
 
 use crate::env::TestEnv;

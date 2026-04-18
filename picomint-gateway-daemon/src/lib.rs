@@ -45,13 +45,13 @@ use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::{Amount, PeerId};
 use picomint_gateway_cli_core::FederationInfo;
-use picomint_gw_client::{
+use picomint_client::gw::{
     EXPIRATION_DELTA_MINIMUM, FinalReceiveState, GatewayClientModule, IGatewayClient,
     LightningRpcError, PaymentAction,
 };
-use picomint_ln_common::Bolt11InvoiceDescription;
-use picomint_ln_common::contracts::{IncomingContract, PaymentImage};
-use picomint_ln_common::gateway_api::{
+use picomint_core::ln::Bolt11InvoiceDescription;
+use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
+use picomint_core::ln::gateway_api::{
     CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
 use picomint_lnurl::VerifyResponse;
@@ -158,7 +158,7 @@ impl AppState {
 
     /// Get the name of a federation from its client config.
     pub async fn federation_name(client: &ClientHandleArc) -> Option<String> {
-        client.config().await.federation_name().map(String::from)
+        client.config().await.federation_name()
     }
 
     /// Get info for all connected federations.
@@ -455,7 +455,7 @@ impl AppState {
 
 #[async_trait]
 impl IGatewayClient for AppState {
-    async fn complete_htlc(&self, htlc_response: picomint_gw_client::InterceptPaymentResponse) {
+    async fn complete_htlc(&self, htlc_response: picomint_client::gw::InterceptPaymentResponse) {
         let ph = PaymentHash(*htlc_response.payment_hash.as_byte_array());
         let claimable_amount_msat = 999_999_999_999_999;
         let ph_hex_str = hex::encode(htlc_response.payment_hash);

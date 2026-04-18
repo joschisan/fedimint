@@ -15,7 +15,7 @@ use picomint_client::secret::RootSecretStrategy;
 use picomint_client::{Client, ClientHandleArc, RootSecret};
 use picomint_core::Amount;
 use picomint_core::invite_code::InviteCode;
-use picomint_wallet_client::WalletClientModule;
+use picomint_client::wallet::WalletClientModule;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;

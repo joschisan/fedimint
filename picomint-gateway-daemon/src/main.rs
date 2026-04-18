@@ -23,8 +23,8 @@ use picomint_core::Amount;
 use picomint_core::util::{SafeUrl};
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
-use picomint_gw_client::GatewayClientModule;
-use picomint_ln_common::gateway_api::PaymentFee;
+use picomint_client::gw::GatewayClientModule;
+use picomint_core::ln::gateway_api::PaymentFee;
 use picomint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use rand::rngs::OsRng;
 use tokio::sync::RwLock;
@@ -301,7 +301,7 @@ async fn try_handle_lightning_payment_ln(
     payment_hash: [u8; 32],
     amount_msat: u64,
 ) -> anyhow::Result<()> {
-    use picomint_ln_common::contracts::PaymentImage;
+    use picomint_core::ln::contracts::PaymentImage;
 
     let hash = sha256::Hash::from_byte_array(payment_hash);
 

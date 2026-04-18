@@ -2,7 +2,7 @@
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::module_name_repetitions)]
 
-pub use picomint_ln_common as common;
+pub use picomint_core::ln as common;
 
 mod db;
 mod rpc;
@@ -17,15 +17,15 @@ use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionIt
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
-use picomint_ln_common::config::{
+use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
-use picomint_ln_common::endpoint_constants::{
+use picomint_core::ln::endpoint_constants::{
     AWAIT_INCOMING_CONTRACT_ENDPOINT, AWAIT_INCOMING_CONTRACTS_ENDPOINT, AWAIT_PREIMAGE_ENDPOINT,
     CONSENSUS_BLOCK_COUNT_ENDPOINT, DECRYPTION_KEY_SHARE_ENDPOINT, GATEWAYS_ENDPOINT,
     OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
 };
-use picomint_ln_common::{
+use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError, OutgoingWitness,
 };

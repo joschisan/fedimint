@@ -1,7 +1,7 @@
 use async_channel::Sender;
 use bitcoin::hashes::{Hash, sha256};
 use parity_scale_codec::{Decode, Encode, IoReader};
-use picomint_api_client::session_outcome::SignedSessionOutcome;
+use picomint_core::session_outcome::SignedSessionOutcome;
 use picomint_core::PeerId;
 use picomint_encoding::Encodable;
 use picomint_core::secp256k1::schnorr;

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use picomint_api_client::transaction::ConsensusItem;
+use picomint_core::transaction::ConsensusItem;
 use picomint_core::TransactionId;
 use picomint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
 use picomint_encoding::Encodable;

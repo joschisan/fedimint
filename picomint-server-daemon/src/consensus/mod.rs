@@ -18,8 +18,8 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use iroh::endpoint::{RecvStream, SendStream};
-use picomint_api_client::transaction::ConsensusItem;
-use picomint_api_client::wire;
+use picomint_core::transaction::ConsensusItem;
+use picomint_core::wire;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
 use picomint_encoding::{Decodable, Encodable};

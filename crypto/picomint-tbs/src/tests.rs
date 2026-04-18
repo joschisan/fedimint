@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use bls12_381::{G2Projective, Scalar};
 use group::Curve;
 use group::ff::Field;
-use picomint_core::BitcoinHash;
-use picomint_core::bitcoin::hashes::sha256;
+use bitcoin::hashes::Hash as BitcoinHash;
+use bitcoin::hashes::sha256;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
