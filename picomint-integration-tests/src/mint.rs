@@ -4,6 +4,7 @@ use async_stream::stream;
 use futures::StreamExt;
 use picomint_client::{ClientHandleArc, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
+use picomint_core::core::OperationId;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_mint_client::{MintClientModule, ReceiveEvent, SendEvent};
 use tracing::info;
@@ -15,13 +16,11 @@ use crate::env::TestEnv;
 enum MintEvent {
     Send(SendEvent),
     Receive(ReceiveEvent),
-    TxAccept(TxAcceptEvent),
-    TxReject(TxRejectEvent),
 }
 
 fn mint_event_stream(
     client: &ClientHandleArc,
-) -> impl futures::Stream<Item = (picomint_core::core::OperationId, MintEvent)> {
+) -> impl futures::Stream<Item = (OperationId, MintEvent)> {
     let client = client.clone();
     let mut log_rx = client.log_event_added_rx();
     let mut next_id = EventLogId::LOG_START;
@@ -43,9 +42,7 @@ fn mint_event_stream(
     }
 }
 
-fn try_parse_mint_event(
-    entry: &EventLogEntry,
-) -> Option<(picomint_core::core::OperationId, MintEvent)> {
+fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent)> {
     let op = entry.operation_id?;
     if let Some(e) = entry.to_event() {
         return Some((op, MintEvent::Send(e)));
@@ -53,13 +50,24 @@ fn try_parse_mint_event(
     if let Some(e) = entry.to_event() {
         return Some((op, MintEvent::Receive(e)));
     }
-    if let Some(e) = entry.to_event() {
-        return Some((op, MintEvent::TxAccept(e)));
-    }
-    if let Some(e) = entry.to_event() {
-        return Some((op, MintEvent::TxReject(e)));
-    }
     None
+}
+
+/// Await the tx outcome (TxAccept or TxReject) for a specific operation_id.
+async fn await_tx_outcome(
+    client: &ClientHandleArc,
+    operation_id: OperationId,
+) -> Result<(), String> {
+    let mut stream = client.subscribe_operation_events(operation_id);
+    while let Some(entry) = stream.next().await {
+        if entry.to_event::<TxAcceptEvent>().is_some() {
+            return Ok(());
+        }
+        if let Some(ev) = entry.to_event::<TxRejectEvent>() {
+            return Err(ev.error);
+        }
+    }
+    unreachable!("stream only ends at client shutdown")
 }
 
 pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::Result<()> {
@@ -92,10 +100,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
         };
         assert_eq!(op, operation_id);
 
-        let Some((op, MintEvent::TxAccept(_))) = receive_events.next().await else {
-            panic!("Expected TxAccept event");
-        };
-        assert_eq!(op, operation_id);
+        await_tx_outcome(&client_receive, operation_id)
+            .await
+            .expect("receive tx should be accepted");
     }
 
     info!("mint: send_and_receive passed");
@@ -122,10 +129,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
     };
     assert_eq!(op, operation_id);
 
-    let Some((op, MintEvent::TxAccept(_))) = send_events.next().await else {
-        panic!("Expected TxAccept event");
-    };
-    assert_eq!(op, operation_id);
+    await_tx_outcome(client_send, operation_id)
+        .await
+        .expect("first receive should be accepted");
 
     // Second receive with same ecash is rejected
     let operation_id = client_receive
@@ -138,10 +144,10 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
     };
     assert_eq!(op, operation_id);
 
-    let Some((op, MintEvent::TxReject(_))) = receive_events.next().await else {
-        panic!("Expected TxReject event");
-    };
-    assert_eq!(op, operation_id);
+    assert!(
+        await_tx_outcome(&client_receive, operation_id).await.is_err(),
+        "double-spend receive should be rejected",
+    );
 
     info!("mint: double_spend_is_rejected passed");
 
