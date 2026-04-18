@@ -34,16 +34,6 @@ pub struct OutputSMCommon {
 pub enum OutputSMState {
     /// Issuance request was created, we are waiting for blind signatures.
     Pending,
-    /// The transaction containing the issuance was rejected, we can stop
-    /// looking for decryption shares.
-    Aborted,
-    /// The transaction containing the issuance was accepted but an unexpected
-    /// error occurred, this should never happen with a honest federation and
-    /// bug-free code.
-    Failure,
-    /// The issuance was completed successfully and the e-cash notes added to
-    /// our wallet.
-    Success,
 }
 
 impl StateMachine for MintOutputStateMachine {
@@ -52,26 +42,21 @@ impl StateMachine for MintOutputStateMachine {
     type Context = MintSmContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        match &self.state {
-            OutputSMState::Pending => {
+        let ctx = ctx.clone();
+        let operation_id = self.common.operation_id;
+        let range = self.common.range;
+        let issuance_requests = self.common.issuance_requests.clone();
+        vec![SmStateTransition::new(
+            await_signature_shares_sm(ctx.clone(), operation_id, range, issuance_requests),
+            move |dbtx, shares, old_state| {
                 let ctx = ctx.clone();
-                let operation_id = self.common.operation_id;
-                let range = self.common.range;
-                let issuance_requests = self.common.issuance_requests.clone();
-                vec![SmStateTransition::new(
-                    await_signature_shares_sm(ctx.clone(), operation_id, range, issuance_requests),
-                    move |dbtx, shares, old_state| {
-                        let ctx = ctx.clone();
-                        let balance_update_sender = ctx.balance_update_sender.clone();
-                        dbtx.on_commit(move || {
-                            balance_update_sender.send_replace(());
-                        });
-                        Box::pin(transition_outcome_ready_sm(ctx, dbtx, shares, old_state))
-                    },
-                )]
-            }
-            OutputSMState::Aborted | OutputSMState::Failure | OutputSMState::Success => vec![],
-        }
+                let balance_update_sender = ctx.balance_update_sender.clone();
+                dbtx.on_commit(move || {
+                    balance_update_sender.send_replace(());
+                });
+                Box::pin(transition_outcome_ready_sm(ctx, dbtx, shares, old_state))
+            },
+        )]
     }
 }
 
@@ -108,12 +93,9 @@ async fn transition_outcome_ready_sm(
         String,
     >,
     old_state: MintOutputStateMachine,
-) -> MintOutputStateMachine {
+) -> Option<MintOutputStateMachine> {
     let Ok(signature_shares) = signature_shares else {
-        return MintOutputStateMachine {
-            common: old_state.common,
-            state: OutputSMState::Aborted,
-        };
+        return None;
     };
 
     for (i, request) in old_state.common.issuance_requests.iter().enumerate() {
@@ -132,10 +114,7 @@ async fn transition_outcome_ready_sm(
             .expect("No aggregated pk found for denomination");
 
         if !verify_note(spendable_note.note(), pk) {
-            return MintOutputStateMachine {
-                common: old_state.common,
-                state: OutputSMState::Failure,
-            };
+            return None;
         }
 
         assert!(dbtx.insert(&NOTE, &spendable_note, &()).is_none());
@@ -151,10 +130,7 @@ async fn transition_outcome_ready_sm(
             .await;
     }
 
-    MintOutputStateMachine {
-        common: old_state.common,
-        state: OutputSMState::Success,
-    }
+    None
 }
 
 pub fn verify_blind_shares(

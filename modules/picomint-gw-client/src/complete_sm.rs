@@ -1,5 +1,3 @@
-use std::fmt;
-
 use picomint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
@@ -15,14 +13,6 @@ use crate::{
 /// State machine that completes the incoming payment by contacting the
 /// lightning node when the incoming contract has been funded and the preimage
 /// is available.
-///
-/// ```mermaid
-/// graph LR
-/// classDef virtual fill:#fff,stroke-dasharray: 5 5
-///
-///    Pending -- receive preimage or fail --> Completing
-///    Completing -- htlc is completed  --> Completed
-/// ```
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct CompleteStateMachine {
@@ -41,16 +31,6 @@ impl CompleteStateMachine {
     }
 }
 
-impl fmt::Display for CompleteStateMachine {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Complete State Machine Operation ID: {:?} State: {}",
-            self.common.operation_id, self.state
-        )
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct CompleteSMCommon {
     pub operation_id: OperationId,
@@ -63,17 +43,6 @@ pub struct CompleteSMCommon {
 pub enum CompleteSMState {
     Pending,
     Completing(FinalReceiveState),
-    Completed,
-}
-
-impl fmt::Display for CompleteSMState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CompleteSMState::Pending => write!(f, "Pending"),
-            CompleteSMState::Completing(_) => write!(f, "Completing"),
-            CompleteSMState::Completed => write!(f, "Completed"),
-        }
-    }
 }
 
 impl StateMachine for CompleteStateMachine {
@@ -91,9 +60,9 @@ impl StateMachine for CompleteStateMachine {
                     |_dbtx: &WriteTxRef<'_>,
                      result: FinalReceiveState,
                      old_state: CompleteStateMachine| {
-                        Box::pin(
-                            async move { old_state.update(CompleteSMState::Completing(result)) },
-                        )
+                        Box::pin(async move {
+                            Some(old_state.update(CompleteSMState::Completing(result)))
+                        })
                     },
                 )]
             }
@@ -117,7 +86,6 @@ impl StateMachine for CompleteStateMachine {
                     },
                 )]
             }
-            CompleteSMState::Completed => vec![],
         }
     }
 }
@@ -149,7 +117,7 @@ async fn transition_completion_sm(
     ctx: GwV2SmContext,
     dbtx: &WriteTxRef<'_>,
     old_state: CompleteStateMachine,
-) -> CompleteStateMachine {
+) -> Option<CompleteStateMachine> {
     ctx.client_ctx
         .log_event(
             dbtx,
@@ -157,5 +125,6 @@ async fn transition_completion_sm(
             CompleteLightningPaymentEvent,
         )
         .await;
-    old_state.update(CompleteSMState::Completed)
+
+    None
 }

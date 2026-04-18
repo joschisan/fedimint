@@ -16,15 +16,6 @@ pub struct SendStateMachine {
 
 picomint_redb::consensus_value!(SendStateMachine);
 
-impl SendStateMachine {
-    pub fn update(&self, state: SendSMState) -> Self {
-        Self {
-            common: self.common.clone(),
-            state,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendSMCommon {
     pub operation_id: OperationId,
@@ -36,9 +27,6 @@ pub struct SendSMCommon {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum SendSMState {
     Funding,
-    Success(bitcoin::Txid),
-    Aborted(String),
-    Failure,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -54,21 +42,16 @@ impl StateMachine for SendStateMachine {
     type Context = WalletClientContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        match &self.state {
-            SendSMState::Funding => {
+        let ctx = ctx.clone();
+        let operation_id = self.common.operation_id;
+        let outpoint = self.common.outpoint;
+        vec![SmStateTransition::new(
+            await_funding_sm(ctx.clone(), operation_id, outpoint),
+            move |dbtx, result, old_state| {
                 let ctx = ctx.clone();
-                let operation_id = self.common.operation_id;
-                let outpoint = self.common.outpoint;
-                vec![SmStateTransition::new(
-                    await_funding_sm(ctx.clone(), operation_id, outpoint),
-                    move |dbtx, result, old_state| {
-                        let ctx = ctx.clone();
-                        Box::pin(transition_funding_sm(ctx, dbtx, result, old_state))
-                    },
-                )]
-            }
-            SendSMState::Success(_) | SendSMState::Aborted(_) | SendSMState::Failure => vec![],
-        }
+                Box::pin(transition_funding_sm(ctx, dbtx, result, old_state))
+            },
+        )]
     }
 }
 
@@ -96,34 +79,22 @@ async fn transition_funding_sm(
     dbtx: &WriteTxRef<'_>,
     result: AwaitFundingResult,
     old_state: SendStateMachine,
-) -> SendStateMachine {
-    match result {
-        AwaitFundingResult::Success(txid) => {
-            ctx.client_ctx
-                .log_event(
-                    dbtx,
-                    old_state.common.operation_id,
-                    SendPaymentUpdateEvent {
-                        status: SendPaymentStatus::Success(txid),
-                    },
-                )
-                .await;
-
-            old_state.update(SendSMState::Success(txid))
+) -> Option<SendStateMachine> {
+    let status = match result {
+        AwaitFundingResult::Success(txid) => SendPaymentStatus::Success(txid),
+        AwaitFundingResult::Aborted(_) => SendPaymentStatus::Aborted,
+        AwaitFundingResult::Failure => {
+            return None;
         }
-        AwaitFundingResult::Aborted(error) => {
-            ctx.client_ctx
-                .log_event(
-                    dbtx,
-                    old_state.common.operation_id,
-                    SendPaymentUpdateEvent {
-                        status: SendPaymentStatus::Aborted,
-                    },
-                )
-                .await;
+    };
 
-            old_state.update(SendSMState::Aborted(error))
-        }
-        AwaitFundingResult::Failure => old_state.update(SendSMState::Failure),
-    }
+    ctx.client_ctx
+        .log_event(
+            dbtx,
+            old_state.common.operation_id,
+            SendPaymentUpdateEvent { status },
+        )
+        .await;
+
+    None
 }

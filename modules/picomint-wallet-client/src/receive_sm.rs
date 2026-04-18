@@ -15,15 +15,6 @@ pub struct ReceiveStateMachine {
 
 picomint_redb::consensus_value!(ReceiveStateMachine);
 
-impl ReceiveStateMachine {
-    pub fn update(&self, state: ReceiveSMState) -> Self {
-        Self {
-            common: self.common.clone(),
-            state,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveSMCommon {
     pub operation_id: OperationId,
@@ -35,8 +26,6 @@ pub struct ReceiveSMCommon {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum ReceiveSMState {
     Funding,
-    Success,
-    Aborted(String),
 }
 
 impl StateMachine for ReceiveStateMachine {
@@ -45,21 +34,16 @@ impl StateMachine for ReceiveStateMachine {
     type Context = WalletClientContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        match &self.state {
-            ReceiveSMState::Funding => {
+        let ctx = ctx.clone();
+        let operation_id = self.common.operation_id;
+        let txid = self.common.txid;
+        vec![SmStateTransition::new(
+            await_funding_sm(ctx.clone(), operation_id, txid),
+            move |dbtx, result, old_state| {
                 let ctx = ctx.clone();
-                let operation_id = self.common.operation_id;
-                let txid = self.common.txid;
-                vec![SmStateTransition::new(
-                    await_funding_sm(ctx.clone(), operation_id, txid),
-                    move |dbtx, result, old_state| {
-                        let ctx = ctx.clone();
-                        Box::pin(transition_funding_sm(ctx, dbtx, result, old_state))
-                    },
-                )]
-            }
-            ReceiveSMState::Success | ReceiveSMState::Aborted(_) => vec![],
-        }
+                Box::pin(transition_funding_sm(ctx, dbtx, result, old_state))
+            },
+        )]
     }
 }
 
@@ -76,33 +60,19 @@ async fn transition_funding_sm(
     dbtx: &WriteTxRef<'_>,
     result: Result<(), String>,
     old_state: ReceiveStateMachine,
-) -> ReceiveStateMachine {
-    match result {
-        Ok(()) => {
-            ctx.client_ctx
-                .log_event(
-                    dbtx,
-                    old_state.common.operation_id,
-                    ReceivePaymentUpdateEvent {
-                        status: ReceivePaymentStatus::Success,
-                    },
-                )
-                .await;
+) -> Option<ReceiveStateMachine> {
+    let status = match result {
+        Ok(()) => ReceivePaymentStatus::Success,
+        Err(_) => ReceivePaymentStatus::Aborted,
+    };
 
-            old_state.update(ReceiveSMState::Success)
-        }
-        Err(error) => {
-            ctx.client_ctx
-                .log_event(
-                    dbtx,
-                    old_state.common.operation_id,
-                    ReceivePaymentUpdateEvent {
-                        status: ReceivePaymentStatus::Aborted,
-                    },
-                )
-                .await;
+    ctx.client_ctx
+        .log_event(
+            dbtx,
+            old_state.common.operation_id,
+            ReceivePaymentUpdateEvent { status },
+        )
+        .await;
 
-            old_state.update(ReceiveSMState::Aborted(error))
-        }
-    }
+    None
 }

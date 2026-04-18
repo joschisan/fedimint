@@ -1,4 +1,3 @@
-use core::fmt;
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
@@ -30,25 +29,6 @@ pub struct ReceiveStateMachine {
 
 picomint_redb::consensus_value!(ReceiveStateMachine);
 
-impl ReceiveStateMachine {
-    pub fn update(&self, state: ReceiveSMState) -> Self {
-        Self {
-            common: self.common.clone(),
-            state,
-        }
-    }
-}
-
-impl fmt::Display for ReceiveStateMachine {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Receive State Machine Operation ID: {:?} State: {}",
-            self.common.operation_id, self.state
-        )
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveSMCommon {
     pub operation_id: OperationId,
@@ -60,63 +40,31 @@ pub struct ReceiveSMCommon {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum ReceiveSMState {
     Funding,
-    Rejected(String),
-    Success([u8; 32]),
-    Failure,
-    Refunding(Vec<OutPoint>),
-}
-
-impl fmt::Display for ReceiveSMState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReceiveSMState::Funding => write!(f, "Funding"),
-            ReceiveSMState::Rejected(_) => write!(f, "Rejected"),
-            ReceiveSMState::Success(_) => write!(f, "Success"),
-            ReceiveSMState::Failure => write!(f, "Failure"),
-            ReceiveSMState::Refunding(_) => write!(f, "Refunding"),
-        }
-    }
 }
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// State machine that handles the relay of an incoming Lightning payment.
-///
-/// ```mermaid
-/// graph LR
-/// classDef virtual fill:#fff,stroke-dasharray: 5 5
-///
-///     Funding -- funding transaction is rejected --> Rejected
-///     Funding -- aggregated decryption key is invalid --> Failure
-///     Funding -- decrypted preimage is valid --> Success
-///     Funding -- decrypted preimage is invalid --> Refunding
-/// ```
+/// Terminates once decryption shares are either invalid, produce a valid
+/// preimage (success), or fail to decode one (refunded).
 impl StateMachine for ReceiveStateMachine {
     const TABLE_NAME: &'static str = "receive-sm";
 
     type Context = GwV2SmContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        match &self.state {
-            ReceiveSMState::Funding => {
-                let ctx_clone = ctx.clone();
-                let operation_id = self.common.operation_id;
-                let outpoint = self.common.outpoint;
-                let contract = self.common.contract.clone();
-                vec![SmStateTransition::new(
-                    await_decryption_shares_sm(ctx_clone.clone(), operation_id, outpoint, contract),
-                    move |dbtx, shares, old_state| {
-                        let ctx = ctx_clone.clone();
-                        Box::pin(transition_decryption_shares_sm(
-                            ctx, dbtx, old_state, shares,
-                        ))
-                    },
-                )]
-            }
-            ReceiveSMState::Success(..)
-            | ReceiveSMState::Rejected(..)
-            | ReceiveSMState::Refunding(..)
-            | ReceiveSMState::Failure => vec![],
-        }
+        let ctx_clone = ctx.clone();
+        let operation_id = self.common.operation_id;
+        let outpoint = self.common.outpoint;
+        let contract = self.common.contract.clone();
+        vec![SmStateTransition::new(
+            await_decryption_shares_sm(ctx_clone.clone(), operation_id, outpoint, contract),
+            move |dbtx, shares, old_state| {
+                let ctx = ctx_clone.clone();
+                Box::pin(transition_decryption_shares_sm(
+                    ctx, dbtx, old_state, shares,
+                ))
+            },
+        )]
     }
 }
 
@@ -165,13 +113,13 @@ async fn transition_decryption_shares_sm(
     dbtx: &WriteTxRef<'_>,
     old_state: ReceiveStateMachine,
     decryption_shares: Result<BTreeMap<PeerId, DecryptionKeyShare>, String>,
-) -> ReceiveStateMachine {
+) -> Option<ReceiveStateMachine> {
     let decryption_shares = match decryption_shares {
-        Ok(decryption_shares) => decryption_shares
+        Ok(shares) => shares
             .into_iter()
             .map(|(peer, share)| (peer.to_usize() as u64, share))
             .collect(),
-        Err(error) => {
+        Err(_) => {
             ctx.client_ctx
                 .log_event(
                     dbtx,
@@ -182,7 +130,7 @@ async fn transition_decryption_shares_sm(
                 )
                 .await;
 
-            return old_state.update(ReceiveSMState::Rejected(error));
+            return None;
         }
     };
 
@@ -205,7 +153,7 @@ async fn transition_decryption_shares_sm(
             )
             .await;
 
-        return old_state.update(ReceiveSMState::Failure);
+        return None;
     }
 
     if let Some(preimage) = old_state
@@ -223,7 +171,7 @@ async fn transition_decryption_shares_sm(
             )
             .await;
 
-        return old_state.update(ReceiveSMState::Success(preimage));
+        return None;
     }
 
     let client_input = ClientInput::<LightningInput> {
@@ -232,17 +180,14 @@ async fn transition_decryption_shares_sm(
         keys: vec![old_state.common.refund_keypair],
     };
 
-    let outpoints = ctx
-        .client_ctx
+    ctx.client_ctx
         .claim_inputs(
             dbtx,
             ClientInputBundle::new(vec![client_input]),
             old_state.common.operation_id,
         )
         .await
-        .expect("Cannot claim input, additional funding needed")
-        .into_iter()
-        .collect();
+        .expect("Cannot claim input, additional funding needed");
 
     ctx.client_ctx
         .log_event(
@@ -254,5 +199,5 @@ async fn transition_decryption_shares_sm(
         )
         .await;
 
-    old_state.update(ReceiveSMState::Refunding(outpoints))
+    None
 }

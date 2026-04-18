@@ -1,5 +1,4 @@
 use picomint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
-use picomint_client_module::module::OutPointRange;
 use picomint_client_module::transaction::{ClientInput, ClientInputBundle};
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
@@ -27,8 +26,6 @@ pub struct InputSMCommon {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum InputSMState {
     Pending,
-    Success,
-    Refunding(OutPointRange),
 }
 
 impl StateMachine for InputStateMachine {
@@ -37,21 +34,16 @@ impl StateMachine for InputStateMachine {
     type Context = MintSmContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        match &self.state {
-            InputSMState::Pending => {
+        let ctx = ctx.clone();
+        let operation_id = self.common.operation_id;
+        let txid = self.common.txid;
+        vec![SmStateTransition::new(
+            await_pending_sm(ctx.clone(), operation_id, txid),
+            move |dbtx, result, old_state| {
                 let ctx = ctx.clone();
-                let operation_id = self.common.operation_id;
-                let txid = self.common.txid;
-                vec![SmStateTransition::new(
-                    await_pending_sm(ctx.clone(), operation_id, txid),
-                    move |dbtx, result, old_state| {
-                        let ctx = ctx.clone();
-                        Box::pin(transition_pending_sm(ctx, dbtx, result, old_state))
-                    },
-                )]
-            }
-            InputSMState::Success | InputSMState::Refunding(..) => vec![],
-        }
+                Box::pin(transition_pending_sm(ctx, dbtx, result, old_state))
+            },
+        )]
     }
 }
 
@@ -68,12 +60,9 @@ async fn transition_pending_sm(
     dbtx: &WriteTxRef<'_>,
     result: Result<(), String>,
     old_state: InputStateMachine,
-) -> InputStateMachine {
+) -> Option<InputStateMachine> {
     if result.is_ok() {
-        return InputStateMachine {
-            common: old_state.common,
-            state: InputSMState::Success,
-        };
+        return None;
     }
 
     let inputs = old_state
@@ -89,8 +78,7 @@ async fn transition_pending_sm(
         })
         .collect();
 
-    let change_range = ctx
-        .client_ctx
+    ctx.client_ctx
         .claim_inputs(
             dbtx,
             ClientInputBundle::new(inputs),
@@ -99,8 +87,5 @@ async fn transition_pending_sm(
         .await
         .expect("Cannot claim input, additional funding needed");
 
-    InputStateMachine {
-        common: old_state.common,
-        state: InputSMState::Refunding(change_range),
-    }
+    None
 }

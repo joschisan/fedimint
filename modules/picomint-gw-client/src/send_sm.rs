@@ -1,5 +1,3 @@
-use std::fmt;
-
 use picomint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
 use picomint_client_module::transaction::{ClientInput, ClientInputBundle};
 use picomint_core::config::FederationId;
@@ -24,25 +22,6 @@ pub struct SendStateMachine {
 
 picomint_redb::consensus_value!(SendStateMachine);
 
-impl SendStateMachine {
-    pub fn update(&self, state: SendSMState) -> Self {
-        Self {
-            common: self.common.clone(),
-            state,
-        }
-    }
-}
-
-impl fmt::Display for SendStateMachine {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Send State Machine Operation ID: {:?} State: {}",
-            self.common.operation_id, self.state
-        )
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendSMCommon {
     pub operation_id: OperationId,
@@ -57,30 +36,12 @@ pub struct SendSMCommon {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum SendSMState {
     Sending,
-    Claiming(Claiming),
-    Cancelled(Cancelled),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentResponse {
     preimage: [u8; 32],
     target_federation: Option<FederationId>,
-}
-
-impl fmt::Display for SendSMState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SendSMState::Sending => write!(f, "Sending"),
-            SendSMState::Claiming(_) => write!(f, "Claiming"),
-            SendSMState::Cancelled(_) => write!(f, "Cancelled"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct Claiming {
-    pub preimage: [u8; 32],
-    pub outpoints: Vec<OutPoint>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable, Serialize, Deserialize)]
@@ -97,44 +58,33 @@ pub enum Cancelled {
 }
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
-/// State machine that handles the relay of an incoming Lightning payment.
-///
-/// ```mermaid
-/// graph LR
-/// classDef virtual fill:#fff,stroke-dasharray: 5 5
-///
-///     Sending -- payment is successful --> Claiming
-///     Sending -- payment fails --> Cancelled
-/// ```
+/// State machine that handles the relay of an outgoing Lightning payment.
+/// Terminates after the payment either succeeds (claim inputs + success event)
+/// or is cancelled (cancelled event).
 impl StateMachine for SendStateMachine {
     const TABLE_NAME: &'static str = "send-sm";
 
     type Context = GwV2SmContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        match &self.state {
-            SendSMState::Sending => {
-                let ctx_clone = ctx.clone();
-                let max_delay = self.common.max_delay;
-                let min_contract_amount = self.common.min_contract_amount;
-                let invoice = self.common.invoice.clone();
-                let contract = self.common.contract.clone();
-                vec![SmStateTransition::new(
-                    send_payment_sm(
-                        ctx_clone.clone(),
-                        max_delay,
-                        min_contract_amount,
-                        invoice,
-                        contract,
-                    ),
-                    move |dbtx, result, old_state| {
-                        let ctx = ctx_clone.clone();
-                        Box::pin(transition_send_payment_sm(ctx, dbtx, old_state, result))
-                    },
-                )]
-            }
-            SendSMState::Claiming(..) | SendSMState::Cancelled(..) => vec![],
-        }
+        let ctx_clone = ctx.clone();
+        let max_delay = self.common.max_delay;
+        let min_contract_amount = self.common.min_contract_amount;
+        let invoice = self.common.invoice.clone();
+        let contract = self.common.contract.clone();
+        vec![SmStateTransition::new(
+            send_payment_sm(
+                ctx_clone.clone(),
+                max_delay,
+                min_contract_amount,
+                invoice,
+                contract,
+            ),
+            move |dbtx, result, old_state| {
+                let ctx = ctx_clone.clone();
+                Box::pin(transition_send_payment_sm(ctx, dbtx, old_state, result))
+            },
+        )]
     }
 }
 
@@ -193,7 +143,7 @@ async fn transition_send_payment_sm(
     dbtx: &WriteTxRef<'_>,
     old_state: SendStateMachine,
     result: Result<PaymentResponse, Cancelled>,
-) -> SendStateMachine {
+) -> Option<SendStateMachine> {
     match result {
         Ok(payment_response) => {
             ctx.client_ctx
@@ -215,24 +165,16 @@ async fn transition_send_payment_sm(
                 keys: vec![old_state.common.claim_keypair],
             };
 
-            let outpoints = ctx
-                .client_ctx
+            ctx.client_ctx
                 .claim_inputs(
                     dbtx,
                     ClientInputBundle::new(vec![client_input]),
                     old_state.common.operation_id,
                 )
                 .await
-                .expect("Cannot claim input, additional funding needed")
-                .into_iter()
-                .collect();
-
-            old_state.update(SendSMState::Claiming(Claiming {
-                preimage: payment_response.preimage,
-                outpoints,
-            }))
+                .expect("Cannot claim input, additional funding needed");
         }
-        Err(e) => {
+        Err(_) => {
             let signature = ctx
                 .keypair
                 .sign_schnorr(old_state.common.contract.forfeit_message());
@@ -246,8 +188,8 @@ async fn transition_send_payment_sm(
                     },
                 )
                 .await;
-
-            old_state.update(SendSMState::Cancelled(e))
         }
     }
+
+    None
 }

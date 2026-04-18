@@ -7,8 +7,10 @@
 //! per-state-machine table keyed by a random [`SmId`] and drives
 //! transitions in a typed reactor loop.
 //!
-//! Terminal states are simply removed from the DB; inactive state
-//! history is not retained.
+//! Every state in the enum is by construction live: `transitions()` must
+//! always return a non-empty list. Terminal states aren't type-representable
+//! — a transition that "finishes" the SM returns `None`, and the executor
+//! then removes the row. Inactive state history is not retained.
 
 use std::any::Any;
 use std::fmt::Debug;
@@ -71,8 +73,9 @@ pub type ErasedValue = Arc<dyn Any + Send + Sync>;
 
 pub type TriggerFuture = Pin<Box<dyn Future<Output = ErasedValue> + 'static + Send>>;
 
-pub type TransitionFn<S> =
-    Arc<dyn for<'a> Fn(&'a WriteTxRef<'_>, ErasedValue, S) -> BoxFuture<'a, S> + Send + Sync>;
+pub type TransitionFn<S> = Arc<
+    dyn for<'a> Fn(&'a WriteTxRef<'_>, ErasedValue, S) -> BoxFuture<'a, Option<S>> + Send + Sync,
+>;
 
 pub struct StateTransition<S> {
     pub trigger: TriggerFuture,
@@ -84,7 +87,11 @@ impl<S: StateMachine> StateTransition<S> {
     where
         V: Clone + Send + Sync + 'static,
         Trigger: Future<Output = V> + Send + 'static,
-        F: for<'a> Fn(&'a WriteTxRef<'_>, V, S) -> BoxFuture<'a, S> + Send + Sync + Clone + 'static,
+        F: for<'a> Fn(&'a WriteTxRef<'_>, V, S) -> BoxFuture<'a, Option<S>>
+            + Send
+            + Sync
+            + Clone
+            + 'static,
     {
         Self {
             trigger: Box::pin(async move { Arc::new(trigger.await) as ErasedValue }),
@@ -192,28 +199,21 @@ impl<S: StateMachine> Inner<S> {
             .collect()
     }
 
-    async fn remove_active(&self, id: SmId) {
-        let tx = self.db.begin_write().await;
-        tx.remove(&table::<S>(), &id);
-        tx.commit().await;
-    }
-
     fn spawn_drive(self: Arc<Self>, id: SmId, state: S) {
         let tg = self.task_group.clone();
         tg.spawn_cancellable("sm-drive", async move { self.drive(id, state).await });
     }
 
-    /// Drive one state machine from its current state to a terminal
-    /// one. Each iteration: race triggers the winning transition
-    /// atomically, advance to the new state (or exit when terminal).
+    /// Drive one state machine until a transition returns `None`. Each
+    /// iteration: race triggers, apply the winning transition atomically,
+    /// write the new state (or delete the row if the transition terminates).
     async fn drive(self: Arc<Self>, id: SmId, mut state: S) {
         loop {
             let transitions = state.transitions(&self.context);
-
-            if transitions.is_empty() {
-                self.remove_active(id).await;
-                return;
-            }
+            assert!(
+                !transitions.is_empty(),
+                "StateMachine::transitions returned empty Vec — every live state must have transitions",
+            );
 
             let (outcome, transition) = select_all(transitions.into_iter().map(|t| {
                 Box::pin(async move { (t.trigger.await, t.transition) })
@@ -223,19 +223,17 @@ impl<S: StateMachine> Inner<S> {
             .0;
 
             let tx = self.db.begin_write().await;
-            let new_state = transition(&tx.as_ref(), outcome, state.clone()).await;
-            let next = if new_state.transitions(&self.context).is_empty() {
-                tx.remove(&table::<S>(), &id);
-                None
-            } else {
-                tx.insert(&table::<S>(), &id, &new_state);
-                Some(new_state)
-            };
-            tx.commit().await;
-
-            match next {
-                Some(new_state) => state = new_state,
-                None => return,
+            match transition(&tx.as_ref(), outcome, state.clone()).await {
+                Some(new_state) => {
+                    tx.insert(&table::<S>(), &id, &new_state);
+                    tx.commit().await;
+                    state = new_state;
+                }
+                None => {
+                    tx.remove(&table::<S>(), &id);
+                    tx.commit().await;
+                    return;
+                }
             }
         }
     }

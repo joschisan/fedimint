@@ -52,26 +52,11 @@ pub struct SendSMCommon {
 pub enum SendSMState {
     Funding,
     Funded,
-    Rejected(String),
-    Success([u8; 32]),
-    Refunding(Vec<OutPoint>),
 }
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// State machine that requests the lightning gateway to pay an invoice on
 /// behalf of a federation client.
-///
-/// ```mermaid
-/// graph LR
-/// classDef virtual fill:#fff,stroke-dasharray: 5 5
-///
-///     Funding -- funding tx is rejected --> Rejected
-///     Funding -- funding tx is accepted --> Funded
-///     Funded -- post invoice returns preimage  --> Success
-///     Funded -- post invoice returns forfeit tx --> Refunding
-///     Funded -- await_preimage returns preimage --> Success
-///     Funded -- await_preimage expires --> Refunding
-/// ```
 
 async fn send_update_event_sm(
     ctx: &LightningClientContext,
@@ -102,11 +87,13 @@ impl StateMachine for SendStateMachine {
                             .await_tx_accepted(operation_id, txid)
                             .await
                     },
-                    |_dbtx, result: Result<(), String>, old_state: SendStateMachine| {
+                    |_dbtx: &WriteTxRef<'_>,
+                     result: Result<(), String>,
+                     old_state: SendStateMachine| {
                         Box::pin(async move {
                             match result {
-                                Ok(()) => old_state.update(SendSMState::Funded),
-                                Err(error) => old_state.update(SendSMState::Rejected(error)),
+                                Ok(()) => Some(old_state.update(SendSMState::Funded)),
+                                Err(_) => None,
                             }
                         })
                     },
@@ -148,9 +135,6 @@ impl StateMachine for SendStateMachine {
                         },
                     ),
                 ]
-            }
-            SendSMState::Refunding(..) | SendSMState::Success(..) | SendSMState::Rejected(..) => {
-                vec![]
             }
         }
     }
@@ -198,7 +182,7 @@ async fn transition_gateway_send_payment_sm(
     dbtx: &WriteTxRef<'_>,
     gateway_response: Result<[u8; 32], Signature>,
     old_state: SendStateMachine,
-) -> SendStateMachine {
+) -> Option<SendStateMachine> {
     match gateway_response {
         Ok(preimage) => {
             send_update_event_sm(
@@ -208,8 +192,6 @@ async fn transition_gateway_send_payment_sm(
                 SendPaymentStatus::Success(preimage),
             )
             .await;
-
-            old_state.update(SendSMState::Success(preimage))
         }
         Err(signature) => {
             let client_input = ClientInput::<LightningInput> {
@@ -221,8 +203,7 @@ async fn transition_gateway_send_payment_sm(
                 keys: vec![old_state.common.refund_keypair],
             };
 
-            let change_range = ctx
-                .client_ctx
+            ctx.client_ctx
                 .claim_inputs(
                     dbtx,
                     ClientInputBundle::new(vec![client_input]),
@@ -238,10 +219,10 @@ async fn transition_gateway_send_payment_sm(
                 SendPaymentStatus::Refunded,
             )
             .await;
-
-            old_state.update(SendSMState::Refunding(change_range.into_iter().collect()))
         }
     }
+
+    None
 }
 
 #[instrument(target = LOG_CLIENT_MODULE_LN, skip(ctx))]
@@ -270,7 +251,7 @@ async fn transition_preimage_sm(
     dbtx: &WriteTxRef<'_>,
     old_state: SendStateMachine,
     preimage: Option<[u8; 32]>,
-) -> SendStateMachine {
+) -> Option<SendStateMachine> {
     if let Some(preimage) = preimage {
         send_update_event_sm(
             &ctx,
@@ -280,7 +261,7 @@ async fn transition_preimage_sm(
         )
         .await;
 
-        return old_state.update(SendSMState::Success(preimage));
+        return None;
     }
 
     let client_input = ClientInput::<LightningInput> {
@@ -289,8 +270,7 @@ async fn transition_preimage_sm(
         keys: vec![old_state.common.refund_keypair],
     };
 
-    let change_range = ctx
-        .client_ctx
+    ctx.client_ctx
         .claim_inputs(
             dbtx,
             ClientInputBundle::new(vec![client_input]),
@@ -307,5 +287,5 @@ async fn transition_preimage_sm(
     )
     .await;
 
-    old_state.update(SendSMState::Refunding(change_range.into_iter().collect()))
+    None
 }

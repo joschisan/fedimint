@@ -15,13 +15,7 @@ use crate::{TxAcceptedEvent, TxRejectedEvent};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// State machine to (re-)submit a transaction until it is either accepted or
-/// rejected by the federation
-///
-/// ```mermaid
-/// flowchart LR
-///     Created -- tx is accepted by consensus --> Accepted
-///     Created -- tx is rejected on submission --> Rejected
-/// ```
+/// rejected by the federation. Acceptance or rejection terminates the SM.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct TxSubmissionStateMachine {
     pub common: TxSubmissionSMCommon,
@@ -29,15 +23,6 @@ pub struct TxSubmissionStateMachine {
 }
 
 picomint_redb::consensus_value!(TxSubmissionStateMachine);
-
-impl TxSubmissionStateMachine {
-    pub fn update(&self, state: TxSubmissionSMState) -> Self {
-        Self {
-            common: self.common.clone(),
-            state,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct TxSubmissionSMCommon {
@@ -48,16 +33,8 @@ pub struct TxSubmissionSMCommon {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum TxSubmissionSMState {
     /// The transaction has been created and potentially already been submitted,
-    /// but no rejection or acceptance happened so far
+    /// but no rejection or acceptance happened so far.
     Created,
-    /// The transaction has been accepted in consensus
-    ///
-    /// **This state is final**
-    Accepted,
-    /// The transaction has been rejected by a quorum on submission
-    ///
-    /// **This state is final**
-    Rejected(String),
 }
 
 /// Context for running [`TxSubmissionStateMachine`] in a typed
@@ -74,34 +51,30 @@ impl StateMachine for TxSubmissionStateMachine {
     type Context = TxSubmissionSmContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        match &self.state {
-            TxSubmissionSMState::Created => {
-                let transaction = self.common.transaction.clone();
-                vec![
-                    SmStateTransition::new(
-                        await_tx_rejected_sm(transaction.clone(), ctx.api.clone()),
-                        {
-                            let ctx = ctx.clone();
-                            move |dbtx, error, old_state| {
-                                let ctx = ctx.clone();
-                                Box::pin(transition_tx_rejected_sm(ctx, dbtx, old_state, error))
-                            }
-                        },
-                    ),
-                    SmStateTransition::new(
-                        await_tx_accepted_sm(transaction, ctx.api.clone()),
-                        {
-                            let ctx = ctx.clone();
-                            move |dbtx, (), old_state| {
-                                let ctx = ctx.clone();
-                                Box::pin(transition_tx_accepted_sm(ctx, dbtx, old_state))
-                            }
-                        },
-                    ),
-                ]
-            }
-            TxSubmissionSMState::Accepted | TxSubmissionSMState::Rejected(..) => vec![],
-        }
+        let TxSubmissionSMState::Created = &self.state;
+        let transaction = self.common.transaction.clone();
+        vec![
+            SmStateTransition::new(
+                await_tx_rejected_sm(transaction.clone(), ctx.api.clone()),
+                {
+                    let ctx = ctx.clone();
+                    move |dbtx, error, old_state| {
+                        let ctx = ctx.clone();
+                        Box::pin(transition_tx_rejected_sm(ctx, dbtx, old_state, error))
+                    }
+                },
+            ),
+            SmStateTransition::new(
+                await_tx_accepted_sm(transaction, ctx.api.clone()),
+                {
+                    let ctx = ctx.clone();
+                    move |dbtx, (), old_state| {
+                        let ctx = ctx.clone();
+                        Box::pin(transition_tx_accepted_sm(ctx, dbtx, old_state))
+                    }
+                },
+            ),
+        ]
     }
 }
 
@@ -132,25 +105,25 @@ async fn transition_tx_rejected_sm(
     dbtx: &WriteTxRef<'_>,
     old_state: TxSubmissionStateMachine,
     error: String,
-) -> TxSubmissionStateMachine {
+) -> Option<TxSubmissionStateMachine> {
     picomint_eventlog::log_event(
         dbtx,
         ctx.log_event_added_tx.clone(),
         Some(old_state.common.operation_id),
         TxRejectedEvent {
             txid: old_state.common.transaction.tx_hash(),
-            error: error.clone(),
+            error,
         },
     );
 
-    old_state.update(TxSubmissionSMState::Rejected(error))
+    None
 }
 
 async fn transition_tx_accepted_sm(
     ctx: TxSubmissionSmContext,
     dbtx: &WriteTxRef<'_>,
     old_state: TxSubmissionStateMachine,
-) -> TxSubmissionStateMachine {
+) -> Option<TxSubmissionStateMachine> {
     picomint_eventlog::log_event(
         dbtx,
         ctx.log_event_added_tx.clone(),
@@ -160,5 +133,5 @@ async fn transition_tx_accepted_sm(
         },
     );
 
-    old_state.update(TxSubmissionSMState::Accepted)
+    None
 }

@@ -23,15 +23,6 @@ pub struct ReceiveStateMachine {
 
 picomint_redb::consensus_value!(ReceiveStateMachine);
 
-impl ReceiveStateMachine {
-    pub fn update(&self, state: ReceiveSMState) -> Self {
-        Self {
-            common: self.common.clone(),
-            state,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveSMCommon {
     pub operation_id: OperationId,
@@ -43,42 +34,28 @@ pub struct ReceiveSMCommon {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum ReceiveSMState {
     Pending,
-    Claiming(Vec<OutPoint>),
-    Expired,
 }
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
-/// State machine that waits on the receipt of a Lightning payment.
-///
-/// ```mermaid
-/// graph LR
-/// classDef virtual fill:#fff,stroke-dasharray: 5 5
-///
-///     Pending -- incoming contract is confirmed --> Claiming
-///     Pending -- decryption contract expires --> Expired
-/// ```
+/// State machine that waits on the receipt of a Lightning payment. Terminates
+/// when the incoming contract is either claimed or expires.
 impl StateMachine for ReceiveStateMachine {
     const TABLE_NAME: &'static str = "receive-sm";
 
     type Context = LightningClientContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        match &self.state {
-            ReceiveSMState::Pending => {
-                let ctx_clone = ctx.clone();
-                let contract = self.common.contract.clone();
-                vec![SmStateTransition::new(
-                    await_incoming_contract_sm(contract, ctx_clone.clone()),
-                    move |dbtx, outpoint, old_state| {
-                        let ctx = ctx_clone.clone();
-                        Box::pin(transition_incoming_contract_sm(
-                            ctx, dbtx, old_state, outpoint,
-                        ))
-                    },
-                )]
-            }
-            ReceiveSMState::Claiming(..) | ReceiveSMState::Expired => vec![],
-        }
+        let ctx_clone = ctx.clone();
+        let contract = self.common.contract.clone();
+        vec![SmStateTransition::new(
+            await_incoming_contract_sm(contract, ctx_clone.clone()),
+            move |dbtx, outpoint, old_state| {
+                let ctx = ctx_clone.clone();
+                Box::pin(transition_incoming_contract_sm(
+                    ctx, dbtx, old_state, outpoint,
+                ))
+            },
+        )]
     }
 }
 
@@ -98,10 +75,8 @@ async fn transition_incoming_contract_sm(
     dbtx: &WriteTxRef<'_>,
     old_state: ReceiveStateMachine,
     outpoint: Option<OutPoint>,
-) -> ReceiveStateMachine {
-    let Some(outpoint) = outpoint else {
-        return old_state.update(ReceiveSMState::Expired);
-    };
+) -> Option<ReceiveStateMachine> {
+    let outpoint = outpoint?;
 
     let client_input = ClientInput::<LightningInput> {
         input: LightningInput::Incoming(outpoint, old_state.common.agg_decryption_key),
@@ -109,8 +84,7 @@ async fn transition_incoming_contract_sm(
         keys: vec![old_state.common.claim_keypair],
     };
 
-    let change_range = ctx
-        .client_ctx
+    ctx.client_ctx
         .claim_inputs(
             dbtx,
             ClientInputBundle::new(vec![client_input]),
@@ -129,5 +103,5 @@ async fn transition_incoming_contract_sm(
         )
         .await;
 
-    old_state.update(ReceiveSMState::Claiming(change_range.into_iter().collect()))
+    None
 }

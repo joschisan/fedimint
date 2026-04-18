@@ -15,15 +15,6 @@ pub struct ReceiveStateMachine {
 
 picomint_redb::consensus_value!(ReceiveStateMachine);
 
-impl ReceiveStateMachine {
-    pub fn update(&self, state: ReceiveSMState) -> Self {
-        Self {
-            common: self.common.clone(),
-            state,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveSMCommon {
     pub operation_id: OperationId,
@@ -33,8 +24,6 @@ pub struct ReceiveSMCommon {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum ReceiveSMState {
     Pending,
-    Success,
-    Rejected(String),
 }
 
 impl StateMachine for ReceiveStateMachine {
@@ -43,27 +32,22 @@ impl StateMachine for ReceiveStateMachine {
     type Context = MintSmContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        match &self.state {
-            ReceiveSMState::Pending => {
-                let ctx_trigger = ctx.clone();
-                let ctx_transition = ctx.clone();
-                let operation_id = self.common.operation_id;
-                let txid = self.common.txid;
-                vec![SmStateTransition::new(
-                    async move {
-                        ctx_trigger
-                            .client_ctx
-                            .await_tx_accepted(operation_id, txid)
-                            .await
-                    },
-                    move |dbtx, result, old_state| {
-                        let ctx = ctx_transition.clone();
-                        Box::pin(transition_tx_outcome_sm(ctx, dbtx, result, old_state))
-                    },
-                )]
-            }
-            ReceiveSMState::Success | ReceiveSMState::Rejected(..) => vec![],
-        }
+        let ctx_trigger = ctx.clone();
+        let ctx_transition = ctx.clone();
+        let operation_id = self.common.operation_id;
+        let txid = self.common.txid;
+        vec![SmStateTransition::new(
+            async move {
+                ctx_trigger
+                    .client_ctx
+                    .await_tx_accepted(operation_id, txid)
+                    .await
+            },
+            move |dbtx, result, old_state| {
+                let ctx = ctx_transition.clone();
+                Box::pin(transition_tx_outcome_sm(ctx, dbtx, result, old_state))
+            },
+        )]
     }
 }
 
@@ -72,10 +56,10 @@ async fn transition_tx_outcome_sm(
     dbtx: &WriteTxRef<'_>,
     result: Result<(), String>,
     old_state: ReceiveStateMachine,
-) -> ReceiveStateMachine {
-    let (status, new_state) = match result {
-        Ok(()) => (ReceivePaymentStatus::Success, ReceiveSMState::Success),
-        Err(e) => (ReceivePaymentStatus::Rejected, ReceiveSMState::Rejected(e)),
+) -> Option<ReceiveStateMachine> {
+    let status = match result {
+        Ok(()) => ReceivePaymentStatus::Success,
+        Err(_) => ReceivePaymentStatus::Rejected,
     };
 
     ctx.client_ctx
@@ -86,5 +70,5 @@ async fn transition_tx_outcome_sm(
         )
         .await;
 
-    old_state.update(new_state)
+    None
 }
