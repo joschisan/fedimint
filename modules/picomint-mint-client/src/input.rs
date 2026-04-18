@@ -1,8 +1,8 @@
-use picomint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
+use picomint_client_module::executor::StateMachine;
 use picomint_client_module::transaction::{ClientInput, ClientInputBundle};
+use picomint_core::TransactionId;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::TransactionId;
 use picomint_mint_common::MintInput;
 use picomint_redb::WriteTxRef;
 
@@ -21,55 +21,41 @@ impl StateMachine for InputStateMachine {
     const TABLE_NAME: &'static str = "input-sm";
 
     type Context = MintSmContext;
+    type Outcome = Result<(), String>;
 
-    fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        let ctx = ctx.clone();
-        let operation_id = self.operation_id;
-        let txid = self.txid;
-        vec![SmStateTransition::new(
-            await_pending_sm(ctx.clone(), operation_id, txid),
-            move |dbtx, result, old_state| {
-                let ctx = ctx.clone();
-                Box::pin(transition_pending_sm(ctx, dbtx, result, old_state))
-            },
-        )]
-    }
-}
-
-async fn await_pending_sm(
-    ctx: MintSmContext,
-    operation_id: OperationId,
-    txid: TransactionId,
-) -> Result<(), String> {
-    ctx.client_ctx.await_tx_accepted(operation_id, txid).await
-}
-
-async fn transition_pending_sm(
-    ctx: MintSmContext,
-    dbtx: &WriteTxRef<'_>,
-    result: Result<(), String>,
-    old_state: InputStateMachine,
-) -> Option<InputStateMachine> {
-    if result.is_ok() {
-        return None;
+    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
+        ctx.client_ctx
+            .await_tx_accepted(self.operation_id, self.txid)
+            .await
     }
 
-    let inputs = old_state
-        .spendable_notes
-        .iter()
-        .map(|spendable_note| ClientInput::<MintInput> {
-            input: MintInput {
-                note: spendable_note.note(),
-            },
-            keys: vec![spendable_note.keypair],
-            amount: spendable_note.amount(),
-        })
-        .collect();
+    async fn transition(
+        &self,
+        ctx: &Self::Context,
+        dbtx: &WriteTxRef<'_>,
+        outcome: Self::Outcome,
+    ) -> Option<Self> {
+        if outcome.is_ok() {
+            return None;
+        }
 
-    ctx.client_ctx
-        .claim_inputs(dbtx, ClientInputBundle::new(inputs), old_state.operation_id)
-        .await
-        .expect("Cannot claim input, additional funding needed");
+        let inputs = self
+            .spendable_notes
+            .iter()
+            .map(|spendable_note| ClientInput::<MintInput> {
+                input: MintInput {
+                    note: spendable_note.note(),
+                },
+                keys: vec![spendable_note.keypair],
+                amount: spendable_note.amount(),
+            })
+            .collect();
 
-    None
+        ctx.client_ctx
+            .claim_inputs(dbtx, ClientInputBundle::new(inputs), self.operation_id)
+            .await
+            .expect("Cannot claim input, additional funding needed");
+
+        None
+    }
 }

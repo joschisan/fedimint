@@ -1,14 +1,14 @@
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
-use picomint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
+use picomint_client_module::executor::StateMachine;
 use picomint_client_module::transaction::{ClientInput, ClientInputBundle};
+use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_encoding::{Decodable, Encodable};
 use picomint_core::util::SafeUrl;
-use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::{OutPoint, secp256k1};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_ln_common::contracts::OutgoingContract;
 use picomint_ln_common::{LightningInput, OutgoingWitness};
 use picomint_logging::LOG_CLIENT_MODULE_LN;
@@ -54,76 +54,71 @@ pub enum SendSMState {
     Funded,
 }
 
-#[cfg_attr(doc, aquamarine::aquamarine)]
+/// Outcome produced by [`SendStateMachine::trigger`]. Which variant is
+/// yielded depends on the current [`SendSMState`]:
+/// - `Funding`  → [`SendOutcome::FundingResult`]
+/// - `Funded`   → [`SendOutcome::GatewayResponse`] or [`SendOutcome::Preimage`],
+///   whichever of the two races finishes first.
+pub enum SendOutcome {
+    FundingResult(Result<(), String>),
+    GatewayResponse(Result<[u8; 32], Signature>),
+    Preimage(Option<[u8; 32]>),
+}
+
 /// State machine that requests the lightning gateway to pay an invoice on
 /// behalf of a federation client.
-
 impl StateMachine for SendStateMachine {
     const TABLE_NAME: &'static str = "send-sm";
 
     type Context = LightningClientContext;
+    type Outcome = SendOutcome;
 
-    fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
+    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
         match &self.state {
-            SendSMState::Funding => {
-                let ctx_clone = ctx.clone();
-                let operation_id = self.common.operation_id;
-                let txid = self.common.outpoint.txid;
-                vec![SmStateTransition::new(
-                    async move {
-                        ctx_clone
-                            .client_ctx
-                            .await_tx_accepted(operation_id, txid)
-                            .await
-                    },
-                    |_dbtx: &WriteTxRef<'_>,
-                     result: Result<(), String>,
-                     old_state: SendStateMachine| {
-                        Box::pin(async move {
-                            match result {
-                                Ok(()) => Some(old_state.update(SendSMState::Funded)),
-                                Err(_) => None,
-                            }
-                        })
-                    },
-                )]
-            }
+            SendSMState::Funding => SendOutcome::FundingResult(
+                ctx.client_ctx
+                    .await_tx_accepted(self.common.operation_id, self.common.outpoint.txid)
+                    .await,
+            ),
             SendSMState::Funded => {
-                let c_pay = ctx.clone();
-                let c_preimage = ctx.clone();
-                let outpoint = self.common.outpoint;
-                let contract = self.common.contract.clone();
                 let gateway_api = self.common.gateway_api.clone().unwrap();
                 let invoice = self.common.invoice.clone().unwrap();
-                let refund_keypair = self.common.refund_keypair;
-                let fed_id = ctx.federation_id;
+                tokio::select! {
+                    response = gateway_send_payment_sm(
+                        gateway_api,
+                        ctx.federation_id,
+                        self.common.outpoint,
+                        self.common.contract.clone(),
+                        invoice,
+                        self.common.refund_keypair,
+                        ctx.clone(),
+                    ) => SendOutcome::GatewayResponse(response),
+                    preimage = await_preimage_sm(
+                        self.common.outpoint,
+                        self.common.contract.clone(),
+                        ctx.clone(),
+                    ) => SendOutcome::Preimage(preimage),
+                }
+            }
+        }
+    }
 
-                vec![
-                    SmStateTransition::new(
-                        gateway_send_payment_sm(
-                            gateway_api,
-                            fed_id,
-                            outpoint,
-                            contract.clone(),
-                            invoice,
-                            refund_keypair,
-                            c_pay.clone(),
-                        ),
-                        move |dbtx, response, old_state| {
-                            let ctx = c_pay.clone();
-                            Box::pin(transition_gateway_send_payment_sm(
-                                ctx, dbtx, response, old_state,
-                            ))
-                        },
-                    ),
-                    SmStateTransition::new(
-                        await_preimage_sm(outpoint, contract.clone(), c_preimage.clone()),
-                        move |dbtx, preimage, old_state| {
-                            let ctx = c_preimage.clone();
-                            Box::pin(transition_preimage_sm(ctx, dbtx, old_state, preimage))
-                        },
-                    ),
-                ]
+    async fn transition(
+        &self,
+        ctx: &Self::Context,
+        dbtx: &WriteTxRef<'_>,
+        outcome: Self::Outcome,
+    ) -> Option<Self> {
+        match outcome {
+            SendOutcome::FundingResult(Ok(())) => Some(self.update(SendSMState::Funded)),
+            SendOutcome::FundingResult(Err(_)) => None,
+            SendOutcome::GatewayResponse(response) => {
+                transition_gateway_send_payment_sm(ctx, dbtx, self, response).await;
+                None
+            }
+            SendOutcome::Preimage(preimage) => {
+                transition_preimage_sm(ctx, dbtx, self, preimage).await;
+                None
             }
         }
     }
@@ -167,11 +162,11 @@ async fn gateway_send_payment_sm(
 }
 
 async fn transition_gateway_send_payment_sm(
-    ctx: LightningClientContext,
+    ctx: &LightningClientContext,
     dbtx: &WriteTxRef<'_>,
+    old_state: &SendStateMachine,
     gateway_response: Result<[u8; 32], Signature>,
-    old_state: SendStateMachine,
-) -> Option<SendStateMachine> {
+) {
     match gateway_response {
         Ok(preimage) => {
             ctx.client_ctx
@@ -213,8 +208,6 @@ async fn transition_gateway_send_payment_sm(
                 .await;
         }
     }
-
-    None
 }
 
 #[instrument(target = LOG_CLIENT_MODULE_LN, skip(ctx))]
@@ -239,11 +232,11 @@ async fn await_preimage_sm(
 }
 
 async fn transition_preimage_sm(
-    ctx: LightningClientContext,
+    ctx: &LightningClientContext,
     dbtx: &WriteTxRef<'_>,
-    old_state: SendStateMachine,
+    old_state: &SendStateMachine,
     preimage: Option<[u8; 32]>,
-) -> Option<SendStateMachine> {
+) {
     if let Some(preimage) = preimage {
         ctx.client_ctx
             .log_event(
@@ -253,7 +246,7 @@ async fn transition_preimage_sm(
             )
             .await;
 
-        return None;
+        return;
     }
 
     let client_input = ClientInput::<LightningInput> {
@@ -281,6 +274,4 @@ async fn transition_preimage_sm(
             },
         )
         .await;
-
-    None
 }

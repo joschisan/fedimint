@@ -7,20 +7,16 @@
 //! per-state-machine table keyed by a random [`SmId`] and drives
 //! transitions in a typed reactor loop.
 //!
-//! Every state in the enum is by construction live: `transitions()` must
-//! always return a non-empty list. Terminal states aren't type-representable
-//! — a transition that "finishes" the SM returns `None`, and the executor
-//! then removes the row. Inactive state history is not retained.
+//! Each driver iteration: wait for [`StateMachine::trigger`] to resolve,
+//! then apply [`StateMachine::transition`] atomically in a DB tx. A
+//! transition returning `None` terminates the SM — the executor removes
+//! the row and the driver exits. Inactive state history is not retained.
 
-use std::any::Any;
 use std::fmt::Debug;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
-use futures::future::select_all;
 use picomint_core::task::TaskGroup;
-use picomint_core::util::BoxFuture;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, WriteTxRef, redb};
 
@@ -40,12 +36,11 @@ impl SmId {
 
 /// A persistent state machine driven by a [`ModuleExecutor`].
 ///
-/// Each state returns a list of possible transitions. The executor races
-/// all trigger futures; when one resolves it atomically applies the
-/// matching transition in a DB transaction and writes the new state.
-///
-/// Returning an empty `Vec` from `transitions` marks the state terminal:
-/// the executor removes it from the DB and stops polling.
+/// States with multiple concurrent reasons-to-transition fold them into
+/// [`Self::Outcome`] via `tokio::select!` inside [`Self::trigger`]. The
+/// owning [`ModuleExecutor`] hands the resolved outcome to
+/// [`Self::transition`], which runs atomically in a write tx and either
+/// produces the next state or `None` to terminate.
 pub trait StateMachine:
     Debug + Clone + for<'a> redb::Value<SelfType<'a> = Self> + Send + Sync + 'static
 {
@@ -54,57 +49,38 @@ pub trait StateMachine:
     /// among state machine types sharing a module DB namespace.
     const TABLE_NAME: &'static str;
 
-    /// Per-module context handed to every transition.
+    /// Per-module context handed to `trigger` and `transition`.
     type Context: Clone + Send + Sync + 'static;
 
-    /// Possible transitions out of this state.
-    fn transitions(&self, ctx: &Self::Context) -> Vec<StateTransition<Self>>;
+    /// Value produced by [`Self::trigger`] and consumed by
+    /// [`Self::transition`]. For SMs with multi-variant state this is
+    /// usually a sum type.
+    type Outcome: Send + 'static;
+
+    /// Future whose resolution drives the next transition. Awaited by the
+    /// driver with both `self` and `ctx` still live, so impls can borrow.
+    ///
+    /// Written as explicit RPITIT (not `async fn`) to require the returned
+    /// future is `Send` — the executor spawns the drive loop on the
+    /// multi-threaded runtime. Impls may still use `async fn`; the compiler
+    /// proves the resulting future matches the `Send` bound.
+    fn trigger<'a>(
+        &'a self,
+        ctx: &'a Self::Context,
+    ) -> impl Future<Output = Self::Outcome> + Send + 'a;
+
+    /// Apply `outcome` atomically inside `dbtx`, producing the next state.
+    /// `None` terminates the state machine.
+    fn transition<'a>(
+        &'a self,
+        ctx: &'a Self::Context,
+        dbtx: &'a WriteTxRef<'_>,
+        outcome: Self::Outcome,
+    ) -> impl Future<Output = Option<Self>> + Send + 'a;
 }
 
 fn table<S: StateMachine>() -> picomint_redb::NativeTableDef<SmId, S> {
     picomint_redb::NativeTableDef::new(S::TABLE_NAME)
-}
-
-/// Type-erased trigger value. The concrete type is captured inside the
-/// closure stored on [`StateTransition::transition`] and recovered via
-/// downcast; retries of the transition body (write conflicts) clone the
-/// value from the [`Arc`].
-pub type ErasedValue = Arc<dyn Any + Send + Sync>;
-
-pub type TriggerFuture = Pin<Box<dyn Future<Output = ErasedValue> + 'static + Send>>;
-
-pub type TransitionFn<S> = Arc<
-    dyn for<'a> Fn(&'a WriteTxRef<'_>, ErasedValue, S) -> BoxFuture<'a, Option<S>> + Send + Sync,
->;
-
-pub struct StateTransition<S> {
-    pub trigger: TriggerFuture,
-    pub transition: TransitionFn<S>,
-}
-
-impl<S: StateMachine> StateTransition<S> {
-    pub fn new<V, Trigger, F>(trigger: Trigger, transition: F) -> Self
-    where
-        V: Clone + Send + Sync + 'static,
-        Trigger: Future<Output = V> + Send + 'static,
-        F: for<'a> Fn(&'a WriteTxRef<'_>, V, S) -> BoxFuture<'a, Option<S>>
-            + Send
-            + Sync
-            + Clone
-            + 'static,
-    {
-        Self {
-            trigger: Box::pin(async move { Arc::new(trigger.await) as ErasedValue }),
-            transition: Arc::new(move |dbtx, val, state| {
-                let transition = transition.clone();
-                let v: V = val
-                    .downcast_ref::<V>()
-                    .expect("transition value type mismatch")
-                    .clone();
-                Box::pin(async move { transition(dbtx, v, state).await })
-            }),
-        }
-    }
 }
 
 // ---- Executor --------------------------------------------------------------
@@ -204,26 +180,19 @@ impl<S: StateMachine> Inner<S> {
         tg.spawn_cancellable("sm-drive", async move { self.drive(id, state).await });
     }
 
-    /// Drive one state machine until a transition returns `None`. Each
-    /// iteration: race triggers, apply the winning transition atomically,
-    /// write the new state (or delete the row if the transition terminates).
+    /// Drive one state machine until `transition` returns `None`. Each
+    /// iteration: await the trigger, then apply the transition atomically
+    /// and write (or delete) the state row.
     async fn drive(self: Arc<Self>, id: SmId, mut state: S) {
         loop {
-            let transitions = state.transitions(&self.context);
-            assert!(
-                !transitions.is_empty(),
-                "StateMachine::transitions returned empty Vec — every live state must have transitions",
-            );
-
-            let (outcome, transition) = select_all(transitions.into_iter().map(|t| {
-                Box::pin(async move { (t.trigger.await, t.transition) })
-                    as BoxFuture<'_, (ErasedValue, TransitionFn<S>)>
-            }))
-            .await
-            .0;
+            let outcome = state.trigger(&self.context).await;
 
             let tx = self.db.begin_write().await;
-            match transition(&tx.as_ref(), outcome, state.clone()).await {
+
+            match state
+                .transition(&self.context, &tx.as_ref(), outcome)
+                .await
+            {
                 Some(new_state) => {
                     tx.insert(&table::<S>(), &id, &new_state);
                     tx.commit().await;

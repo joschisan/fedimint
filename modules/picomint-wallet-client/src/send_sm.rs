@@ -1,4 +1,4 @@
-use picomint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
+use picomint_client_module::executor::StateMachine;
 use picomint_core::OutPoint;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
@@ -19,7 +19,7 @@ pub struct SendStateMachine {
 picomint_redb::consensus_value!(SendStateMachine);
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-enum AwaitFundingResult {
+pub enum AwaitFundingResult {
     Success(bitcoin::Txid),
     Aborted(String),
     Failure,
@@ -29,58 +29,42 @@ impl StateMachine for SendStateMachine {
     const TABLE_NAME: &'static str = "send-sm";
 
     type Context = WalletClientContext;
+    type Outcome = AwaitFundingResult;
 
-    fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        let ctx = ctx.clone();
-        let operation_id = self.operation_id;
-        let outpoint = self.outpoint;
-        vec![SmStateTransition::new(
-            await_funding_sm(ctx.clone(), operation_id, outpoint),
-            move |dbtx, result, old_state| {
-                let ctx = ctx.clone();
-                Box::pin(transition_funding_sm(ctx, dbtx, result, old_state))
-            },
-        )]
-    }
-}
-
-async fn await_funding_sm(
-    ctx: WalletClientContext,
-    operation_id: OperationId,
-    outpoint: OutPoint,
-) -> AwaitFundingResult {
-    if let Err(error) = ctx
-        .client_ctx
-        .await_tx_accepted(operation_id, outpoint.txid)
-        .await
-    {
-        return AwaitFundingResult::Aborted(error);
-    }
-
-    match ctx.client_ctx.module_api().tx_id(outpoint).await {
-        Some(txid) => AwaitFundingResult::Success(txid),
-        None => AwaitFundingResult::Failure,
-    }
-}
-
-async fn transition_funding_sm(
-    ctx: WalletClientContext,
-    dbtx: &WriteTxRef<'_>,
-    result: AwaitFundingResult,
-    old_state: SendStateMachine,
-) -> Option<SendStateMachine> {
-    match result {
-        AwaitFundingResult::Success(txid) => {
-            ctx.client_ctx
-                .log_event(dbtx, old_state.operation_id, SendConfirmEvent { txid })
-                .await;
+    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
+        if let Err(error) = ctx
+            .client_ctx
+            .await_tx_accepted(self.operation_id, self.outpoint.txid)
+            .await
+        {
+            return AwaitFundingResult::Aborted(error);
         }
-        AwaitFundingResult::Aborted(_) | AwaitFundingResult::Failure => {
-            ctx.client_ctx
-                .log_event(dbtx, old_state.operation_id, SendFailureEvent)
-                .await;
+
+        match ctx.client_ctx.module_api().tx_id(self.outpoint).await {
+            Some(txid) => AwaitFundingResult::Success(txid),
+            None => AwaitFundingResult::Failure,
         }
     }
 
-    None
+    async fn transition(
+        &self,
+        ctx: &Self::Context,
+        dbtx: &WriteTxRef<'_>,
+        outcome: Self::Outcome,
+    ) -> Option<Self> {
+        match outcome {
+            AwaitFundingResult::Success(txid) => {
+                ctx.client_ctx
+                    .log_event(dbtx, self.operation_id, SendConfirmEvent { txid })
+                    .await;
+            }
+            AwaitFundingResult::Aborted(_) | AwaitFundingResult::Failure => {
+                ctx.client_ctx
+                    .log_event(dbtx, self.operation_id, SendFailureEvent)
+                    .await;
+            }
+        }
+
+        None
+    }
 }

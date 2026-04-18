@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 
 use anyhow::ensure;
-use picomint_client_module::executor::{StateMachine, StateTransition as SmStateTransition};
+use picomint_client_module::executor::StateMachine;
 use picomint_client_module::module::OutPointRange;
+use picomint_core::PeerId;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::PeerId;
-use picomint_mint_common::{verify_note, Denomination};
+use picomint_mint_common::{Denomination, verify_note};
 use picomint_redb::WriteTxRef;
-use tbs::{aggregate_signature_shares, BlindedSignatureShare, PublicKeyShare};
+use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use crate::api::MintV2ModuleApi;
 use crate::client_db::NOTE;
@@ -28,99 +28,78 @@ impl StateMachine for MintOutputStateMachine {
     const TABLE_NAME: &'static str = "output-sm";
 
     type Context = MintSmContext;
+    type Outcome = Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>;
 
-    fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        let ctx = ctx.clone();
-        let operation_id = self.operation_id;
-        let range = self.range;
-        let issuance_requests = self.issuance_requests.clone();
-        vec![SmStateTransition::new(
-            await_signature_shares_sm(ctx.clone(), operation_id, range, issuance_requests),
-            move |dbtx, shares, old_state| {
-                let ctx = ctx.clone();
-                let balance_update_sender = ctx.balance_update_sender.clone();
-                dbtx.on_commit(move || {
-                    balance_update_sender.send_replace(());
-                });
-                Box::pin(transition_outcome_ready_sm(ctx, dbtx, shares, old_state))
-            },
-        )]
-    }
-}
-
-async fn await_signature_shares_sm(
-    ctx: MintSmContext,
-    operation_id: OperationId,
-    range: Option<OutPointRange>,
-    issuance_requests: Vec<NoteIssuanceRequest>,
-) -> Result<std::collections::BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String> {
-    let tbs_pks = ctx.tbs_pks.clone();
-    if let Some(range) = range {
-        ctx.client_ctx
-            .await_tx_accepted(operation_id, range.txid)
-            .await?;
-        Ok(ctx
-            .client_ctx
-            .module_api()
-            .fetch_signature_shares(range, issuance_requests, tbs_pks)
-            .await)
-    } else {
-        Ok(ctx
-            .client_ctx
-            .module_api()
-            .fetch_signature_shares_recovery(issuance_requests, tbs_pks)
-            .await)
-    }
-}
-
-async fn transition_outcome_ready_sm(
-    ctx: MintSmContext,
-    dbtx: &WriteTxRef<'_>,
-    signature_shares: Result<
-        std::collections::BTreeMap<PeerId, Vec<BlindedSignatureShare>>,
-        String,
-    >,
-    old_state: MintOutputStateMachine,
-) -> Option<MintOutputStateMachine> {
-    let Ok(signature_shares) = signature_shares else {
-        ctx.client_ctx
-            .log_event(dbtx, old_state.operation_id, OutputFailureEvent)
-            .await;
-        return None;
-    };
-
-    for (i, request) in old_state.issuance_requests.iter().enumerate() {
-        let agg_blind_signature = aggregate_signature_shares(
-            &signature_shares
-                .iter()
-                .map(|(peer, shares)| (peer.to_usize() as u64, shares[i]))
-                .collect(),
-        );
-
-        let spendable_note = request.finalize(agg_blind_signature);
-
-        let pk = *ctx
-            .tbs_agg_pks
-            .get(&request.denomination)
-            .expect("No aggregated pk found for denomination");
-
-        if !verify_note(spendable_note.note(), pk) {
+    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
+        let tbs_pks = ctx.tbs_pks.clone();
+        let shares = if let Some(range) = self.range {
             ctx.client_ctx
-                .log_event(dbtx, old_state.operation_id, OutputFailureEvent)
+                .await_tx_accepted(self.operation_id, range.txid)
+                .await?;
+            ctx.client_ctx
+                .module_api()
+                .fetch_signature_shares(range, self.issuance_requests.clone(), tbs_pks)
+                .await
+        } else {
+            ctx.client_ctx
+                .module_api()
+                .fetch_signature_shares_recovery(self.issuance_requests.clone(), tbs_pks)
+                .await
+        };
+        Ok(shares)
+    }
+
+    async fn transition(
+        &self,
+        ctx: &Self::Context,
+        dbtx: &WriteTxRef<'_>,
+        outcome: Self::Outcome,
+    ) -> Option<Self> {
+        let balance_update_sender = ctx.balance_update_sender.clone();
+        dbtx.on_commit(move || {
+            balance_update_sender.send_replace(());
+        });
+
+        let Ok(signature_shares) = outcome else {
+            ctx.client_ctx
+                .log_event(dbtx, self.operation_id, OutputFailureEvent)
                 .await;
             return None;
+        };
+
+        for (i, request) in self.issuance_requests.iter().enumerate() {
+            let agg_blind_signature = aggregate_signature_shares(
+                &signature_shares
+                    .iter()
+                    .map(|(peer, shares)| (peer.to_usize() as u64, shares[i]))
+                    .collect(),
+            );
+
+            let spendable_note = request.finalize(agg_blind_signature);
+
+            let pk = *ctx
+                .tbs_agg_pks
+                .get(&request.denomination)
+                .expect("No aggregated pk found for denomination");
+
+            if !verify_note(spendable_note.note(), pk) {
+                ctx.client_ctx
+                    .log_event(dbtx, self.operation_id, OutputFailureEvent)
+                    .await;
+                return None;
+            }
+
+            assert!(dbtx.insert(&NOTE, &spendable_note, &()).is_none());
         }
 
-        assert!(dbtx.insert(&NOTE, &spendable_note, &()).is_none());
-    }
+        if let Some(range) = self.range {
+            ctx.client_ctx
+                .log_event(dbtx, self.operation_id, OutputFinalEvent { range })
+                .await;
+        }
 
-    if let Some(range) = old_state.range {
-        ctx.client_ctx
-            .log_event(dbtx, old_state.operation_id, OutputFinalEvent { range })
-            .await;
+        None
     }
-
-    None
 }
 
 pub fn verify_blind_shares(
