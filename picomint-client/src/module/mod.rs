@@ -45,8 +45,6 @@ pub type SpawnSms = Box<
         + Sync,
 >;
 
-pub mod recovery;
-
 /// A client context for a module `M`.
 ///
 /// Client modules can interact with the whole client through this struct.

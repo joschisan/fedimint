@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::bail;
@@ -8,7 +7,6 @@ use crate::api::{ApiScope, FederationApi};
 use picomint_core::config::ConsensusConfig;
 use crate::{Endpoint, download_from_invite_code};
 use crate::executor::ModuleExecutor;
-use crate::module::recovery::RecoveryProgress;
 use crate::module::LateClient;
 use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use crate::transaction::TxSubmissionSmContext;
@@ -24,15 +22,11 @@ use picomint_logging::LOG_CLIENT;
 use crate::mint::MintClientInit;
 use picomint_redb::Database;
 use crate::wallet::WalletClientInit;
-use tokio::sync::watch;
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 use super::handle::ClientHandle;
 use super::{Client, LnFlavor};
-use crate::db::{
-    self, CLIENT_CONFIG, CLIENT_INIT_STATE, CLIENT_MODULE_RECOVERY, ClientModuleRecovery,
-    ClientModuleRecoveryState, InitMode, InitState,
-};
+use crate::db::CLIENT_CONFIG;
 
 /// The type of root secret hashing
 ///
@@ -139,7 +133,6 @@ impl ClientBuilder {
         db_no_decoders: Database,
         pre_root_secret: DerivableSecret,
         config: ConsensusConfig,
-        init_mode: InitMode,
     ) -> anyhow::Result<ClientHandle> {
         if Client::is_initialized(&db_no_decoders).await {
             bail!("Client database already initialized")
@@ -150,10 +143,6 @@ impl ClientBuilder {
             let dbtx = db_no_decoders.begin_write().await;
             let tx = dbtx.as_ref();
             tx.insert(&CLIENT_CONFIG, &(), &config);
-
-            let init_state = InitState::Pending(init_mode);
-            tx.insert(&CLIENT_INIT_STATE, &(), &init_state);
-
             dbtx.commit().await;
         }
 
@@ -257,32 +246,9 @@ impl ClientBuilder {
 
         let task_group = TaskGroup::new();
 
-        let init_state = Self::load_init_state(&db).await;
-
         let final_client: LateClient = Arc::new(std::sync::OnceLock::new());
 
         let root_secret = Self::federation_root_secret(&pre_root_secret, &config);
-
-        let mut module_recoveries: BTreeMap<
-            ModuleKind,
-            Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
-        > = BTreeMap::new();
-        let mut module_recovery_progress_receivers: BTreeMap<
-            ModuleKind,
-            watch::Receiver<RecoveryProgress>,
-        > = BTreeMap::new();
-
-        if init_state.does_require_recovery() {
-            schedule_mint_recovery(
-                &self.mint_init,
-                &db,
-                &api,
-                &root_secret,
-                &mut module_recoveries,
-                &mut module_recovery_progress_receivers,
-            )
-            .await;
-        }
 
         let mint_context = crate::module::ClientContext::new(
             final_client.clone(),
@@ -374,20 +340,6 @@ impl ClientBuilder {
             }
         };
 
-        if init_state.is_pending() && module_recoveries.is_empty() {
-            let dbtx = db.begin_write().await;
-            dbtx.as_ref()
-                .insert(&CLIENT_INIT_STATE, &(), &init_state.into_complete());
-            dbtx.commit().await;
-        }
-
-        let recovery_receiver_init_val = module_recovery_progress_receivers
-            .iter()
-            .map(|(kind, rx)| (*kind, *rx.borrow()))
-            .collect::<BTreeMap<_, _>>();
-        let (client_recovery_progress_sender, client_recovery_progress_receiver) =
-            watch::channel(recovery_receiver_init_val);
-
         let tx_submission_executor = ModuleExecutor::new(
             db.clone(),
             TxSubmissionSmContext { api: api.clone() },
@@ -404,10 +356,9 @@ impl ClientBuilder {
             wallet,
             ln,
             tx_submission_executor,
-            api,
+            api: api.clone(),
             secp_ctx: Secp256k1::new(),
-            task_group,
-            client_recovery_progress_receiver,
+            task_group: task_group.clone(),
         });
 
         let client_iface = std::sync::Arc::<Client>::downgrade(&client_inner);
@@ -427,31 +378,7 @@ impl ClientBuilder {
         client_arc.wallet.start().await;
         client_arc.ln.start().await;
 
-        if !module_recoveries.is_empty() {
-            client_arc.spawn_module_recoveries_task(
-                client_recovery_progress_sender,
-                module_recoveries,
-                module_recovery_progress_receivers,
-            );
-        }
-
         Ok(client_arc)
-    }
-
-    async fn load_init_state(db: &Database) -> InitState {
-        db.begin_read()
-            .await
-            .as_ref()
-            .get(&CLIENT_INIT_STATE, &())
-            .unwrap_or_else(|| {
-                // could be turned in a hard error in the future, but for now
-                // no need to break backward compat.
-                warn!(
-                    target: LOG_CLIENT,
-                    "Client missing ClientRequiresRecovery: assuming complete"
-                );
-                db::InitState::Complete(db::InitModeComplete::Fresh)
-            })
     }
 
     /// Re-derive client's `root_secret` using the federation ID. This
@@ -465,78 +392,7 @@ impl ClientBuilder {
     }
 }
 
-async fn schedule_mint_recovery(
-    init: &crate::mint::MintClientInit,
-    db: &Database,
-    api: &FederationApi,
-    root_secret: &DerivableSecret,
-    module_recoveries: &mut BTreeMap<
-        ModuleKind,
-        Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
-    >,
-    module_recovery_progress_receivers: &mut BTreeMap<
-        ModuleKind,
-        watch::Receiver<RecoveryProgress>,
-    >,
-) {
-    let kind = ModuleKind::Mint;
-    let existing_recovery_state = db
-        .begin_read()
-        .await
-        .as_ref()
-        .get(&CLIENT_MODULE_RECOVERY, &ClientModuleRecovery { kind });
-
-    let progress = match existing_recovery_state {
-        Some(state) if state.is_done() => {
-            debug!(kind = %kind, "Mint recovery already complete");
-            return;
-        }
-        Some(state) => state.progress,
-        None => {
-            let progress = RecoveryProgress::none();
-            let dbtx = db.begin_write().await;
-            let tx = dbtx.as_ref();
-            tx.insert(
-                &CLIENT_MODULE_RECOVERY,
-                &ClientModuleRecovery { kind },
-                &ClientModuleRecoveryState { progress },
-            );
-            dbtx.commit().await;
-            progress
-        }
-    };
-
-    let (progress_tx, progress_rx) = tokio::sync::watch::channel(progress);
-    let module_db = db.isolate("mint".to_string());
-    let module_api = api.with_scope(ApiScope::Mint);
-    let init_clone = init.clone();
-    let api_clone = api.clone();
-    let module_root_secret = root_secret.derive_module_secret(kind);
-
-    let recover_fut = Box::pin(async move {
-        init_clone
-            .recover(
-                &module_db,
-                &api_clone,
-                &module_api,
-                &module_root_secret,
-                progress_tx,
-            )
-            .await
-            .inspect_err(|err| {
-                warn!(
-                    target: LOG_CLIENT,
-                    kind = %kind,
-                    err = %format_args!("{err:#}"), "Mint failed to recover"
-                );
-            })
-    });
-
-    module_recoveries.insert(kind, recover_fut);
-    module_recovery_progress_receivers.insert(kind, progress_rx);
-}
-
-/// An intermediate step before Client joining or recovering
+/// An intermediate step before Client joining.
 ///
 /// Meant to support showing user some initial information about the Federation
 /// before actually joining.
@@ -561,32 +417,7 @@ impl ClientPreview {
         let pre_root_secret = pre_root_secret.to_inner(self.config.calculate_federation_id());
 
         self.inner
-            .init(
-                self.connectors,
-                db_no_decoders,
-                pre_root_secret,
-                self.config,
-                InitMode::Fresh,
-            )
-            .await
-    }
-
-    /// Join a (possibly) previous joined Federation, with module recovery.
-    pub async fn recover(
-        self,
-        db_no_decoders: Database,
-        pre_root_secret: RootSecret,
-    ) -> anyhow::Result<ClientHandle> {
-        let pre_root_secret = pre_root_secret.to_inner(self.config.calculate_federation_id());
-
-        self.inner
-            .init(
-                self.connectors,
-                db_no_decoders,
-                pre_root_secret,
-                self.config,
-                InitMode::Recover,
-            )
+            .init(self.connectors, db_no_decoders, pre_root_secret, self.config)
             .await
     }
 }

@@ -27,11 +27,9 @@ use client_db::{RecoveryState, NOTE, RECEIVE_OPERATION, RECOVERY_STATE};
 pub use events::*;
 use futures::StreamExt;
 use crate::api::FederationApi;
-use crate::module::recovery::RecoveryProgress;
 use crate::module::ClientContext;
 use picomint_core::task::TaskGroup;
 use picomint_redb::Database;
-use tokio::sync::watch;
 use crate::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
@@ -104,7 +102,6 @@ impl MintClientInit {
         api: &FederationApi,
         module_api: &FederationApi,
         module_root_secret: &DerivableSecret,
-        progress_tx: watch::Sender<RecoveryProgress>,
     ) -> anyhow::Result<()> {
         let mut state = if let Some(state) = db.begin_read().await.get(&RECOVERY_STATE, &())
         {
@@ -227,12 +224,12 @@ impl MintClientInit {
 
             dbtx.commit().await;
 
-            let progress = RecoveryProgress {
-                complete: state.next_index.try_into().unwrap_or(u32::MAX),
-                total: state.total_items.try_into().unwrap_or(u32::MAX),
-            };
-            // Ignore send errors: nothing listening.
-            progress_tx.send(progress).ok();
+            tracing::info!(
+                target: picomint_logging::LOG_CLIENT,
+                next_index = state.next_index,
+                total_items = state.total_items,
+                "Mint recovery progress"
+            );
         }
     }
 

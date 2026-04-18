@@ -1,11 +1,9 @@
 use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
 use std::fmt::{self, Formatter};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
-use anyhow::{Context as _, bail};
+use anyhow::bail;
 use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1;
 use futures::{Stream, StreamExt as _};
@@ -15,7 +13,6 @@ use picomint_core::transaction::Transaction;
 use crate::Endpoint;
 use picomint_core::wire;
 use crate::executor::ModuleExecutor;
-use crate::module::recovery::RecoveryProgress;
 use crate::transaction::{TransactionBuilder, TxSubmissionStateMachine};
 use crate::{ClientModuleInstance, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
@@ -28,18 +25,14 @@ use picomint_core::{Amount, PeerId, TransactionId};
 use picomint_eventlog::{EventLogId, PersistedLogEntry};
 use crate::gw::GatewayClientModule;
 use crate::ln::LightningClientModule;
-use picomint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
+use picomint_logging::LOG_CLIENT_NET_API;
 use crate::mint::MintClientModule;
 use picomint_redb::{Database, WriteTxRef};
 use crate::wallet::WalletClientModule;
-use tokio::sync::watch;
-use tokio_stream::wrappers::WatchStream;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::ClientBuilder;
-use crate::db::{
-    CLIENT_CONFIG, CLIENT_MODULE_RECOVERY, ClientModuleRecovery, ClientModuleRecoveryState,
-};
+use crate::db::CLIENT_CONFIG;
 
 pub(crate) mod builder;
 pub(crate) mod handle;
@@ -103,10 +96,6 @@ pub struct Client {
     secp_ctx: Secp256k1<secp256k1::All>,
 
     task_group: TaskGroup,
-
-    /// Updates about client recovery progress
-    client_recovery_progress_receiver:
-        watch::Receiver<BTreeMap<ModuleKind, RecoveryProgress>>,
 }
 
 impl Client {
@@ -480,203 +469,6 @@ impl Client {
                 notified.await;
             }
         })
-    }
-
-    pub fn has_pending_recoveries(&self) -> bool {
-        !self
-            .client_recovery_progress_receiver
-            .borrow()
-            .iter()
-            .all(|(_id, progress)| progress.is_done())
-    }
-
-    /// Wait for all module recoveries to finish
-    ///
-    /// This will block until the recovery task is done with recoveries.
-    /// Returns success if all recovery tasks are complete (success case),
-    /// or an error if some modules could not complete the recovery at the time.
-    ///
-    /// A bit of a heavy approach.
-    pub async fn wait_for_all_recoveries(&self) -> anyhow::Result<()> {
-        let mut recovery_receiver = self.client_recovery_progress_receiver.clone();
-        recovery_receiver
-            .wait_for(|in_progress| {
-                in_progress
-                    .iter()
-                    .all(|(_id, progress)| progress.is_done())
-            })
-            .await
-            .context("Recovery task completed and update receiver disconnected, but some modules failed to recover")?;
-
-        Ok(())
-    }
-
-    /// Subscribe to recover progress for all the modules.
-    ///
-    /// This stream can contain duplicate progress for a module.
-    /// Don't use this stream for detecting completion of recovery.
-    pub fn subscribe_to_recovery_progress(
-        &self,
-    ) -> impl Stream<Item = (ModuleKind, RecoveryProgress)> + use<> {
-        WatchStream::new(self.client_recovery_progress_receiver.clone())
-            .flat_map(futures::stream::iter)
-    }
-
-    pub async fn wait_for_module_kind_recovery(
-        &self,
-        module_kind: ModuleKind,
-    ) -> anyhow::Result<()> {
-        let mut recovery_receiver = self.client_recovery_progress_receiver.clone();
-        recovery_receiver
-            .wait_for(|in_progress| {
-                !in_progress
-                    .iter()
-                    .filter(|(kind, _)| **kind == module_kind)
-                    .any(|(_, progress)| !progress.is_done())
-            })
-            .await
-            .context("Recovery task completed and update receiver disconnected, but the desired modules are still unavailable or failed to recover")?;
-
-        Ok(())
-    }
-
-    fn spawn_module_recoveries_task(
-        &self,
-        recovery_sender: watch::Sender<BTreeMap<ModuleKind, RecoveryProgress>>,
-        module_recoveries: BTreeMap<
-            ModuleKind,
-            Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
-        >,
-        module_recovery_progress_receivers: BTreeMap<
-            ModuleKind,
-            watch::Receiver<RecoveryProgress>,
-        >,
-    ) {
-        let db = self.db.clone();
-        let task_group = self.task_group.clone();
-        self.task_group
-            .spawn("module recoveries", |_task_handle| async move {
-                Self::run_module_recoveries_task(
-                    db,
-                    recovery_sender,
-                    module_recoveries,
-                    module_recovery_progress_receivers,
-                    task_group,
-                )
-                .await;
-            });
-    }
-
-    async fn run_module_recoveries_task(
-        db: Database,
-        recovery_sender: watch::Sender<BTreeMap<ModuleKind, RecoveryProgress>>,
-        module_recoveries: BTreeMap<
-            ModuleKind,
-            Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
-        >,
-        module_recovery_progress_receivers: BTreeMap<
-            ModuleKind,
-            watch::Receiver<RecoveryProgress>,
-        >,
-        task_group: TaskGroup,
-    ) {
-        debug!(target: LOG_CLIENT_RECOVERY, num_modules=%module_recovery_progress_receivers.len(), "Starting module recoveries");
-
-        // Recoveries run as independent tasks and report completion via this
-        // channel. Running them inside the select below would let them hold a
-        // write transaction while yielding, deadlocking the progress handler
-        // that needs its own write transaction.
-        let (completion_tx, completion_rx) =
-            tokio::sync::mpsc::unbounded_channel::<ModuleKind>();
-
-        for (kind, f) in module_recoveries {
-            let tx = completion_tx.clone();
-            task_group.spawn(
-                format!("module {kind} recovery"),
-                move |_| async move {
-                    match f.await {
-                        Ok(()) => {
-                            let _ = tx.send(kind);
-                        }
-                        Err(err) => {
-                            warn!(
-                                target: LOG_CLIENT,
-                                err = %format_args!("{err:#}"),
-                                kind = %kind,
-                                "Module recovery failed"
-                            );
-                            // Don't send completion - recovery is considered
-                            // permanently stuck.
-                        }
-                    }
-                },
-            );
-        }
-        drop(completion_tx);
-
-        let progress_stream = futures::stream::FuturesUnordered::new();
-        for (kind, rx) in module_recovery_progress_receivers {
-            progress_stream.push(
-                tokio_stream::wrappers::WatchStream::new(rx)
-                    .fuse()
-                    .map(move |progress| (kind, Some(progress))),
-            );
-        }
-
-        let completion_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(completion_rx)
-            .map(|kind| (kind, None));
-
-        let mut futures = futures::stream::select(
-            futures::stream::select_all(progress_stream),
-            completion_stream,
-        );
-
-        while let Some((kind, progress)) = futures.next().await {
-            let dbtx = db.begin_write().await;
-            let tx = dbtx.as_ref();
-
-            let prev_progress = *recovery_sender
-                .borrow()
-                .get(&kind)
-                .expect("existing progress must be present");
-
-            let progress = if prev_progress.is_done() {
-                // since updates might be out of order, once done, stick with it
-                prev_progress
-            } else if let Some(progress) = progress {
-                progress
-            } else {
-                prev_progress.to_complete()
-            };
-
-            if !prev_progress.is_done() && progress.is_done() {
-                info!(
-                    target: LOG_CLIENT,
-                    kind = %kind,
-                    progress = format!("{}/{}", progress.complete, progress.total),
-                    "Recovery complete"
-                );
-            } else {
-                info!(
-                    target: LOG_CLIENT,
-                    kind = %kind,
-                    progress = format!("{}/{}", progress.complete, progress.total),
-                    "Recovery progress"
-                );
-            }
-
-            tx.insert(
-                &CLIENT_MODULE_RECOVERY,
-                &ClientModuleRecovery { kind },
-                &ClientModuleRecoveryState { progress },
-            );
-            dbtx.commit().await;
-
-            recovery_sender.send_modify(|v| {
-                v.insert(kind, progress);
-            });
-        }
-        debug!(target: LOG_CLIENT_RECOVERY, "Recovery executor stopped");
     }
 
     /// Returns a list of guardian iroh API node ids
