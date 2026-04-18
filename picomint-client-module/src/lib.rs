@@ -33,7 +33,7 @@ pub mod secret;
 /// Structs and interfaces to construct Picomint transactions
 pub mod transaction;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TxAcceptEvent {
     pub txid: TransactionId,
 }
@@ -43,7 +43,7 @@ impl Event for TxAcceptEvent {
     const KIND: EventKind = EventKind::from_static("tx-accept");
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TxRejectEvent {
     pub txid: TransactionId,
     pub error: String,

@@ -9,7 +9,7 @@ use picomint_core::util::SafeUrl;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_ln_client::LightningClientModule;
 use picomint_ln_client::events::{
-    ReceivePaymentEvent, SendPaymentEvent, SendPaymentStatus, SendPaymentUpdateEvent,
+    ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent,
 };
 use picomint_ln_common::Bolt11InvoiceDescription;
 use tracing::info;
@@ -20,9 +20,10 @@ use crate::env::{NUM_GUARDIANS, TestEnv, retry};
 #[derive(Debug)]
 #[allow(dead_code)]
 enum LnEvent {
-    Send(SendPaymentEvent),
-    SendUpdate(SendPaymentUpdateEvent),
-    Receive(ReceivePaymentEvent),
+    Send(SendEvent),
+    SendSuccess(SendSuccessEvent),
+    SendRefund(SendRefundEvent),
+    Receive(ReceiveEvent),
 }
 
 fn ln_event_stream(
@@ -57,7 +58,10 @@ fn try_parse_ln_event(
         return Some((op, LnEvent::Send(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, LnEvent::SendUpdate(e)));
+        return Some((op, LnEvent::SendSuccess(e)));
+    }
+    if let Some(e) = entry.to_event() {
+        return Some((op, LnEvent::SendRefund(e)));
     }
     if let Some(e) = entry.to_event() {
         return Some((op, LnEvent::Receive(e)));
@@ -183,11 +187,10 @@ async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Resul
         };
         assert_eq!(op, send_op);
 
-        let Some((op, LnEvent::SendUpdate(update))) = events.next().await else {
-            panic!("Expected SendUpdate event");
+        let Some((op, LnEvent::SendSuccess(_))) = events.next().await else {
+            panic!("Expected SendSuccess event");
         };
         assert_eq!(op, send_op);
-        assert!(matches!(update.status, SendPaymentStatus::Success(_)));
     }
 
     info!("Polling gateway federation balance...");
@@ -276,11 +279,10 @@ async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Resul
         }
         env.ldk_node.bolt11_payment().fail_for_hash(payment_hash)?;
 
-        let Some((op, LnEvent::SendUpdate(update))) = events.next().await else {
-            panic!("Expected SendUpdate event");
+        let Some((op, LnEvent::SendRefund(_))) = events.next().await else {
+            panic!("Expected SendRefund event");
         };
         assert_eq!(op, send_op);
-        assert_eq!(update.status, SendPaymentStatus::Refunded);
     }
 
     info!("ln: test_payments passed");

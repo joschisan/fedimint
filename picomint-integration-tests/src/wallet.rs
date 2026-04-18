@@ -8,8 +8,7 @@ use picomint_client::ClientHandleArc;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_wallet_client::WalletClientModule;
 use picomint_wallet_client::events::{
-    ReceivePaymentEvent, ReceivePaymentUpdateEvent, SendPaymentEvent, SendPaymentStatus,
-    SendPaymentUpdateEvent,
+    ReceiveEvent, SendConfirmEvent, SendEvent, SendFailureEvent,
 };
 use tokio::task::block_in_place;
 use tracing::info;
@@ -19,10 +18,10 @@ use crate::env::{TestEnv, retry};
 #[derive(Debug)]
 #[allow(dead_code)]
 enum WalletEvent {
-    Send(SendPaymentEvent),
-    SendUpdate(SendPaymentUpdateEvent),
-    Receive(ReceivePaymentEvent),
-    ReceiveUpdate(ReceivePaymentUpdateEvent),
+    Send(SendEvent),
+    SendConfirm(SendConfirmEvent),
+    SendFailure(SendFailureEvent),
+    Receive(ReceiveEvent),
 }
 
 fn wallet_event_stream(
@@ -57,13 +56,13 @@ fn try_parse_wallet_event(
         return Some((op, WalletEvent::Send(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, WalletEvent::SendUpdate(e)));
+        return Some((op, WalletEvent::SendConfirm(e)));
+    }
+    if let Some(e) = entry.to_event() {
+        return Some((op, WalletEvent::SendFailure(e)));
     }
     if let Some(e) = entry.to_event() {
         return Some((op, WalletEvent::Receive(e)));
-    }
-    if let Some(e) = entry.to_event() {
-        return Some((op, WalletEvent::ReceiveUpdate(e)));
     }
     None
 }
@@ -79,9 +78,6 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
     // Drain the wallet events emitted by the pegin itself.
     let Some((_, WalletEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected pegin Receive event");
-    };
-    let Some((_, WalletEvent::ReceiveUpdate(_))) = send_events.next().await else {
-        panic!("Expected pegin ReceiveUpdate event");
     };
 
     let external_address = block_in_place(|| env.bitcoind.get_new_address(None, None))?
@@ -103,14 +99,11 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
     };
     assert_eq!(op, operation_id);
 
-    let Some((op, WalletEvent::SendUpdate(update))) = send_events.next().await else {
-        panic!("Expected SendUpdate event");
+    let Some((op, WalletEvent::SendConfirm(ev))) = send_events.next().await else {
+        panic!("Expected SendConfirm event");
     };
     assert_eq!(op, operation_id);
-
-    let SendPaymentStatus::Success(txid) = update.status else {
-        panic!("On-chain send failed: {:?}", update.status);
-    };
+    let txid = ev.txid;
 
     info!(%txid, "Send confirmed, waiting for tx in mempool");
 
@@ -139,11 +132,10 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
     };
     assert_eq!(op, abort_op);
 
-    let Some((op, WalletEvent::SendUpdate(update))) = send_events.next().await else {
-        panic!("Expected SendUpdate event");
+    let Some((op, WalletEvent::SendFailure(_))) = send_events.next().await else {
+        panic!("Expected SendFailure event");
     };
     assert_eq!(op, abort_op);
-    assert_eq!(update.status, SendPaymentStatus::Aborted);
 
     info!("wallet: zero_fee_send_aborts passed");
 
