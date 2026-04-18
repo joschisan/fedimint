@@ -1,5 +1,3 @@
-pub mod backoff_util;
-
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::hash::Hash;
@@ -289,13 +287,12 @@ pub async fn write_new_async<P: AsRef<Path>, C: AsRef<[u8]>>(
 /// retries is determined by the specified strategy.
 ///
 /// ```
-/// use std::time::Duration;
-///
-/// use picomint_core::util::{backoff_util, retry};
+/// use picomint_core::backoff::networking_backoff;
+/// use picomint_core::util::retry;
 /// # tokio_test::block_on(async {
 /// retry(
 ///     "Gateway balance after swap".to_string(),
-///     backoff_util::background_backoff(),
+///     networking_backoff(),
 ///     || async {
 ///         // Fallible network calls …
 ///         Ok(())
@@ -313,7 +310,7 @@ pub async fn write_new_async<P: AsRef<Path>, C: AsRef<[u8]>>(
 ///   error of the closure is returned
 pub async fn retry<F, Fut, T>(
     op_name: impl Into<String>,
-    strategy: impl backoff_util::Backoff,
+    strategy: impl crate::backoff::Backoff,
     op_fn: F,
 ) -> Result<T, anyhow::Error>
 where

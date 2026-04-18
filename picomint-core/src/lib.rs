@@ -52,6 +52,8 @@ use picomint_encoding::{Decodable, Encodable};
 
 /// Bitcoin amount types
 mod amount;
+/// Fibonacci backoff policies for retry loops.
+pub mod backoff;
 /// Federation configuration
 pub mod config;
 /// Fundamental types

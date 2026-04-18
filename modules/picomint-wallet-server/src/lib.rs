@@ -604,7 +604,7 @@ impl Wallet {
 
             let block_hash = util::retry(
                 "get_block_hash",
-                util::backoff_util::background_backoff(),
+                picomint_core::backoff::networking_backoff(),
                 || self.btc_rpc.get_block_hash(height),
             )
             .await
@@ -612,7 +612,7 @@ impl Wallet {
 
             let block = util::retry(
                 "get_block",
-                util::backoff_util::background_backoff(),
+                picomint_core::backoff::networking_backoff(),
                 || self.btc_rpc.get_block(&block_hash),
             )
             .await

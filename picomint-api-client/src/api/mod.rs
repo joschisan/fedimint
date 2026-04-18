@@ -20,7 +20,7 @@ use picomint_core::module::{
     ApiError, ApiMethod, ApiRequestErased, IrohApiRequest, PICOMINT_ALPN,
 };
 use tokio::time::sleep;
-use picomint_core::util::backoff_util::api_networking_backoff;
+use picomint_core::backoff::networking_backoff;
 use picomint_core::{NumPeersExt, PeerId, TransactionId, util};
 use picomint_logging::LOG_CLIENT_NET_API;
 use thiserror::Error;
@@ -356,7 +356,7 @@ impl FederationApi {
                 async move {
                     let response = util::retry(
                         format!("api-request-{method}-{peer}"),
-                        api_networking_backoff(),
+                        networking_backoff(),
                         || async {
                             self.request_single_peer(method.clone(), params.clone(), *peer)
                                 .await
@@ -389,7 +389,7 @@ impl FederationApi {
                             async move {
                                 let response = util::retry(
                                     format!("api-request-{method}-{peer}"),
-                                    api_networking_backoff(),
+                                    networking_backoff(),
                                     || async {
                                         self.request_single_peer(
                                             method.clone(),
@@ -483,12 +483,12 @@ async fn connection_task(
     endpoint: Endpoint,
     state: watch::Sender<Option<PeerState>>,
 ) {
-    let mut backoff = api_networking_backoff();
+    let mut backoff = networking_backoff();
 
     loop {
         match endpoint.connect(node_id, PICOMINT_ALPN).await {
             Ok(conn) => {
-                backoff = api_networking_backoff();
+                backoff = networking_backoff();
 
                 let _ = state.send(Some(PeerState::Connected(conn.clone())));
 

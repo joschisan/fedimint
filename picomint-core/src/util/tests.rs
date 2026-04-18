@@ -3,11 +3,20 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use assert_matches::assert_matches;
+use backon::{BackoffBuilder, FibonacciBackoff, FibonacciBuilder};
 use futures::FutureExt;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 
-use super::{NextOrPending, SafeUrl, backoff_util, retry};
+use super::{NextOrPending, SafeUrl, retry};
+
+fn zero_delay_backoff(retries: usize) -> FibonacciBackoff {
+    FibonacciBuilder::default()
+        .with_min_delay(Duration::ZERO)
+        .with_max_delay(Duration::ZERO)
+        .with_max_times(retries)
+        .build()
+}
 
 #[test]
 fn test_safe_url() {
@@ -93,7 +102,7 @@ async fn retry_succeed_with_one_attempt() {
 
     let _ = retry(
         "Run once",
-        backoff_util::immediate_backoff(Some(2)),
+        zero_delay_backoff(2),
         closure,
     )
     .await;
@@ -113,7 +122,7 @@ async fn retry_fail_with_three_attempts() {
 
     let _ = retry(
         "Run 3 times",
-        backoff_util::immediate_backoff(Some(2)),
+        zero_delay_backoff(2),
         closure,
     )
     .await;

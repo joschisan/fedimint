@@ -7,15 +7,13 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{Context as _, bail};
+use anyhow::bail;
 use api::{FederationApi, ServerError};
 use config::ConsensusConfig;
 use picomint_core::PeerId;
-use picomint_core::config::FederationId;
 use picomint_core::endpoint_constants::CLIENT_CONFIG_ENDPOINT;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::module::ApiRequestErased;
-use picomint_core::util::backoff_util;
 use picomint_logging::LOG_CLIENT_NET;
 use query::FilterMap;
 use tracing::debug;
@@ -34,8 +32,8 @@ pub mod wire;
 
 pub use iroh::Endpoint;
 
-/// Tries to download the [`ConsensusConfig`], attempts to retry ten times
-/// before giving up.
+/// Downloads the [`ConsensusConfig`] using the peers advertised in the invite
+/// code, then re-verifies it with the full peer set from the config itself.
 pub async fn download_from_invite_code(
     endpoint: &Endpoint,
     invite: &InviteCode,
@@ -50,22 +48,6 @@ pub async fn download_from_invite_code(
     let federation_id = invite.federation_id();
     let api_from_invite = FederationApi::new(endpoint.clone(), invite.peers());
 
-    picomint_core::util::retry(
-        "Downloading client config",
-        backoff_util::aggressive_backoff(),
-        || try_download_client_config(endpoint, &api_from_invite, federation_id),
-    )
-    .await
-    .context("Failed to download client config")
-}
-
-/// Tries to download the [`ConsensusConfig`] only once.
-pub async fn try_download_client_config(
-    endpoint: &Endpoint,
-    api_from_invite: &FederationApi,
-    federation_id: FederationId,
-) -> anyhow::Result<(ConsensusConfig, FederationApi)> {
-    debug!(target: LOG_CLIENT_NET, "Downloading client config from peer");
     let query_strategy = FilterMap::new(move |cfg: ConsensusConfig| {
         if federation_id != cfg.calculate_federation_id() {
             return Err(ServerError::ConditionFailed(anyhow::anyhow!(

@@ -1,13 +1,11 @@
 //! State machine for submitting transactions
 
-use std::time::Duration;
-
 use picomint_api_client::api::FederationApi;
 use picomint_api_client::transaction::{Transaction, TransactionSubmissionOutcome};
 use picomint_core::TransactionId;
+use picomint_core::backoff::networking_backoff;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::util::backoff_util::custom_backoff;
 use picomint_core::util::retry;
 use picomint_eventlog::Event;
 use picomint_logging::LOG_CLIENT_NET_API;
@@ -162,7 +160,7 @@ async fn tx_submission_trigger_rejected(
     debug!(target: LOG_CLIENT_NET_API, %txid, "Submitting transaction");
     retry(
         "tx-submit-sm",
-        custom_backoff(Duration::from_secs(2), Duration::from_mins(10), None),
+        networking_backoff(),
         || async {
             if let TransactionSubmissionOutcome(Err(transaction_error)) =
                 api.submit_transaction(transaction.clone()).await

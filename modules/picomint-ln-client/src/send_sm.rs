@@ -7,7 +7,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::util::SafeUrl;
-use picomint_core::util::backoff_util::api_networking_backoff;
+use picomint_core::backoff::networking_backoff;
 use picomint_core::{OutPoint, secp256k1, util};
 use picomint_ln_common::contracts::OutgoingContract;
 use picomint_ln_common::{LightningInput, OutgoingWitness};
@@ -166,7 +166,7 @@ async fn gateway_send_payment_sm(
     refund_keypair: Keypair,
     ctx: LightningClientContext,
 ) -> Result<[u8; 32], Signature> {
-    util::retry("gateway-send-payment", api_networking_backoff(), || async {
+    util::retry("gateway-send-payment", networking_backoff(), || async {
         let payment_result = ctx
             .gateway_conn
             .send_payment(
