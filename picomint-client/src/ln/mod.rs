@@ -47,7 +47,6 @@ use secp256k1::{Keypair, PublicKey, Scalar, SecretKey, ecdh};
 use thiserror::Error;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
 
-use self::api::LightningFederationApi;
 use self::events::SendEvent;
 use self::receive_sm::ReceiveStateMachine;
 use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine};
@@ -215,7 +214,7 @@ impl LightningClientModule {
         // if possible, such that the payment does not go over lightning, reducing
         // fees and latency.
 
-        if let Ok(gateways) = self.module_api.gateways().await {
+        if let Ok(gateways) = self.module_api.ln_gateways().await {
             let mut entries = Vec::new();
             for gateway in gateways {
                 if let Ok(Some(routing_info)) = self
@@ -249,7 +248,7 @@ impl LightningClientModule {
     ) -> Result<(SafeUrl, RoutingInfo), SelectGatewayError> {
         let gateways = self
             .module_api
-            .gateways()
+            .ln_gateways()
             .await
             .map_err(|e| SelectGatewayError::FailedToRequestGateways(e.to_string()))?;
 
@@ -287,12 +286,12 @@ impl LightningClientModule {
     ) -> Result<Vec<SafeUrl>, ListGatewaysError> {
         if let Some(peer) = peer {
             self.module_api
-                .gateways_from_peer(peer)
+                .ln_gateways_from_peer(peer)
                 .await
                 .map_err(|_| ListGatewaysError::FailedToListGateways)
         } else {
             self.module_api
-                .gateways()
+                .ln_gateways()
                 .await
                 .map_err(|_| ListGatewaysError::FailedToListGateways)
         }
@@ -381,7 +380,7 @@ impl LightningClientModule {
 
         let consensus_block_count = self
             .module_api
-            .consensus_block_count()
+            .ln_consensus_block_count()
             .await
             .map_err(|e| SendPaymentError::FailedToRequestBlockCount(e.to_string()))?;
 
@@ -660,7 +659,7 @@ impl LightningClientModule {
         } else {
             let gateways = self
                 .module_api
-                .gateways()
+                .ln_gateways()
                 .await
                 .map_err(|e| GenerateLnurlError::FailedToRequestGateways(e.to_string()))?;
 
@@ -704,7 +703,7 @@ impl LightningClientModule {
 
         let (contracts, next_index) = self
             .module_api
-            .await_incoming_contracts(stream_index, 128)
+            .ln_await_incoming_contracts(stream_index, 128)
             .await;
 
         let dbtx = self.client_ctx.module_db().begin_write().await;

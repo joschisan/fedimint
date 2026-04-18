@@ -13,28 +13,8 @@ use picomint_core::ln::endpoint_constants::{
 };
 use rand::seq::SliceRandom;
 
-#[async_trait::async_trait]
-pub trait LightningFederationApi {
-    async fn consensus_block_count(&self) -> FederationResult<u64>;
-
-    async fn await_incoming_contract(
-        &self,
-        contract_id: &ContractId,
-        expiration: u64,
-    ) -> Option<OutPoint>;
-
-    async fn await_preimage(&self, contract_id: OutPoint, expiration: u64) -> Option<[u8; 32]>;
-
-    async fn await_incoming_contracts(&self, start: u64, n: u64) -> (Vec<IncomingContract>, u64);
-
-    async fn gateways(&self) -> FederationResult<Vec<SafeUrl>>;
-
-    async fn gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<SafeUrl>>;
-}
-
-#[async_trait::async_trait]
-impl LightningFederationApi for FederationApi {
-    async fn consensus_block_count(&self) -> FederationResult<u64> {
+impl FederationApi {
+    pub async fn ln_consensus_block_count(&self) -> FederationResult<u64> {
         self.request_current_consensus(
             CONSENSUS_BLOCK_COUNT_ENDPOINT.to_string(),
             ApiRequestErased::new(()),
@@ -42,7 +22,7 @@ impl LightningFederationApi for FederationApi {
         .await
     }
 
-    async fn await_incoming_contract(
+    pub async fn ln_await_incoming_contract(
         &self,
         contract_id: &ContractId,
         expiration: u64,
@@ -54,7 +34,7 @@ impl LightningFederationApi for FederationApi {
         .await
     }
 
-    async fn await_preimage(&self, outpoint: OutPoint, expiration: u64) -> Option<[u8; 32]> {
+    pub async fn ln_await_preimage(&self, outpoint: OutPoint, expiration: u64) -> Option<[u8; 32]> {
         self.request_current_consensus_retry(
             AWAIT_PREIMAGE_ENDPOINT.to_string(),
             ApiRequestErased::new((outpoint, expiration)),
@@ -62,7 +42,7 @@ impl LightningFederationApi for FederationApi {
         .await
     }
 
-    async fn await_incoming_contracts(&self, start: u64, n: u64) -> (Vec<IncomingContract>, u64) {
+    pub async fn ln_await_incoming_contracts(&self, start: u64, n: u64) -> (Vec<IncomingContract>, u64) {
         self.request_current_consensus_retry(
             AWAIT_INCOMING_CONTRACTS_ENDPOINT.to_string(),
             ApiRequestErased::new((start, n)),
@@ -70,7 +50,7 @@ impl LightningFederationApi for FederationApi {
         .await
     }
 
-    async fn gateways(&self) -> FederationResult<Vec<SafeUrl>> {
+    pub async fn ln_gateways(&self) -> FederationResult<Vec<SafeUrl>> {
         let gateways: BTreeMap<PeerId, Vec<SafeUrl>> = self
             .request_with_strategy(
                 FilterMapThreshold::new(
@@ -104,7 +84,7 @@ impl LightningFederationApi for FederationApi {
         Ok(union)
     }
 
-    async fn gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<SafeUrl>> {
+    pub async fn ln_gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<SafeUrl>> {
         let gateways = self
             .request_single_peer::<Vec<SafeUrl>>(
                 GATEWAYS_ENDPOINT.to_string(),

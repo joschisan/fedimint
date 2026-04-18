@@ -10,7 +10,6 @@ use picomint_redb::WriteTxRef;
 use tpe::AggregateDecryptionKey;
 
 use super::LightningClientContext;
-use crate::ln::api::LightningFederationApi;
 use super::events::{ReceiveEvent, ReceiveExpiryEvent};
 
 /// State machine that waits on the receipt of a Lightning payment. Terminates
@@ -34,7 +33,7 @@ impl StateMachine for ReceiveStateMachine {
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
         ctx.client_ctx
             .module_api()
-            .await_incoming_contract(
+            .ln_await_incoming_contract(
                 &self.contract.contract_id(),
                 self.contract.commitment.expiration,
             )

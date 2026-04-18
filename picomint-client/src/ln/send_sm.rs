@@ -17,7 +17,6 @@ use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
 use tracing::{error, instrument};
 
-use crate::ln::api::LightningFederationApi;
 use super::events::{SendRefundEvent, SendSuccessEvent};
 use super::{LightningClientContext, LightningInvoice};
 
@@ -217,7 +216,7 @@ async fn await_preimage_sm(
     let preimage = ctx
         .client_ctx
         .module_api()
-        .await_preimage(outpoint, contract.expiration)
+        .ln_await_preimage(outpoint, contract.expiration)
         .await?;
 
     if contract.verify_preimage(&preimage) {
