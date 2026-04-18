@@ -11,12 +11,10 @@ use std::time::Duration;
 use bitcoin::hashes::{Hash, hash160, sha256};
 use bitcoin::key::TapTweak;
 use bitcoin::{Address, PubkeyHash, ScriptBuf, ScriptHash, Txid, WPubkeyHash, WScriptHash};
-use config::WalletConfigConsensus;
 use miniscript::descriptor::Wsh;
 use picomint_encoding::{Decodable, Encodable};
 
 use crate::core::ModuleKind;
-use crate::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use crate::{NumPeersExt, PeerId};
 use secp256k1::ecdsa::Signature;
 use secp256k1::{PublicKey, Scalar, XOnlyPublicKey};
@@ -27,8 +25,6 @@ pub mod config;
 pub mod endpoint_constants;
 
 pub const KIND: ModuleKind = ModuleKind::Wallet;
-
-pub const MODULE_CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::new(1, 0);
 
 /// Returns a sleep duration of 1 second in test environments or 60 seconds in
 /// production. Used for polling intervals where faster feedback is needed
@@ -104,27 +100,6 @@ pub struct OutputInfo {
     pub script: ScriptBuf,
     pub value: bitcoin::Amount,
     pub spent: bool,
-}
-
-#[derive(Debug)]
-pub struct WalletCommonInit;
-
-impl CommonModuleInit for WalletCommonInit {
-    const CONSENSUS_VERSION: ModuleConsensusVersion = MODULE_CONSENSUS_VERSION;
-    const KIND: ModuleKind = KIND;
-
-    type ClientConfig = WalletConfigConsensus;
-}
-
-pub struct WalletModuleTypes;
-
-impl ModuleCommon for WalletModuleTypes {
-    type ClientConfig = WalletConfigConsensus;
-    type Input = WalletInput;
-    type Output = WalletOutput;
-    type ConsensusItem = WalletConsensusItem;
-    type InputError = WalletInputError;
-    type OutputError = WalletOutputError;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encodable, Decodable)]

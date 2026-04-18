@@ -18,7 +18,6 @@ pub mod tweak;
 
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
-use config::LightningConfigConsensus;
 pub use gateway_connection::GatewayApi;
 use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
@@ -28,7 +27,6 @@ use tpe::AggregateDecryptionKey;
 
 use crate::core::ModuleKind;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
-use crate::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use crate::{Amount, OutPoint};
 
 mod gateway_connection;
@@ -45,7 +43,6 @@ pub enum LightningInvoice {
 }
 
 pub const KIND: ModuleKind = ModuleKind::Ln;
-pub const MODULE_CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::new(1, 0);
 
 /// Minimum contract amount to ensure the incoming contract can be claimed
 /// without additional funds.
@@ -131,23 +128,3 @@ impl std::fmt::Display for LightningConsensusItem {
     }
 }
 
-#[derive(Debug)]
-pub struct LightningCommonInit;
-
-impl CommonModuleInit for LightningCommonInit {
-    const CONSENSUS_VERSION: ModuleConsensusVersion = MODULE_CONSENSUS_VERSION;
-    const KIND: ModuleKind = KIND;
-
-    type ClientConfig = LightningConfigConsensus;
-}
-
-pub struct LightningModuleTypes;
-
-impl ModuleCommon for LightningModuleTypes {
-    type ClientConfig = LightningConfigConsensus;
-    type Input = LightningInput;
-    type Output = LightningOutput;
-    type ConsensusItem = LightningConsensusItem;
-    type InputError = LightningInputError;
-    type OutputError = LightningOutputError;
-}

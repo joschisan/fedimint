@@ -9,7 +9,6 @@ use std::fmt;
 use std::hash::Hash;
 
 use bitcoin_hashes::hash160;
-use config::MintConfigConsensus;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tbs::{BlindedMessage, Message};
@@ -17,14 +16,12 @@ use thiserror::Error;
 
 use crate::Amount;
 use crate::core::ModuleKind;
-use crate::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use crate::secp256k1::PublicKey;
 
 pub mod config;
 pub mod endpoint_constants;
 
 pub const KIND: ModuleKind = ModuleKind::Mint;
-pub const MODULE_CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::new(1, 0);
 
 /// Compact representation of a power-of-2 amount denomination
 /// Represents 2^denomination msats
@@ -94,16 +91,6 @@ impl Note {
     }
 }
 
-#[derive(Debug)]
-pub struct MintCommonInit;
-
-impl CommonModuleInit for MintCommonInit {
-    const CONSENSUS_VERSION: ModuleConsensusVersion = MODULE_CONSENSUS_VERSION;
-    const KIND: ModuleKind = KIND;
-
-    type ClientConfig = MintConfigConsensus;
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct MintInput {
     pub note: Note,
@@ -149,23 +136,12 @@ pub enum RecoveryItem {
 
 picomint_redb::consensus_value!(RecoveryItem);
 
-pub struct MintModuleTypes;
-
 pub fn verify_note(note: Note, pk: tbs::AggregatePublicKey) -> bool {
     tbs::verify(nonce_message(note.nonce), note.signature, pk)
 }
 
 pub fn nonce_message(nonce: PublicKey) -> Message {
     tbs::Message::from_bytes_sha256(&nonce.serialize())
-}
-
-impl ModuleCommon for MintModuleTypes {
-    type ClientConfig = MintConfigConsensus;
-    type Input = MintInput;
-    type Output = MintOutput;
-    type ConsensusItem = MintConsensusItem;
-    type InputError = MintInputError;
-    type OutputError = MintOutputError;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]

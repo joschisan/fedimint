@@ -1,21 +1,4 @@
-//! Core module system traits and types.
-//!
-//! Picomint supports modules to allow extending its functionality.
-//! Some of the standard functionality is implemented in form of modules as
-//! well. This rust module houses the core trait
-//! [`picomint_core::module::ModuleCommon`] used by both the server and client
-//! side module traits. Specific server and client traits exist in their
-//! respective crates.
-//!
-//! The top level server-side types are:
-//!
-//! * `picomint_server::core::ServerModuleInit`
-//! * `picomint_server::core::ServerModule`
-//!
-//! Top level client-side types are:
-//!
-//! * `ClientModuleInit` (in `picomint_client`)
-//! * `ClientModule` (in `picomint_client`)
+//! Core module system types shared between the server and client sides.
 pub mod audit;
 
 use std::error::Error;
@@ -23,8 +6,6 @@ use std::fmt::{self, Debug, Formatter};
 
 use serde::{Deserialize, Serialize};
 
-mod version;
-pub use self::version::*;
 use crate::Amount;
 use picomint_encoding::{Decodable, Encodable};
 
@@ -190,26 +171,3 @@ impl ApiError {
     }
 }
 
-/// Trait implemented by every `*ModuleInit` (server or client side)
-pub trait ModuleInit: Debug + Clone + Send + Sync + 'static {
-    type Common: CommonModuleInit;
-}
-
-/// Logic and constant common between server side and client side modules
-#[async_trait::async_trait]
-pub trait CommonModuleInit: Debug + Sized {
-    const CONSENSUS_VERSION: ModuleConsensusVersion;
-    const KIND: crate::core::ModuleKind;
-
-    type ClientConfig: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
-}
-
-/// Module associated types required by both client and server
-pub trait ModuleCommon {
-    type ClientConfig: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
-    type Input: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
-    type Output: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
-    type ConsensusItem: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
-    type InputError: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
-    type OutputError: Encodable + Decodable + Debug + Clone + Send + Sync + 'static;
-}

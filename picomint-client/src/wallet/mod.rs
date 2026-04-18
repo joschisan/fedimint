@@ -27,7 +27,6 @@ use crate::transaction::{
 };
 use picomint_core::core::OperationId;
 use picomint_encoding::Encodable;
-use picomint_core::module::ModuleInit;
 use picomint_core::task::TaskGroup;
 use tokio::task::block_in_place;
 use tokio::time::sleep;
@@ -37,7 +36,7 @@ use picomint_logging::LOG_CLIENT_MODULE_WALLET;
 use picomint_redb::Database;
 use picomint_core::wallet::config::WalletConfigConsensus;
 use picomint_core::wallet::{
-    StandardScript, WalletCommonInit, WalletInput, WalletOutput, descriptor,
+    StandardScript, WalletInput, WalletOutput, descriptor,
     is_potential_receive,
 };
 use secp256k1::Keypair;
@@ -79,10 +78,6 @@ impl WalletClientModule {
 
 #[derive(Debug, Clone, Default)]
 pub struct WalletClientInit;
-
-impl ModuleInit for WalletClientInit {
-    type Common = WalletCommonInit;
-}
 
 impl WalletClientInit {
     pub async fn init(

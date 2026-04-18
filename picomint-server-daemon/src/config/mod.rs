@@ -9,7 +9,7 @@ use picomint_core::config::ConsensusConfig;
 pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::envs::is_running_in_test_env;
 use picomint_core::invite_code::InviteCode;
-use picomint_core::module::{ApiAuth, CORE_CONSENSUS_VERSION};
+use picomint_core::module::ApiAuth;
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
 use picomint_core::ln::config::LightningConfigPrivate;
 use picomint_logging::LOG_NET_PEER_DKG;
@@ -133,7 +133,6 @@ impl ServerConfig {
         wallet: WalletConfig,
     ) -> Self {
         let consensus = ConsensusConfig {
-            version: CORE_CONSENSUS_VERSION,
             broadcast_public_keys,
             broadcast_rounds_per_session: broadcast_rounds_per_session(),
             iroh_endpoints: params.iroh_endpoints(),

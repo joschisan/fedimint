@@ -35,7 +35,6 @@ use crate::transaction::{
 };
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::module::ModuleInit;
 use picomint_core::secp256k1::rand::{thread_rng, Rng};
 use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_core::{Amount, PeerId};
@@ -43,7 +42,7 @@ use picomint_derive_secret::DerivableSecret;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::mint::config::{client_denominations, MintConfigConsensus};
 use picomint_core::mint::{
-    Denomination, MintCommonInit, MintInput, MintOutput, Note, RecoveryItem,
+    Denomination, MintInput, MintOutput, Note, RecoveryItem,
 };
 use picomint_redb::WriteTxRef;
 use rand::seq::IteratorRandom;
@@ -90,10 +89,6 @@ impl SpendableNote {
 
 #[derive(Debug, Clone)]
 pub struct MintClientInit;
-
-impl ModuleInit for MintClientInit {
-    type Common = MintCommonInit;
-}
 
 impl MintClientInit {
     pub async fn recover(

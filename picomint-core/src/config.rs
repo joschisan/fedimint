@@ -12,7 +12,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::PeerId;
 use crate::ln::config::LightningConfigConsensus;
 use crate::mint::config::MintConfigConsensus;
-use crate::module::CoreConsensusVersion;
 use crate::wallet::config::WalletConfigConsensus;
 use picomint_encoding::{Decodable, Encodable};
 use secp256k1::PublicKey;
@@ -158,8 +157,6 @@ pub fn load_from_file<T: DeserializeOwned>(path: &Path) -> Result<T, anyhow::Err
 /// [`CLIENT_CONFIG_ENDPOINT`]: crate::endpoint_constants::CLIENT_CONFIG_ENDPOINT
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ConsensusConfig {
-    /// Agreed on core consensus version
-    pub version: CoreConsensusVersion,
     /// Public keys for the atomic broadcast to authenticate messages
     pub broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
     /// Number of rounds per session

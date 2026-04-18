@@ -25,7 +25,6 @@ use crate::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_encoding::Encodable;
-use picomint_core::module::ModuleInit;
 use picomint_core::secp256k1::SECP256K1;
 use picomint_core::task::TaskGroup;
 use picomint_core::time::duration_since_epoch;
@@ -38,7 +37,7 @@ use picomint_core::ln::gateway_api::{
     GatewayConnection, PaymentFee, RealGatewayConnection, RoutingInfo,
 };
 use picomint_core::ln::{
-    Bolt11InvoiceDescription, GatewayApi, LightningCommonInit, LightningInvoice, LightningOutput,
+    Bolt11InvoiceDescription, GatewayApi, LightningInvoice, LightningOutput,
     MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl, tweak,
 };
 use picomint_redb::WriteTxRef;
@@ -72,10 +71,6 @@ impl std::fmt::Debug for LightningClientInit {
             .field("gateway_conn", &self.gateway_conn)
             .finish()
     }
-}
-
-impl ModuleInit for LightningClientInit {
-    type Common = LightningCommonInit;
 }
 
 impl LightningClientInit {

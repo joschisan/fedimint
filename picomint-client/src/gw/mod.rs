@@ -26,7 +26,6 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::hex::ToHex;
-use picomint_core::module::ModuleInit;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
@@ -34,9 +33,7 @@ use picomint_derive_secret::DerivableSecret;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 use picomint_core::ln::gateway_api::SendPaymentPayload;
-use picomint_core::ln::{
-    LightningCommonInit, LightningInvoice, LightningOutput,
-};
+use picomint_core::ln::{LightningInvoice, LightningOutput};
 use receive_sm::ReceiveStateMachine;
 use secp256k1::schnorr::Signature;
 use send_sm::SendStateMachine;
@@ -52,10 +49,6 @@ pub const EXPIRATION_DELTA_MINIMUM: u64 = 144;
 #[derive(Debug, Clone)]
 pub struct GatewayClientInit {
     pub gateway: Arc<dyn IGatewayClient>,
-}
-
-impl ModuleInit for GatewayClientInit {
-    type Common = LightningCommonInit;
 }
 
 impl GatewayClientInit {
