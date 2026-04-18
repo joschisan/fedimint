@@ -293,10 +293,17 @@ impl Database {
         self.wait_key_check(def, key, |v| v).await
     }
 
-    /// Await the next commit on this database. Fires on every committed
-    /// write, regardless of which tables were touched.
-    pub async fn wait_commit(&self) {
-        self.inner.global_notify.notified().await;
+    /// Notification future for the next commit on this database. Fires on
+    /// every committed write, regardless of which tables were touched.
+    ///
+    /// Must be constructed *before* the check it guards — tokio's `Notified`
+    /// captures the `notify_waiters` generation at construction time, so any
+    /// commit that happens after `wait_commit()` returns but before the
+    /// future is awaited will still wake the waiter. Wrapping this in an
+    /// `async fn` would defer the generation capture to first poll and
+    /// reintroduce the TOCTOU race.
+    pub fn wait_commit(&self) -> tokio::sync::futures::Notified<'_> {
+        self.inner.global_notify.notified()
     }
 
     /// Wait until `check` on the current value returns `Some(T)`, then return
