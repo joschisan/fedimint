@@ -306,6 +306,18 @@ impl Database {
         self.inner.global_notify.notified()
     }
 
+    /// Shared [`Notify`] handle for `table`'s resolved name (i.e. table name
+    /// under this [`Database`]'s prefix). Fires via `notify_waiters` on every
+    /// commit that opened the table for write. Callers should construct
+    /// `notified()` *before* the check it guards (see [`Self::wait_commit`]).
+    pub fn notify_for_table<WK, WV>(&self, def: &NativeTableDef<WK, WV>) -> Arc<Notify>
+    where
+        WK: redb::Key + 'static,
+        WV: redb::Value + 'static,
+    {
+        self.inner.notify_for(&def.resolved_name(&self.prefix))
+    }
+
     /// Wait until `check` on the current value returns `Some(T)`, then return
     /// `(T, ReadTransaction)`. The returned tx is the one that observed the
     /// matched state. `check` is called once on entry and again after every

@@ -10,6 +10,8 @@ use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
+use std::sync::Arc;
+
 use futures::Stream;
 use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::time::duration_since_epoch;
@@ -19,7 +21,7 @@ use picomint_redb::redb::ReadableTable as _;
 use picomint_redb::{Database, WriteTxRef};
 use picomint_redb::{consensus_key, consensus_value};
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
+use tokio::sync::Notify;
 
 pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
     const MODULE: Option<ModuleKind>;
@@ -192,10 +194,10 @@ pub const EVENT_LOG_BY_OPERATION: NativeTableDef<(OperationId, EventLogId), Even
 
 /// Append an event to [`EVENT_LOG`] and — if `operation_id` is set — to
 /// [`EVENT_LOG_BY_OPERATION`]. IDs are allocated inline under redb's
-/// single-writer serialization.
+/// single-writer serialization. The per-table [`Notify`] for `EVENT_LOG` is
+/// woken automatically on commit by the redb layer.
 pub fn log_event_raw(
     dbtx: &WriteTxRef<'_>,
-    log_event_added_tx: watch::Sender<()>,
     kind: EventKind,
     module: Option<ModuleKind>,
     operation_id: Option<OperationId>,
@@ -228,22 +230,12 @@ pub fn log_event_raw(
             );
         });
     }
-
-    dbtx.on_commit(move || {
-        log_event_added_tx.send_replace(());
-    });
 }
 
 /// Typed convenience: encode an [`Event`] into the log.
-pub fn log_event<E: Event>(
-    dbtx: &WriteTxRef<'_>,
-    log_event_added_tx: watch::Sender<()>,
-    operation_id: Option<OperationId>,
-    event: E,
-) {
+pub fn log_event<E: Event>(dbtx: &WriteTxRef<'_>, operation_id: Option<OperationId>, event: E) {
     log_event_raw(
         dbtx,
-        log_event_added_tx,
         E::KIND,
         E::MODULE,
         operation_id,
@@ -264,16 +256,17 @@ fn next_event_log_id(dbtx: &WriteTxRef<'_>) -> EventLogId {
 /// Stream every event belonging to `operation_id`, in insertion order.
 ///
 /// Yields existing events first, then live ones. The cursor is kept internally
-/// — callers never manage an `EventLogId`. The stream ends when the
-/// `log_event_added` watch channel is dropped (typically at client shutdown).
+/// — callers never manage an `EventLogId`. The stream runs forever; callers
+/// stop tailing by dropping it.
 pub fn subscribe_operation_events(
     db: Database,
-    mut log_event_added: watch::Receiver<()>,
+    event_notify: Arc<Notify>,
     operation_id: OperationId,
 ) -> impl Stream<Item = PersistedLogEntry> {
     async_stream::stream! {
         let mut next_id = EventLogId::LOG_START;
         loop {
+            let notified = event_notify.notified();
             let batch = db
                 .begin_read()
                 .await
@@ -293,9 +286,7 @@ pub fn subscribe_operation_events(
                 next_id = entry.id().next();
                 yield entry;
             }
-            if log_event_added.changed().await.is_err() {
-                break;
-            }
+            notified.await;
         }
     }
 }
@@ -304,11 +295,11 @@ pub fn subscribe_operation_events(
 /// `E::KIND`/`E::MODULE` and decodes each matching entry.
 pub fn subscribe_operation_events_typed<E: Event + 'static>(
     db: Database,
-    log_event_added: watch::Receiver<()>,
+    event_notify: Arc<Notify>,
     operation_id: OperationId,
 ) -> impl Stream<Item = E> {
     use futures::StreamExt as _;
-    subscribe_operation_events(db, log_event_added, operation_id)
+    subscribe_operation_events(db, event_notify, operation_id)
         .filter_map(|entry| async move { entry.to_event::<E>() })
 }
 

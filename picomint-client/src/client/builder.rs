@@ -248,8 +248,6 @@ impl ClientBuilder {
             version = %env!("CARGO_PKG_VERSION"),
             "Building picomint client",
         );
-        let (log_event_added_tx, _) = watch::channel(());
-
         let config = config.clone();
         let fed_id = config.calculate_federation_id();
         let db = db_no_decoders;
@@ -293,7 +291,6 @@ impl ClientBuilder {
             fed_id,
             num_peers,
             &init_state,
-            &log_event_added_tx,
             &mut module_recoveries,
             &mut module_recovery_progress_receivers,
         )
@@ -314,7 +311,6 @@ impl ClientBuilder {
             fed_id,
             num_peers,
             &init_state,
-            &log_event_added_tx,
             &mut module_recoveries,
             &mut module_recovery_progress_receivers,
         )
@@ -337,7 +333,6 @@ impl ClientBuilder {
                     fed_id,
                     num_peers,
                     &init_state,
-                    &log_event_added_tx,
                     &mut module_recoveries,
                     &mut module_recovery_progress_receivers,
                 )
@@ -359,7 +354,6 @@ impl ClientBuilder {
                     fed_id,
                     num_peers,
                     &init_state,
-                    &log_event_added_tx,
                     &mut module_recoveries,
                     &mut module_recovery_progress_receivers,
                 )
@@ -383,10 +377,7 @@ impl ClientBuilder {
 
         let tx_submission_executor = ModuleExecutor::new(
             db.clone(),
-            TxSubmissionSmContext {
-                api: api.clone(),
-                log_event_added_tx: log_event_added_tx.clone(),
-            },
+            TxSubmissionSmContext { api: api.clone() },
             task_group.clone(),
         );
 
@@ -399,7 +390,6 @@ impl ClientBuilder {
             mint,
             wallet,
             ln,
-            log_event_added_tx,
             tx_submission_executor,
             api,
             secp_ctx: Secp256k1::new(),
@@ -482,7 +472,6 @@ async fn init_or_recover<I: ClientModuleInit>(
     fed_id: FederationId,
     num_peers: NumPeers,
     init_state: &InitState,
-    log_event_added_tx: &watch::Sender<()>,
     module_recoveries: &mut BTreeMap<
         ModuleKind,
         Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
@@ -506,7 +495,6 @@ async fn init_or_recover<I: ClientModuleInit>(
             final_client.clone(),
             fed_id,
             num_peers,
-            log_event_added_tx,
             module_recoveries,
             module_recovery_progress_receivers,
         )
@@ -531,7 +519,6 @@ async fn init_or_recover<I: ClientModuleInit>(
             module_db,
             full_config.clone(),
             fed_id,
-            log_event_added_tx.clone(),
         ),
         task_group: task_group.clone(),
         connector_registry: connectors.clone(),
@@ -554,7 +541,6 @@ async fn schedule_recovery<I: ClientModuleInit>(
     final_client: FinalClientIface,
     fed_id: FederationId,
     num_peers: NumPeers,
-    log_event_added_tx: &watch::Sender<()>,
     module_recoveries: &mut BTreeMap<
         ModuleKind,
         Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
@@ -583,12 +569,7 @@ where
             let progress = RecoveryProgress::none();
             let dbtx = db.begin_write().await;
             let tx = dbtx.as_ref();
-            picomint_eventlog::log_event(
-                &tx,
-                log_event_added_tx.clone(),
-                None,
-                ModuleRecoveryStarted::new(kind),
-            );
+            picomint_eventlog::log_event(&tx, None, ModuleRecoveryStarted::new(kind));
             tx.insert(
                 &CLIENT_MODULE_RECOVERY,
                 &ClientModuleRecovery { kind },
@@ -609,7 +590,6 @@ where
     let root_secret_clone = root_secret.clone();
     let final_client_clone = final_client.clone();
     let full_config_clone = full_config.clone();
-    let log_event_added_tx_clone = log_event_added_tx.clone();
 
     let recover_fut = Box::pin(async move {
         let args = picomint_client_module::module::init::ClientModuleRecoverArgs {
@@ -629,7 +609,6 @@ where
                 module_db,
                 full_config_clone,
                 fed_id,
-                log_event_added_tx_clone,
             ),
             progress_tx,
             task_group: task_group_clone,

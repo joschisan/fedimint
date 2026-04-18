@@ -12,10 +12,10 @@ use picomint_core::invite_code::InviteCode;
 use picomint_core::module::{CommonModuleInit, ModuleCommon, ModuleInit};
 use picomint_core::util::{BoxFuture, BoxStream};
 use picomint_core::{Amount, TransactionId};
-use picomint_eventlog::{Event, EventLogId, PersistedLogEntry};
+use picomint_eventlog::{EVENT_LOG, Event, EventLogId, PersistedLogEntry};
 use picomint_logging::LOG_CLIENT;
 use picomint_redb::{Database, WriteTxRef};
-use tokio::sync::watch;
+use tokio::sync::Notify;
 use tracing::warn;
 
 use self::init::ClientModuleInit;
@@ -120,7 +120,6 @@ pub struct ClientContext<M> {
     module_db: Database,
     config: ConsensusConfig,
     federation_id: FederationId,
-    log_event_added_tx: watch::Sender<()>,
     _marker: marker::PhantomData<M>,
 }
 
@@ -135,7 +134,6 @@ impl<M> Clone for ClientContext<M> {
             module_db: self.module_db.clone(),
             config: self.config.clone(),
             federation_id: self.federation_id,
-            log_event_added_tx: self.log_event_added_tx.clone(),
             _marker: marker::PhantomData,
         }
     }
@@ -161,7 +159,6 @@ where
         module_db: Database,
         config: ConsensusConfig,
         federation_id: FederationId,
-        log_event_added_tx: watch::Sender<()>,
     ) -> Self {
         Self {
             client,
@@ -172,7 +169,6 @@ where
             module_db,
             config,
             federation_id,
-            log_event_added_tx,
             _marker: marker::PhantomData,
         }
     }
@@ -288,10 +284,9 @@ where
             .await
     }
 
-    /// Watch channel that signals when any new event is added to the
-    /// persistent event log.
-    pub fn log_event_added_rx(&self) -> watch::Receiver<()> {
-        self.log_event_added_tx.subscribe()
+    /// Shared [`Notify`] that fires on every commit touching the event log.
+    pub fn event_notify(&self) -> Arc<Notify> {
+        self.db.notify_for_table(&EVENT_LOG)
     }
 
     /// Read a batch of persisted event log entries starting at `pos`.
@@ -326,7 +321,7 @@ where
     ) -> BoxStream<'static, PersistedLogEntry> {
         Box::pin(picomint_eventlog::subscribe_operation_events(
             self.db.clone(),
-            self.log_event_added_tx.subscribe(),
+            self.event_notify(),
             operation_id,
         ))
     }
@@ -358,12 +353,7 @@ where
                 "Client module logging events of different module than its own. This might become an error in the future."
             );
         }
-        picomint_eventlog::log_event(
-            &dbtx.deisolate(),
-            self.log_event_added_tx.clone(),
-            Some(operation_id),
-            event,
-        );
+        picomint_eventlog::log_event(&dbtx.deisolate(), Some(operation_id), event);
     }
 }
 
@@ -411,7 +401,7 @@ pub trait ClientModule: Debug + Send + Sync + 'static {
     ///
     /// * [`Self::create_final_inputs_and_outputs`]
     /// * [`Self::get_balance`]
-    /// * [`Self::subscribe_balance_changes`]
+    /// * [`Self::balance_notify`]
     fn supports_being_primary(&self) -> bool {
         false
     }
@@ -438,9 +428,9 @@ pub trait ClientModule: Debug + Send + Sync + 'static {
         unimplemented!()
     }
 
-    /// Returns a stream that will output the updated module balance each time
-    /// it changes.
-    async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()> {
+    /// Shared [`Notify`] that fires on every commit touching a table whose
+    /// contents contribute to this module's balance.
+    fn balance_notify(&self) -> Arc<Notify> {
         unimplemented!()
     }
 }

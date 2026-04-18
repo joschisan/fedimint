@@ -28,11 +28,12 @@ fn wallet_event_stream(
     client: &ClientHandleArc,
 ) -> impl futures::Stream<Item = (picomint_core::core::OperationId, WalletEvent)> {
     let client = client.clone();
-    let mut log_rx = client.log_event_added_rx();
+    let notify = client.event_notify();
     let mut next_id = EventLogId::LOG_START;
 
     stream! {
         loop {
+            let notified = notify.notified();
             let events = client.get_event_log(Some(next_id), 100).await;
 
             for entry in events {
@@ -43,7 +44,7 @@ fn wallet_event_stream(
                 }
             }
 
-            let _ = log_rx.changed().await;
+            notified.await;
         }
     }
 }

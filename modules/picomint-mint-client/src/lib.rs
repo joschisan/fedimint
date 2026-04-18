@@ -42,7 +42,6 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::{ModuleCommon, ModuleInit};
 use picomint_core::secp256k1::rand::{thread_rng, Rng};
 use picomint_core::secp256k1::{Keypair, PublicKey};
-use picomint_core::util::BoxStream;
 use picomint_core::{Amount, PeerId};
 use picomint_derive_secret::DerivableSecret;
 use picomint_mint_common::config::{client_denominations, MintConfigConsensus};
@@ -252,13 +251,11 @@ impl ClientModuleInit for MintClientInit {
 
         let cfg: MintConfigConsensus = args.cfg().clone();
         let client_ctx = args.context();
-        let balance_update_sender = tokio::sync::watch::channel(()).0;
 
         let sm_context = MintSmContext {
             client_ctx: client_ctx.clone(),
             tbs_agg_pks: cfg.tbs_agg_pks.clone(),
             tbs_pks: cfg.tbs_pks.clone(),
-            balance_update_sender: balance_update_sender.clone(),
         };
 
         let task_group = args.task_group().clone();
@@ -279,7 +276,6 @@ impl ClientModuleInit for MintClientInit {
             cfg,
             root_secret: args.module_root_secret().clone(),
             client_ctx,
-            balance_update_sender,
             tweak_receiver,
             input_executor,
             output_executor,
@@ -293,7 +289,6 @@ pub struct MintClientModule {
     cfg: MintConfigConsensus,
     root_secret: DerivableSecret,
     client_ctx: ClientContext<Self>,
-    balance_update_sender: tokio::sync::watch::Sender<()>,
     tweak_receiver: async_channel::Receiver<[u8; 16]>,
     input_executor: picomint_client_module::executor::ModuleExecutor<InputStateMachine>,
     output_executor: picomint_client_module::executor::ModuleExecutor<MintOutputStateMachine>,
@@ -306,7 +301,6 @@ pub struct MintSmContext {
     pub client_ctx: ClientContext<MintClientModule>,
     pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
     pub tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, tbs::PublicKeyShare>>,
-    pub balance_update_sender: tokio::sync::watch::Sender<()>,
 }
 
 #[async_trait::async_trait]
@@ -404,9 +398,6 @@ impl ClientModule for MintClientModule {
 
         let (issuance_requests, outputs) = self.build_issuance(denominations).await;
 
-        let sender = self.balance_update_sender.clone();
-        dbtx.on_commit(move || sender.send_replace(()));
-
         let input_executor = self.input_executor.clone();
         let output_executor = self.output_executor.clone();
 
@@ -456,10 +447,8 @@ impl ClientModule for MintClientModule {
             .sum()
     }
 
-    async fn subscribe_balance_changes(&self) -> BoxStream<'static, ()> {
-        Box::pin(tokio_stream::wrappers::WatchStream::new(
-            self.balance_update_sender.subscribe(),
-        ))
+    fn balance_notify(&self) -> Arc<tokio::sync::Notify> {
+        self.client_ctx.module_db().notify_for_table(&NOTE)
     }
 }
 
@@ -762,9 +751,6 @@ impl MintClientModule {
                 },
             )
             .await;
-
-        let sender = self.balance_update_sender.clone();
-        dbtx.on_commit(move || sender.send_replace(()));
 
         Ok(Some(ecash))
     }

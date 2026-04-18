@@ -55,11 +55,6 @@ impl StateMachine for MintOutputStateMachine {
         dbtx: &WriteTxRef<'_>,
         outcome: Self::Outcome,
     ) -> Option<Self> {
-        let balance_update_sender = ctx.balance_update_sender.clone();
-        dbtx.on_commit(move || {
-            balance_update_sender.send_replace(());
-        });
-
         let Ok(signature_shares) = outcome else {
             ctx.client_ctx
                 .log_event(dbtx, self.operation_id, OutputFailureEvent)

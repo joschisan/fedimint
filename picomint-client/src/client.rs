@@ -118,10 +118,6 @@ pub struct Client {
     /// Updates about client recovery progress
     client_recovery_progress_receiver:
         watch::Receiver<BTreeMap<ModuleKind, RecoveryProgress>>,
-
-    /// Broadcast channel that pings on every committed event log insertion.
-    /// `.subscribe()` hands out a fresh receiver to each waiter.
-    log_event_added_tx: watch::Sender<()>,
 }
 
 impl Client {
@@ -478,7 +474,7 @@ impl Client {
     /// Returns a stream that yields the current client balance every time it
     /// changes.
     pub async fn subscribe_balance_changes(&self) -> BoxStream<'static, Amount> {
-        let mut balance_changes = self.mint.subscribe_balance_changes().await;
+        let notify = self.mint.balance_notify();
         let initial_balance = self.get_balance().await.expect("Primary is present");
         let mint = self.mint.clone();
         let db = self.db().clone();
@@ -486,7 +482,8 @@ impl Client {
         Box::pin(async_stream::stream! {
             yield initial_balance;
             let mut prev_balance = initial_balance;
-            while let Some(()) = balance_changes.next().await {
+            loop {
+                let notified = notify.notified();
                 let dbtx = db.begin_write().await;
                 let balance = mint
                     .get_balance(
@@ -499,6 +496,7 @@ impl Client {
                     prev_balance = balance;
                     yield balance;
                 }
+                notified.await;
             }
         })
     }
@@ -574,13 +572,11 @@ impl Client {
         >,
     ) {
         let db = self.db.clone();
-        let log_event_added_tx = self.log_event_added_tx.clone();
         let task_group = self.task_group.clone();
         self.task_group
             .spawn("module recoveries", |_task_handle| async move {
                 Self::run_module_recoveries_task(
                     db,
-                    log_event_added_tx,
                     recovery_sender,
                     module_recoveries,
                     module_recovery_progress_receivers,
@@ -592,7 +588,6 @@ impl Client {
 
     async fn run_module_recoveries_task(
         db: Database,
-        log_event_added_tx: watch::Sender<()>,
         recovery_sender: watch::Sender<BTreeMap<ModuleKind, RecoveryProgress>>,
         module_recoveries: BTreeMap<
             ModuleKind,
@@ -680,12 +675,7 @@ impl Client {
                     progress = format!("{}/{}", progress.complete, progress.total),
                     "Recovery complete"
                 );
-                picomint_eventlog::log_event(
-                    &tx,
-                    log_event_added_tx.clone(),
-                    None,
-                    ModuleRecoveryCompleted { kind },
-                );
+                picomint_eventlog::log_event(&tx, None, ModuleRecoveryCompleted { kind });
             } else {
                 info!(
                     target: LOG_CLIENT,
@@ -759,9 +749,9 @@ impl Client {
             .unwrap_or_default()
     }
 
-    /// Get a receiver that signals when new events are added to the event log
-    pub fn log_event_added_rx(&self) -> watch::Receiver<()> {
-        self.log_event_added_tx.subscribe()
+    /// Shared [`Notify`] that fires on every commit touching the event log.
+    pub fn event_notify(&self) -> Arc<tokio::sync::Notify> {
+        self.db.notify_for_table(&picomint_eventlog::EVENT_LOG)
     }
 
     /// Stream every event belonging to `operation_id`, starting from the
@@ -772,7 +762,7 @@ impl Client {
     ) -> BoxStream<'static, PersistedLogEntry> {
         Box::pin(picomint_eventlog::subscribe_operation_events(
             self.db.clone(),
-            self.log_event_added_tx.subscribe(),
+            self.event_notify(),
             operation_id,
         ))
     }

@@ -43,7 +43,6 @@ serde = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tokio-stream = { workspace = true }
 
 [dev-dependencies]
 divan = "0.1.21"

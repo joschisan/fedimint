@@ -5,7 +5,6 @@ use picomint_api_client::transaction::Transaction;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
-use tokio::sync::watch;
 
 use crate::executor::StateMachine;
 use crate::{TxAcceptEvent, TxRejectEvent};
@@ -27,7 +26,6 @@ picomint_redb::consensus_value!(TxSubmissionStateMachine);
 #[derive(Debug, Clone)]
 pub struct TxSubmissionSmContext {
     pub api: FederationApi,
-    pub log_event_added_tx: watch::Sender<()>,
 }
 
 impl StateMachine for TxSubmissionStateMachine {
@@ -45,7 +43,7 @@ impl StateMachine for TxSubmissionStateMachine {
 
     async fn transition(
         &self,
-        ctx: &Self::Context,
+        _ctx: &Self::Context,
         dbtx: &WriteTxRef<'_>,
         outcome: Self::Outcome,
     ) -> Option<Self> {
@@ -53,17 +51,11 @@ impl StateMachine for TxSubmissionStateMachine {
 
         match outcome {
             Ok(()) => {
-                picomint_eventlog::log_event(
-                    dbtx,
-                    ctx.log_event_added_tx.clone(),
-                    Some(self.operation_id),
-                    TxAcceptEvent { txid },
-                );
+                picomint_eventlog::log_event(dbtx, Some(self.operation_id), TxAcceptEvent { txid });
             }
             Err(error) => {
                 picomint_eventlog::log_event(
                     dbtx,
-                    ctx.log_event_added_tx.clone(),
                     Some(self.operation_id),
                     TxRejectEvent { txid, error },
                 );

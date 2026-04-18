@@ -4,16 +4,15 @@ use std::sync::atomic::AtomicU8;
 use anyhow::bail;
 use futures::StreamExt as _;
 use picomint_redb::Database;
-use tokio::sync::watch;
 use tokio::try_join;
 use tracing::info;
 
-use super::{EventKind, log_event_raw, subscribe_operation_events};
+use super::{EVENT_LOG, EventKind, log_event_raw, subscribe_operation_events};
 
 #[test_log::test(tokio::test)]
 async fn sanity_subscribe_operation_events() {
     let db = Database::open_in_memory();
-    let (log_event_added_tx, log_event_added_rx) = watch::channel(());
+    let event_notify = db.notify_for_table(&EVENT_LOG);
 
     let operation_id = picomint_core::core::OperationId::new_random();
     let counter = Arc::new(AtomicU8::new(0));
@@ -22,11 +21,11 @@ async fn sanity_subscribe_operation_events() {
         {
             let counter = counter.clone();
             let db = db.clone();
-            let log_event_added_rx = log_event_added_rx.clone();
+            let event_notify = event_notify.clone();
             async move {
                 let mut stream = Box::pin(subscribe_operation_events(
                     db,
-                    log_event_added_rx,
+                    event_notify,
                     operation_id,
                 ));
                 while let Some(entry) = stream.next().await {
@@ -51,7 +50,6 @@ async fn sanity_subscribe_operation_events() {
                 let dbtx = db.begin_write().await;
                 log_event_raw(
                     &dbtx.as_ref(),
-                    log_event_added_tx.clone(),
                     EventKind::from(format!("{i}")),
                     None,
                     Some(operation_id),
