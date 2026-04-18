@@ -125,8 +125,6 @@ use picomint_core::TransactionId;
 use picomint_eventlog::{Event, EventKind};
 use serde::{Deserialize, Serialize};
 
-pub use crate::module::ClientModule;
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TxAcceptEvent {
     pub txid: TransactionId,
@@ -148,7 +146,7 @@ impl Event for TxRejectEvent {
 }
 
 /// Resources particular to a module instance
-pub struct ClientModuleInstance<'m, M: ClientModule> {
+pub struct ClientModuleInstance<'m, M> {
     /// Module-specific DB
     pub db: picomint_redb::Database,
     /// Module-specific API
@@ -157,7 +155,7 @@ pub struct ClientModuleInstance<'m, M: ClientModule> {
     pub module: &'m M,
 }
 
-impl<'m, M: ClientModule> ClientModuleInstance<'m, M> {
+impl<'m, M> ClientModuleInstance<'m, M> {
     /// Get a reference to the module
     pub fn inner(&self) -> &'m M {
         self.module
@@ -165,8 +163,6 @@ impl<'m, M: ClientModule> ClientModuleInstance<'m, M> {
 }
 
 impl<M> std::ops::Deref for ClientModuleInstance<'_, M>
-where
-    M: ClientModule,
 {
     type Target = M;
 

@@ -16,7 +16,7 @@ use crate::Endpoint;
 use picomint_core::wire;
 use crate::executor::ModuleExecutor;
 use crate::module::recovery::RecoveryProgress;
-use crate::module::{ClientModule, FinalizeTransaction};
+use crate::module::FinalizeTransaction;
 use crate::transaction::{TransactionBuilder, TxSubmissionStateMachine};
 use crate::{ClientModuleInstance, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
@@ -55,25 +55,17 @@ pub enum LnFlavor {
 }
 
 impl LnFlavor {
-    fn input_fee(
-        &self,
-        amount: Amount,
-        input: &picomint_core::ln::LightningInput,
-    ) -> Option<Amount> {
+    fn input_fee(&self) -> Amount {
         match self {
-            LnFlavor::Regular(m) => m.input_fee(amount, input),
-            LnFlavor::Gateway(m) => m.input_fee(amount, input),
+            LnFlavor::Regular(m) => m.input_fee(),
+            LnFlavor::Gateway(m) => m.input_fee(),
         }
     }
 
-    fn output_fee(
-        &self,
-        amount: Amount,
-        output: &picomint_core::ln::LightningOutput,
-    ) -> Option<Amount> {
+    fn output_fee(&self) -> Amount {
         match self {
-            LnFlavor::Regular(m) => m.output_fee(amount, output),
-            LnFlavor::Gateway(m) => m.output_fee(amount, output),
+            LnFlavor::Regular(m) => m.output_fee(),
+            LnFlavor::Gateway(m) => m.output_fee(),
         }
     }
 
@@ -173,13 +165,10 @@ impl Client {
 
         for input in builder.inputs() {
             let item_fee = match &input.input {
-                wire::Input::Mint(i) => self.mint.input_fee(input.amount, i),
-                wire::Input::Ln(i) => self.ln.input_fee(input.amount, i),
-                wire::Input::Wallet(i) => self.wallet.input_fee(input.amount, i),
-            }
-            .expect(
-                "We only build transactions with input versions that are supported by the module",
-            );
+                wire::Input::Mint(_) => self.mint.input_fee(),
+                wire::Input::Ln(_) => self.ln.input_fee(),
+                wire::Input::Wallet(_) => self.wallet.input_fee(),
+            };
 
             in_amount += input.amount;
             fee_amount += item_fee;
@@ -187,13 +176,10 @@ impl Client {
 
         for output in builder.outputs() {
             let item_fee = match &output.output {
-                wire::Output::Mint(o) => self.mint.output_fee(output.amount, o),
-                wire::Output::Ln(o) => self.ln.output_fee(output.amount, o),
-                wire::Output::Wallet(o) => self.wallet.output_fee(output.amount, o),
-            }
-            .expect(
-                "We only build transactions with output versions that are supported by the module",
-            );
+                wire::Output::Mint(_) => self.mint.output_fee(),
+                wire::Output::Ln(_) => self.ln.output_fee(),
+                wire::Output::Wallet(_) => self.wallet.output_fee(),
+            };
 
             out_amount += output.amount;
             fee_amount += item_fee;
@@ -405,7 +391,7 @@ impl Client {
     /// Returns a typed module client instance by type. Uses `TypeId` dispatch
     /// over the fixed module set (`MintClientModule` / `WalletClientModule` /
     /// `LightningClientModule` / `GatewayClientModule`).
-    pub fn get_first_module<M: ClientModule>(
+    pub fn get_first_module<M: Any + Send + Sync + 'static>(
         &'_ self,
     ) -> anyhow::Result<ClientModuleInstance<'_, M>> {
         let tid = TypeId::of::<M>();
@@ -429,7 +415,7 @@ impl Client {
                     }
                 }
             } else {
-                bail!("No modules found of kind {}", M::kind());
+                bail!("Unknown client module type");
             };
 
         let module: &M = module_any

@@ -10,7 +10,7 @@ use crate::{Endpoint, download_from_invite_code};
 use crate::executor::ModuleExecutor;
 use crate::module::init::ClientModuleInit;
 use crate::module::recovery::RecoveryProgress;
-use crate::module::{ClientModule, FinalClientIface};
+use crate::module::FinalClientIface;
 use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use crate::transaction::TxSubmissionSmContext;
 use picomint_core::config::FederationId;

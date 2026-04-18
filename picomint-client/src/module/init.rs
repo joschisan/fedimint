@@ -12,7 +12,6 @@ use tracing::warn;
 
 use super::ClientContext;
 use super::recovery::RecoveryProgress;
-use crate::module::ClientModule;
 
 pub struct ClientModuleInitArgs<C>
 where
@@ -160,10 +159,10 @@ where
 
 #[async_trait::async_trait]
 pub trait ClientModuleInit: ModuleInit + Sized {
-    type Module: ClientModule;
+    type Module: Send + Sync + 'static;
 
     fn kind() -> ModuleKind {
-        <Self::Module as ClientModule>::kind()
+        <<Self as ModuleInit>::Common as CommonModuleInit>::KIND
     }
 
     /// Recover the state of the client module.
@@ -173,12 +172,12 @@ pub trait ClientModuleInit: ModuleInit + Sized {
     async fn recover(&self, _args: &ClientModuleRecoverArgs<Self>) -> anyhow::Result<()> {
         warn!(
             target: LOG_CLIENT,
-            kind = %<Self::Module as ClientModule>::kind(),
+            kind = %<<Self as ModuleInit>::Common as CommonModuleInit>::KIND,
             "Module does not support recovery, completing without doing anything"
         );
         Ok(())
     }
 
-    /// Initialize a [`ClientModule`] instance from its config
+    /// Initialize a module instance from its config
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module>;
 }

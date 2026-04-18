@@ -22,13 +22,13 @@ use events::{ReceiveEvent, SendEvent};
 use crate::api::{FederationApi, FederationResult};
 use crate::executor::ModuleExecutor;
 use crate::module::init::{ClientModuleInit, ClientModuleInitArgs};
-use crate::module::{ClientContext, ClientModule};
+use crate::module::ClientContext;
 use crate::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
 use picomint_core::core::OperationId;
 use picomint_encoding::Encodable;
-use picomint_core::module::{ModuleCommon, ModuleInit};
+use picomint_core::module::ModuleInit;
 use picomint_core::task::TaskGroup;
 use tokio::task::block_in_place;
 use tokio::time::sleep;
@@ -38,7 +38,7 @@ use picomint_logging::LOG_CLIENT_MODULE_WALLET;
 use picomint_redb::Database;
 use picomint_core::wallet::config::WalletConfigConsensus;
 use picomint_core::wallet::{
-    StandardScript, WalletCommonInit, WalletInput, WalletModuleTypes, WalletOutput, descriptor,
+    StandardScript, WalletCommonInit, WalletInput, WalletOutput, descriptor,
     is_potential_receive,
 };
 use secp256k1::Keypair;
@@ -64,29 +64,17 @@ pub struct WalletClientContext {
     pub client_ctx: ClientContext<WalletClientModule>,
 }
 
-#[async_trait::async_trait]
-impl ClientModule for WalletClientModule {
-    type Init = WalletClientInit;
-    type Common = WalletModuleTypes;
-
-    async fn start(&self) {
+impl WalletClientModule {
+    pub async fn start(&self) {
         self.send_executor.start().await;
     }
 
-    fn input_fee(
-        &self,
-        _amount: Amount,
-        _input: &<Self::Common as ModuleCommon>::Input,
-    ) -> Option<Amount> {
-        Some(self.cfg.input_fee)
+    pub fn input_fee(&self) -> Amount {
+        self.cfg.input_fee
     }
 
-    fn output_fee(
-        &self,
-        _amount: Amount,
-        _output: &<Self::Common as ModuleCommon>::Output,
-    ) -> Option<Amount> {
-        Some(self.cfg.output_fee)
+    pub fn output_fee(&self) -> Amount {
+        self.cfg.output_fee
     }
 }
 

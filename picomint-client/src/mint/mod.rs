@@ -31,13 +31,13 @@ use crate::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
 use crate::module::recovery::RecoveryProgress;
-use crate::module::{ClientContext, ClientModule};
+use crate::module::ClientContext;
 use crate::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::module::{ModuleCommon, ModuleInit};
+use picomint_core::module::ModuleInit;
 use picomint_core::secp256k1::rand::{thread_rng, Rng};
 use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_core::{Amount, PeerId};
@@ -45,7 +45,7 @@ use picomint_derive_secret::DerivableSecret;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::mint::config::{client_denominations, MintConfigConsensus};
 use picomint_core::mint::{
-    Denomination, MintCommonInit, MintInput, MintModuleTypes, MintOutput, Note, RecoveryItem,
+    Denomination, MintCommonInit, MintInput, MintOutput, Note, RecoveryItem,
 };
 use picomint_redb::WriteTxRef;
 use rand::seq::IteratorRandom;
@@ -294,36 +294,20 @@ pub struct MintSmContext {
     pub tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, tbs::PublicKeyShare>>,
 }
 
-#[async_trait::async_trait]
-impl ClientModule for MintClientModule {
-    type Init = MintClientInit;
-    type Common = MintModuleTypes;
-
-    async fn start(&self) {
+impl MintClientModule {
+    pub async fn start(&self) {
         self.issuance_executor.start().await;
     }
 
-    fn input_fee(
-        &self,
-        _amount: Amount,
-        _input: &<Self::Common as ModuleCommon>::Input,
-    ) -> Option<Amount> {
-        Some(self.cfg.input_fee)
+    pub fn input_fee(&self) -> Amount {
+        self.cfg.input_fee
     }
 
-    fn output_fee(
-        &self,
-        _amount: Amount,
-        _output: &<Self::Common as ModuleCommon>::Output,
-    ) -> Option<Amount> {
-        Some(self.cfg.output_fee)
+    pub fn output_fee(&self) -> Amount {
+        self.cfg.output_fee
     }
 
-    fn supports_being_primary(&self) -> bool {
-        true
-    }
-
-    async fn create_final_inputs_and_outputs(
+    pub async fn create_final_inputs_and_outputs(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
@@ -392,7 +376,7 @@ impl ClientModule for MintClientModule {
         })
     }
 
-    async fn get_balance(&self, dbtx: &WriteTxRef<'_>) -> Amount {
+    pub async fn get_balance(&self, dbtx: &WriteTxRef<'_>) -> Amount {
         self.get_count_by_denomination_dbtx(dbtx)
             .await
             .into_iter()
@@ -400,12 +384,10 @@ impl ClientModule for MintClientModule {
             .sum()
     }
 
-    fn balance_notify(&self) -> Arc<tokio::sync::Notify> {
+    pub fn balance_notify(&self) -> Arc<tokio::sync::Notify> {
         self.client_ctx.module_db().notify_for_table(&NOTE)
     }
-}
 
-impl MintClientModule {
     async fn select_funding_input(
         &self,
         dbtx: &WriteTxRef<'_>,

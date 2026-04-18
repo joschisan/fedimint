@@ -21,20 +21,20 @@ use lightning_invoice::Bolt11Invoice;
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::init::{ClientModuleInit, ClientModuleInitArgs};
-use crate::module::{ClientContext, ClientModule};
+use crate::module::ClientContext;
 use crate::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::hex::ToHex;
-use picomint_core::module::{ModuleCommon, ModuleInit};
+use picomint_core::module::ModuleInit;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 use picomint_core::ln::gateway_api::SendPaymentPayload;
 use picomint_core::ln::{
-    LightningCommonInit, LightningInvoice, LightningModuleTypes, LightningOutput,
+    LightningCommonInit, LightningInvoice, LightningOutput,
 };
 use receive_sm::ReceiveStateMachine;
 use secp256k1::schnorr::Signature;
@@ -132,32 +132,6 @@ pub struct GwSmContext {
     pub gateway: Arc<dyn IGatewayClient>,
 }
 
-#[async_trait::async_trait]
-impl ClientModule for GatewayClientModule {
-    type Init = GatewayClientInit;
-    type Common = LightningModuleTypes;
-
-    async fn start(&self) {
-        self.send_executor.start().await;
-        self.receive_executor.start().await;
-        self.complete_executor.start().await;
-    }
-    fn input_fee(
-        &self,
-        _amount: Amount,
-        _input: &<Self::Common as ModuleCommon>::Input,
-    ) -> Option<Amount> {
-        Some(self.cfg.input_fee)
-    }
-
-    fn output_fee(
-        &self,
-        _amount: Amount,
-        _output: &<Self::Common as ModuleCommon>::Output,
-    ) -> Option<Amount> {
-        Some(self.cfg.output_fee)
-    }
-}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Decodable, Encodable)]
 pub enum FinalReceiveState {
@@ -167,6 +141,20 @@ pub enum FinalReceiveState {
 }
 
 impl GatewayClientModule {
+    pub async fn start(&self) {
+        self.send_executor.start().await;
+        self.receive_executor.start().await;
+        self.complete_executor.start().await;
+    }
+
+    pub fn input_fee(&self) -> Amount {
+        self.cfg.input_fee
+    }
+
+    pub fn output_fee(&self) -> Amount {
+        self.cfg.output_fee
+    }
+
     pub async fn send_payment(
         &self,
         payload: SendPaymentPayload,
