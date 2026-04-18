@@ -1,18 +1,14 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::hash::Hash;
-use std::io::Write;
-use std::path::Path;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::LazyLock;
-use std::{fs, io};
 
 use anyhow::format_err;
 use futures::StreamExt;
 use picomint_logging::LOG_CORE;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
 use tracing::{debug, warn};
 use url::{Host, ParseError, Url};
 
@@ -236,51 +232,6 @@ impl FromStr for SafeUrl {
     fn from_str(input: &str) -> Result<Self, ParseError> {
         Self::parse(input)
     }
-}
-
-/// Write out a new file (like [`std::fs::write`] but fails if file already
-/// exists)
-pub fn write_new<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> io::Result<()> {
-    let mut file = fs::File::options()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
-    file.write_all(contents.as_ref())?;
-    file.sync_all()?;
-    Ok(())
-}
-pub fn write_overwrite<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> io::Result<()> {
-    fs::File::options()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)?
-        .write_all(contents.as_ref())
-}
-pub async fn write_overwrite_async<P: AsRef<Path>, C: AsRef<[u8]>>(
-    path: P,
-    contents: C,
-) -> io::Result<()> {
-    tokio::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)
-        .await?
-        .write_all(contents.as_ref())
-        .await
-}
-pub async fn write_new_async<P: AsRef<Path>, C: AsRef<[u8]>>(
-    path: P,
-    contents: C,
-) -> io::Result<()> {
-    tokio::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .await?
-        .write_all(contents.as_ref())
-        .await
 }
 
 /// Run the supplied closure `op_fn` until it succeeds. Frequency and number of
