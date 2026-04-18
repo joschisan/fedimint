@@ -7,8 +7,8 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_core::util::SafeUrl;
-use picomint_core::backoff::networking_backoff;
-use picomint_core::{OutPoint, secp256k1, util};
+use picomint_core::backoff::{Retryable, networking_backoff};
+use picomint_core::{OutPoint, secp256k1};
 use picomint_ln_common::contracts::OutgoingContract;
 use picomint_ln_common::{LightningInput, OutgoingWitness};
 use picomint_logging::LOG_CLIENT_MODULE_LN;
@@ -166,7 +166,7 @@ async fn gateway_send_payment_sm(
     refund_keypair: Keypair,
     ctx: LightningClientContext,
 ) -> Result<[u8; 32], Signature> {
-    util::retry("gateway-send-payment", networking_backoff(), || async {
+    (|| async {
         let payment_result = ctx
             .gateway_conn
             .send_payment(
@@ -188,8 +188,9 @@ async fn gateway_send_payment_sm(
 
         Ok(payment_result)
     })
+    .retry(networking_backoff())
     .await
-    .expect("Number of retries has no limit")
+    .expect("networking_backoff retries forever")
 }
 
 async fn transition_gateway_send_payment_sm(

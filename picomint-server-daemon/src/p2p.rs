@@ -19,7 +19,7 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_core::module::PICOMINT_ALPN;
 use picomint_core::task::TaskGroup;
 use tokio::time::sleep;
-use picomint_core::backoff::{FibonacciBackoff, networking_backoff};
+use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
 use picomint_core::{PeerId, secp256k1};
 use picomint_logging::{LOG_CONSENSUS, LOG_NET_PEER};
 use picomint_server_core::P2PConnectionStatus;
@@ -376,7 +376,7 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
                         incoming_connections,
                         status_sender,
                     },
-                    state: P2PConnectionSMState::Disconnected(networking_backoff()),
+                    state: P2PConnectionSMState::Disconnected(networking_backoff().build()),
                 };
 
                 while let Some(sm) = state_machine.state_transition().await {
@@ -487,7 +487,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
     fn disconnect(&self, error: anyhow::Error) -> P2PConnectionSMState {
         info!(target: LOG_NET_PEER, "Disconnected from peer: {}", error);
 
-        P2PConnectionSMState::Disconnected(networking_backoff())
+        P2PConnectionSMState::Disconnected(networking_backoff().build())
     }
 
     async fn send_message(

@@ -3,10 +3,9 @@
 use picomint_api_client::api::FederationApi;
 use picomint_api_client::transaction::{Transaction, TransactionSubmissionOutcome};
 use picomint_core::TransactionId;
-use picomint_core::backoff::networking_backoff;
+use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::util::retry;
 use picomint_eventlog::Event;
 use picomint_logging::LOG_CLIENT_NET_API;
 use picomint_redb::WriteTxRef;
@@ -158,27 +157,24 @@ async fn tx_submission_trigger_rejected(
 ) -> String {
     let txid = transaction.tx_hash();
     debug!(target: LOG_CLIENT_NET_API, %txid, "Submitting transaction");
-    retry(
-        "tx-submit-sm",
-        networking_backoff(),
-        || async {
-            if let TransactionSubmissionOutcome(Err(transaction_error)) =
-                api.submit_transaction(transaction.clone()).await
-            {
-                Ok(transaction_error.to_string())
-            } else {
-                debug!(
-                    target: LOG_CLIENT_NET_API,
-                    %txid,
-                    "Transaction submission accepted by peer, awaiting consensus",
-                );
-                tx_submitted.send_replace(true);
-                Err(anyhow::anyhow!("Transaction is still valid"))
-            }
-        },
-    )
+    (|| async {
+        if let TransactionSubmissionOutcome(Err(transaction_error)) =
+            api.submit_transaction(transaction.clone()).await
+        {
+            Ok(transaction_error.to_string())
+        } else {
+            debug!(
+                target: LOG_CLIENT_NET_API,
+                %txid,
+                "Transaction submission accepted by peer, awaiting consensus",
+            );
+            tx_submitted.send_replace(true);
+            Err(anyhow::anyhow!("Transaction is still valid"))
+        }
+    })
+    .retry(networking_backoff())
     .await
-    .expect("Number of retries is has no limit")
+    .expect("networking_backoff retries forever")
 }
 
 async fn tx_submission_trigger_accepted(

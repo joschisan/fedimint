@@ -20,8 +20,8 @@ use picomint_core::module::{
     ApiError, ApiMethod, ApiRequestErased, IrohApiRequest, PICOMINT_ALPN,
 };
 use tokio::time::sleep;
-use picomint_core::backoff::networking_backoff;
-use picomint_core::{NumPeersExt, PeerId, TransactionId, util};
+use picomint_core::backoff::{BackoffBuilder, Retryable, networking_backoff};
+use picomint_core::{NumPeersExt, PeerId, TransactionId};
 use picomint_logging::LOG_CLIENT_NET_API;
 use thiserror::Error;
 use tokio::sync::watch;
@@ -354,20 +354,17 @@ impl FederationApi {
                 let method = &method;
                 let params = &params;
                 async move {
-                    let response = util::retry(
-                        format!("api-request-{method}-{peer}"),
-                        networking_backoff(),
-                        || async {
-                            self.request_single_peer(method.clone(), params.clone(), *peer)
-                                .await
-                                .inspect_err(|e| {
-                                    e.report_if_unusual(*peer, "QueryWithStrategyRetry");
-                                })
-                                .map_err(|e| anyhow!(e.to_string()))
-                        },
-                    )
+                    let response = (|| async {
+                        self.request_single_peer(method.clone(), params.clone(), *peer)
+                            .await
+                            .inspect_err(|e| {
+                                e.report_if_unusual(*peer, "QueryWithStrategyRetry");
+                            })
+                            .map_err(|e| anyhow!(e.to_string()))
+                    })
+                    .retry(networking_backoff())
                     .await
-                    .expect("Number of retries has no limit");
+                    .expect("networking_backoff retries forever");
 
                     (*peer, response)
                 }
@@ -387,26 +384,23 @@ impl FederationApi {
                             let method = &method;
                             let params = &params;
                             async move {
-                                let response = util::retry(
-                                    format!("api-request-{method}-{peer}"),
-                                    networking_backoff(),
-                                    || async {
-                                        self.request_single_peer(
-                                            method.clone(),
-                                            params.clone(),
-                                            peer,
-                                        )
-                                        .await
-                                        .inspect_err(|err| {
-                                            if err.is_unusual() {
-                                                debug!(target: LOG_CLIENT_NET_API, err = %err, "Unusual peer error");
-                                            }
-                                        })
-                                        .map_err(|e| anyhow!(e.to_string()))
-                                    },
-                                )
+                                let response = (|| async {
+                                    self.request_single_peer(
+                                        method.clone(),
+                                        params.clone(),
+                                        peer,
+                                    )
+                                    .await
+                                    .inspect_err(|err| {
+                                        if err.is_unusual() {
+                                            debug!(target: LOG_CLIENT_NET_API, err = %err, "Unusual peer error");
+                                        }
+                                    })
+                                    .map_err(|e| anyhow!(e.to_string()))
+                                })
+                                .retry(networking_backoff())
                                 .await
-                                .expect("Number of retries has no limit");
+                                .expect("networking_backoff retries forever");
 
                                 (peer, response)
                             }
@@ -483,12 +477,12 @@ async fn connection_task(
     endpoint: Endpoint,
     state: watch::Sender<Option<PeerState>>,
 ) {
-    let mut backoff = networking_backoff();
+    let mut backoff = networking_backoff().build();
 
     loop {
         match endpoint.connect(node_id, PICOMINT_ALPN).await {
             Ok(conn) => {
-                backoff = networking_backoff();
+                backoff = networking_backoff().build();
 
                 let _ = state.send(Some(PeerState::Connected(conn.clone())));
 

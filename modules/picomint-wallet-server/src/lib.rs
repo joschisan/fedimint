@@ -36,7 +36,8 @@ use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::task::TaskGroup;
 use tokio::time::sleep;
-use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId, util};
+use picomint_core::backoff::{Retryable, networking_backoff};
+use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_logging::LOG_MODULE_WALLET;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use picomint_server_core::config::{PeerHandleOps, PeerHandleOpsExt};
@@ -602,21 +603,15 @@ impl Wallet {
                 assert_eq!(status.network, self.cfg.consensus.network);
             }
 
-            let block_hash = util::retry(
-                "get_block_hash",
-                picomint_core::backoff::networking_backoff(),
-                || self.btc_rpc.get_block_hash(height),
-            )
-            .await
-            .expect("Bitcoind rpc to get_block_hash failed");
+            let block_hash = (|| self.btc_rpc.get_block_hash(height))
+                .retry(networking_backoff())
+                .await
+                .expect("networking_backoff retries forever");
 
-            let block = util::retry(
-                "get_block",
-                picomint_core::backoff::networking_backoff(),
-                || self.btc_rpc.get_block(&block_hash),
-            )
-            .await
-            .expect("Bitcoind rpc to get_block failed");
+            let block = (|| self.btc_rpc.get_block(&block_hash))
+                .retry(networking_backoff())
+                .await
+                .expect("networking_backoff retries forever");
 
             assert_eq!(block.block_hash(), block_hash, "Block hash mismatch");
 

@@ -1,22 +1,11 @@
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
-use anyhow::anyhow;
 use assert_matches::assert_matches;
-use backon::{BackoffBuilder, FibonacciBackoff, FibonacciBuilder};
 use futures::FutureExt;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 
-use super::{NextOrPending, SafeUrl, retry};
-
-fn zero_delay_backoff(retries: usize) -> FibonacciBackoff {
-    FibonacciBuilder::default()
-        .with_min_delay(Duration::ZERO)
-        .with_max_delay(Duration::ZERO)
-        .with_max_times(retries)
-        .build()
-}
+use super::{NextOrPending, SafeUrl};
 
 #[test]
 fn test_safe_url() {
@@ -91,41 +80,3 @@ async fn test_next_or_pending() {
     );
 }
 
-#[tokio::test]
-async fn retry_succeed_with_one_attempt() {
-    let counter = AtomicU8::new(0);
-    let closure = || async {
-        counter.fetch_add(1, Ordering::SeqCst);
-        // Always return a success.
-        Ok(42)
-    };
-
-    let _ = retry(
-        "Run once",
-        zero_delay_backoff(2),
-        closure,
-    )
-    .await;
-
-    // Ensure the closure was only called once, and no backoff was applied.
-    assert_eq!(counter.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn retry_fail_with_three_attempts() {
-    let counter = AtomicU8::new(0);
-    let closure = || async {
-        counter.fetch_add(1, Ordering::SeqCst);
-        // always fail
-        Err::<(), anyhow::Error>(anyhow!("42"))
-    };
-
-    let _ = retry(
-        "Run 3 times",
-        zero_delay_backoff(2),
-        closure,
-    )
-    .await;
-
-    assert_eq!(counter.load(Ordering::SeqCst), 3);
-}
