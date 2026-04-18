@@ -319,15 +319,12 @@ impl GatewayClientModuleV2 {
             return Ok(());
         }
 
-        let range = self
+        let txid = self
             .client_ctx
             .finalize_and_submit_transaction_dbtx(&tx, operation_id, transaction)
             .await?;
 
-        let outpoint = OutPoint {
-            txid: range.txid(),
-            out_idx: 0,
-        };
+        let outpoint = OutPoint { txid, out_idx: 0 };
 
         self.receive_executor
             .add_state_machine_dbtx(
@@ -400,15 +397,12 @@ impl GatewayClientModuleV2 {
             return Ok(self.await_receive(operation_id).await);
         }
 
-        let range = self
+        let txid = self
             .client_ctx
             .finalize_and_submit_transaction_dbtx(&tx, operation_id, transaction)
             .await?;
 
-        let outpoint = OutPoint {
-            txid: range.txid(),
-            out_idx: 0,
-        };
+        let outpoint = OutPoint { txid, out_idx: 0 };
 
         self.receive_executor
             .add_state_machine_dbtx(

@@ -5,7 +5,7 @@ use bitcoin_hashes::sha256;
 use picomint_api_client::api::{FederationApi, ServerError};
 use picomint_api_client::query::FilterMapThreshold;
 use picomint_core::module::ApiRequestErased;
-use picomint_core::{NumPeersExt, OutPointRange, PeerId};
+use picomint_core::{NumPeersExt, PeerId, TransactionId};
 use picomint_mint_common::endpoint_constants::{
     RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
     SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
@@ -20,7 +20,7 @@ use crate::NoteIssuanceRequest;
 pub trait MintV2ModuleApi {
     async fn fetch_signature_shares(
         &self,
-        range: OutPointRange,
+        txid: TransactionId,
         issuance_requests: Vec<NoteIssuanceRequest>,
         tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
     ) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>>;
@@ -48,7 +48,7 @@ pub trait MintV2ModuleApi {
 impl MintV2ModuleApi for FederationApi {
     async fn fetch_signature_shares(
         &self,
-        range: OutPointRange,
+        txid: TransactionId,
         issuance_requests: Vec<NoteIssuanceRequest>,
         tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
     ) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>> {
@@ -62,7 +62,7 @@ impl MintV2ModuleApi for FederationApi {
                 self.all_peers().to_num_peers(),
             ),
             SIGNATURE_SHARES_ENDPOINT.to_owned(),
-            ApiRequestErased::new(range),
+            ApiRequestErased::new(txid),
         )
         .await
     }

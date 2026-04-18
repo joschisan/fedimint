@@ -414,7 +414,7 @@ impl LightningClientModule {
             return Err(SendPaymentError::InvoiceAlreadyAttempted(operation_id));
         }
 
-        let range = self
+        let txid = self
             .client_ctx
             .finalize_and_submit_transaction_dbtx(&tx, operation_id, transaction)
             .await
@@ -426,10 +426,7 @@ impl LightningClientModule {
                 SendStateMachine {
                     common: SendSMCommon {
                         operation_id,
-                        outpoint: OutPoint {
-                            txid: range.txid(),
-                            out_idx: 0,
-                        },
+                        outpoint: OutPoint { txid, out_idx: 0 },
                         contract,
                         gateway_api: Some(gateway_api),
                         invoice: Some(LightningInvoice::Bolt11(invoice.clone())),
@@ -445,7 +442,7 @@ impl LightningClientModule {
                 &tx,
                 operation_id,
                 SendEvent {
-                    txid: range.txid(),
+                    txid,
                     amount: send_fee.add_to(amount),
                     fee: send_fee.fee(amount),
                 },

@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::ensure;
 use picomint_client_module::executor::StateMachine;
-use picomint_client_module::module::OutPointRange;
-use picomint_core::PeerId;
+use picomint_core::{PeerId, TransactionId};
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_mint_common::{Denomination, verify_note};
@@ -18,7 +17,9 @@ use crate::{MintSmContext, NoteIssuanceRequest};
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct MintOutputStateMachine {
     pub operation_id: OperationId,
-    pub range: Option<OutPointRange>,
+    /// `Some(txid)` for normal operation. `None` for recovery-bootstrapped
+    /// state machines, which fetch shares via the recovery endpoint instead.
+    pub txid: Option<TransactionId>,
     pub issuance_requests: Vec<NoteIssuanceRequest>,
 }
 
@@ -32,13 +33,13 @@ impl StateMachine for MintOutputStateMachine {
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
         let tbs_pks = ctx.tbs_pks.clone();
-        let shares = if let Some(range) = self.range {
+        let shares = if let Some(txid) = self.txid {
             ctx.client_ctx
-                .await_tx_accepted(self.operation_id, range.txid)
+                .await_tx_accepted(self.operation_id, txid)
                 .await?;
             ctx.client_ctx
                 .module_api()
-                .fetch_signature_shares(range, self.issuance_requests.clone(), tbs_pks)
+                .fetch_signature_shares(txid, self.issuance_requests.clone(), tbs_pks)
                 .await
         } else {
             ctx.client_ctx
@@ -87,9 +88,9 @@ impl StateMachine for MintOutputStateMachine {
             assert!(dbtx.insert(&NOTE, &spendable_note, &()).is_none());
         }
 
-        if let Some(range) = self.range {
+        if let Some(txid) = self.txid {
             ctx.client_ctx
-                .log_event(dbtx, self.operation_id, OutputFinalEvent { range })
+                .log_event(dbtx, self.operation_id, OutputFinalEvent { txid })
                 .await;
         }
 

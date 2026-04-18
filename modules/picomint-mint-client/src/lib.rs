@@ -32,7 +32,7 @@ use picomint_client_module::module::init::{
     ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
 };
 use picomint_client_module::module::recovery::RecoveryProgress;
-use picomint_client_module::module::{ClientContext, ClientModule, IdxRange, OutPointRange};
+use picomint_client_module::module::{ClientContext, ClientModule};
 use picomint_client_module::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
@@ -209,7 +209,7 @@ impl ClientModuleInit for MintClientInit {
                 // `get_active_states` and drives it.
                 let sm = MintOutputStateMachine {
                     operation_id: OperationId::new_random(),
-                    range: None,
+                    txid: None,
                     issuance_requests: state.requests.into_values().collect(),
                 };
 
@@ -388,36 +388,35 @@ impl ClientModule for MintClientModule {
         let input_executor = self.input_executor.clone();
         let output_executor = self.output_executor.clone();
 
-        let spawn_sms: picomint_client_module::module::SpawnSms =
-            Box::new(move |dbtx, txid, _primary_in_range, primary_out_range| {
-                Box::pin(async move {
-                    if !spendable_notes.is_empty() {
-                        input_executor
-                            .add_state_machine_dbtx(
-                                dbtx,
-                                InputStateMachine {
-                                    operation_id,
-                                    txid,
-                                    spendable_notes,
-                                },
-                            )
-                            .await;
-                    }
+        let spawn_sms: picomint_client_module::module::SpawnSms = Box::new(move |dbtx, txid| {
+            Box::pin(async move {
+                if !spendable_notes.is_empty() {
+                    input_executor
+                        .add_state_machine_dbtx(
+                            dbtx,
+                            InputStateMachine {
+                                operation_id,
+                                txid,
+                                spendable_notes,
+                            },
+                        )
+                        .await;
+                }
 
-                    if !issuance_requests.is_empty() {
-                        output_executor
-                            .add_state_machine_dbtx(
-                                dbtx,
-                                MintOutputStateMachine {
-                                    operation_id,
-                                    range: Some(OutPointRange::new(txid, primary_out_range)),
-                                    issuance_requests,
-                                },
-                            )
-                            .await;
-                    }
-                })
-            });
+                if !issuance_requests.is_empty() {
+                    output_executor
+                        .add_state_machine_dbtx(
+                            dbtx,
+                            MintOutputStateMachine {
+                                operation_id,
+                                txid: Some(txid),
+                                issuance_requests,
+                            },
+                        )
+                        .await;
+                }
+            })
+        });
 
         Ok(picomint_client_module::module::FinalContribution {
             inputs,
@@ -673,11 +672,16 @@ impl MintClientModule {
         denominations.sort();
 
         let (issuance_requests, outputs) = self.build_issuance(denominations).await;
-        let issuance_count = issuance_requests.len() as u64;
 
         let tx_builder = TransactionBuilder::new()
-            .with_inputs(self.client_ctx.make_client_inputs(ClientInputBundle::new(inputs)))
-            .with_outputs(self.client_ctx.make_client_outputs(ClientOutputBundle::new(outputs)));
+            .with_inputs(
+                self.client_ctx
+                    .make_client_inputs(ClientInputBundle::new(inputs)),
+            )
+            .with_outputs(
+                self.client_ctx
+                    .make_client_outputs(ClientOutputBundle::new(outputs)),
+            );
 
         let txid = self
             .client_ctx
@@ -685,14 +689,12 @@ impl MintClientModule {
             .await
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
-        let output_range = OutPointRange::new(txid, IdxRange::from(0..issuance_count));
-
         self.output_executor
             .add_state_machine_dbtx(
                 &tx,
                 MintOutputStateMachine {
                     operation_id,
-                    range: Some(output_range),
+                    txid: Some(txid),
                     issuance_requests,
                 },
             )
@@ -715,7 +717,10 @@ impl MintClientModule {
 
         dbtx.commit().await;
 
-        await_output_finalisation(&self.client_ctx, operation_id, output_range).await;
+        self.client_ctx
+            .subscribe_operation_events_typed::<events::OutputFinalEvent>(operation_id)
+            .next()
+            .await;
 
         Box::pin(self.send(amount)).await
     }
@@ -799,7 +804,7 @@ impl MintClientModule {
             return Ok(operation_id);
         }
 
-        let finalize_range = self
+        let txid = self
             .client_ctx
             .finalize_and_submit_transaction_dbtx(
                 &tx,
@@ -809,9 +814,6 @@ impl MintClientModule {
             .await
             .map_err(|_| ReceiveECashError::InsufficientFunds)?;
 
-        let txid = finalize_range.txid();
-
-        // Caller's inputs come first — input indices 0..input_count.
         self.input_executor
             .add_state_machine_dbtx(
                 &tx,
@@ -922,22 +924,6 @@ async fn download_slice_with_hash(
             peer_selector.remove(peer);
         } else {
             peer_selector.report(peer, TIMEOUT);
-        }
-    }
-}
-
-async fn await_output_finalisation(
-    client_ctx: &picomint_client_module::module::ClientContext<MintClientModule>,
-    operation_id: OperationId,
-    range: OutPointRange,
-) {
-    use futures::StreamExt as _;
-
-    let mut stream =
-        client_ctx.subscribe_operation_events_typed::<events::OutputFinalEvent>(operation_id);
-    while let Some(ev) = stream.next().await {
-        if ev.range == range {
-            return;
         }
     }
 }

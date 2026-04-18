@@ -124,7 +124,7 @@ impl StateMachine for ReceiveStateMachine {
             keys: vec![self.refund_keypair],
         };
 
-        let range = ctx
+        let txid = ctx
             .client_ctx
             .claim_inputs(
                 dbtx,
@@ -135,13 +135,7 @@ impl StateMachine for ReceiveStateMachine {
             .expect("Cannot claim input, additional funding needed");
 
         ctx.client_ctx
-            .log_event(
-                dbtx,
-                self.operation_id,
-                ReceiveRefundEvent {
-                    txid: range.txid(),
-                },
-            )
+            .log_event(dbtx, self.operation_id, ReceiveRefundEvent { txid })
             .await;
 
         None

@@ -114,7 +114,7 @@ impl StateMachine for SendStateMachine {
                     keys: vec![self.claim_keypair],
                 };
 
-                let range = ctx
+                let txid = ctx
                     .client_ctx
                     .claim_inputs(
                         dbtx,
@@ -130,7 +130,7 @@ impl StateMachine for SendStateMachine {
                         self.operation_id,
                         SendSuccessEvent {
                             preimage: payment_response.preimage,
-                            txid: range.txid(),
+                            txid,
                         },
                     )
                     .await;

@@ -39,7 +39,6 @@
 extern crate self as picomint_core;
 
 use std::fmt::Debug;
-use std::ops::{self, Range};
 pub use amount::*;
 /// Mostly re-exported for [`Decodable`] macros.
 pub use anyhow;
@@ -191,127 +190,6 @@ impl std::fmt::Display for OutPoint {
 }
 
 picomint_redb::consensus_key!(OutPoint);
-
-/// A contiguous range of input/output indexes
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub struct IdxRange {
-    start: u64,
-    end: u64,
-}
-
-impl IdxRange {
-    pub fn new_single(start: u64) -> Option<Self> {
-        start.checked_add(1).map(|end| Self { start, end })
-    }
-
-    pub fn start(self) -> u64 {
-        self.start
-    }
-
-    pub fn count(self) -> usize {
-        self.into_iter().count()
-    }
-
-    pub fn from_inclusive(range: ops::RangeInclusive<u64>) -> Option<Self> {
-        range.end().checked_add(1).map(|end| Self {
-            start: *range.start(),
-            end,
-        })
-    }
-}
-
-impl From<Range<u64>> for IdxRange {
-    fn from(Range { start, end }: Range<u64>) -> Self {
-        Self { start, end }
-    }
-}
-
-impl IntoIterator for IdxRange {
-    type Item = u64;
-    type IntoIter = ops::Range<u64>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        ops::Range {
-            start: self.start,
-            end: self.end,
-        }
-    }
-}
-
-/// Represents a range of output indices for a single transaction
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub struct OutPointRange {
-    pub txid: TransactionId,
-    idx_range: IdxRange,
-}
-
-impl OutPointRange {
-    pub fn new(txid: TransactionId, idx_range: IdxRange) -> Self {
-        Self { txid, idx_range }
-    }
-
-    pub fn new_single(txid: TransactionId, idx: u64) -> Option<Self> {
-        IdxRange::new_single(idx).map(|idx_range| Self { txid, idx_range })
-    }
-
-    pub fn start_idx(self) -> u64 {
-        self.idx_range.start()
-    }
-
-    pub fn out_idx_iter(self) -> impl Iterator<Item = u64> {
-        self.idx_range.into_iter()
-    }
-
-    pub fn count(self) -> usize {
-        self.idx_range.count()
-    }
-
-    pub fn start_out_point(self) -> OutPoint {
-        OutPoint {
-            txid: self.txid,
-            out_idx: self.idx_range.start(),
-        }
-    }
-
-    pub fn end_out_point(self) -> OutPoint {
-        OutPoint {
-            txid: self.txid,
-            out_idx: self.idx_range.end,
-        }
-    }
-
-    pub fn txid(&self) -> TransactionId {
-        self.txid
-    }
-}
-
-impl IntoIterator for OutPointRange {
-    type Item = OutPoint;
-    type IntoIter = OutPointRangeIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        OutPointRangeIter {
-            txid: self.txid,
-            inner: self.idx_range.into_iter(),
-        }
-    }
-}
-
-pub struct OutPointRangeIter {
-    txid: TransactionId,
-    inner: ops::Range<u64>,
-}
-
-impl Iterator for OutPointRangeIter {
-    type Item = OutPoint;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|idx| OutPoint {
-            txid: self.txid,
-            out_idx: idx,
-        })
-    }
-}
 
 impl Encodable for TransactionId {
     fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {

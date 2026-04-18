@@ -24,12 +24,11 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 
 /// Return type of [`ClientModule::create_final_inputs_and_outputs`]. The
 /// primary module contributes inputs/outputs to balance a partial
-/// transaction and — once the final txid + index ranges are known —
-/// spawns any state machines it needs to track those contributions.
+/// transaction and — once the final txid is known — spawns any state
+/// machines it needs to track those contributions.
 ///
 /// `spawn_sms` is invoked exactly once by the submission path, *after*
-/// the txid is computed, with the range of input indices and range of
-/// output indices allocated to the primary contribution.
+/// the txid is computed.
 pub struct FinalContribution<I, O> {
     pub inputs: Vec<crate::transaction::ClientInput<I>>,
     pub outputs: Vec<crate::transaction::ClientOutput<O>>,
@@ -37,7 +36,7 @@ pub struct FinalContribution<I, O> {
 }
 
 pub type SpawnSms = Box<
-    dyn for<'a> FnOnce(&'a WriteTxRef<'_>, TransactionId, IdxRange, IdxRange) -> BoxFuture<'a, ()>
+    dyn for<'a> FnOnce(&'a WriteTxRef<'_>, TransactionId) -> BoxFuture<'a, ()>
         + 'static
         + Send
         + Sync,
@@ -57,21 +56,21 @@ pub trait FinalizeTransaction: Send + Sync {
         &self,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<OutPointRange>;
+    ) -> anyhow::Result<TransactionId>;
 
     async fn finalize_and_submit_transaction_dbtx(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<OutPointRange>;
+    ) -> anyhow::Result<TransactionId>;
 
     async fn finalize_and_submit_transaction_inner(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<OutPointRange>;
+    ) -> anyhow::Result<TransactionId>;
 
     async fn submit_tx_builder_dbtx(
         &self,
@@ -210,7 +209,7 @@ where
         &self,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<OutPointRange> {
+    ) -> anyhow::Result<TransactionId> {
         self.client
             .get()
             .finalize_and_submit_transaction(operation_id, tx_builder)
@@ -222,7 +221,7 @@ where
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<OutPointRange> {
+    ) -> anyhow::Result<TransactionId> {
         self.client
             .get()
             .finalize_and_submit_transaction_dbtx(&dbtx.deisolate(), operation_id, tx_builder)
@@ -294,7 +293,7 @@ where
         dbtx: &WriteTxRef<'_>,
         inputs: ClientInputBundle<I>,
         operation_id: OperationId,
-    ) -> anyhow::Result<OutPointRange>
+    ) -> anyhow::Result<TransactionId>
     where
         picomint_api_client::wire::Input: From<I>,
     {
@@ -457,7 +456,3 @@ pub trait ClientModule: Debug + Send + Sync + 'static {
     }
 }
 
-// Re-export types from picomint_core
-pub use picomint_core::{IdxRange, OutPointRange, OutPointRangeIter};
-
-pub type StateGenerator<S> = Arc<dyn Fn(OutPointRange) -> Vec<S> + 'static + Send + Sync>;

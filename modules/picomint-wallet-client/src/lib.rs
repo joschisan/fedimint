@@ -204,7 +204,7 @@ impl WalletClientModule {
         let dbtx = self.client_ctx.module_db().begin_write().await;
         let tx = dbtx.as_ref();
 
-        let range = self
+        let txid = self
             .client_ctx
             .finalize_and_submit_transaction_dbtx(
                 &tx,
@@ -219,10 +219,7 @@ impl WalletClientModule {
                 &tx,
                 SendStateMachine {
                     operation_id,
-                    outpoint: OutPoint {
-                        txid: range.txid(),
-                        out_idx: 0,
-                    },
+                    outpoint: OutPoint { txid, out_idx: 0 },
                     value,
                     fee,
                 },
@@ -234,7 +231,7 @@ impl WalletClientModule {
                 &tx,
                 operation_id,
                 SendEvent {
-                    txid: range.txid(),
+                    txid,
                     address,
                     value,
                     fee,
@@ -314,7 +311,7 @@ impl WalletClientModule {
         let dbtx = self.client_ctx.module_db().begin_write().await;
         let tx = dbtx.as_ref();
 
-        let range = self
+        let txid = self
             .client_ctx
             .finalize_and_submit_transaction_dbtx(
                 &tx,
@@ -329,7 +326,7 @@ impl WalletClientModule {
                 &tx,
                 operation_id,
                 ReceiveEvent {
-                    txid: range.txid(),
+                    txid,
                     address: self.derive_address(address_index).as_unchecked().clone(),
                     value,
                     fee,
@@ -339,7 +336,7 @@ impl WalletClientModule {
 
         dbtx.commit().await;
 
-        (operation_id, range.txid())
+        (operation_id, txid)
     }
 
     fn spawn_output_scanner(&self, task_group: &TaskGroup) {

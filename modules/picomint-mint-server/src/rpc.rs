@@ -5,7 +5,7 @@
 //! `Mint::handle_api` via `picomint_server_core::handler!`.
 
 use bitcoin::hashes::sha256;
-use picomint_core::OutPointRange;
+use picomint_core::{OutPoint, TransactionId};
 use picomint_encoding::Encodable as _;
 use picomint_core::module::ApiError;
 use picomint_mint_common::RecoveryItem;
@@ -17,18 +17,21 @@ use crate::db::{BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, RECOV
 
 pub async fn signature_shares(
     mint: &Mint,
-    range: OutPointRange,
+    txid: TransactionId,
 ) -> Result<Vec<BlindedSignatureShare>, ApiError> {
-    let tx = mint
-        .db
-        .wait_key_check(
-            &BLINDED_SIGNATURE_SHARE,
-            &range.start_out_point(),
-            std::convert::identity,
-        )
-        .await
-        .1;
-    Ok(collect_signature_shares(&tx, range))
+    // Wait until any BLINDED_SIGNATURE_SHARE for this txid exists. All mint
+    // outputs of a given tx are signed atomically in the same consensus
+    // commit, so observing one implies all are present.
+    let notify = mint.db.notify_for_table(&BLINDED_SIGNATURE_SHARE);
+    let tx = loop {
+        let notified = notify.notified();
+        let read = mint.db.begin_read().await;
+        if !collect_signature_shares(&read, txid).is_empty() {
+            break read;
+        }
+        notified.await;
+    };
+    Ok(collect_signature_shares(&tx, txid))
 }
 
 pub async fn signature_shares_recovery(
@@ -67,10 +70,13 @@ pub async fn recovery_count(mint: &Mint, _: ()) -> Result<u64, ApiError> {
     Ok(crate::get_recovery_count(&tx))
 }
 
-fn collect_signature_shares(tx: &ReadTransaction, range: OutPointRange) -> Vec<BlindedSignatureShare> {
+fn collect_signature_shares(tx: &ReadTransaction, txid: TransactionId) -> Vec<BlindedSignatureShare> {
     tx.range(
         &BLINDED_SIGNATURE_SHARE,
-        range.start_out_point()..range.end_out_point(),
+        OutPoint { txid, out_idx: 0 }..OutPoint {
+            txid,
+            out_idx: u64::MAX,
+        },
     )
     .into_iter()
     .map(|(_, v)| v)

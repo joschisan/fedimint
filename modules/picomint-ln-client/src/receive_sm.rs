@@ -60,7 +60,7 @@ impl StateMachine for ReceiveStateMachine {
             keys: vec![self.claim_keypair],
         };
 
-        let range = ctx
+        let txid = ctx
             .client_ctx
             .claim_inputs(
                 dbtx,
@@ -75,7 +75,7 @@ impl StateMachine for ReceiveStateMachine {
                 dbtx,
                 self.operation_id,
                 ReceiveEvent {
-                    txid: range.txid(),
+                    txid,
                     amount: self.contract.commitment.amount,
                 },
             )

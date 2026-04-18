@@ -1,4 +1,3 @@
-use picomint_client_module::module::OutPointRange;
 use picomint_core::Amount;
 use picomint_core::TransactionId;
 use picomint_core::core::ModuleKind;
@@ -45,7 +44,7 @@ impl Event for ReceiveEvent {
 /// Emitted when an output state machine successfully finalises new notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OutputFinalEvent {
-    pub range: OutPointRange,
+    pub txid: TransactionId,
 }
 
 impl Event for OutputFinalEvent {

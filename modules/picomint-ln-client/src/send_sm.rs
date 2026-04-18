@@ -187,7 +187,7 @@ async fn transition_gateway_send_payment_sm(
                 keys: vec![old_state.common.refund_keypair],
             };
 
-            let range = ctx
+            let txid = ctx
                 .client_ctx
                 .claim_inputs(
                     dbtx,
@@ -201,9 +201,7 @@ async fn transition_gateway_send_payment_sm(
                 .log_event(
                     dbtx,
                     old_state.common.operation_id,
-                    SendRefundEvent {
-                        txid: range.txid(),
-                    },
+                    SendRefundEvent { txid },
                 )
                 .await;
         }
@@ -255,7 +253,7 @@ async fn transition_preimage_sm(
         keys: vec![old_state.common.refund_keypair],
     };
 
-    let range = ctx
+    let txid = ctx
         .client_ctx
         .claim_inputs(
             dbtx,
@@ -266,12 +264,6 @@ async fn transition_preimage_sm(
         .expect("Cannot claim input, additional funding needed");
 
     ctx.client_ctx
-        .log_event(
-            dbtx,
-            old_state.common.operation_id,
-            SendRefundEvent {
-                txid: range.txid(),
-            },
-        )
+        .log_event(dbtx, old_state.common.operation_id, SendRefundEvent { txid })
         .await;
 }
