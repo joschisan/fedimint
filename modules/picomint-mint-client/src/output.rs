@@ -17,24 +17,12 @@ use crate::{MintSmContext, NoteIssuanceRequest};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct MintOutputStateMachine {
-    pub common: OutputSMCommon,
-    pub state: OutputSMState,
-}
-
-picomint_redb::consensus_value!(MintOutputStateMachine);
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct OutputSMCommon {
     pub operation_id: OperationId,
     pub range: Option<OutPointRange>,
     pub issuance_requests: Vec<NoteIssuanceRequest>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum OutputSMState {
-    /// Issuance request was created, we are waiting for blind signatures.
-    Pending,
-}
+picomint_redb::consensus_value!(MintOutputStateMachine);
 
 impl StateMachine for MintOutputStateMachine {
     const TABLE_NAME: &'static str = "output-sm";
@@ -43,9 +31,9 @@ impl StateMachine for MintOutputStateMachine {
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
         let ctx = ctx.clone();
-        let operation_id = self.common.operation_id;
-        let range = self.common.range;
-        let issuance_requests = self.common.issuance_requests.clone();
+        let operation_id = self.operation_id;
+        let range = self.range;
+        let issuance_requests = self.issuance_requests.clone();
         vec![SmStateTransition::new(
             await_signature_shares_sm(ctx.clone(), operation_id, range, issuance_requests),
             move |dbtx, shares, old_state| {
@@ -98,7 +86,7 @@ async fn transition_outcome_ready_sm(
         return None;
     };
 
-    for (i, request) in old_state.common.issuance_requests.iter().enumerate() {
+    for (i, request) in old_state.issuance_requests.iter().enumerate() {
         let agg_blind_signature = aggregate_signature_shares(
             &signature_shares
                 .iter()
@@ -120,11 +108,11 @@ async fn transition_outcome_ready_sm(
         assert!(dbtx.insert(&NOTE, &spendable_note, &()).is_none());
     }
 
-    if let Some(range) = old_state.common.range {
+    if let Some(range) = old_state.range {
         ctx.client_ctx
             .log_event(
                 dbtx,
-                old_state.common.operation_id,
+                old_state.operation_id,
                 OutputFinalisedEvent { range },
             )
             .await;

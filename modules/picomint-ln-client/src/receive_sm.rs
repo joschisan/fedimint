@@ -15,30 +15,18 @@ use crate::LightningClientContext;
 use crate::api::LightningFederationApi;
 use crate::events::ReceivePaymentEvent;
 
+/// State machine that waits on the receipt of a Lightning payment. Terminates
+/// when the incoming contract is either claimed or expires.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
-    pub common: ReceiveSMCommon,
-    pub state: ReceiveSMState,
-}
-
-picomint_redb::consensus_value!(ReceiveStateMachine);
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct ReceiveSMCommon {
     pub operation_id: OperationId,
     pub contract: IncomingContract,
     pub claim_keypair: Keypair,
     pub agg_decryption_key: AggregateDecryptionKey,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum ReceiveSMState {
-    Pending,
-}
+picomint_redb::consensus_value!(ReceiveStateMachine);
 
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// State machine that waits on the receipt of a Lightning payment. Terminates
-/// when the incoming contract is either claimed or expires.
 impl StateMachine for ReceiveStateMachine {
     const TABLE_NAME: &'static str = "receive-sm";
 
@@ -46,7 +34,7 @@ impl StateMachine for ReceiveStateMachine {
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
         let ctx_clone = ctx.clone();
-        let contract = self.common.contract.clone();
+        let contract = self.contract.clone();
         vec![SmStateTransition::new(
             await_incoming_contract_sm(contract, ctx_clone.clone()),
             move |dbtx, outpoint, old_state| {
@@ -79,16 +67,16 @@ async fn transition_incoming_contract_sm(
     let outpoint = outpoint?;
 
     let client_input = ClientInput::<LightningInput> {
-        input: LightningInput::Incoming(outpoint, old_state.common.agg_decryption_key),
-        amount: old_state.common.contract.commitment.amount,
-        keys: vec![old_state.common.claim_keypair],
+        input: LightningInput::Incoming(outpoint, old_state.agg_decryption_key),
+        amount: old_state.contract.commitment.amount,
+        keys: vec![old_state.claim_keypair],
     };
 
     ctx.client_ctx
         .claim_inputs(
             dbtx,
             ClientInputBundle::new(vec![client_input]),
-            old_state.common.operation_id,
+            old_state.operation_id,
         )
         .await
         .expect("Cannot claim input, additional funding needed");
@@ -96,9 +84,9 @@ async fn transition_incoming_contract_sm(
     ctx.client_ctx
         .log_event(
             dbtx,
-            old_state.common.operation_id,
+            old_state.operation_id,
             ReceivePaymentEvent {
-                amount: old_state.common.contract.commitment.amount,
+                amount: old_state.contract.commitment.amount,
             },
         )
         .await;

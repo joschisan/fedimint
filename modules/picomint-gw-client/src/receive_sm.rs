@@ -21,31 +21,19 @@ use tracing::warn;
 use super::events::{ReceivePaymentStatus, ReceivePaymentUpdateEvent};
 use crate::GwV2SmContext;
 
+/// State machine that handles the relay of an incoming Lightning payment.
+/// Terminates once decryption shares are either invalid, produce a valid
+/// preimage (success), or fail to decode one (refunded).
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
-    pub common: ReceiveSMCommon,
-    pub state: ReceiveSMState,
-}
-
-picomint_redb::consensus_value!(ReceiveStateMachine);
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct ReceiveSMCommon {
     pub operation_id: OperationId,
     pub contract: IncomingContract,
     pub outpoint: OutPoint,
     pub refund_keypair: Keypair,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum ReceiveSMState {
-    Funding,
-}
+picomint_redb::consensus_value!(ReceiveStateMachine);
 
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// State machine that handles the relay of an incoming Lightning payment.
-/// Terminates once decryption shares are either invalid, produce a valid
-/// preimage (success), or fail to decode one (refunded).
 impl StateMachine for ReceiveStateMachine {
     const TABLE_NAME: &'static str = "receive-sm";
 
@@ -53,9 +41,9 @@ impl StateMachine for ReceiveStateMachine {
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
         let ctx_clone = ctx.clone();
-        let operation_id = self.common.operation_id;
-        let outpoint = self.common.outpoint;
-        let contract = self.common.contract.clone();
+        let operation_id = self.operation_id;
+        let outpoint = self.outpoint;
+        let contract = self.contract.clone();
         vec![SmStateTransition::new(
             await_decryption_shares_sm(ctx_clone.clone(), operation_id, outpoint, contract),
             move |dbtx, shares, old_state| {
@@ -123,7 +111,7 @@ async fn transition_decryption_shares_sm(
             ctx.client_ctx
                 .log_event(
                     dbtx,
-                    old_state.common.operation_id,
+                    old_state.operation_id,
                     ReceivePaymentUpdateEvent {
                         status: ReceivePaymentStatus::Rejected,
                     },
@@ -137,7 +125,6 @@ async fn transition_decryption_shares_sm(
     let agg_decryption_key = aggregate_dk_shares(&decryption_shares);
 
     if !old_state
-        .common
         .contract
         .verify_agg_decryption_key(&ctx.tpe_agg_pk, &agg_decryption_key)
     {
@@ -146,7 +133,7 @@ async fn transition_decryption_shares_sm(
         ctx.client_ctx
             .log_event(
                 dbtx,
-                old_state.common.operation_id,
+                old_state.operation_id,
                 ReceivePaymentUpdateEvent {
                     status: ReceivePaymentStatus::Failure,
                 },
@@ -157,14 +144,13 @@ async fn transition_decryption_shares_sm(
     }
 
     if let Some(preimage) = old_state
-        .common
         .contract
         .decrypt_preimage(&agg_decryption_key)
     {
         ctx.client_ctx
             .log_event(
                 dbtx,
-                old_state.common.operation_id,
+                old_state.operation_id,
                 ReceivePaymentUpdateEvent {
                     status: ReceivePaymentStatus::Success(preimage),
                 },
@@ -175,16 +161,16 @@ async fn transition_decryption_shares_sm(
     }
 
     let client_input = ClientInput::<LightningInput> {
-        input: LightningInput::Incoming(old_state.common.outpoint, agg_decryption_key),
-        amount: old_state.common.contract.commitment.amount,
-        keys: vec![old_state.common.refund_keypair],
+        input: LightningInput::Incoming(old_state.outpoint, agg_decryption_key),
+        amount: old_state.contract.commitment.amount,
+        keys: vec![old_state.refund_keypair],
     };
 
     ctx.client_ctx
         .claim_inputs(
             dbtx,
             ClientInputBundle::new(vec![client_input]),
-            old_state.common.operation_id,
+            old_state.operation_id,
         )
         .await
         .expect("Cannot claim input, additional funding needed");
@@ -192,7 +178,7 @@ async fn transition_decryption_shares_sm(
     ctx.client_ctx
         .log_event(
             dbtx,
-            old_state.common.operation_id,
+            old_state.operation_id,
             ReceivePaymentUpdateEvent {
                 status: ReceivePaymentStatus::Refunded,
             },

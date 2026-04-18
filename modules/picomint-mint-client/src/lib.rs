@@ -57,9 +57,9 @@ use thiserror::Error;
 
 use crate::api::MintV2ModuleApi;
 pub use crate::ecash::ECash;
-use crate::input::{InputSMCommon, InputSMState, InputStateMachine};
+use crate::input::InputStateMachine;
 use crate::issuance::NoteIssuanceRequest;
-use crate::output::{MintOutputStateMachine, OutputSMCommon, OutputSMState};
+use crate::output::MintOutputStateMachine;
 use crate::receive::ReceiveStateMachine;
 
 const TARGET_PER_DENOMINATION: usize = 3;
@@ -211,12 +211,9 @@ impl ClientModuleInit for MintClientInit {
                 // `output_executor.start()` runs, it picks this up via
                 // `get_active_states` and drives it.
                 let sm = MintOutputStateMachine {
-                    common: OutputSMCommon {
-                        operation_id: OperationId::new_random(),
-                        range: None,
-                        issuance_requests: state.requests.into_values().collect(),
-                    },
-                    state: OutputSMState::Pending,
+                    operation_id: OperationId::new_random(),
+                    range: None,
+                    issuance_requests: state.requests.into_values().collect(),
                 };
 
                 picomint_client_module::executor::ModuleExecutor::add_state_machine_unstarted(
@@ -431,12 +428,9 @@ impl ClientModule for MintClientModule {
                             .add_state_machine_dbtx(
                                 dbtx,
                                 InputStateMachine {
-                                    common: InputSMCommon {
-                                        operation_id,
-                                        txid,
-                                        spendable_notes,
-                                    },
-                                    state: InputSMState::Pending,
+                                    operation_id,
+                                    txid,
+                                    spendable_notes,
                                 },
                             )
                             .await;
@@ -447,12 +441,9 @@ impl ClientModule for MintClientModule {
                             .add_state_machine_dbtx(
                                 dbtx,
                                 MintOutputStateMachine {
-                                    common: OutputSMCommon {
-                                        operation_id,
-                                        range: Some(OutPointRange::new(txid, primary_out_range)),
-                                        issuance_requests,
-                                    },
-                                    state: OutputSMState::Pending,
+                                    operation_id,
+                                    range: Some(OutPointRange::new(txid, primary_out_range)),
+                                    issuance_requests,
                                 },
                             )
                             .await;
@@ -712,12 +703,9 @@ impl MintClientModule {
             .add_state_machine_dbtx(
                 &tx,
                 MintOutputStateMachine {
-                    common: OutputSMCommon {
-                        operation_id,
-                        range: Some(caller_range),
-                        issuance_requests,
-                    },
-                    state: OutputSMState::Pending,
+                    operation_id,
+                    range: Some(caller_range),
+                    issuance_requests,
                 },
             )
             .await;
@@ -828,12 +816,9 @@ impl MintClientModule {
             .add_state_machine_dbtx(
                 &tx,
                 InputStateMachine {
-                    common: input::InputSMCommon {
-                        operation_id,
-                        txid,
-                        spendable_notes,
-                    },
-                    state: input::InputSMState::Pending,
+                    operation_id,
+                    txid,
+                    spendable_notes,
                 },
             )
             .await;
@@ -842,8 +827,8 @@ impl MintClientModule {
             .add_state_machine_dbtx(
                 &tx,
                 ReceiveStateMachine {
-                    common: crate::receive::ReceiveSMCommon { operation_id, txid },
-                    state: crate::receive::ReceiveSMState::Pending,
+                    operation_id,
+                    txid,
                 },
             )
             .await;

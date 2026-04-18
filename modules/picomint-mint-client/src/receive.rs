@@ -9,22 +9,11 @@ use crate::MintSmContext;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
-    pub common: ReceiveSMCommon,
-    pub state: ReceiveSMState,
-}
-
-picomint_redb::consensus_value!(ReceiveStateMachine);
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct ReceiveSMCommon {
     pub operation_id: OperationId,
     pub txid: TransactionId,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum ReceiveSMState {
-    Pending,
-}
+picomint_redb::consensus_value!(ReceiveStateMachine);
 
 impl StateMachine for ReceiveStateMachine {
     const TABLE_NAME: &'static str = "receive-sm";
@@ -34,8 +23,8 @@ impl StateMachine for ReceiveStateMachine {
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
         let ctx_trigger = ctx.clone();
         let ctx_transition = ctx.clone();
-        let operation_id = self.common.operation_id;
-        let txid = self.common.txid;
+        let operation_id = self.operation_id;
+        let txid = self.txid;
         vec![SmStateTransition::new(
             async move {
                 ctx_trigger
@@ -65,7 +54,7 @@ async fn transition_tx_outcome_sm(
     ctx.client_ctx
         .log_event(
             dbtx,
-            old_state.common.operation_id,
+            old_state.operation_id,
             ReceivePaymentUpdateEvent { status },
         )
         .await;

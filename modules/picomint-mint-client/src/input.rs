@@ -8,25 +8,14 @@ use picomint_redb::WriteTxRef;
 
 use crate::{MintSmContext, SpendableNote};
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct InputStateMachine {
-    pub common: InputSMCommon,
-    pub state: InputSMState,
-}
-
-picomint_redb::consensus_value!(InputStateMachine);
-
 #[derive(Debug, Clone, Eq, Hash, PartialEq, Decodable, Encodable)]
-pub struct InputSMCommon {
+pub struct InputStateMachine {
     pub operation_id: OperationId,
     pub txid: TransactionId,
     pub spendable_notes: Vec<SpendableNote>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum InputSMState {
-    Pending,
-}
+picomint_redb::consensus_value!(InputStateMachine);
 
 impl StateMachine for InputStateMachine {
     const TABLE_NAME: &'static str = "input-sm";
@@ -35,8 +24,8 @@ impl StateMachine for InputStateMachine {
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
         let ctx = ctx.clone();
-        let operation_id = self.common.operation_id;
-        let txid = self.common.txid;
+        let operation_id = self.operation_id;
+        let txid = self.txid;
         vec![SmStateTransition::new(
             await_pending_sm(ctx.clone(), operation_id, txid),
             move |dbtx, result, old_state| {
@@ -66,7 +55,6 @@ async fn transition_pending_sm(
     }
 
     let inputs = old_state
-        .common
         .spendable_notes
         .iter()
         .map(|spendable_note| ClientInput::<MintInput> {
@@ -79,11 +67,7 @@ async fn transition_pending_sm(
         .collect();
 
     ctx.client_ctx
-        .claim_inputs(
-            dbtx,
-            ClientInputBundle::new(inputs),
-            old_state.common.operation_id,
-        )
+        .claim_inputs(dbtx, ClientInputBundle::new(inputs), old_state.operation_id)
         .await
         .expect("Cannot claim input, additional funding needed");
 

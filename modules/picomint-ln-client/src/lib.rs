@@ -49,7 +49,7 @@ use tpe::{AggregateDecryptionKey, derive_agg_dk};
 
 use crate::api::LightningFederationApi;
 use crate::events::SendPaymentEvent;
-use crate::receive_sm::{ReceiveSMCommon, ReceiveSMState, ReceiveStateMachine};
+use crate::receive_sm::ReceiveStateMachine;
 use crate::send_sm::{SendSMCommon, SendSMState, SendStateMachine};
 
 /// Number of blocks until outgoing lightning contracts times out and user
@@ -607,13 +607,10 @@ impl LightningClientModule {
             .add_state_machine_dbtx(
                 dbtx,
                 ReceiveStateMachine {
-                    common: ReceiveSMCommon {
-                        operation_id,
-                        contract,
-                        claim_keypair,
-                        agg_decryption_key,
-                    },
-                    state: ReceiveSMState::Pending,
+                    operation_id,
+                    contract,
+                    claim_keypair,
+                    agg_decryption_key,
                 },
             )
             .await;

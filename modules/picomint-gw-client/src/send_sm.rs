@@ -14,16 +14,11 @@ use super::FinalReceiveState;
 use super::events::{SendPaymentStatus, SendPaymentUpdateEvent};
 use crate::GwV2SmContext;
 
+/// State machine that handles the relay of an outgoing Lightning payment.
+/// Terminates after the payment either succeeds (claim inputs + success event)
+/// or is cancelled (cancelled event).
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
-    pub common: SendSMCommon,
-    pub state: SendSMState,
-}
-
-picomint_redb::consensus_value!(SendStateMachine);
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct SendSMCommon {
     pub operation_id: OperationId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
@@ -33,10 +28,7 @@ pub struct SendSMCommon {
     pub claim_keypair: Keypair,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum SendSMState {
-    Sending,
-}
+picomint_redb::consensus_value!(SendStateMachine);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentResponse {
@@ -57,10 +49,6 @@ pub enum Cancelled {
     LightningRpcError(String),
 }
 
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// State machine that handles the relay of an outgoing Lightning payment.
-/// Terminates after the payment either succeeds (claim inputs + success event)
-/// or is cancelled (cancelled event).
 impl StateMachine for SendStateMachine {
     const TABLE_NAME: &'static str = "send-sm";
 
@@ -68,10 +56,10 @@ impl StateMachine for SendStateMachine {
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
         let ctx_clone = ctx.clone();
-        let max_delay = self.common.max_delay;
-        let min_contract_amount = self.common.min_contract_amount;
-        let invoice = self.common.invoice.clone();
-        let contract = self.common.contract.clone();
+        let max_delay = self.max_delay;
+        let min_contract_amount = self.min_contract_amount;
+        let invoice = self.invoice.clone();
+        let contract = self.contract.clone();
         vec![SmStateTransition::new(
             send_payment_sm(
                 ctx_clone.clone(),
@@ -149,7 +137,7 @@ async fn transition_send_payment_sm(
             ctx.client_ctx
                 .log_event(
                     dbtx,
-                    old_state.common.operation_id,
+                    old_state.operation_id,
                     SendPaymentUpdateEvent {
                         status: SendPaymentStatus::Success(payment_response.preimage),
                     },
@@ -158,18 +146,18 @@ async fn transition_send_payment_sm(
 
             let client_input = ClientInput::<LightningInput> {
                 input: LightningInput::Outgoing(
-                    old_state.common.outpoint,
+                    old_state.outpoint,
                     OutgoingWitness::Claim(payment_response.preimage),
                 ),
-                amount: old_state.common.contract.amount,
-                keys: vec![old_state.common.claim_keypair],
+                amount: old_state.contract.amount,
+                keys: vec![old_state.claim_keypair],
             };
 
             ctx.client_ctx
                 .claim_inputs(
                     dbtx,
                     ClientInputBundle::new(vec![client_input]),
-                    old_state.common.operation_id,
+                    old_state.operation_id,
                 )
                 .await
                 .expect("Cannot claim input, additional funding needed");
@@ -177,12 +165,12 @@ async fn transition_send_payment_sm(
         Err(_) => {
             let signature = ctx
                 .keypair
-                .sign_schnorr(old_state.common.contract.forfeit_message());
+                .sign_schnorr(old_state.contract.forfeit_message());
 
             ctx.client_ctx
                 .log_event(
                     dbtx,
-                    old_state.common.operation_id,
+                    old_state.operation_id,
                     SendPaymentUpdateEvent {
                         status: SendPaymentStatus::Cancelled(signature),
                     },

@@ -43,9 +43,9 @@ use picomint_wallet_common::{
     StandardScript, WalletCommonInit, WalletInput, WalletModuleTypes, WalletOutput, descriptor,
     is_potential_receive,
 };
-use receive_sm::{ReceiveSMCommon, ReceiveSMState, ReceiveStateMachine};
+use receive_sm::ReceiveStateMachine;
 use secp256k1::Keypair;
-use send_sm::{SendSMCommon, SendSMState, SendStateMachine};
+use send_sm::SendStateMachine;
 use thiserror::Error;
 use tracing::warn;
 
@@ -228,16 +228,13 @@ impl WalletClientModule {
             .add_state_machine_dbtx(
                 &tx,
                 SendStateMachine {
-                    common: SendSMCommon {
-                        operation_id,
-                        outpoint: OutPoint {
-                            txid: range.txid(),
-                            out_idx: 0,
-                        },
-                        value,
-                        fee,
+                    operation_id,
+                    outpoint: OutPoint {
+                        txid: range.txid(),
+                        out_idx: 0,
                     },
-                    state: SendSMState::Funding,
+                    value,
+                    fee,
                 },
             )
             .await;
@@ -340,13 +337,10 @@ impl WalletClientModule {
             .add_state_machine_dbtx(
                 &tx,
                 ReceiveStateMachine {
-                    common: ReceiveSMCommon {
-                        operation_id,
-                        txid: range.txid(),
-                        value,
-                        fee,
-                    },
-                    state: ReceiveSMState::Funding,
+                    operation_id,
+                    txid: range.txid(),
+                    value,
+                    fee,
                 },
             )
             .await;

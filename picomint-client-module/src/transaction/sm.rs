@@ -13,29 +13,15 @@ use tracing::debug;
 use crate::executor::{StateMachine, StateTransition as SmStateTransition};
 use crate::{TxAcceptedEvent, TxRejectedEvent};
 
-#[cfg_attr(doc, aquamarine::aquamarine)]
-/// State machine to (re-)submit a transaction until it is either accepted or
-/// rejected by the federation. Acceptance or rejection terminates the SM.
+/// State machine that (re-)submits a transaction until it is either accepted
+/// or rejected by the federation.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct TxSubmissionStateMachine {
-    pub common: TxSubmissionSMCommon,
-    pub state: TxSubmissionSMState,
-}
-
-picomint_redb::consensus_value!(TxSubmissionStateMachine);
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct TxSubmissionSMCommon {
     pub operation_id: OperationId,
     pub transaction: Transaction,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum TxSubmissionSMState {
-    /// The transaction has been created and potentially already been submitted,
-    /// but no rejection or acceptance happened so far.
-    Created,
-}
+picomint_redb::consensus_value!(TxSubmissionStateMachine);
 
 /// Context for running [`TxSubmissionStateMachine`] in a typed
 /// [`crate::executor::ModuleExecutor`].
@@ -51,8 +37,7 @@ impl StateMachine for TxSubmissionStateMachine {
     type Context = TxSubmissionSmContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        let TxSubmissionSMState::Created = &self.state;
-        let transaction = self.common.transaction.clone();
+        let transaction = self.transaction.clone();
         vec![
             SmStateTransition::new(
                 await_tx_rejected_sm(transaction.clone(), ctx.api.clone()),
@@ -109,9 +94,9 @@ async fn transition_tx_rejected_sm(
     picomint_eventlog::log_event(
         dbtx,
         ctx.log_event_added_tx.clone(),
-        Some(old_state.common.operation_id),
+        Some(old_state.operation_id),
         TxRejectedEvent {
-            txid: old_state.common.transaction.tx_hash(),
+            txid: old_state.transaction.tx_hash(),
             error,
         },
     );
@@ -127,9 +112,9 @@ async fn transition_tx_accepted_sm(
     picomint_eventlog::log_event(
         dbtx,
         ctx.log_event_added_tx.clone(),
-        Some(old_state.common.operation_id),
+        Some(old_state.operation_id),
         TxAcceptedEvent {
-            txid: old_state.common.transaction.tx_hash(),
+            txid: old_state.transaction.tx_hash(),
         },
     );
 

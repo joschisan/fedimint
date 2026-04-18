@@ -36,17 +36,15 @@ use picomint_ln_common::gateway_api::SendPaymentPayload;
 use picomint_ln_common::{
     LightningCommonInit, LightningInvoice, LightningModuleTypes, LightningOutput,
 };
-use receive_sm::{ReceiveSMState, ReceiveStateMachine};
+use receive_sm::ReceiveStateMachine;
 use secp256k1::schnorr::Signature;
-use send_sm::{SendSMState, SendStateMachine};
+use send_sm::SendStateMachine;
 use serde::{Deserialize, Serialize};
 use tpe::{AggregatePublicKey, PublicKeyShare};
 use tracing::warn;
 
 use crate::api::GatewayFederationApi;
 use crate::complete_sm::{CompleteSMCommon, CompleteSMState, CompleteStateMachine};
-use crate::receive_sm::ReceiveSMCommon;
-use crate::send_sm::SendSMCommon;
 
 /// LNv2 CLTV Delta in blocks
 pub const EXPIRATION_DELTA_MINIMUM_V2: u64 = 144;
@@ -248,16 +246,13 @@ impl GatewayClientModuleV2 {
             .add_state_machine_dbtx(
                 &tx,
                 SendStateMachine {
-                    common: SendSMCommon {
-                        operation_id,
-                        outpoint: payload.outpoint,
-                        contract: payload.contract.clone(),
-                        max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM_V2),
-                        min_contract_amount,
-                        invoice: payload.invoice,
-                        claim_keypair: self.keypair,
-                    },
-                    state: SendSMState::Sending,
+                    operation_id,
+                    outpoint: payload.outpoint,
+                    contract: payload.contract.clone(),
+                    max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM_V2),
+                    min_contract_amount,
+                    invoice: payload.invoice,
+                    claim_keypair: self.keypair,
                 },
             )
             .await;
@@ -328,13 +323,10 @@ impl GatewayClientModuleV2 {
             .add_state_machine_dbtx(
                 &tx,
                 ReceiveStateMachine {
-                    common: ReceiveSMCommon {
-                        operation_id,
-                        contract,
-                        outpoint,
-                        refund_keypair,
-                    },
-                    state: ReceiveSMState::Funding,
+                    operation_id,
+                    contract,
+                    outpoint,
+                    refund_keypair,
                 },
             )
             .await;
@@ -401,13 +393,10 @@ impl GatewayClientModuleV2 {
             .add_state_machine_dbtx(
                 &tx,
                 ReceiveStateMachine {
-                    common: ReceiveSMCommon {
-                        operation_id,
-                        contract,
-                        outpoint,
-                        refund_keypair,
-                    },
-                    state: ReceiveSMState::Funding,
+                    operation_id,
+                    contract,
+                    outpoint,
+                    refund_keypair,
                 },
             )
             .await;

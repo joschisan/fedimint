@@ -10,24 +10,13 @@ use crate::events::{SendPaymentStatus, SendPaymentUpdateEvent};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
-    pub common: SendSMCommon,
-    pub state: SendSMState,
-}
-
-picomint_redb::consensus_value!(SendStateMachine);
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct SendSMCommon {
     pub operation_id: OperationId,
     pub outpoint: OutPoint,
     pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum SendSMState {
-    Funding,
-}
+picomint_redb::consensus_value!(SendStateMachine);
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum AwaitFundingResult {
@@ -43,8 +32,8 @@ impl StateMachine for SendStateMachine {
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
         let ctx = ctx.clone();
-        let operation_id = self.common.operation_id;
-        let outpoint = self.common.outpoint;
+        let operation_id = self.operation_id;
+        let outpoint = self.outpoint;
         vec![SmStateTransition::new(
             await_funding_sm(ctx.clone(), operation_id, outpoint),
             move |dbtx, result, old_state| {
@@ -91,7 +80,7 @@ async fn transition_funding_sm(
     ctx.client_ctx
         .log_event(
             dbtx,
-            old_state.common.operation_id,
+            old_state.operation_id,
             SendPaymentUpdateEvent { status },
         )
         .await;

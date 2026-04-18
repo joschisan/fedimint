@@ -17,9 +17,7 @@ use picomint_api_client::{Endpoint, wire};
 use picomint_client_module::executor::ModuleExecutor;
 use picomint_client_module::module::recovery::RecoveryProgress;
 use picomint_client_module::module::{ClientModule, FinalizeTransaction, IdxRange, OutPointRange};
-use picomint_client_module::transaction::{
-    TransactionBuilder, TxSubmissionSMCommon, TxSubmissionSMState, TxSubmissionStateMachine,
-};
+use picomint_client_module::transaction::{TransactionBuilder, TxSubmissionStateMachine};
 use picomint_client_module::{
     ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
 };
@@ -383,11 +381,8 @@ impl Client {
             .add_state_machine_dbtx(
                 dbtx,
                 TxSubmissionStateMachine {
-                    common: TxSubmissionSMCommon {
-                        operation_id,
-                        transaction,
-                    },
-                    state: TxSubmissionSMState::Created,
+                    operation_id,
+                    transaction,
                 },
             )
             .await;
