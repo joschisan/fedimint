@@ -173,6 +173,8 @@ struct DatabaseInner {
     /// Lazily-populated map of resolved table name -> shared `Notify`. Any
     /// commit that opened a table for write wakes every waiter on that table.
     notify: Mutex<BTreeMap<String, Arc<Notify>>>,
+    /// Fires on every commit, regardless of which tables were written.
+    global_notify: Arc<Notify>,
 }
 
 impl DatabaseInner {
@@ -206,6 +208,7 @@ impl Database {
             inner: Arc::new(DatabaseInner {
                 env,
                 notify: Mutex::new(BTreeMap::new()),
+                global_notify: Arc::new(Notify::new()),
             }),
             prefix: Vec::new(),
         })
@@ -221,6 +224,7 @@ impl Database {
             inner: Arc::new(DatabaseInner {
                 env,
                 notify: Mutex::new(BTreeMap::new()),
+                global_notify: Arc::new(Notify::new()),
             }),
             prefix: Vec::new(),
         }
@@ -287,6 +291,12 @@ impl Database {
         V: Debug + 'static,
     {
         self.wait_key_check(def, key, |v| v).await
+    }
+
+    /// Await the next commit on this database. Fires on every committed
+    /// write, regardless of which tables were touched.
+    pub async fn wait_commit(&self) {
+        self.inner.global_notify.notified().await;
     }
 
     /// Wait until `check` on the current value returns `Some(T)`, then return
@@ -447,6 +457,8 @@ impl WriteTransaction {
         for name in touched.into_inner().expect("touched poisoned") {
             db.notify_for(&name).notify_waiters();
         }
+
+        db.global_notify.notify_waiters();
 
         for cb in on_commit.into_inner().expect("on_commit poisoned") {
             cb();

@@ -115,9 +115,6 @@ pub const TRANSACTION_OVERFLOW_ERROR: TransactionError = TransactionError::Unbal
     fee: Amount::ZERO,
 };
 
-#[derive(Debug, Encodable, Decodable, Clone, Eq, PartialEq)]
-pub struct TransactionSubmissionOutcome(pub Result<TransactionId, TransactionError>);
-
 /// All the items that may be produced during a consensus epoch.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum ConsensusItem {
