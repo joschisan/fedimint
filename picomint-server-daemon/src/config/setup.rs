@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, ensure};
 use iroh::SecretKey;
-use picomint_core::base32::PICOMINT_PREFIX;
+use picomint_base32::{self as base32, PICOMINT_PREFIX};
+use picomint_core::PeerId;
 use picomint_core::config::META_FEDERATION_NAME_KEY;
-use picomint_core::{PeerId, base32};
 use picomint_encoding::{Decodable, Encodable};
 use serde::Serialize;
 use tokio::sync::Mutex;

@@ -37,7 +37,7 @@ use picomint_client_module::module::{ClientContext, ClientModule, IdxRange, OutP
 use picomint_client_module::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
-use picomint_core::base32::{self, PICOMINT_PREFIX};
+use picomint_base32::{self as base32, PICOMINT_PREFIX};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};

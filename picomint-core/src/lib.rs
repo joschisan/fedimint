@@ -52,8 +52,6 @@ use picomint_encoding::{Decodable, Encodable};
 
 /// Bitcoin amount types
 mod amount;
-/// Base 32 encoding
-pub mod base32;
 /// Federation configuration
 pub mod config;
 /// Fundamental types

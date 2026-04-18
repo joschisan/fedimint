@@ -12,7 +12,7 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
-use picomint_core::base32::{self, PICOMINT_PREFIX};
+use picomint_base32::{self as base32, PICOMINT_PREFIX};
 use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
     ChannelInfo, FederationBalanceRequest, FederationBalanceResponse, FederationConfigRequest,

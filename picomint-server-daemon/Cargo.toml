@@ -30,6 +30,7 @@ bls12_381 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
 picomint-api-client = { workspace = true }
+picomint-base32 = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-ln-common = { workspace = true }

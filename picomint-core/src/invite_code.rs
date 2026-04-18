@@ -10,7 +10,8 @@ use bech32::{Bech32m, Hrp};
 use iroh_base::PublicKey;
 use serde::{Deserialize, Serialize};
 
-use crate::base32::PICOMINT_PREFIX;
+use picomint_base32::PICOMINT_PREFIX;
+
 use crate::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
 use crate::{NumPeersExt, PeerId};
@@ -158,7 +159,7 @@ impl FromStr for InviteCode {
     type Err = anyhow::Error;
 
     fn from_str(encoded: &str) -> Result<Self, Self::Err> {
-        if let Ok(invite_code) = crate::base32::decode_prefixed(PICOMINT_PREFIX, encoded) {
+        if let Ok(invite_code) = picomint_base32::decode_prefixed(PICOMINT_PREFIX, encoded) {
             return Ok(invite_code);
         }
 

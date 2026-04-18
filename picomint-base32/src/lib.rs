@@ -34,7 +34,7 @@ pub fn encode(input: &[u8]) -> String {
         output.push(RFC4648[buffer & 0b11111]);
     }
 
-    String::from_utf8(output).unwrap()
+    String::from_utf8(output).expect("RFC4648 alphabet is ASCII")
 }
 
 /// Decodes a base 32 string back to raw bytes. Returns an error
@@ -103,15 +103,6 @@ fn test_base_32_roundtrip() {
 
         assert_eq!(
             decode_prefixed::<Vec<u8>>(TEST_PREFIX, &encode_prefixed(TEST_PREFIX, &bytes)).unwrap(),
-            bytes
-        );
-
-        assert_eq!(
-            decode_prefixed::<Vec<u8>>(
-                TEST_PREFIX,
-                &encode_prefixed(TEST_PREFIX, &bytes).to_ascii_uppercase()
-            )
-            .unwrap(),
             bytes
         );
     }

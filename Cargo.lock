@@ -3861,6 +3861,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-base32"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "picomint-encoding",
+]
+
+[[package]]
 name = "picomint-bip39"
 version = "0.1.0"
 dependencies = [
@@ -3965,6 +3973,7 @@ dependencies = [
  "lightning",
  "lightning-types",
  "n0-future 0.1.3",
+ "picomint-base32",
  "picomint-derive",
  "picomint-encoding",
  "picomint-logging",
@@ -4089,6 +4098,7 @@ dependencies = [
  "lightning-invoice",
  "lockable",
  "picomint-api-client",
+ "picomint-base32",
  "picomint-bip39",
  "picomint-client",
  "picomint-client-module",
@@ -4187,6 +4197,7 @@ dependencies = [
  "futures",
  "lightning-invoice",
  "picomint-api-client",
+ "picomint-base32",
  "picomint-client-module",
  "picomint-core",
  "picomint-derive-secret",
@@ -4272,6 +4283,7 @@ dependencies = [
  "divan",
  "futures",
  "picomint-api-client",
+ "picomint-base32",
  "picomint-client-module",
  "picomint-core",
  "picomint-derive-secret",
@@ -4326,6 +4338,7 @@ dependencies = [
  "bitcoin",
  "clap",
  "lightning-invoice",
+ "picomint-base32",
  "picomint-core",
  "picomint-encoding",
  "picomint-ln-common",
@@ -4408,6 +4421,7 @@ dependencies = [
  "maud",
  "parity-scale-codec",
  "picomint-api-client",
+ "picomint-base32",
  "picomint-bitcoin-rpc",
  "picomint-core",
  "picomint-encoding",

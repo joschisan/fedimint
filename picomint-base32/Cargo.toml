@@ -1,0 +1,20 @@
+[package]
+authors = { workspace = true }
+description = "Base32hex encoding/decoding with picomint-prefixed variants"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-base32"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "picomint_base32"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+picomint-encoding = { workspace = true }
+
+[lints]
+workspace = true

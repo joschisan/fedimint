@@ -25,6 +25,7 @@ bech32 = { workspace = true }
 bitcoin = { workspace = true }
 bitcoin-units = { workspace = true }
 bls12_381 = { workspace = true }
+picomint-base32 = { workspace = true }
 picomint-derive = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-logging = { workspace = true }

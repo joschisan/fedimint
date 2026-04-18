@@ -19,6 +19,7 @@ axum = { workspace = true, features = ["json"] }
 bitcoin = { workspace = true }
 clap = { workspace = true }
 picomint-api-client = { workspace = true }
+picomint-base32 = { workspace = true }
 picomint-bip39 = { workspace = true }
 picomint-client = { workspace = true }
 picomint-client-module = { workspace = true }

@@ -676,8 +676,8 @@ impl LightningClientModule {
             gateways
         };
 
-        let payload = picomint_core::base32::encode_prefixed(
-            picomint_core::base32::PICOMINT_PREFIX,
+        let payload = picomint_base32::encode_prefixed(
+            picomint_base32::PICOMINT_PREFIX,
             &lnurl::LnurlRequest {
                 federation_id: self.federation_id,
                 recipient_pk: self.lnurl_keypair.public_key(),

@@ -10,7 +10,7 @@ use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::{self, PublicKey};
 use clap::Parser;
 use lightning_invoice::Bolt11Invoice;
-use picomint_core::base32::{PICOMINT_PREFIX, decode_prefixed};
+use picomint_base32::{PICOMINT_PREFIX, decode_prefixed};
 use picomint_core::config::FederationId;
 use picomint_encoding::Encodable;
 use picomint_core::secp256k1::Scalar;
