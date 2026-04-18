@@ -4,17 +4,8 @@ use picomint_core::module::ApiRequestErased;
 use picomint_core::ln::ContractId;
 use picomint_core::ln::endpoint_constants::OUTGOING_CONTRACT_EXPIRATION_ENDPOINT;
 
-#[async_trait::async_trait]
-pub trait GatewayFederationApi {
-    async fn outgoing_contract_expiration(
-        &self,
-        outpoint: OutPoint,
-    ) -> FederationResult<Option<(ContractId, u64)>>;
-}
-
-#[async_trait::async_trait]
-impl GatewayFederationApi for FederationApi {
-    async fn outgoing_contract_expiration(
+impl FederationApi {
+    pub async fn gw_outgoing_contract_expiration(
         &self,
         outpoint: OutPoint,
     ) -> FederationResult<Option<(ContractId, u64)>> {

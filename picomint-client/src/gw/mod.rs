@@ -43,7 +43,6 @@ use serde::{Deserialize, Serialize};
 use tpe::{AggregatePublicKey, PublicKeyShare};
 use tracing::warn;
 
-use self::api::GatewayFederationApi;
 use self::complete_sm::{CompleteSMCommon, CompleteSMState, CompleteStateMachine};
 
 /// Lightning CLTV Delta in blocks
@@ -205,7 +204,7 @@ impl GatewayClientModule {
         // before we start the state machine to prevent DOS attacks.
         let (contract_id, expiration) = self
             .module_api
-            .outgoing_contract_expiration(payload.outpoint)
+            .gw_outgoing_contract_expiration(payload.outpoint)
             .await
             .map_err(|_| anyhow!("The gateway can not reach the federation"))?
             .ok_or(anyhow!("The outgoing contract has not yet been confirmed"))?;
