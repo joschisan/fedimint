@@ -4,7 +4,8 @@
 //! [`ModuleExecutor<S>`] parameterised by its state type. The caller
 //! must hand the executor a [`Database`] it owns exclusively (typically
 //! via [`Database::isolate`]); the executor persists active states in a
-//! per-state-machine table and drives transitions in a typed reactor loop.
+//! per-state-machine table keyed by a random [`SmId`] and drives
+//! transitions in a typed reactor loop.
 //!
 //! Terminal states are simply removed from the DB; inactive state
 //! history is not retained.
@@ -12,15 +13,28 @@
 use std::any::Any;
 use std::fmt::Debug;
 use std::future::Future;
-use std::hash::Hash;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::future::select_all;
-use picomint_redb::redb;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxFuture;
-use picomint_redb::{Database, WriteTxRef};
+use picomint_encoding::{Decodable, Encodable};
+use picomint_redb::{Database, WriteTxRef, redb};
+
+/// Random opaque identifier assigned by the executor when a state
+/// machine is first inserted. Used as the table key; the state machine
+/// struct is the stored value.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Encodable, Decodable)]
+pub struct SmId([u8; 16]);
+
+picomint_redb::consensus_key!(SmId);
+
+impl SmId {
+    fn random() -> Self {
+        Self(rand::random())
+    }
+}
 
 /// A persistent state machine driven by a [`ModuleExecutor`].
 ///
@@ -31,7 +45,7 @@ use picomint_redb::{Database, WriteTxRef};
 /// Returning an empty `Vec` from `transitions` marks the state terminal:
 /// the executor removes it from the DB and stops polling.
 pub trait StateMachine:
-    Debug + Clone + Eq + Hash + for<'a> redb::Key<SelfType<'a> = Self> + Send + Sync + 'static
+    Debug + Clone + for<'a> redb::Value<SelfType<'a> = Self> + Send + Sync + 'static
 {
     /// Logical table name under which this state machine's active states are
     /// persisted in the owning [`ModuleExecutor`]'s database. Must be unique
@@ -45,7 +59,7 @@ pub trait StateMachine:
     fn transitions(&self, ctx: &Self::Context) -> Vec<StateTransition<Self>>;
 }
 
-fn table<S: StateMachine>() -> picomint_redb::NativeTableDef<S, ()> {
+fn table<S: StateMachine>() -> picomint_redb::NativeTableDef<SmId, S> {
     picomint_redb::NativeTableDef::new(S::TABLE_NAME)
 }
 
@@ -126,29 +140,31 @@ impl<S: StateMachine> ModuleExecutor<S> {
     /// owning client's `FinalClientIface` (and similar late-bound refs
     /// used by `S::Context`) have been resolved.
     pub async fn start(&self) {
-        for state in self.inner.get_active_states().await {
-            self.inner.clone().spawn_drive(state);
+        for (id, state) in self.inner.get_active_states().await {
+            self.inner.clone().spawn_drive(id, state);
         }
     }
 
-    /// Atomically insert `state` as a new active state machine. A
-    /// driver task is spawned for it when the DB transaction commits.
+    /// Atomically insert `state` as a new active state machine under a
+    /// freshly-generated [`SmId`]. A driver task is spawned for it when
+    /// the DB transaction commits.
     ///
     /// `dbtx` must be scoped to the module's DB namespace.
     pub async fn add_state_machine_dbtx(&self, dbtx: &WriteTxRef<'_>, state: S) {
+        let id = SmId::random();
         assert!(
-            dbtx.insert(&table::<S>(), &state, &()).is_none(),
-            "State already exists in executor"
+            dbtx.insert(&table::<S>(), &id, &state).is_none(),
+            "SmId collision"
         );
 
         let inner = self.inner.clone();
 
         dbtx.on_commit(move || {
-            inner.spawn_drive(state);
+            inner.spawn_drive(id, state);
         });
     }
 
-    pub async fn get_active_states(&self) -> Vec<S> {
+    pub async fn get_active_states(&self) -> Vec<(SmId, S)> {
         self.inner.get_active_states().await
     }
 
@@ -158,44 +174,44 @@ impl<S: StateMachine> ModuleExecutor<S> {
     /// to seed state before the executor exists. `dbtx` must be scoped
     /// to the module's DB namespace.
     pub async fn add_state_machine_unstarted(dbtx: &WriteTxRef<'_>, state: S) {
+        let id = SmId::random();
         assert!(
-            dbtx.insert(&table::<S>(), &state, &()).is_none(),
-            "State already exists in executor"
+            dbtx.insert(&table::<S>(), &id, &state).is_none(),
+            "SmId collision"
         );
     }
 }
 
 impl<S: StateMachine> Inner<S> {
-    async fn get_active_states(&self) -> Vec<S> {
+    async fn get_active_states(&self) -> Vec<(SmId, S)> {
         self.db
             .begin_read()
             .await
             .iter(&table::<S>())
             .into_iter()
-            .map(|(k, ())| k)
             .collect()
     }
 
-    async fn remove_active(&self, state: &S) {
+    async fn remove_active(&self, id: SmId) {
         let tx = self.db.begin_write().await;
-        tx.remove(&table::<S>(), state);
+        tx.remove(&table::<S>(), &id);
         tx.commit().await;
     }
 
-    fn spawn_drive(self: Arc<Self>, state: S) {
+    fn spawn_drive(self: Arc<Self>, id: SmId, state: S) {
         let tg = self.task_group.clone();
-        tg.spawn_cancellable("sm-drive", async move { self.drive(state).await });
+        tg.spawn_cancellable("sm-drive", async move { self.drive(id, state).await });
     }
 
     /// Drive one state machine from its current state to a terminal
     /// one. Each iteration: race triggers the winning transition
     /// atomically, advance to the new state (or exit when terminal).
-    async fn drive(self: Arc<Self>, mut state: S) {
+    async fn drive(self: Arc<Self>, id: SmId, mut state: S) {
         loop {
             let transitions = state.transitions(&self.context);
 
             if transitions.is_empty() {
-                self.remove_active(&state).await;
+                self.remove_active(id).await;
                 return;
             }
 
@@ -208,11 +224,11 @@ impl<S: StateMachine> Inner<S> {
 
             let tx = self.db.begin_write().await;
             let new_state = transition(&tx.as_ref(), outcome, state.clone()).await;
-            tx.remove(&table::<S>(), &state);
             let next = if new_state.transitions(&self.context).is_empty() {
+                tx.remove(&table::<S>(), &id);
                 None
             } else {
-                tx.insert(&table::<S>(), &new_state, &());
+                tx.insert(&table::<S>(), &id, &new_state);
                 Some(new_state)
             };
             tx.commit().await;

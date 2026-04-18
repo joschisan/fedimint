@@ -28,7 +28,7 @@ pub struct ReceiveStateMachine {
     pub state: ReceiveSMState,
 }
 
-picomint_redb::consensus_key!(ReceiveStateMachine);
+picomint_redb::consensus_value!(ReceiveStateMachine);
 
 impl ReceiveStateMachine {
     pub fn update(&self, state: ReceiveSMState) -> Self {

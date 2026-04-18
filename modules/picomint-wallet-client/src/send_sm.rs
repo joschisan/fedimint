@@ -14,7 +14,7 @@ pub struct SendStateMachine {
     pub state: SendSMState,
 }
 
-picomint_redb::consensus_key!(SendStateMachine);
+picomint_redb::consensus_value!(SendStateMachine);
 
 impl SendStateMachine {
     pub fn update(&self, state: SendSMState) -> Self {

@@ -15,7 +15,7 @@ pub struct InputStateMachine {
     pub state: InputSMState,
 }
 
-picomint_redb::consensus_key!(InputStateMachine);
+picomint_redb::consensus_value!(InputStateMachine);
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq, Decodable, Encodable)]
 pub struct InputSMCommon {

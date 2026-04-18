@@ -28,7 +28,7 @@ pub struct TxSubmissionStateMachine {
     pub state: TxSubmissionSMState,
 }
 
-picomint_redb::consensus_key!(TxSubmissionStateMachine);
+picomint_redb::consensus_value!(TxSubmissionStateMachine);
 
 impl TxSubmissionStateMachine {
     pub fn update(&self, state: TxSubmissionSMState) -> Self {
