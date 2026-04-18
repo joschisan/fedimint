@@ -13,19 +13,19 @@ use picomint_mint_common::endpoint_constants::{
 use picomint_mint_common::{Denomination, RecoveryItem};
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
-use crate::output::verify_blind_shares;
+use crate::issuance_sm::verify_blind_shares;
 use crate::NoteIssuanceRequest;
 
 #[async_trait::async_trait]
 pub trait MintV2ModuleApi {
-    async fn fetch_signature_shares(
+    async fn signature_shares(
         &self,
         txid: TransactionId,
         issuance_requests: Vec<NoteIssuanceRequest>,
         tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
     ) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>>;
 
-    async fn fetch_signature_shares_recovery(
+    async fn signature_shares_recovery(
         &self,
         issuance_requests: Vec<NoteIssuanceRequest>,
         tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
@@ -46,7 +46,7 @@ pub trait MintV2ModuleApi {
 
 #[async_trait::async_trait]
 impl MintV2ModuleApi for FederationApi {
-    async fn fetch_signature_shares(
+    async fn signature_shares(
         &self,
         txid: TransactionId,
         issuance_requests: Vec<NoteIssuanceRequest>,
@@ -67,7 +67,7 @@ impl MintV2ModuleApi for FederationApi {
         .await
     }
 
-    async fn fetch_signature_shares_recovery(
+    async fn signature_shares_recovery(
         &self,
         issuance_requests: Vec<NoteIssuanceRequest>,
         tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,

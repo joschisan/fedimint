@@ -41,15 +41,15 @@ impl Event for ReceiveEvent {
     const KIND: EventKind = EventKind::from_static("receive");
 }
 
-/// Emitted when an output state machine successfully finalises new notes.
+/// Emitted when an issuance state machine successfully finalises new notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OutputFinalEvent {
+pub(crate) struct IssuanceComplete {
     pub txid: TransactionId,
 }
 
-impl Event for OutputFinalEvent {
+impl Event for IssuanceComplete {
     const MODULE: Option<ModuleKind> = Some(KIND);
-    const KIND: EventKind = EventKind::from_static("output-final");
+    const KIND: EventKind = EventKind::from_static("issuance-complete");
 }
 
 /// Emitted when an output state machine fails to finalise notes.

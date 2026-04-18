@@ -2,52 +2,63 @@ use std::collections::BTreeMap;
 
 use anyhow::ensure;
 use picomint_client_module::executor::StateMachine;
-use picomint_core::{PeerId, TransactionId};
 use picomint_core::core::OperationId;
+use picomint_core::{PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_mint_common::{Denomination, verify_note};
+use picomint_mint_common::{verify_note, Denomination};
 use picomint_redb::WriteTxRef;
-use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
+use tbs::{aggregate_signature_shares, BlindedSignatureShare, PublicKeyShare};
 
 use crate::api::MintV2ModuleApi;
 use crate::client_db::NOTE;
-use crate::events::{OutputFailureEvent, OutputFinalEvent};
-use crate::{MintSmContext, NoteIssuanceRequest};
+use crate::events::{IssuanceComplete, OutputFailureEvent};
+use crate::{MintSmContext, NoteIssuanceRequest, SpendableNote};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct MintOutputStateMachine {
+pub struct IssuanceStateMachine {
     pub operation_id: OperationId,
+    /// Notes this tx consumed on its input side that originated from our own
+    /// wallet db. Restored to `NOTE` on tx rejection.
+    pub spendable_notes: Vec<SpendableNote>,
     /// `Some(txid)` for normal operation. `None` for recovery-bootstrapped
     /// state machines, which fetch shares via the recovery endpoint instead.
     pub txid: Option<TransactionId>,
+    /// Blinded outputs this tx issues. Finalized into `SpendableNote`s and
+    /// inserted into `NOTE` once the federation's blind-signature shares are
+    /// aggregated.
     pub issuance_requests: Vec<NoteIssuanceRequest>,
 }
 
-picomint_redb::consensus_value!(MintOutputStateMachine);
+picomint_redb::consensus_value!(IssuanceStateMachine);
 
-impl StateMachine for MintOutputStateMachine {
-    const TABLE_NAME: &'static str = "output-sm";
+impl StateMachine for IssuanceStateMachine {
+    const TABLE_NAME: &'static str = "issuance-sm";
 
     type Context = MintSmContext;
     type Outcome = Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>;
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
-        let tbs_pks = ctx.tbs_pks.clone();
-        let shares = if let Some(txid) = self.txid {
+        if let Some(txid) = self.txid {
             ctx.client_ctx
                 .await_tx_accepted(self.operation_id, txid)
                 .await?;
-            ctx.client_ctx
+
+            let shares = ctx
+                .client_ctx
                 .module_api()
-                .fetch_signature_shares(txid, self.issuance_requests.clone(), tbs_pks)
-                .await
+                .signature_shares(txid, self.issuance_requests.clone(), ctx.tbs_pks.clone())
+                .await;
+
+            Ok(shares)
         } else {
-            ctx.client_ctx
+            let shares = ctx
+                .client_ctx
                 .module_api()
-                .fetch_signature_shares_recovery(self.issuance_requests.clone(), tbs_pks)
-                .await
-        };
-        Ok(shares)
+                .signature_shares_recovery(self.issuance_requests.clone(), ctx.tbs_pks.clone())
+                .await;
+
+            Ok(shares)
+        }
     }
 
     async fn transition(
@@ -57,9 +68,10 @@ impl StateMachine for MintOutputStateMachine {
         outcome: Self::Outcome,
     ) -> Option<Self> {
         let Ok(signature_shares) = outcome else {
-            ctx.client_ctx
-                .log_event(dbtx, self.operation_id, OutputFailureEvent)
-                .await;
+            for note in &self.spendable_notes {
+                dbtx.insert(&NOTE, note, &());
+            }
+
             return None;
         };
 
@@ -82,6 +94,7 @@ impl StateMachine for MintOutputStateMachine {
                 ctx.client_ctx
                     .log_event(dbtx, self.operation_id, OutputFailureEvent)
                     .await;
+
                 return None;
             }
 
@@ -90,7 +103,7 @@ impl StateMachine for MintOutputStateMachine {
 
         if let Some(txid) = self.txid {
             ctx.client_ctx
-                .log_event(dbtx, self.operation_id, OutputFinalEvent { txid })
+                .log_event(dbtx, self.operation_id, IssuanceComplete { txid })
                 .await;
         }
 

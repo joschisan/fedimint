@@ -13,9 +13,8 @@ mod api;
 mod client_db;
 mod ecash;
 mod events;
-mod input;
 pub mod issuance;
-mod output;
+mod issuance_sm;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::convert::Infallible;
@@ -55,9 +54,8 @@ use thiserror::Error;
 
 use crate::api::MintV2ModuleApi;
 pub use crate::ecash::ECash;
-use crate::input::InputStateMachine;
 use crate::issuance::NoteIssuanceRequest;
-use crate::output::MintOutputStateMachine;
+use crate::issuance_sm::IssuanceStateMachine;
 
 const TARGET_PER_DENOMINATION: usize = 3;
 const SLICE_SIZE: u64 = 10000;
@@ -205,10 +203,11 @@ impl ClientModuleInit for MintClientInit {
             if state.next_index == state.total_items {
                 // Persist the recovery-bootstrapped Output SM under the
                 // executor's table. When the module loads and
-                // `output_executor.start()` runs, it picks this up via
+                // `issuance_executor.start()` runs, it picks this up via
                 // `get_active_states` and drives it.
-                let sm = MintOutputStateMachine {
+                let sm = IssuanceStateMachine {
                     operation_id: OperationId::new_random(),
+                    spendable_notes: vec![],
                     txid: None,
                     issuance_requests: state.requests.into_values().collect(),
                 };
@@ -260,12 +259,7 @@ impl ClientModuleInit for MintClientInit {
 
         let task_group = args.task_group().clone();
 
-        let input_executor = picomint_client_module::executor::ModuleExecutor::new(
-            client_ctx.module_db().clone(),
-            sm_context.clone(),
-            task_group.clone(),
-        );
-        let output_executor = picomint_client_module::executor::ModuleExecutor::new(
+        let issuance_executor = picomint_client_module::executor::ModuleExecutor::new(
             client_ctx.module_db().clone(),
             sm_context,
             task_group,
@@ -277,8 +271,7 @@ impl ClientModuleInit for MintClientInit {
             root_secret: args.module_root_secret().clone(),
             client_ctx,
             tweak_receiver,
-            input_executor,
-            output_executor,
+            issuance_executor,
         })
     }
 }
@@ -290,8 +283,7 @@ pub struct MintClientModule {
     root_secret: DerivableSecret,
     client_ctx: ClientContext<Self>,
     tweak_receiver: async_channel::Receiver<[u8; 16]>,
-    input_executor: picomint_client_module::executor::ModuleExecutor<InputStateMachine>,
-    output_executor: picomint_client_module::executor::ModuleExecutor<MintOutputStateMachine>,
+    issuance_executor: picomint_client_module::executor::ModuleExecutor<IssuanceStateMachine>,
 }
 
 /// Context handed to per-SM executors. Keeps the `ClientContext` handle
@@ -309,8 +301,7 @@ impl ClientModule for MintClientModule {
     type Common = MintModuleTypes;
 
     async fn start(&self) {
-        self.input_executor.start().await;
-        self.output_executor.start().await;
+        self.issuance_executor.start().await;
     }
 
     fn input_fee(
@@ -377,36 +368,21 @@ impl ClientModule for MintClientModule {
 
         let (issuance_requests, outputs) = self.build_issuance(denominations).await;
 
-        let input_executor = self.input_executor.clone();
-        let output_executor = self.output_executor.clone();
+        let issuance_executor = self.issuance_executor.clone();
 
         let spawn_sms: picomint_client_module::module::SpawnSms = Box::new(move |dbtx, txid| {
             Box::pin(async move {
-                if !spendable_notes.is_empty() {
-                    input_executor
-                        .add_state_machine_dbtx(
-                            dbtx,
-                            InputStateMachine {
-                                operation_id,
-                                txid,
-                                spendable_notes,
-                            },
-                        )
-                        .await;
-                }
-
-                if !issuance_requests.is_empty() {
-                    output_executor
-                        .add_state_machine_dbtx(
-                            dbtx,
-                            MintOutputStateMachine {
-                                operation_id,
-                                txid: Some(txid),
-                                issuance_requests,
-                            },
-                        )
-                        .await;
-                }
+                issuance_executor
+                    .add_state_machine_dbtx(
+                        dbtx,
+                        IssuanceStateMachine {
+                            operation_id,
+                            spendable_notes,
+                            txid: Some(txid),
+                            issuance_requests,
+                        },
+                    )
+                    .await;
             })
         });
 
@@ -691,24 +667,14 @@ impl MintClientModule {
             .await
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
-        self.output_executor
+        self.issuance_executor
             .add_state_machine_dbtx(
                 &dbtx.as_ref(),
-                MintOutputStateMachine {
+                IssuanceStateMachine {
                     operation_id,
+                    spendable_notes,
                     txid: Some(txid),
                     issuance_requests,
-                },
-            )
-            .await;
-
-        self.input_executor
-            .add_state_machine_dbtx(
-                &dbtx.as_ref(),
-                InputStateMachine {
-                    operation_id,
-                    txid,
-                    spendable_notes,
                 },
             )
             .await;
@@ -720,7 +686,7 @@ impl MintClientModule {
         dbtx.commit().await;
 
         self.client_ctx
-            .subscribe_operation_events_typed::<events::OutputFinalEvent>(operation_id)
+            .subscribe_operation_events_typed::<events::IssuanceComplete>(operation_id)
             .next()
             .await;
 
@@ -815,17 +781,6 @@ impl MintClientModule {
             )
             .await
             .map_err(|_| ReceiveECashError::InsufficientFunds)?;
-
-        self.input_executor
-            .add_state_machine_dbtx(
-                &tx,
-                InputStateMachine {
-                    operation_id,
-                    txid,
-                    spendable_notes,
-                },
-            )
-            .await;
 
         self.client_ctx
             .log_event(
