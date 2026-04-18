@@ -707,7 +707,7 @@ async fn test_lnurl_recovery(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     }
 
     // Wait for balance to increase
-    let expected_min = pre_recovery_balance + 2 * LNURL_AMOUNT_MSAT - 100_000;
+    let expected_min = post_recovery_balance + 2 * LNURL_AMOUNT_MSAT - 100_000;
     while restored.balance().await? < expected_min {
         info!("Waiting for post-recovery LNURL payments to settle...");
         cmd!(restored, "dev", "wait", "1").out_json().await?;
