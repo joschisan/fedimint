@@ -215,7 +215,7 @@ impl Client {
             let contribution = self
                 .mint
                 .create_final_inputs_and_outputs(
-                    &dbtx.isolate(format!("module-{}", ModuleKind::Mint)),
+                    &dbtx.isolate("mint".to_string()),
                     operation_id,
                     in_amount,
                     out_amount,
@@ -421,7 +421,11 @@ impl Client {
         let module: &M = module_any
             .downcast_ref::<M>()
             .expect("TypeId of M was just matched");
-        let db = self.db().isolate(format!("module-{kind}"));
+        let db = self.db().isolate(match kind {
+            ModuleKind::Mint => "mint".to_string(),
+            ModuleKind::Wallet => "wallet".to_string(),
+            ModuleKind::Ln => "ln".to_string(),
+        });
         Ok(ClientModuleInstance {
             db,
             api: self.api().with_scope(scope),
@@ -444,7 +448,7 @@ impl Client {
             .get_balance(
                 &dbtx
                     .as_ref()
-                    .isolate(format!("module-{}", ModuleKind::Mint)),
+                    .isolate("mint".to_string()),
             )
             .await)
     }
@@ -465,7 +469,7 @@ impl Client {
                 let dbtx = db.begin_write().await;
                 let balance = mint
                     .get_balance(
-                        &dbtx.as_ref().isolate(format!("module-{}", ModuleKind::Mint)),
+                        &dbtx.as_ref().isolate("mint".to_string()),
                     )
                     .await;
 

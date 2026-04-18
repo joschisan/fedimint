@@ -118,12 +118,10 @@ picomint_redb::consensus_key!(OperationId);
     Encodable,
     Decodable,
 )]
-#[serde(rename_all = "lowercase")]
-#[repr(u8)]
 pub enum ModuleKind {
-    Mint = 0,
-    Ln = 1,
-    Wallet = 2,
+    Mint,
+    Ln,
+    Wallet,
 }
 
 impl ModuleKind {

@@ -21,7 +21,6 @@ use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
 use events::{ReceiveEvent, SendEvent};
 use crate::api::{FederationApi, FederationResult};
 use crate::executor::ModuleExecutor;
-use crate::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use crate::module::ClientContext;
 use crate::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
@@ -85,28 +84,31 @@ impl ModuleInit for WalletClientInit {
     type Common = WalletCommonInit;
 }
 
-#[async_trait::async_trait]
-impl ClientModuleInit for WalletClientInit {
-    type Module = WalletClientModule;
-
-    async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
-        let client_ctx = args.context();
+impl WalletClientInit {
+    pub async fn init(
+        &self,
+        cfg: WalletConfigConsensus,
+        context: ClientContext<WalletClientModule>,
+        module_root_secret: &DerivableSecret,
+        task_group: &TaskGroup,
+    ) -> anyhow::Result<WalletClientModule> {
+        let db = context.module_db().clone();
+        let module_api = context.module_api();
         let sm_context = WalletClientContext {
-            client_ctx: client_ctx.clone(),
+            client_ctx: context.clone(),
         };
-        let send_executor =
-            ModuleExecutor::new(args.db().clone(), sm_context, args.task_group().clone());
+        let send_executor = ModuleExecutor::new(db.clone(), sm_context, task_group.clone());
 
         let module = WalletClientModule {
-            root_secret: args.module_root_secret().clone(),
-            cfg: args.cfg().clone(),
-            client_ctx,
-            db: args.db().clone(),
-            module_api: args.module_api().clone(),
+            root_secret: module_root_secret.clone(),
+            cfg,
+            client_ctx: context,
+            db,
+            module_api,
             send_executor,
         };
 
-        module.spawn_output_scanner(args.task_group());
+        module.spawn_output_scanner(task_group);
 
         Ok(module)
     }

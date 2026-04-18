@@ -8,7 +8,6 @@ use crate::api::{ApiScope, FederationApi};
 use picomint_core::config::ConsensusConfig;
 use crate::{Endpoint, download_from_invite_code};
 use crate::executor::ModuleExecutor;
-use crate::module::init::ClientModuleInit;
 use crate::module::recovery::RecoveryProgress;
 use crate::module::FinalClientIface;
 use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
@@ -16,9 +15,8 @@ use crate::transaction::TxSubmissionSmContext;
 use picomint_core::config::FederationId;
 use picomint_core::core::ModuleKind;
 use picomint_core::invite_code::InviteCode;
-use picomint_core::module::CommonModuleInit;
 use picomint_core::task::TaskGroup;
-use picomint_core::{NumPeers, PeerId};
+use picomint_core::PeerId;
 use picomint_derive_secret::DerivableSecret;
 use crate::gw::{GatewayClientInit, IGatewayClient};
 use crate::ln::LightningClientInit;
@@ -264,7 +262,6 @@ impl ClientBuilder {
         let final_client = FinalClientIface::default();
 
         let root_secret = Self::federation_root_secret(&pre_root_secret, &config);
-        let num_peers = NumPeers::from(config.iroh_endpoints.len());
 
         let mut module_recoveries: BTreeMap<
             ModuleKind,
@@ -275,89 +272,106 @@ impl ClientBuilder {
             watch::Receiver<RecoveryProgress>,
         > = BTreeMap::new();
 
-        let mint = init_or_recover(
-            &self.mint_init,
-            ModuleKind::Mint,
-            ApiScope::Mint,
-            config.mint.clone(),
-            &config,
-            &db,
-            &api,
-            &connectors,
-            &task_group,
-            &root_secret,
-            final_client.clone(),
-            fed_id,
-            num_peers,
-            &init_state,
-            &mut module_recoveries,
-            &mut module_recovery_progress_receivers,
-        )
-        .await?;
+        if init_state.does_require_recovery() {
+            schedule_mint_recovery(
+                &self.mint_init,
+                &db,
+                &api,
+                &root_secret,
+                &mut module_recoveries,
+                &mut module_recovery_progress_receivers,
+            )
+            .await;
+        }
 
-        let wallet = init_or_recover(
-            &self.wallet_init,
-            ModuleKind::Wallet,
-            ApiScope::Wallet,
-            config.wallet.clone(),
-            &config,
-            &db,
-            &api,
-            &connectors,
-            &task_group,
-            &root_secret,
+        let mint_context = crate::module::ClientContext::new(
             final_client.clone(),
+            ModuleKind::Mint,
+            api.clone(),
+            ApiScope::Mint,
+            db.clone(),
+            db.isolate("mint".to_string()),
+            config.clone(),
             fed_id,
-            num_peers,
-            &init_state,
-            &mut module_recoveries,
-            &mut module_recovery_progress_receivers,
-        )
-        .await?;
+        );
+        let mint = Arc::new(
+            self.mint_init
+                .init(
+                    fed_id,
+                    config.mint.clone(),
+                    mint_context,
+                    &root_secret.derive_module_secret(ModuleKind::Mint),
+                    &task_group,
+                )
+                .await?,
+        );
+
+        let wallet_context = crate::module::ClientContext::new(
+            final_client.clone(),
+            ModuleKind::Wallet,
+            api.clone(),
+            ApiScope::Wallet,
+            db.clone(),
+            db.isolate("wallet".to_string()),
+            config.clone(),
+            fed_id,
+        );
+        let wallet = Arc::new(
+            self.wallet_init
+                .init(
+                    config.wallet.clone(),
+                    wallet_context,
+                    &root_secret.derive_module_secret(ModuleKind::Wallet),
+                    &task_group,
+                )
+                .await?,
+        );
 
         let ln = match self.ln_init {
-            LnInit::Regular(init) => LnFlavor::Regular(
-                init_or_recover(
-                    &init,
-                    ModuleKind::Ln,
-                    ApiScope::Ln,
-                    config.ln.clone(),
-                    &config,
-                    &db,
-                    &api,
-                    &connectors,
-                    &task_group,
-                    &root_secret,
+            LnInit::Regular(init) => {
+                let ln_context = crate::module::ClientContext::new(
                     final_client.clone(),
-                    fed_id,
-                    num_peers,
-                    &init_state,
-                    &mut module_recoveries,
-                    &mut module_recovery_progress_receivers,
-                )
-                .await?,
-            ),
-            LnInit::Gateway(init) => LnFlavor::Gateway(
-                init_or_recover(
-                    &init,
                     ModuleKind::Ln,
+                    api.clone(),
                     ApiScope::Ln,
-                    config.ln.clone(),
-                    &config,
-                    &db,
-                    &api,
-                    &connectors,
-                    &task_group,
-                    &root_secret,
-                    final_client.clone(),
+                    db.clone(),
+                    db.isolate("ln".to_string()),
+                    config.clone(),
                     fed_id,
-                    num_peers,
-                    &init_state,
-                    &mut module_recoveries,
-                    &mut module_recovery_progress_receivers,
-                )
-                .await?,
-            ),
+                );
+                LnFlavor::Regular(Arc::new(
+                    init.init(
+                        fed_id,
+                        config.ln.clone(),
+                        ln_context,
+                        &root_secret.derive_module_secret(ModuleKind::Ln),
+                        &task_group,
+                    )
+                    .await?,
+                ))
+            }
+            LnInit::Gateway(init) => {
+                let ln_context = crate::module::ClientContext::new(
+                    final_client.clone(),
+                    ModuleKind::Ln,
+                    api.clone(),
+                    ApiScope::Ln,
+                    db.clone(),
+                    db.isolate("ln".to_string()),
+                    config.clone(),
+                    fed_id,
+                );
+                LnFlavor::Gateway(Arc::new(
+                    init.init(
+                        fed_id,
+                        config.ln.clone(),
+                        ln_context,
+                        &root_secret.derive_module_secret(ModuleKind::Ln),
+                        &task_group,
+                    )
+                    .await?,
+                ))
+            }
         };
 
         if init_state.is_pending() && module_recoveries.is_empty() {
@@ -449,28 +463,11 @@ impl ClientBuilder {
     }
 }
 
-/// Run init (or spawn recovery if the database indicates recovery is
-/// required). Returns an `Arc` of the typed module on success; on recovery
-/// the future is stashed into `module_recoveries` and this returns — but we
-/// still need a module instance to store in `Client`, so recovery paths
-/// currently require running init after recovery finishes. For now we always
-/// run init; recovery is scheduled to run in parallel on the task group.
-#[allow(clippy::too_many_arguments)]
-async fn init_or_recover<I: ClientModuleInit>(
-    init: &I,
-    kind: ModuleKind,
-    api_scope: ApiScope,
-    typed_cfg: <<I as picomint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
-    full_config: &ConsensusConfig,
+async fn schedule_mint_recovery(
+    init: &crate::mint::MintClientInit,
     db: &Database,
     api: &FederationApi,
-    connectors: &Endpoint,
-    task_group: &TaskGroup,
     root_secret: &DerivableSecret,
-    final_client: FinalClientIface,
-    fed_id: FederationId,
-    num_peers: NumPeers,
-    init_state: &InitState,
     module_recoveries: &mut BTreeMap<
         ModuleKind,
         Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
@@ -479,79 +476,8 @@ async fn init_or_recover<I: ClientModuleInit>(
         ModuleKind,
         watch::Receiver<RecoveryProgress>,
     >,
-) -> anyhow::Result<Arc<<I as ClientModuleInit>::Module>> {
-    if init_state.does_require_recovery() {
-        schedule_recovery(
-            init,
-            kind,
-            api_scope,
-            typed_cfg.clone(),
-            full_config,
-            db,
-            api,
-            task_group,
-            root_secret,
-            final_client.clone(),
-            fed_id,
-            num_peers,
-            module_recoveries,
-            module_recovery_progress_receivers,
-        )
-        .await?;
-    }
-
-    let module_db = db.isolate(format!("module-{kind}"));
-    let args = crate::module::init::ClientModuleInitArgs {
-        federation_id: fed_id,
-        peer_num: num_peers.total(),
-        cfg: typed_cfg.clone(),
-        db: module_db.clone(),
-        module_root_secret: root_secret.derive_module_secret(kind),
-        api: api.clone(),
-        module_api: api.with_scope(api_scope),
-        context: crate::module::ClientContext::new(
-            final_client,
-            kind,
-            api.clone(),
-            api_scope,
-            db.clone(),
-            module_db,
-            full_config.clone(),
-            fed_id,
-        ),
-        task_group: task_group.clone(),
-        connector_registry: connectors.clone(),
-    };
-
-    Ok(Arc::new(<I as ClientModuleInit>::init(init, &args).await?))
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn schedule_recovery<I: ClientModuleInit>(
-    init: &I,
-    kind: ModuleKind,
-    api_scope: ApiScope,
-    cfg: <<I as picomint_core::module::ModuleInit>::Common as CommonModuleInit>::ClientConfig,
-    full_config: &ConsensusConfig,
-    db: &Database,
-    api: &FederationApi,
-    task_group: &TaskGroup,
-    root_secret: &DerivableSecret,
-    final_client: FinalClientIface,
-    fed_id: FederationId,
-    num_peers: NumPeers,
-    module_recoveries: &mut BTreeMap<
-        ModuleKind,
-        Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>,
-    >,
-    module_recovery_progress_receivers: &mut BTreeMap<
-        ModuleKind,
-        watch::Receiver<RecoveryProgress>,
-    >,
-) -> anyhow::Result<()>
-where
-    I: Clone,
-{
+) {
+    let kind = ModuleKind::Mint;
     let existing_recovery_state = db
         .begin_read()
         .await
@@ -560,8 +486,8 @@ where
 
     let progress = match existing_recovery_state {
         Some(state) if state.is_done() => {
-            debug!(kind = %kind, "Module recovery already complete");
-            return Ok(());
+            debug!(kind = %kind, "Mint recovery already complete");
+            return;
         }
         Some(state) => state.progress,
         None => {
@@ -579,52 +505,33 @@ where
     };
 
     let (progress_tx, progress_rx) = tokio::sync::watch::channel(progress);
-    let module_db = db.isolate(format!("module-{kind}"));
-    let module_api = api.with_scope(api_scope);
+    let module_db = db.isolate("mint".to_string());
+    let module_api = api.with_scope(ApiScope::Mint);
     let init_clone = init.clone();
     let api_clone = api.clone();
-    let db_clone = db.clone();
-    let task_group_clone = task_group.clone();
-    let root_secret_clone = root_secret.clone();
-    let final_client_clone = final_client.clone();
-    let full_config_clone = full_config.clone();
+    let module_root_secret = root_secret.derive_module_secret(kind);
 
     let recover_fut = Box::pin(async move {
-        let args = crate::module::init::ClientModuleRecoverArgs {
-            federation_id: fed_id,
-            num_peers,
-            cfg: cfg.clone(),
-            db: module_db.clone(),
-            module_root_secret: root_secret_clone.derive_module_secret(kind),
-            api: api_clone.clone(),
-            module_api,
-            context: crate::module::ClientContext::new(
-                final_client_clone,
-                kind,
-                api_clone,
-                api_scope,
-                db_clone,
-                module_db,
-                full_config_clone,
-                fed_id,
-            ),
-            progress_tx,
-            task_group: task_group_clone,
-        };
-        <I as ClientModuleInit>::recover(&init_clone, &args)
+        init_clone
+            .recover(
+                &module_db,
+                &api_clone,
+                &module_api,
+                &module_root_secret,
+                progress_tx,
+            )
             .await
             .inspect_err(|err| {
                 warn!(
                     target: LOG_CLIENT,
                     kind = %kind,
-                    err = %format_args!("{err:#}"), "Module failed to recover"
+                    err = %format_args!("{err:#}"), "Mint failed to recover"
                 );
             })
     });
 
     module_recoveries.insert(kind, recover_fut);
     module_recovery_progress_receivers.insert(kind, progress_rx);
-    Ok(())
 }
 
 /// An intermediate step before Client joining or recovering

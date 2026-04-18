@@ -20,7 +20,6 @@ use events::{
 use lightning_invoice::Bolt11Invoice;
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
-use crate::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use crate::module::ClientContext;
 use crate::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use picomint_core::config::FederationId;
@@ -29,7 +28,9 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_core::hex::ToHex;
 use picomint_core::module::ModuleInit;
 use picomint_core::secp256k1::Keypair;
+use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
+use picomint_derive_secret::DerivableSecret;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 use picomint_core::ln::gateway_api::SendPaymentPayload;
@@ -57,24 +58,23 @@ impl ModuleInit for GatewayClientInit {
     type Common = LightningCommonInit;
 }
 
-#[async_trait::async_trait]
-impl ClientModuleInit for GatewayClientInit {
-    type Module = GatewayClientModule;
-
-    async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
-        let federation_id = *args.federation_id();
-        let cfg = args.cfg().clone();
-        let client_ctx = args.context();
-        let module_api = args.module_api().clone();
-        let keypair = args
-            .module_root_secret()
+impl GatewayClientInit {
+    pub async fn init(
+        &self,
+        federation_id: FederationId,
+        cfg: LightningConfigConsensus,
+        context: ClientContext<GatewayClientModule>,
+        module_root_secret: &DerivableSecret,
+        task_group: &TaskGroup,
+    ) -> anyhow::Result<GatewayClientModule> {
+        let module_api = context.module_api();
+        let keypair = module_root_secret
             .clone()
             .to_secp_key(picomint_core::secp256k1::SECP256K1);
         let gateway = self.gateway.clone();
-        let task_group = args.task_group().clone();
 
         let sm_context = GwSmContext {
-            client_ctx: client_ctx.clone(),
+            client_ctx: context.clone(),
             keypair,
             tpe_agg_pk: cfg.tpe_agg_pk,
             tpe_pks: cfg.tpe_pks.clone(),
@@ -82,22 +82,25 @@ impl ClientModuleInit for GatewayClientInit {
         };
 
         let send_executor = ModuleExecutor::new(
-            client_ctx.module_db().clone(),
+            context.module_db().clone(),
             sm_context.clone(),
             task_group.clone(),
         );
         let receive_executor = ModuleExecutor::new(
-            client_ctx.module_db().clone(),
+            context.module_db().clone(),
             sm_context.clone(),
             task_group.clone(),
         );
-        let complete_executor =
-            ModuleExecutor::new(client_ctx.module_db().clone(), sm_context, task_group);
+        let complete_executor = ModuleExecutor::new(
+            context.module_db().clone(),
+            sm_context,
+            task_group.clone(),
+        );
 
         Ok(GatewayClientModule {
             federation_id,
             cfg,
-            client_ctx,
+            client_ctx: context,
             module_api,
             keypair,
             gateway,

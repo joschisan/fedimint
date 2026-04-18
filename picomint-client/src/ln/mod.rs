@@ -20,7 +20,6 @@ use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
 use lightning_invoice::{Bolt11Invoice, Currency};
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
-use crate::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use crate::module::ClientContext;
 use crate::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
 use picomint_core::config::FederationId;
@@ -79,25 +78,30 @@ impl ModuleInit for LightningClientInit {
     type Common = LightningCommonInit;
 }
 
-#[async_trait::async_trait]
-impl ClientModuleInit for LightningClientInit {
-    type Module = LightningClientModule;
-
-    async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
+impl LightningClientInit {
+    pub async fn init(
+        &self,
+        federation_id: FederationId,
+        cfg: LightningConfigConsensus,
+        context: ClientContext<LightningClientModule>,
+        module_root_secret: &DerivableSecret,
+        task_group: &TaskGroup,
+    ) -> anyhow::Result<LightningClientModule> {
         let gateway_conn = if let Some(gateway_conn) = self.gateway_conn.clone() {
             gateway_conn
         } else {
             let api = GatewayApi::new();
             Arc::new(RealGatewayConnection { api })
         };
+        let module_api = context.module_api();
         Ok(LightningClientModule::new(
-            *args.federation_id(),
-            args.cfg().clone(),
-            args.context(),
-            args.module_api().clone(),
-            args.module_root_secret(),
+            federation_id,
+            cfg,
+            context,
+            module_api,
+            module_root_secret,
             gateway_conn,
-            args.task_group(),
+            task_group,
         ))
     }
 }

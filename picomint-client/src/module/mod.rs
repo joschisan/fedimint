@@ -39,7 +39,6 @@ pub type SpawnSms = Box<
         + Sync,
 >;
 
-pub mod init;
 pub mod recovery;
 
 /// Minimal back-reference trait a client module needs to finalize and submit

@@ -27,11 +27,11 @@ use client_db::{RecoveryState, NOTE, RECEIVE_OPERATION, RECOVERY_STATE};
 pub use events::*;
 use futures::StreamExt;
 use crate::api::FederationApi;
-use crate::module::init::{
-    ClientModuleInit, ClientModuleInitArgs, ClientModuleRecoverArgs,
-};
 use crate::module::recovery::RecoveryProgress;
 use crate::module::ClientContext;
+use picomint_core::task::TaskGroup;
+use picomint_redb::Database;
+use tokio::sync::watch;
 use crate::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
@@ -97,18 +97,22 @@ impl ModuleInit for MintClientInit {
     type Common = MintCommonInit;
 }
 
-#[async_trait::async_trait]
-impl ClientModuleInit for MintClientInit {
-    type Module = MintClientModule;
-
-    async fn recover(&self, args: &ClientModuleRecoverArgs<Self>) -> anyhow::Result<()> {
-        let mut state = if let Some(state) = args.db().begin_read().await.get(&RECOVERY_STATE, &())
+impl MintClientInit {
+    pub async fn recover(
+        &self,
+        db: &Database,
+        api: &FederationApi,
+        module_api: &FederationApi,
+        module_root_secret: &DerivableSecret,
+        progress_tx: watch::Sender<RecoveryProgress>,
+    ) -> anyhow::Result<()> {
+        let mut state = if let Some(state) = db.begin_read().await.get(&RECOVERY_STATE, &())
         {
             state
         } else {
             RecoveryState {
                 next_index: 0,
-                total_items: args.module_api().recovery_count().await?,
+                total_items: module_api.recovery_count().await?,
                 requests: BTreeMap::new(),
                 nonces: BTreeSet::new(),
             }
@@ -118,13 +122,13 @@ impl ClientModuleInit for MintClientInit {
             return Ok(());
         }
 
-        let peer_selector = PeerSelector::new(args.api().all_peers().clone());
+        let peer_selector = PeerSelector::new(api.all_peers().clone());
 
         let mut recovery_stream = futures::stream::iter(
             (state.next_index..state.total_items).step_by(SLICE_SIZE as usize),
         )
         .map(|start| {
-            let api = args.module_api().clone();
+            let api = module_api.clone();
             let end = std::cmp::min(start + SLICE_SIZE, state.total_items);
 
             async move { (start, end, api.recovery_slice_hash(start, end).await) }
@@ -132,7 +136,7 @@ impl ClientModuleInit for MintClientInit {
         .buffered(PARALLEL_HASH_REQUESTS)
         .map(|(start, end, hash)| {
             download_slice_with_hash(
-                args.module_api().clone(),
+                module_api.clone(),
                 peer_selector.clone(),
                 start,
                 end,
@@ -141,7 +145,7 @@ impl ClientModuleInit for MintClientInit {
         })
         .buffered(PARALLEL_SLICE_REQUESTS);
 
-        let tweak_filter = issuance::tweak_filter(args.module_root_secret());
+        let tweak_filter = issuance::tweak_filter(module_root_secret);
 
         loop {
             let items = recovery_stream
@@ -162,7 +166,7 @@ impl ClientModuleInit for MintClientInit {
                         let output_secret = issuance::output_secret(
                             *denomination,
                             *tweak,
-                            args.module_root_secret(),
+                            module_root_secret,
                         );
 
                         if !issuance::check_nonce(&output_secret, *nonce_hash) {
@@ -181,7 +185,7 @@ impl ClientModuleInit for MintClientInit {
                             NoteIssuanceRequest::new(
                                 *denomination,
                                 *tweak,
-                                args.module_root_secret(),
+                                module_root_secret,
                             ),
                         );
                     }
@@ -194,7 +198,7 @@ impl ClientModuleInit for MintClientInit {
 
             state.next_index += items.len() as u64;
 
-            let dbtx = args.db().begin_write().await;
+            let dbtx = db.begin_write().await;
             let tx = dbtx.as_ref();
 
             tx.insert(&RECOVERY_STATE, &(), &state);
@@ -223,17 +227,26 @@ impl ClientModuleInit for MintClientInit {
 
             dbtx.commit().await;
 
-            args.update_recovery_progress(RecoveryProgress {
+            let progress = RecoveryProgress {
                 complete: state.next_index.try_into().unwrap_or(u32::MAX),
                 total: state.total_items.try_into().unwrap_or(u32::MAX),
-            });
+            };
+            // Ignore send errors: nothing listening.
+            progress_tx.send(progress).ok();
         }
     }
 
-    async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
+    pub async fn init(
+        &self,
+        federation_id: FederationId,
+        cfg: MintConfigConsensus,
+        context: ClientContext<MintClientModule>,
+        module_root_secret: &DerivableSecret,
+        task_group: &TaskGroup,
+    ) -> anyhow::Result<MintClientModule> {
         let (tweak_sender, tweak_receiver) = async_channel::bounded(50);
 
-        let filter = issuance::tweak_filter(args.module_root_secret());
+        let filter = issuance::tweak_filter(module_root_secret);
 
         tokio::task::spawn_blocking(move || loop {
             let tweak: [u8; 16] = thread_rng().r#gen();
@@ -247,28 +260,23 @@ impl ClientModuleInit for MintClientInit {
             }
         });
 
-        let cfg: MintConfigConsensus = args.cfg().clone();
-        let client_ctx = args.context();
-
         let sm_context = MintSmContext {
-            client_ctx: client_ctx.clone(),
+            client_ctx: context.clone(),
             tbs_agg_pks: cfg.tbs_agg_pks.clone(),
             tbs_pks: cfg.tbs_pks.clone(),
         };
 
-        let task_group = args.task_group().clone();
-
         let issuance_executor = crate::executor::ModuleExecutor::new(
-            client_ctx.module_db().clone(),
+            context.module_db().clone(),
             sm_context,
-            task_group,
+            task_group.clone(),
         );
 
         Ok(MintClientModule {
-            federation_id: *args.federation_id(),
+            federation_id,
             cfg,
-            root_secret: args.module_root_secret().clone(),
-            client_ctx,
+            root_secret: module_root_secret.clone(),
+            client_ctx: context,
             tweak_receiver,
             issuance_executor,
         })
