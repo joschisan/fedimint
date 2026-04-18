@@ -9,7 +9,6 @@ pub use picomint_wallet_common as common;
 mod api;
 mod db;
 pub mod events;
-mod receive_sm;
 mod send_sm;
 
 use std::collections::BTreeMap;
@@ -43,7 +42,6 @@ use picomint_wallet_common::{
     StandardScript, WalletCommonInit, WalletInput, WalletModuleTypes, WalletOutput, descriptor,
     is_potential_receive,
 };
-use receive_sm::ReceiveStateMachine;
 use secp256k1::Keypair;
 use send_sm::SendStateMachine;
 use thiserror::Error;
@@ -60,7 +58,6 @@ pub struct WalletClientModule {
     db: Database,
     module_api: FederationApi,
     send_executor: ModuleExecutor<SendStateMachine>,
-    receive_executor: ModuleExecutor<ReceiveStateMachine>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +72,6 @@ impl ClientModule for WalletClientModule {
 
     async fn start(&self) {
         self.send_executor.start().await;
-        self.receive_executor.start().await;
     }
 
     fn input_fee(
@@ -111,12 +107,7 @@ impl ClientModuleInit for WalletClientInit {
         let sm_context = WalletClientContext {
             client_ctx: client_ctx.clone(),
         };
-        let send_executor = ModuleExecutor::new(
-            args.db().clone(),
-            sm_context.clone(),
-            args.task_group().clone(),
-        );
-        let receive_executor =
+        let send_executor =
             ModuleExecutor::new(args.db().clone(), sm_context, args.task_group().clone());
 
         let module = WalletClientModule {
@@ -126,7 +117,6 @@ impl ClientModuleInit for WalletClientInit {
             db: args.db().clone(),
             module_api: args.module_api().clone(),
             send_executor,
-            receive_executor,
         };
 
         module.spawn_output_scanner(args.task_group());
@@ -332,18 +322,6 @@ impl WalletClientModule {
             )
             .await
             .expect("Input amount is sufficient to finalize transaction");
-
-        self.receive_executor
-            .add_state_machine_dbtx(
-                &tx,
-                ReceiveStateMachine {
-                    operation_id,
-                    txid: range.txid(),
-                    value,
-                    fee,
-                },
-            )
-            .await;
 
         self.client_ctx
             .log_event(

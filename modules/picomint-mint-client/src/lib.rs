@@ -16,7 +16,6 @@ mod events;
 mod input;
 pub mod issuance;
 mod output;
-mod receive;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::convert::Infallible;
@@ -60,7 +59,6 @@ pub use crate::ecash::ECash;
 use crate::input::InputStateMachine;
 use crate::issuance::NoteIssuanceRequest;
 use crate::output::MintOutputStateMachine;
-use crate::receive::ReceiveStateMachine;
 
 const TARGET_PER_DENOMINATION: usize = 3;
 const SLICE_SIZE: u64 = 10000;
@@ -272,11 +270,6 @@ impl ClientModuleInit for MintClientInit {
         );
         let output_executor = picomint_client_module::executor::ModuleExecutor::new(
             client_ctx.module_db().clone(),
-            sm_context.clone(),
-            task_group.clone(),
-        );
-        let receive_executor = picomint_client_module::executor::ModuleExecutor::new(
-            client_ctx.module_db().clone(),
             sm_context,
             task_group,
         );
@@ -290,7 +283,6 @@ impl ClientModuleInit for MintClientInit {
             tweak_receiver,
             input_executor,
             output_executor,
-            receive_executor,
         })
     }
 }
@@ -305,7 +297,6 @@ pub struct MintClientModule {
     tweak_receiver: async_channel::Receiver<[u8; 16]>,
     input_executor: picomint_client_module::executor::ModuleExecutor<InputStateMachine>,
     output_executor: picomint_client_module::executor::ModuleExecutor<MintOutputStateMachine>,
-    receive_executor: picomint_client_module::executor::ModuleExecutor<ReceiveStateMachine>,
 }
 
 /// Context handed to per-SM executors. Keeps the `ClientContext` handle
@@ -326,7 +317,6 @@ impl ClientModule for MintClientModule {
     async fn start(&self) {
         self.input_executor.start().await;
         self.output_executor.start().await;
-        self.receive_executor.start().await;
     }
 
     fn input_fee(
@@ -819,16 +809,6 @@ impl MintClientModule {
                     operation_id,
                     txid,
                     spendable_notes,
-                },
-            )
-            .await;
-
-        self.receive_executor
-            .add_state_machine_dbtx(
-                &tx,
-                ReceiveStateMachine {
-                    operation_id,
-                    txid,
                 },
             )
             .await;
