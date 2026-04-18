@@ -69,17 +69,13 @@ impl StateMachine for TxSubmissionStatesSM {
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
         let operation_id = self.operation_id;
-        let (tx_submitted_sender, tx_submitted_receiver) = watch::channel(false);
+
         match self.state.clone() {
             TxSubmissionStates::Created(transaction) => {
                 let txid = transaction.tx_hash();
                 vec![
                     SmStateTransition::new(
-                        tx_submission_trigger_rejected(
-                            transaction.clone(),
-                            ctx.api.clone(),
-                            tx_submitted_sender,
-                        ),
+                        tx_submission_trigger_rejected(transaction.clone(), ctx.api.clone()),
                         {
                             let ctx = ctx.clone();
                             move |dbtx, error: String, _| {
@@ -103,11 +99,7 @@ impl StateMachine for TxSubmissionStatesSM {
                         },
                     ),
                     SmStateTransition::new(
-                        tx_submission_trigger_accepted(
-                            txid,
-                            ctx.api.clone(),
-                            tx_submitted_receiver,
-                        ),
+                        tx_submission_trigger_accepted(txid, ctx.api.clone()),
                         {
                             let ctx = ctx.clone();
                             move |dbtx, (), _| {
@@ -150,26 +142,17 @@ fn log_tx_event<E: Event + Send>(
     );
 }
 
-async fn tx_submission_trigger_rejected(
-    transaction: Transaction,
-    api: FederationApi,
-    tx_submitted: watch::Sender<bool>,
-) -> String {
-    let txid = transaction.tx_hash();
-    debug!(target: LOG_CLIENT_NET_API, %txid, "Submitting transaction");
+async fn tx_submission_trigger_rejected(transaction: Transaction, api: FederationApi) -> String {
+    debug!(target: LOG_CLIENT_NET_API, txid = %transaction.tx_hash(), "Submitting transaction");
+
     (|| async {
-        if let TransactionSubmissionOutcome(Err(transaction_error)) =
-            api.submit_transaction(transaction.clone()).await
-        {
-            Ok(transaction_error.to_string())
-        } else {
-            debug!(
-                target: LOG_CLIENT_NET_API,
-                %txid,
-                "Transaction submission accepted by peer, awaiting consensus",
-            );
-            tx_submitted.send_replace(true);
-            Err(anyhow::anyhow!("Transaction is still valid"))
+        match api.submit_transaction(transaction.clone()).await {
+            TransactionSubmissionOutcome(Err(transaction_error)) => {
+                Ok(transaction_error.to_string())
+            }
+            TransactionSubmissionOutcome(Ok(..)) => {
+                Err(anyhow::anyhow!("Transaction is still valid"))
+            }
         }
     })
     .retry(networking_backoff())
@@ -177,12 +160,6 @@ async fn tx_submission_trigger_rejected(
     .expect("networking_backoff retries forever")
 }
 
-async fn tx_submission_trigger_accepted(
-    txid: TransactionId,
-    api: FederationApi,
-    mut tx_submitted: watch::Receiver<bool>,
-) {
-    let _ = tx_submitted.wait_for(|submitted| *submitted).await;
+async fn tx_submission_trigger_accepted(txid: TransactionId, api: FederationApi) {
     api.await_transaction(txid).await;
-    debug!(target: LOG_CLIENT_NET_API, %txid, "Transaction accepted in consensus");
 }
