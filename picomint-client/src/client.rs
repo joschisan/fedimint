@@ -18,7 +18,7 @@ use picomint_client_module::executor::ModuleExecutor;
 use picomint_client_module::module::recovery::RecoveryProgress;
 use picomint_client_module::module::{ClientModule, FinalizeTransaction, IdxRange, OutPointRange};
 use picomint_client_module::transaction::{
-    TransactionBuilder, TxSubmissionStates, TxSubmissionStatesSM,
+    TransactionBuilder, TxSubmissionSMCommon, TxSubmissionSMState, TxSubmissionStateMachine,
 };
 use picomint_client_module::{
     ClientModuleInstance, ModuleRecoveryCompleted, TxAcceptedEvent, TxCreatedEvent, TxRejectedEvent,
@@ -111,7 +111,7 @@ pub struct Client {
     pub(crate) mint: Arc<MintClientModule>,
     pub(crate) wallet: Arc<WalletClientModule>,
     pub(crate) ln: LnFlavor,
-    tx_submission_executor: ModuleExecutor<TxSubmissionStatesSM>,
+    tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine>,
     pub(crate) api: FederationApi,
     secp_ctx: Secp256k1<secp256k1::All>,
 
@@ -382,9 +382,12 @@ impl Client {
         self.tx_submission_executor
             .add_state_machine_dbtx(
                 dbtx,
-                TxSubmissionStatesSM {
-                    operation_id,
-                    state: TxSubmissionStates::Created(transaction),
+                TxSubmissionStateMachine {
+                    common: TxSubmissionSMCommon {
+                        operation_id,
+                        transaction,
+                    },
+                    state: TxSubmissionSMState::Created,
                 },
             )
             .await;

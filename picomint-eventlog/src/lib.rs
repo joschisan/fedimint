@@ -12,11 +12,12 @@ use std::str::FromStr;
 
 use futures::Stream;
 use picomint_core::core::{ModuleKind, OperationId};
-use picomint_redb::NativeTableDef;
+use picomint_core::time::duration_since_epoch;
 use picomint_encoding::{Decodable, Encodable};
+use picomint_redb::NativeTableDef;
 use picomint_redb::redb::ReadableTable as _;
-use picomint_redb::{consensus_key, consensus_value};
 use picomint_redb::{Database, WriteTxRef};
+use picomint_redb::{consensus_key, consensus_value};
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
@@ -201,8 +202,7 @@ pub fn log_event_raw(
     payload: Vec<u8>,
 ) {
     let id = next_event_log_id(dbtx);
-    let ts_usecs =
-        u64::try_from(picomint_core::time::duration_since_epoch().as_micros()).unwrap_or(u64::MAX);
+    let ts_usecs = u64::try_from(duration_since_epoch().as_micros()).unwrap_or(u64::MAX);
     let entry = EventLogEntry {
         kind,
         module,

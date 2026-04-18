@@ -2,11 +2,9 @@
 
 use picomint_api_client::api::FederationApi;
 use picomint_api_client::transaction::{Transaction, TransactionSubmissionOutcome};
-use picomint_core::TransactionId;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_eventlog::Event;
 use picomint_logging::LOG_CLIENT_NET_API;
 use picomint_redb::WriteTxRef;
 use tokio::sync::watch;
@@ -24,37 +22,45 @@ use crate::{TxAcceptedEvent, TxRejectedEvent};
 ///     Created -- tx is accepted by consensus --> Accepted
 ///     Created -- tx is rejected on submission --> Rejected
 /// ```
-// NOTE: This struct needs to retain the same encoding as [`crate::sm::OperationState`],
-// because it was used to replace it, and clients already have it persisted.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct TxSubmissionStatesSM {
-    pub operation_id: OperationId,
-    pub state: TxSubmissionStates,
+pub struct TxSubmissionStateMachine {
+    pub common: TxSubmissionSMCommon,
+    pub state: TxSubmissionSMState,
 }
 
-picomint_redb::consensus_key!(TxSubmissionStatesSM);
+picomint_redb::consensus_key!(TxSubmissionStateMachine);
+
+impl TxSubmissionStateMachine {
+    pub fn update(&self, state: TxSubmissionSMState) -> Self {
+        Self {
+            common: self.common.clone(),
+            state,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum TxSubmissionStates {
+pub struct TxSubmissionSMCommon {
+    pub operation_id: OperationId,
+    pub transaction: Transaction,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
+pub enum TxSubmissionSMState {
     /// The transaction has been created and potentially already been submitted,
     /// but no rejection or acceptance happened so far
-    Created(Transaction),
+    Created,
     /// The transaction has been accepted in consensus
     ///
     /// **This state is final**
-    Accepted(TransactionId),
+    Accepted,
     /// The transaction has been rejected by a quorum on submission
     ///
     /// **This state is final**
-    Rejected(TransactionId, String),
-    // Ideally this would be uncommented:
-    // #[deprecated(since = "0.2.2", note = "all errors should be retried")]
-    // but due to some rust bug/limitation it seem impossible to prevent
-    // existing usages from spamming compilation output with warnings.
-    NonRetryableError(String),
+    Rejected(String),
 }
 
-/// Context for running [`TxSubmissionStatesSM`] in a typed
+/// Context for running [`TxSubmissionStateMachine`] in a typed
 /// [`crate::executor::ModuleExecutor`].
 #[derive(Debug, Clone)]
 pub struct TxSubmissionSmContext {
@@ -62,87 +68,44 @@ pub struct TxSubmissionSmContext {
     pub log_event_added_tx: watch::Sender<()>,
 }
 
-impl StateMachine for TxSubmissionStatesSM {
+impl StateMachine for TxSubmissionStateMachine {
     const TABLE_NAME: &'static str = "tx-submission-sm";
 
     type Context = TxSubmissionSmContext;
 
     fn transitions(&self, ctx: &Self::Context) -> Vec<SmStateTransition<Self>> {
-        let operation_id = self.operation_id;
-
-        match self.state.clone() {
-            TxSubmissionStates::Created(transaction) => {
-                let txid = transaction.tx_hash();
+        match &self.state {
+            TxSubmissionSMState::Created => {
+                let transaction = self.common.transaction.clone();
                 vec![
                     SmStateTransition::new(
-                        tx_submission_trigger_rejected(transaction.clone(), ctx.api.clone()),
+                        await_tx_rejected_sm(transaction.clone(), ctx.api.clone()),
                         {
                             let ctx = ctx.clone();
-                            move |dbtx, error: String, _| {
+                            move |dbtx, error, old_state| {
                                 let ctx = ctx.clone();
-                                Box::pin(async move {
-                                    log_tx_event(
-                                        &ctx,
-                                        dbtx,
-                                        operation_id,
-                                        TxRejectedEvent {
-                                            txid,
-                                            error: error.clone(),
-                                        },
-                                    );
-                                    TxSubmissionStatesSM {
-                                        state: TxSubmissionStates::Rejected(txid, error),
-                                        operation_id,
-                                    }
-                                })
+                                Box::pin(transition_tx_rejected_sm(ctx, dbtx, old_state, error))
                             }
                         },
                     ),
                     SmStateTransition::new(
-                        tx_submission_trigger_accepted(txid, ctx.api.clone()),
+                        await_tx_accepted_sm(transaction, ctx.api.clone()),
                         {
                             let ctx = ctx.clone();
-                            move |dbtx, (), _| {
+                            move |dbtx, (), old_state| {
                                 let ctx = ctx.clone();
-                                Box::pin(async move {
-                                    log_tx_event(
-                                        &ctx,
-                                        dbtx,
-                                        operation_id,
-                                        TxAcceptedEvent { txid },
-                                    );
-                                    TxSubmissionStatesSM {
-                                        state: TxSubmissionStates::Accepted(txid),
-                                        operation_id,
-                                    }
-                                })
+                                Box::pin(transition_tx_accepted_sm(ctx, dbtx, old_state))
                             }
                         },
                     ),
                 ]
             }
-            TxSubmissionStates::Accepted(..)
-            | TxSubmissionStates::Rejected(..)
-            | TxSubmissionStates::NonRetryableError(..) => vec![],
+            TxSubmissionSMState::Accepted | TxSubmissionSMState::Rejected(..) => vec![],
         }
     }
 }
 
-fn log_tx_event<E: Event + Send>(
-    ctx: &TxSubmissionSmContext,
-    dbtx: &WriteTxRef<'_>,
-    operation_id: OperationId,
-    event: E,
-) {
-    picomint_eventlog::log_event(
-        dbtx,
-        ctx.log_event_added_tx.clone(),
-        Some(operation_id),
-        event,
-    );
-}
-
-async fn tx_submission_trigger_rejected(transaction: Transaction, api: FederationApi) -> String {
+async fn await_tx_rejected_sm(transaction: Transaction, api: FederationApi) -> String {
     debug!(target: LOG_CLIENT_NET_API, txid = %transaction.tx_hash(), "Submitting transaction");
 
     (|| async {
@@ -160,6 +123,42 @@ async fn tx_submission_trigger_rejected(transaction: Transaction, api: Federatio
     .expect("networking_backoff retries forever")
 }
 
-async fn tx_submission_trigger_accepted(txid: TransactionId, api: FederationApi) {
-    api.await_transaction(txid).await;
+async fn await_tx_accepted_sm(transaction: Transaction, api: FederationApi) {
+    api.await_transaction(transaction.tx_hash()).await;
+}
+
+async fn transition_tx_rejected_sm(
+    ctx: TxSubmissionSmContext,
+    dbtx: &WriteTxRef<'_>,
+    old_state: TxSubmissionStateMachine,
+    error: String,
+) -> TxSubmissionStateMachine {
+    picomint_eventlog::log_event(
+        dbtx,
+        ctx.log_event_added_tx.clone(),
+        Some(old_state.common.operation_id),
+        TxRejectedEvent {
+            txid: old_state.common.transaction.tx_hash(),
+            error: error.clone(),
+        },
+    );
+
+    old_state.update(TxSubmissionSMState::Rejected(error))
+}
+
+async fn transition_tx_accepted_sm(
+    ctx: TxSubmissionSmContext,
+    dbtx: &WriteTxRef<'_>,
+    old_state: TxSubmissionStateMachine,
+) -> TxSubmissionStateMachine {
+    picomint_eventlog::log_event(
+        dbtx,
+        ctx.log_event_added_tx.clone(),
+        Some(old_state.common.operation_id),
+        TxAcceptedEvent {
+            txid: old_state.common.transaction.tx_hash(),
+        },
+    );
+
+    old_state.update(TxSubmissionSMState::Accepted)
 }
