@@ -3886,20 +3886,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-bitcoind"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin",
- "bitcoincore-rpc",
- "esplora-client 0.12.3",
- "picomint-core",
- "picomint-logging",
- "tracing",
-]
-
-[[package]]
 name = "picomint-client"
 version = "0.1.0"
 dependencies = [

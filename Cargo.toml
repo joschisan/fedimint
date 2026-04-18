@@ -7,7 +7,6 @@ members = [
     "crypto/picomint-tpe",
     "picomint-api-client",
     "picomint-bip39",
-    "picomint-bitcoind",
     "picomint-client",
     "picomint-client-module",
     "picomint-core",
@@ -106,7 +105,6 @@ esplora-client = { version = "0.12.3", default-features = false, features = [
 
 picomint-api-client = { path = "./picomint-api-client", version = "=0.1.0" }
 picomint-bip39 = { path = "./picomint-bip39", version = "=0.1.0" }
-picomint-bitcoind = { path = "./picomint-bitcoind", version = "=0.1.0" }
 picomint-client = { path = "./picomint-client", version = "=0.1.0" }
 picomint-client-module = { path = "./picomint-client-module", version = "=0.1.0" }
 picomint-core = { path = "./picomint-core", version = "=0.1.0" }
