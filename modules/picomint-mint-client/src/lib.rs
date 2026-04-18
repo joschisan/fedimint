@@ -52,7 +52,7 @@ use rand::seq::IteratorRandom;
 use tbs::AggregatePublicKey;
 use thiserror::Error;
 
-use crate::api::MintV2ModuleApi;
+use crate::api::MintFederationApi;
 pub use crate::ecash::ECash;
 use crate::issuance::NoteIssuanceRequest;
 use crate::issuance_sm::IssuanceStateMachine;

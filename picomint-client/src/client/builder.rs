@@ -21,7 +21,7 @@ use picomint_core::module::CommonModuleInit;
 use picomint_core::task::TaskGroup;
 use picomint_core::{NumPeers, PeerId};
 use picomint_derive_secret::DerivableSecret;
-use picomint_gw_client::{GatewayClientInitV2, IGatewayClientV2};
+use picomint_gw_client::{GatewayClientInit, IGatewayClient};
 use picomint_ln_client::LightningClientInit;
 use picomint_logging::LOG_CLIENT;
 use picomint_mint_client::MintClientInit;
@@ -85,7 +85,7 @@ impl RootSecret {
 /// one client-side wrapper.
 pub enum LnInit {
     Regular(LightningClientInit),
-    Gateway(GatewayClientInitV2),
+    Gateway(GatewayClientInit),
 }
 
 /// Used to configure, assemble and build [`Client`]
@@ -120,8 +120,8 @@ impl ClientBuilder {
 
     /// Mount the gateway lightning flavor. Used by the gateway daemon in
     /// place of the regular lightning module.
-    pub fn with_gateway_ln(&mut self, gateway: Arc<dyn IGatewayClientV2>) {
-        self.ln_init = LnInit::Gateway(GatewayClientInitV2 { gateway });
+    pub fn with_gateway_ln(&mut self, gateway: Arc<dyn IGatewayClient>) {
+        self.ln_init = LnInit::Gateway(GatewayClientInit { gateway });
     }
 
     pub fn stopped(&mut self) {

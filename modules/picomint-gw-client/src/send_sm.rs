@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::FinalReceiveState;
 use super::events::{SendCancelEvent, SendSuccessEvent};
-use crate::GwV2SmContext;
+use crate::GwSmContext;
 
 /// State machine that handles the relay of an outgoing Lightning payment.
 /// Terminates after the payment either succeeds (claim inputs + success event)
@@ -51,7 +51,7 @@ pub enum Cancelled {
 impl StateMachine for SendStateMachine {
     const TABLE_NAME: &'static str = "send-sm";
 
-    type Context = GwV2SmContext;
+    type Context = GwSmContext;
     type Outcome = Result<PaymentResponse, Cancelled>;
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {

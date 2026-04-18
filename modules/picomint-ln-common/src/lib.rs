@@ -122,10 +122,10 @@ impl std::fmt::Display for LightningConsensusItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LightningConsensusItem::BlockCountVote(c) => {
-                write!(f, "LNv2 Block Count {c}")
+                write!(f, "Block Count {c}")
             }
             LightningConsensusItem::UnixTimeVote(t) => {
-                write!(f, "LNv2 Unix Time {t}")
+                write!(f, "Unix Time {t}")
             }
         }
     }

@@ -90,7 +90,7 @@ enum ModuleCommands {
     /// Wallet module commands
     #[command(subcommand)]
     Wallet(WalletCommands),
-    /// LNv2 module commands
+    /// LN module commands
     #[command(subcommand)]
     Ln(LnCommands),
 }

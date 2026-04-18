@@ -19,7 +19,7 @@ use tpe::{DecryptionKeyShare, aggregate_dk_shares};
 use tracing::warn;
 
 use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent};
-use crate::GwV2SmContext;
+use crate::GwSmContext;
 
 /// State machine that handles the relay of an incoming Lightning payment.
 /// Terminates once decryption shares are either invalid, produce a valid
@@ -37,7 +37,7 @@ picomint_redb::consensus_value!(ReceiveStateMachine);
 impl StateMachine for ReceiveStateMachine {
     const TABLE_NAME: &'static str = "receive-sm";
 
-    type Context = GwV2SmContext;
+    type Context = GwSmContext;
     type Outcome = Result<BTreeMap<PeerId, DecryptionKeyShare>, String>;
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {

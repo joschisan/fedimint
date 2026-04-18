@@ -46,21 +46,21 @@ use tracing::warn;
 use crate::api::GatewayFederationApi;
 use crate::complete_sm::{CompleteSMCommon, CompleteSMState, CompleteStateMachine};
 
-/// LNv2 CLTV Delta in blocks
-pub const EXPIRATION_DELTA_MINIMUM_V2: u64 = 144;
+/// Lightning CLTV Delta in blocks
+pub const EXPIRATION_DELTA_MINIMUM: u64 = 144;
 
 #[derive(Debug, Clone)]
-pub struct GatewayClientInitV2 {
-    pub gateway: Arc<dyn IGatewayClientV2>,
+pub struct GatewayClientInit {
+    pub gateway: Arc<dyn IGatewayClient>,
 }
 
-impl ModuleInit for GatewayClientInitV2 {
+impl ModuleInit for GatewayClientInit {
     type Common = LightningCommonInit;
 }
 
 #[async_trait::async_trait]
-impl ClientModuleInit for GatewayClientInitV2 {
-    type Module = GatewayClientModuleV2;
+impl ClientModuleInit for GatewayClientInit {
+    type Module = GatewayClientModule;
 
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
         let federation_id = *args.federation_id();
@@ -74,7 +74,7 @@ impl ClientModuleInit for GatewayClientInitV2 {
         let gateway = self.gateway.clone();
         let task_group = args.task_group().clone();
 
-        let sm_context = GwV2SmContext {
+        let sm_context = GwSmContext {
             client_ctx: client_ctx.clone(),
             keypair,
             tpe_agg_pk: cfg.tpe_agg_pk,
@@ -95,7 +95,7 @@ impl ClientModuleInit for GatewayClientInitV2 {
         let complete_executor =
             ModuleExecutor::new(client_ctx.module_db().clone(), sm_context, task_group);
 
-        Ok(GatewayClientModuleV2 {
+        Ok(GatewayClientModule {
             federation_id,
             cfg,
             client_ctx,
@@ -110,13 +110,13 @@ impl ClientModuleInit for GatewayClientInitV2 {
 }
 
 #[derive(Debug, Clone)]
-pub struct GatewayClientModuleV2 {
+pub struct GatewayClientModule {
     pub federation_id: FederationId,
     pub cfg: LightningConfigConsensus,
     pub client_ctx: ClientContext<Self>,
     pub module_api: FederationApi,
     pub keypair: Keypair,
-    pub gateway: Arc<dyn IGatewayClientV2>,
+    pub gateway: Arc<dyn IGatewayClient>,
     send_executor: ModuleExecutor<SendStateMachine>,
     receive_executor: ModuleExecutor<ReceiveStateMachine>,
     complete_executor: ModuleExecutor<CompleteStateMachine>,
@@ -125,17 +125,17 @@ pub struct GatewayClientModuleV2 {
 /// Lean context handed to per-SM executors. Does NOT hold the module itself
 /// — that would create a cycle (module → executor → Inner → ctx → module).
 #[derive(Debug, Clone)]
-pub struct GwV2SmContext {
-    pub client_ctx: ClientContext<GatewayClientModuleV2>,
+pub struct GwSmContext {
+    pub client_ctx: ClientContext<GatewayClientModule>,
     pub keypair: Keypair,
     pub tpe_agg_pk: AggregatePublicKey,
     pub tpe_pks: BTreeMap<PeerId, PublicKeyShare>,
-    pub gateway: Arc<dyn IGatewayClientV2>,
+    pub gateway: Arc<dyn IGatewayClient>,
 }
 
 #[async_trait::async_trait]
-impl ClientModule for GatewayClientModuleV2 {
-    type Init = GatewayClientInitV2;
+impl ClientModule for GatewayClientModule {
+    type Init = GatewayClientInit;
     type Common = LightningModuleTypes;
 
     async fn start(&self) {
@@ -167,7 +167,7 @@ pub enum FinalReceiveState {
     Failure,
 }
 
-impl GatewayClientModuleV2 {
+impl GatewayClientModule {
     pub async fn send_payment(
         &self,
         payload: SendPaymentPayload,
@@ -248,7 +248,7 @@ impl GatewayClientModuleV2 {
                     operation_id,
                     outpoint: payload.outpoint,
                     contract: payload.contract.clone(),
-                    max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM_V2),
+                    max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM),
                     min_contract_amount,
                     invoice: payload.invoice.clone(),
                     claim_keypair: self.keypair,
@@ -449,7 +449,7 @@ impl GatewayClientModuleV2 {
 }
 
 pub(crate) async fn await_receive_from_log(
-    client_ctx: &ClientContext<GatewayClientModuleV2>,
+    client_ctx: &ClientContext<GatewayClientModule>,
     operation_id: OperationId,
 ) -> FinalReceiveState {
     use futures::StreamExt as _;
@@ -473,16 +473,16 @@ pub(crate) async fn await_receive_from_log(
 ///
 /// To abstract away and decouple the core gateway from the modules, the
 /// interface between the is expressed as a trait. The core gateway handles
-/// LNv2 operations that require access to the database or lightning node.
+/// lightning operations that require access to the database or lightning node.
 #[async_trait]
-pub trait IGatewayClientV2: Debug + Send + Sync {
+pub trait IGatewayClient: Debug + Send + Sync {
     /// Use the gateway's lightning node to complete a payment
     async fn complete_htlc(&self, htlc_response: InterceptPaymentResponse);
 
     /// Try to settle an outgoing payment via a direct swap to another
     /// federation hosted by the same gateway. If the gateway's connected
     /// lightning node is the invoice's payee the gateway dispatches the swap
-    /// against the target federation's `GatewayClientModuleV2` and returns
+    /// against the target federation's `GatewayClientModule` and returns
     /// the final receive state along with the target federation id.
     ///
     /// Returns `Ok(None)` when this is not a direct swap.

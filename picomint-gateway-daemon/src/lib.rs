@@ -46,7 +46,7 @@ use picomint_core::time::duration_since_epoch;
 use picomint_core::{Amount, PeerId};
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_gw_client::{
-    EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
+    EXPIRATION_DELTA_MINIMUM, FinalReceiveState, GatewayClientModule, IGatewayClient,
     LightningRpcError, PaymentAction,
 };
 use picomint_ln_common::Bolt11InvoiceDescription;
@@ -131,8 +131,8 @@ impl AppState {
         Ok(())
     }
 
-    /// Verifies that the federation has an LNv2 lightning module and that the
-    /// network matches the gateway's network.
+    /// Verifies that the federation's lightning module network matches the
+    /// gateway's network.
     pub async fn check_federation_network(
         client: &ClientHandleArc,
         network: Network,
@@ -145,10 +145,10 @@ impl AppState {
                 target: LOG_GATEWAY,
                 %federation_id,
                 %network,
-                "Incorrect LNv2 network for federation",
+                "Incorrect network for federation",
             );
             return Err(anyhow::anyhow!(format!(
-                "Unsupported LNv2 network {}",
+                "Unsupported network {}",
                 config.ln.network
             )));
         }
@@ -208,20 +208,19 @@ impl AppState {
     }
 }
 
-// LNv2 Gateway implementation
+// Lightning Gateway implementation
 impl AppState {
-    async fn public_key_v2(&self, federation_id: &FederationId) -> Option<PublicKey> {
+    async fn public_key(&self, federation_id: &FederationId) -> Option<PublicKey> {
         self.clients.read().await.get(federation_id).map(|client| {
             client
-                
-                .get_first_module::<GatewayClientModuleV2>()
+                .get_first_module::<GatewayClientModule>()
                 .expect("Must have client module")
                 .keypair
                 .public_key()
         })
     }
 
-    pub async fn routing_info_v2(
+    pub async fn routing_info(
         &self,
         federation_id: &FederationId,
     ) -> anyhow::Result<Option<RoutingInfo>> {
@@ -230,7 +229,7 @@ impl AppState {
             .context("Federation not connected")?;
 
         Ok(self
-            .public_key_v2(federation_id)
+            .public_key(federation_id)
             .await
             .map(|module_public_key| RoutingInfo {
                 lightning_public_key: self.node.node_id(),
@@ -238,49 +237,48 @@ impl AppState {
                 send_fee_default: self.routing_fees + self.transaction_fees,
                 send_fee_minimum: self.transaction_fees,
                 expiration_delta_default: 1440,
-                expiration_delta_minimum: EXPIRATION_DELTA_MINIMUM_V2,
+                expiration_delta_minimum: EXPIRATION_DELTA_MINIMUM,
                 receive_fee: self.transaction_fees,
             }))
     }
 
-    pub async fn send_payment_v2(
+    pub async fn send_payment(
         &self,
         payload: SendPaymentPayload,
     ) -> anyhow::Result<std::result::Result<[u8; 32], Signature>> {
         self.select_client(payload.federation_id)
             .await
             .context("Federation not connected")?
-            
-            .get_first_module::<GatewayClientModuleV2>()
+            .get_first_module::<GatewayClientModule>()
             .expect("Must have client module")
             .send_payment(payload)
             .await
-            .map_err(|e| anyhow::anyhow!(format!("LNv2 outgoing payment error: {e}")))
+            .map_err(|e| anyhow::anyhow!(format!("Outgoing payment error: {e}")))
     }
 
-    pub async fn create_bolt11_invoice_v2(
+    pub async fn create_bolt11_invoice(
         &self,
         payload: CreateBolt11InvoicePayload,
     ) -> anyhow::Result<Bolt11Invoice> {
         if !payload.contract.verify() {
             return Err(anyhow::anyhow!(
-                "LNv2 incoming payment error: The contract is invalid",
+                "Incoming payment error: The contract is invalid",
             ));
         }
 
         let payment_info = self
-            .routing_info_v2(&payload.federation_id)
+            .routing_info(&payload.federation_id)
             .await?
             .with_context(|| {
                 format!(
-                    "LNv2 incoming payment error: Federation {} does not exist",
+                    "Incoming payment error: Federation {} does not exist",
                     payload.federation_id
                 )
             })?;
 
         if payload.contract.commitment.refund_pk != payment_info.module_public_key {
             return Err(anyhow::anyhow!(
-                "LNv2 incoming payment error: The incoming contract is keyed to another gateway",
+                "Incoming payment error: The incoming contract is keyed to another gateway",
             ));
         }
 
@@ -288,19 +286,19 @@ impl AppState {
 
         if contract_amount == Amount::ZERO {
             return Err(anyhow::anyhow!(
-                "LNv2 incoming payment error: Zero amount incoming contracts are not supported",
+                "Incoming payment error: Zero amount incoming contracts are not supported",
             ));
         }
 
         if contract_amount != payload.contract.commitment.amount {
             return Err(anyhow::anyhow!(
-                "LNv2 incoming payment error: The contract amount does not pay the correct amount of fees",
+                "Incoming payment error: The contract amount does not pay the correct amount of fees",
             ));
         }
 
         if payload.contract.commitment.expiration <= duration_since_epoch().as_secs() {
             return Err(anyhow::anyhow!(
-                "LNv2 incoming payment error: The contract has already expired",
+                "Incoming payment error: The contract has already expired",
             ));
         }
 
@@ -308,13 +306,13 @@ impl AppState {
             PaymentImage::Hash(payment_hash) => payment_hash,
             PaymentImage::Point(..) => {
                 return Err(anyhow::anyhow!(
-                    "LNv2 incoming payment error: PaymentImage is not a payment hash",
+                    "Incoming payment error: PaymentImage is not a payment hash",
                 ));
             }
         };
 
         let invoice = self
-            .create_invoice_via_lnrpc_v2(
+            .create_invoice_via_lnrpc(
                 payment_hash,
                 payload.amount,
                 payload.description.clone(),
@@ -338,7 +336,7 @@ impl AppState {
             .is_some()
         {
             return Err(anyhow::anyhow!(
-                "LNv2 incoming payment error: PaymentHash is already registered",
+                "Incoming payment error: PaymentHash is already registered",
             ));
         }
 
@@ -347,7 +345,7 @@ impl AppState {
         Ok(invoice)
     }
 
-    pub async fn create_invoice_via_lnrpc_v2(
+    pub async fn create_invoice_via_lnrpc(
         &self,
         payment_hash: sha256::Hash,
         amount: Amount,
@@ -377,7 +375,7 @@ impl AppState {
             })
     }
 
-    pub async fn verify_bolt11_preimage_v2(
+    pub async fn verify_bolt11_preimage(
         &self,
         payment_hash: sha256::Hash,
         wait: bool,
@@ -396,8 +394,7 @@ impl AppState {
         let client = self
             .select_client(registered_contract.federation_id)
             .await
-            .ok_or("Not connected to federation".to_string())?
-            ;
+            .ok_or("Not connected to federation".to_string())?;
 
         let operation_id = OperationId::from_encodable(&registered_contract.contract);
 
@@ -409,7 +406,7 @@ impl AppState {
         }
 
         let state = client
-            .get_first_module::<GatewayClientModuleV2>()
+            .get_first_module::<GatewayClientModule>()
             .expect("Must have client module")
             .await_receive(operation_id)
             .await;
@@ -426,7 +423,7 @@ impl AppState {
         })
     }
 
-    pub async fn get_registered_incoming_contract_and_client_v2(
+    pub async fn get_registered_incoming_contract_and_client(
         &self,
         payment_image: PaymentImage,
         amount_msats: u64,
@@ -438,27 +435,26 @@ impl AppState {
             .as_ref()
             .get(&REGISTERED_INCOMING_CONTRACT, &payment_image)
             .context(
-                "LNv2 incoming payment error: No corresponding decryption contract available",
+                "Incoming payment error: No corresponding decryption contract available",
             )?;
 
         if registered_incoming_contract.incoming_amount_msats != amount_msats {
             return Err(anyhow::anyhow!(
-                "LNv2 incoming payment error: The available decryption contract's amount is not equal to the requested amount",
+                "Incoming payment error: The available decryption contract's amount is not equal to the requested amount",
             ));
         }
 
         let client = self
             .select_client(registered_incoming_contract.federation_id)
             .await
-            .context("Federation not connected")?
-            ;
+            .context("Federation not connected")?;
 
         Ok((registered_incoming_contract.contract, client))
     }
 }
 
 #[async_trait]
-impl IGatewayClientV2 for AppState {
+impl IGatewayClient for AppState {
     async fn complete_htlc(&self, htlc_response: picomint_gw_client::InterceptPaymentResponse) {
         let ph = PaymentHash(*htlc_response.payment_hash.as_byte_array());
         let claimable_amount_msat = 999_999_999_999_999;
@@ -503,7 +499,7 @@ impl IGatewayClientV2 for AppState {
         }
 
         let (contract, client) = self
-            .get_registered_incoming_contract_and_client_v2(
+            .get_registered_incoming_contract_and_client(
                 PaymentImage::Hash(*invoice.payment_hash()),
                 invoice
                     .amount_milli_satoshis()
@@ -513,7 +509,7 @@ impl IGatewayClientV2 for AppState {
 
         let federation_id = client.federation_id();
         let final_state = client
-            .get_first_module::<GatewayClientModuleV2>()
+            .get_first_module::<GatewayClientModule>()
             .expect("Must have client module")
             .relay_direct_swap(
                 contract,
@@ -589,7 +585,7 @@ impl IGatewayClientV2 for AppState {
         amount: u64,
     ) -> anyhow::Result<Amount> {
         Ok(self
-            .routing_info_v2(federation_id)
+            .routing_info(federation_id)
             .await?
             .ok_or(anyhow!("Routing Info not available"))?
             .send_fee_minimum

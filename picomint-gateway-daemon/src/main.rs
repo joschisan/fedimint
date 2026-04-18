@@ -23,7 +23,7 @@ use picomint_core::Amount;
 use picomint_core::util::{SafeUrl};
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
-use picomint_gw_client::GatewayClientModuleV2;
+use picomint_gw_client::GatewayClientModule;
 use picomint_ln_common::gateway_api::PaymentFee;
 use picomint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use rand::rngs::OsRng;
@@ -306,11 +306,11 @@ async fn try_handle_lightning_payment_ln(
     let hash = sha256::Hash::from_byte_array(payment_hash);
 
     let (contract, client) = state
-        .get_registered_incoming_contract_and_client_v2(PaymentImage::Hash(hash), amount_msat)
+        .get_registered_incoming_contract_and_client(PaymentImage::Hash(hash), amount_msat)
         .await?;
 
     if let Err(err) = client
-        .get_first_module::<GatewayClientModuleV2>()
+        .get_first_module::<GatewayClientModule>()
         .expect("Must have client module")
         .relay_incoming_htlc(hash, 0, 0, contract, amount_msat)
         .await

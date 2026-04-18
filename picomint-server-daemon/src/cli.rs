@@ -83,7 +83,7 @@ pub async fn run_cli(data_dir: &Path, state: CliState, handle: TaskHandle) {
 }
 
 /// Build the Dashboard-phase CLI router that exposes read-only federation
-/// endpoints (audit, invite) plus the LNv2/wallet module-admin routes.
+/// endpoints (audit, invite) plus the LN/wallet module-admin routes.
 pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use axum::Json;
     use axum::routing::post;

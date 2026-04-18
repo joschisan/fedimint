@@ -28,7 +28,7 @@ use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
 use picomint_core::{Amount, PeerId, TransactionId};
 use picomint_eventlog::{EventLogId, PersistedLogEntry};
-use picomint_gw_client::GatewayClientModuleV2;
+use picomint_gw_client::GatewayClientModule;
 use picomint_ln_client::LightningClientModule;
 use picomint_logging::{LOG_CLIENT, LOG_CLIENT_NET_API, LOG_CLIENT_RECOVERY};
 use picomint_mint_client::MintClientModule;
@@ -52,7 +52,7 @@ pub(crate) mod handle;
 /// mutually exclusive at instance id `1`.
 pub enum LnFlavor {
     Regular(Arc<LightningClientModule>),
-    Gateway(Arc<GatewayClientModuleV2>),
+    Gateway(Arc<GatewayClientModule>),
 }
 
 impl LnFlavor {
@@ -405,7 +405,7 @@ impl Client {
 
     /// Returns a typed module client instance by type. Uses `TypeId` dispatch
     /// over the fixed module set (`MintClientModule` / `WalletClientModule` /
-    /// `LightningClientModule` / `GatewayClientModuleV2`).
+    /// `LightningClientModule` / `GatewayClientModule`).
     pub fn get_first_module<M: ClientModule>(
         &'_ self,
     ) -> anyhow::Result<ClientModuleInstance<'_, M>> {
@@ -422,11 +422,11 @@ impl Client {
                         bail!("LightningClientModule is not mounted on this client")
                     }
                 }
-            } else if tid == TypeId::of::<GatewayClientModuleV2>() {
+            } else if tid == TypeId::of::<GatewayClientModule>() {
                 match &self.ln {
                     LnFlavor::Gateway(m) => (&**m, ModuleKind::Ln, ApiScope::Ln),
                     LnFlavor::Regular(_) => {
-                        bail!("GatewayClientModuleV2 is not mounted on this client")
+                        bail!("GatewayClientModule is not mounted on this client")
                     }
                 }
             } else {

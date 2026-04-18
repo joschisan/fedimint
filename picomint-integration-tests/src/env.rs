@@ -106,7 +106,7 @@ impl TestEnv {
         runtime.block_on(start_gatewayd(base, "gw", GW_PORT, GW_LN_PORT))?;
 
         let gw_data_dir = base.join("gw");
-        // Public API is on the base port (for LNv2 protocol)
+        // Public API is on the base port
         let gw_public = format!("http://127.0.0.1:{GW_PORT}");
 
         info!("Waiting for gateway...");

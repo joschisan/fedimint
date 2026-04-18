@@ -6,7 +6,7 @@ use picomint_redb::WriteTxRef;
 use super::FinalReceiveState;
 use super::events::CompleteEvent;
 use crate::{
-    GwV2SmContext, InterceptPaymentResponse, PaymentAction, Preimage, await_receive_from_log,
+    GwSmContext, InterceptPaymentResponse, PaymentAction, Preimage, await_receive_from_log,
 };
 
 /// State machine that completes the incoming payment by contacting the
@@ -55,7 +55,7 @@ pub enum CompleteOutcome {
 impl StateMachine for CompleteStateMachine {
     const TABLE_NAME: &'static str = "complete-sm";
 
-    type Context = GwV2SmContext;
+    type Context = GwSmContext;
     type Outcome = CompleteOutcome;
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {

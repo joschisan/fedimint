@@ -17,7 +17,7 @@ use crate::issuance_sm::verify_blind_shares;
 use crate::NoteIssuanceRequest;
 
 #[async_trait::async_trait]
-pub trait MintV2ModuleApi {
+pub trait MintFederationApi {
     async fn signature_shares(
         &self,
         txid: TransactionId,
@@ -45,7 +45,7 @@ pub trait MintV2ModuleApi {
 }
 
 #[async_trait::async_trait]
-impl MintV2ModuleApi for FederationApi {
+impl MintFederationApi for FederationApi {
     async fn signature_shares(
         &self,
         txid: TransactionId,
