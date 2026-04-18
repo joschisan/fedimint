@@ -14,7 +14,7 @@ use picomint_core::module::audit::Audit;
 use picomint_core::{InPoint, OutPoint, PeerId};
 use picomint_ln_server::Lightning;
 use picomint_mint_server::Mint;
-use picomint_redb::{ReadTxRef, WriteTransaction, WriteTxRef};
+use picomint_redb::{WriteTransaction, WriteTxRef};
 use picomint_server_core::ServerModule;
 use picomint_wallet_server::Wallet;
 
@@ -33,32 +33,6 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn consensus_proposal(&self, dbtx: &ReadTxRef<'_>) -> Vec<wire::ModuleConsensusItem> {
-        let mut items = Vec::new();
-        items.extend(
-            self.mint
-                .consensus_proposal(&dbtx.isolate(MINT_NS.to_string()))
-                .await
-                .into_iter()
-                .map(wire::ModuleConsensusItem::Mint),
-        );
-        items.extend(
-            self.ln
-                .consensus_proposal(&dbtx.isolate(LN_NS.to_string()))
-                .await
-                .into_iter()
-                .map(wire::ModuleConsensusItem::Ln),
-        );
-        items.extend(
-            self.wallet
-                .consensus_proposal(&dbtx.isolate(WALLET_NS.to_string()))
-                .await
-                .into_iter()
-                .map(wire::ModuleConsensusItem::Wallet),
-        );
-        items
-    }
-
     pub async fn process_consensus_item(
         &self,
         dbtx: &WriteTxRef<'_>,
@@ -138,9 +112,7 @@ impl Server {
         self.mint
             .audit(&dbtx.isolate(MINT_NS.to_string()), audit)
             .await;
-        self.ln
-            .audit(&dbtx.isolate(LN_NS.to_string()), audit)
-            .await;
+        self.ln.audit(&dbtx.isolate(LN_NS.to_string()), audit).await;
         self.wallet
             .audit(&dbtx.isolate(WALLET_NS.to_string()), audit)
             .await;
