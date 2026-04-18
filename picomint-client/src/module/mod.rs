@@ -1,8 +1,9 @@
 use core::fmt;
 use std::marker;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
 use futures::StreamExt as _;
+use crate::Client;
 use crate::api::{ApiScope, FederationApi};
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
@@ -18,6 +19,11 @@ use tracing::warn;
 
 use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
 use crate::{TxAcceptEvent, TxRejectEvent};
+
+/// Late-bound weak reference to the owning `Client`, shared between
+/// `ClientContext`s and set once by the builder after the `Client` is
+/// constructed.
+pub(crate) type LateClient = Arc<OnceLock<Weak<Client>>>;
 
 /// Return type of [`ClientModule::create_final_inputs_and_outputs`]. The
 /// primary module contributes inputs/outputs to balance a partial
@@ -41,80 +47,13 @@ pub type SpawnSms = Box<
 
 pub mod recovery;
 
-/// Minimal back-reference trait a client module needs to finalize and submit
-/// transactions. This is the only piece of the `Client` that modules cannot
-/// compute from the values threaded into [`ClientContext`] at construction
-/// time, because balancing a transaction requires access to the concrete
-/// mint / ln / wallet modules to compute fees and generate change.
-#[async_trait::async_trait]
-pub trait FinalizeTransaction: Send + Sync {
-    async fn finalize_and_submit_transaction(
-        &self,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId>;
-
-    async fn finalize_and_submit_transaction_dbtx(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId>;
-
-    async fn finalize_and_submit_transaction_inner(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId>;
-
-    async fn submit_tx_builder_dbtx(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId>;
-}
-
-/// Lazily-set, `Weak<dyn FinalizeTransaction>` handle used to break the
-/// circular dependency between `picomint-client` and module crates. Set
-/// exactly once by `ClientBuilder` after the `Client` is constructed.
-#[derive(Clone, Default)]
-pub struct FinalClientIface(Arc<std::sync::OnceLock<Weak<dyn FinalizeTransaction>>>);
-
-impl FinalClientIface {
-    /// Get a temporary strong reference.
-    ///
-    /// Care must be taken to not let the user take ownership of this value,
-    /// and not store it elsewhere permanently either, as it could prevent
-    /// the cleanup of the Client.
-    pub(crate) fn get(&self) -> Arc<dyn FinalizeTransaction> {
-        self.0
-            .get()
-            .expect("client must be already set")
-            .upgrade()
-            .expect("client module context must not be use past client shutdown")
-    }
-
-    pub fn set(&self, client: Weak<dyn FinalizeTransaction>) {
-        self.0.set(client).expect("FinalLazyClient already set");
-    }
-}
-
-impl fmt::Debug for FinalClientIface {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("FinalClientIface")
-    }
-}
-
-/// A Client context for a [`ClientModule`] `M`
+/// A client context for a module `M`.
 ///
 /// Client modules can interact with the whole client through this struct.
-/// All concrete handles are stored directly; only the three transaction
-/// finalize methods reach back to the full `Client` via
-/// [`FinalClientIface`].
+/// All concrete handles are stored directly; only the transaction finalize
+/// methods reach back to the full `Client` via a late-bound [`LateClient`].
 pub struct ClientContext<M> {
-    client: FinalClientIface,
+    client: LateClient,
     kind: ModuleKind,
     api: FederationApi,
     api_scope: ApiScope,
@@ -150,7 +89,7 @@ impl<M> fmt::Debug for ClientContext<M> {
 impl<M> ClientContext<M> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        client: FinalClientIface,
+        client: LateClient,
         kind: ModuleKind,
         api: FederationApi,
         api_scope: ApiScope,
@@ -198,13 +137,20 @@ impl<M> ClientContext<M> {
         inputs.into_wire()
     }
 
+    fn client(&self) -> Arc<Client> {
+        self.client
+            .get()
+            .expect("client must be set before contexts are used")
+            .upgrade()
+            .expect("client must outlive its module contexts")
+    }
+
     pub async fn finalize_and_submit_transaction(
         &self,
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<TransactionId> {
-        self.client
-            .get()
+        self.client()
             .finalize_and_submit_transaction(operation_id, tx_builder)
             .await
     }
@@ -215,8 +161,7 @@ impl<M> ClientContext<M> {
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<TransactionId> {
-        self.client
-            .get()
+        self.client()
             .finalize_and_submit_transaction_dbtx(&dbtx.deisolate(), operation_id, tx_builder)
             .await
     }
@@ -230,8 +175,7 @@ impl<M> ClientContext<M> {
         operation_id: OperationId,
         tx_builder: TransactionBuilder,
     ) -> anyhow::Result<TransactionId> {
-        self.client
-            .get()
+        self.client()
             .submit_tx_builder_dbtx(&dbtx.deisolate(), operation_id, tx_builder)
             .await
     }
@@ -292,8 +236,7 @@ impl<M> ClientContext<M> {
     {
         let tx_builder = TransactionBuilder::new().with_inputs(inputs.into_wire());
 
-        self.client
-            .get()
+        self.client()
             .finalize_and_submit_transaction_inner(&dbtx.deisolate(), operation_id, tx_builder)
             .await
     }

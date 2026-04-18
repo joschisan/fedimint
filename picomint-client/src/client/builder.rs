@@ -9,7 +9,7 @@ use picomint_core::config::ConsensusConfig;
 use crate::{Endpoint, download_from_invite_code};
 use crate::executor::ModuleExecutor;
 use crate::module::recovery::RecoveryProgress;
-use crate::module::FinalClientIface;
+use crate::module::LateClient;
 use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use crate::transaction::TxSubmissionSmContext;
 use picomint_core::config::FederationId;
@@ -259,7 +259,7 @@ impl ClientBuilder {
 
         let init_state = Self::load_init_state(&db).await;
 
-        let final_client = FinalClientIface::default();
+        let final_client: LateClient = Arc::new(std::sync::OnceLock::new());
 
         let root_secret = Self::federation_root_secret(&pre_root_secret, &config);
 
@@ -414,7 +414,9 @@ impl ClientBuilder {
 
         let client_arc = ClientHandle::new(client_inner);
 
-        final_client.set(client_iface.clone());
+        final_client
+            .set(client_iface.clone())
+            .expect("LateClient already set");
 
         client_arc.tx_submission_executor.start().await;
 

@@ -16,7 +16,6 @@ use crate::Endpoint;
 use picomint_core::wire;
 use crate::executor::ModuleExecutor;
 use crate::module::recovery::RecoveryProgress;
-use crate::module::FinalizeTransaction;
 use crate::transaction::{TransactionBuilder, TxSubmissionStateMachine};
 use crate::{ClientModuleInstance, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
@@ -286,7 +285,7 @@ impl Client {
             .await
     }
 
-    async fn finalize_and_submit_transaction_inner(
+    pub(crate) async fn finalize_and_submit_transaction_inner(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
@@ -746,44 +745,6 @@ impl Client {
             self.event_notify(),
             operation_id,
         ))
-    }
-}
-
-#[async_trait::async_trait]
-impl FinalizeTransaction for Client {
-    async fn finalize_and_submit_transaction(
-        &self,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        Client::finalize_and_submit_transaction(self, operation_id, tx_builder).await
-    }
-
-    async fn finalize_and_submit_transaction_dbtx(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        Client::finalize_and_submit_transaction_dbtx(self, dbtx, operation_id, tx_builder).await
-    }
-
-    async fn finalize_and_submit_transaction_inner(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        Client::finalize_and_submit_transaction_inner(self, dbtx, operation_id, tx_builder).await
-    }
-
-    async fn submit_tx_builder_dbtx(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        Client::submit_tx_builder_dbtx(self, dbtx, operation_id, tx_builder).await
     }
 }
 
