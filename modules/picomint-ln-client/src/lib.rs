@@ -676,15 +676,12 @@ impl LightningClientModule {
             gateways
         };
 
-        let payload = picomint_base32::encode_prefixed(
-            picomint_base32::PICOMINT_PREFIX,
-            &lnurl::LnurlRequest {
-                federation_id: self.federation_id,
-                recipient_pk: self.lnurl_keypair.public_key(),
-                aggregate_pk: self.cfg.tpe_agg_pk,
-                gateways,
-            },
-        );
+        let payload = picomint_base32::encode(&lnurl::LnurlRequest {
+            federation_id: self.federation_id,
+            recipient_pk: self.lnurl_keypair.public_key(),
+            aggregate_pk: self.cfg.tpe_agg_pk,
+            gateways,
+        });
 
         Ok(picomint_lnurl::encode_lnurl(&format!(
             "{recurringd}pay/{payload}"

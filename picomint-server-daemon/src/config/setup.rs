@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, ensure};
 use iroh::SecretKey;
-use picomint_base32::{self as base32, PICOMINT_PREFIX};
 use picomint_core::PeerId;
 use picomint_core::config::META_FEDERATION_NAME_KEY;
 use picomint_encoding::{Decodable, Encodable};
@@ -100,7 +99,7 @@ impl SetupApi {
             .await
             .local_params
             .as_ref()
-            .map(|lp| base32::encode_prefixed(PICOMINT_PREFIX, &lp.setup_code()))
+            .map(|lp| picomint_base32::encode(&lp.setup_code()))
     }
 
     pub async fn guardian_name(&self) -> Option<String> {
@@ -145,10 +144,7 @@ impl SetupApi {
             && existing_local_parameters.federation_name == federation_name
             && existing_local_parameters.federation_size == federation_size
         {
-            return Ok(base32::encode_prefixed(
-                PICOMINT_PREFIX,
-                &existing_local_parameters.setup_code(),
-            ));
+            return Ok(picomint_base32::encode(&existing_local_parameters.setup_code()));
         }
 
         ensure!(!name.is_empty(), "The guardian name is empty");
@@ -186,11 +182,11 @@ impl SetupApi {
 
         state.local_params = Some(lp.clone());
 
-        Ok(base32::encode_prefixed(PICOMINT_PREFIX, &lp.setup_code()))
+        Ok(picomint_base32::encode(&lp.setup_code()))
     }
 
     pub async fn add_peer_setup_code(&self, info: String) -> anyhow::Result<String> {
-        let info = base32::decode_prefixed(PICOMINT_PREFIX, &info)?;
+        let info = picomint_base32::decode(&info)?;
 
         let mut state = self.state.lock().await;
 

@@ -10,7 +10,6 @@ use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::{self, PublicKey};
 use clap::Parser;
 use lightning_invoice::Bolt11Invoice;
-use picomint_base32::{PICOMINT_PREFIX, decode_prefixed};
 use picomint_core::config::FederationId;
 use picomint_encoding::Encodable;
 use picomint_core::secp256k1::Scalar;
@@ -124,7 +123,7 @@ async fn invoice(
     Query(params): Query<GetInvoiceParams>,
     State(state): State<AppState>,
 ) -> Json<LnurlResponse<InvoiceResponse>> {
-    let Ok(request) = decode_prefixed::<LnurlRequest>(PICOMINT_PREFIX, &payload) else {
+    let Ok(request) = picomint_base32::decode::<LnurlRequest>(&payload) else {
         return Json(LnurlResponse::error("Failed to decode payload"));
     };
 

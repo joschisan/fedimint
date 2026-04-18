@@ -1,18 +1,31 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, ensure};
-
 use picomint_encoding::{Decodable, Encodable};
 
 /// Lowercase RFC 4648 Base32hex alphabet (32 characters).
 const RFC4648: [u8; 32] = *b"0123456789abcdefghijklmnopqrstuv";
 
-/// Prefix used for some of the user-facing Base32 encodings in Picomint to
-/// allow easy identification
-pub const PICOMINT_PREFIX: &str = "picomint";
+/// Prefix tagging user-facing Picomint base32 strings.
+const PREFIX: &str = "picomint";
 
-/// Encodes the input bytes as Base32 (hex variant) using lowercase characters
-pub fn encode(input: &[u8]) -> String {
+/// Encodes `value` as base32hex, prefixed with `picomint`.
+pub fn encode<T: Encodable>(value: &T) -> String {
+    format!("{PREFIX}{}", encode_bytes(&value.consensus_encode_to_vec()))
+}
+
+/// Decodes a `picomint`-prefixed base32hex string back into `T`.
+pub fn decode<T: Decodable>(s: &str) -> anyhow::Result<T> {
+    let s = s.to_lowercase();
+
+    ensure!(s.starts_with(PREFIX), "Invalid prefix");
+
+    let bytes = decode_bytes(&s[PREFIX.len()..])?;
+
+    Ok(T::consensus_decode_exact(&bytes)?)
+}
+
+fn encode_bytes(input: &[u8]) -> String {
     let mut output = Vec::with_capacity(((8 * input.len()) / 5) + 1);
 
     let mut buffer = 0;
@@ -37,9 +50,7 @@ pub fn encode(input: &[u8]) -> String {
     String::from_utf8(output).expect("RFC4648 alphabet is ASCII")
 }
 
-/// Decodes a base 32 string back to raw bytes. Returns an error
-/// if any invalid character is encountered.
-pub fn decode(input: &str) -> anyhow::Result<Vec<u8>> {
+fn decode_bytes(input: &str) -> anyhow::Result<Vec<u8>> {
     let decode_table = RFC4648
         .iter()
         .enumerate()
@@ -71,39 +82,16 @@ pub fn decode(input: &str) -> anyhow::Result<Vec<u8>> {
     Ok(output)
 }
 
-pub fn encode_prefixed<T: Encodable>(prefix: &str, encodable: &T) -> String {
-    encode_prefixed_bytes(prefix, &encodable.consensus_encode_to_vec())
-}
-
-pub fn encode_prefixed_bytes(prefix: &str, bytes: &[u8]) -> String {
-    format!("{prefix}{}", encode(bytes))
-}
-
-pub fn decode_prefixed<T: Decodable>(prefix: &str, s: &str) -> anyhow::Result<T> {
-    Ok(T::consensus_decode_exact(&decode_prefixed_bytes(
-        prefix, s,
-    )?)?)
-}
-
-pub fn decode_prefixed_bytes(prefix: &str, s: &str) -> anyhow::Result<Vec<u8>> {
-    let s = s.to_lowercase();
-    ensure!(s.starts_with(prefix), "Invalid Prefix");
-    decode(&s[prefix.len()..])
-}
-
 #[test]
-fn test_base_32_roundtrip() {
-    const TEST_PREFIX: &str = "test";
-    let data: [u8; 10] = [0x50, 0xAB, 0x3F, 0x77, 0x01, 0xCD, 0x55, 0xFE, 0x10, 0x99];
+fn test_roundtrip() {
+    let data: Vec<u8> = vec![0x50, 0xAB, 0x3F, 0x77, 0x01, 0xCD, 0x55, 0xFE, 0x10, 0x99];
 
-    for n in 1..10 {
-        let bytes = data[0..n].to_vec();
+    let encoded = encode(&data);
+    assert!(encoded.starts_with(PREFIX));
 
-        assert_eq!(decode(&encode(&bytes)).unwrap(), bytes);
+    let decoded: Vec<u8> = decode(&encoded).unwrap();
+    assert_eq!(decoded, data);
 
-        assert_eq!(
-            decode_prefixed::<Vec<u8>>(TEST_PREFIX, &encode_prefixed(TEST_PREFIX, &bytes)).unwrap(),
-            bytes
-        );
-    }
+    let decoded: Vec<u8> = decode(&encoded.to_ascii_uppercase()).unwrap();
+    assert_eq!(decoded, data);
 }

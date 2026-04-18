@@ -12,7 +12,6 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
-use picomint_base32::{self as base32, PICOMINT_PREFIX};
 use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
     ChannelInfo, FederationBalanceRequest, FederationBalanceResponse, FederationConfigRequest,
@@ -589,7 +588,7 @@ async fn module_mint_send(
         .map_err(|e| CliError::internal(e))?;
 
     let response = MintSendResponse {
-        notes: base32::encode_prefixed(PICOMINT_PREFIX, &ecash),
+        notes: picomint_base32::encode(&ecash),
     };
     Ok(Json(response))
 }
@@ -601,7 +600,7 @@ async fn module_mint_receive(
     Json(payload): Json<MintReceiveRequest>,
 ) -> Result<Json<MintReceiveResponse>, CliError> {
     let ecash: picomint_mint_client::ECash =
-        base32::decode_prefixed(PICOMINT_PREFIX, &payload.notes)
+        picomint_base32::decode(&payload.notes)
             .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
 
     let federation_id = ecash

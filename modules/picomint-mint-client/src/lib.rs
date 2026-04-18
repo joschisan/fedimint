@@ -37,7 +37,6 @@ use picomint_client_module::module::{ClientContext, ClientModule, IdxRange, OutP
 use picomint_client_module::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
-use picomint_base32::{self as base32, PICOMINT_PREFIX};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
@@ -771,7 +770,7 @@ impl MintClientModule {
                 operation_id,
                 SendPaymentEvent {
                     amount,
-                    ecash: base32::encode_prefixed(PICOMINT_PREFIX, &ecash),
+                    ecash: picomint_base32::encode(&ecash),
                 },
             )
             .await;
