@@ -3,9 +3,8 @@ use std::sync::Arc;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use picomint_core::config::ConsensusConfig;
-use picomint_bip39::{Bip39RootSecretStrategy, Mnemonic};
+use picomint_bip39::Mnemonic;
 use picomint_client::{Client, ClientBuilder, RootSecret};
-use picomint_client::secret::RootSecretStrategy;
 use picomint_core::config::FederationId;
 use picomint_core::invite_code::InviteCode;
 use picomint_redb::Database;
@@ -66,9 +65,7 @@ impl GatewayClientFactory {
     }
 
     fn root_secret(&self) -> RootSecret {
-        RootSecret::StandardDoubleDerive(Bip39RootSecretStrategy::<12>::to_root_secret(
-            &self.mnemonic,
-        ))
+        RootSecret::StandardDoubleDerive(picomint_bip39::to_root_secret(&self.mnemonic))
     }
 
     fn client_database(&self, federation_id: FederationId) -> Database {

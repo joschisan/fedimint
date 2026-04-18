@@ -10,8 +10,7 @@ use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
-use picomint_bip39::{Bip39RootSecretStrategy, Mnemonic};
-use picomint_client::secret::RootSecretStrategy;
+use picomint_bip39::Mnemonic;
 use picomint_client::{Client, ClientHandleArc, RootSecret};
 use picomint_core::Amount;
 use picomint_core::invite_code::InviteCode;
@@ -259,7 +258,7 @@ async fn build_client(
 
     let mnemonic = Mnemonic::generate(12)?;
     let root_secret =
-        RootSecret::StandardDoubleDerive(Bip39RootSecretStrategy::<12>::to_root_secret(&mnemonic));
+        RootSecret::StandardDoubleDerive(picomint_bip39::to_root_secret(&mnemonic));
 
     let client = builder
         .preview(connectors, &invite_code)

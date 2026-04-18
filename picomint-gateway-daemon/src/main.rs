@@ -17,8 +17,6 @@ use bitcoin::Network;
 use bitcoin::hashes::{Hash as _, sha256};
 use clap::{ArgGroup, Parser};
 use lightning::types::payment::PaymentHash;
-use picomint_bip39::Bip39RootSecretStrategy;
-use picomint_client::secret::RootSecretStrategy;
 use picomint_core::Amount;
 use picomint_core::util::{SafeUrl};
 use picomint_gateway_daemon::client::GatewayClientFactory;
@@ -124,7 +122,7 @@ fn main() -> anyhow::Result<()> {
             Some(factory) => factory,
             None => runtime.block_on(GatewayClientFactory::init(
                 gateway_db.clone(),
-                Bip39RootSecretStrategy::<12>::random(&mut OsRng),
+                picomint_bip39::random(&mut OsRng),
             ))?,
         };
 
