@@ -5,7 +5,6 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
 
 use super::WalletClientContext;
-use crate::wallet::api::WalletFederationApi;
 use super::events::{SendConfirmEvent, SendFailureEvent};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -40,7 +39,7 @@ impl StateMachine for SendStateMachine {
             return AwaitFundingResult::Aborted(error);
         }
 
-        match ctx.client_ctx.module_api().tx_id(self.outpoint).await {
+        match ctx.client_ctx.module_api().wallet_tx_id(self.outpoint).await {
             Some(txid) => AwaitFundingResult::Success(txid),
             None => AwaitFundingResult::Failure,
         }

@@ -8,32 +8,8 @@ use picomint_core::wallet::endpoint_constants::{
 };
 use picomint_core::wallet::{FederationWallet, OutputInfo, TxInfo};
 
-#[async_trait::async_trait]
-pub trait WalletFederationApi {
-    async fn consensus_block_count(&self) -> FederationResult<u64>;
-
-    async fn consensus_feerate(&self) -> FederationResult<Option<u64>>;
-
-    async fn federation_wallet(&self) -> FederationResult<Option<FederationWallet>>;
-
-    async fn send_fee(&self) -> FederationResult<Option<bitcoin::Amount>>;
-
-    async fn receive_fee(&self) -> FederationResult<Option<bitcoin::Amount>>;
-
-    async fn pending_tx_chain(&self) -> FederationResult<Vec<TxInfo>>;
-
-    async fn output_info_slice(
-        &self,
-        start_index: u64,
-        end_index: u64,
-    ) -> FederationResult<Vec<OutputInfo>>;
-
-    async fn tx_id(&self, outpoint: OutPoint) -> Option<bitcoin::Txid>;
-}
-
-#[async_trait::async_trait]
-impl WalletFederationApi for FederationApi {
-    async fn consensus_block_count(&self) -> FederationResult<u64> {
+impl FederationApi {
+    pub async fn wallet_consensus_block_count(&self) -> FederationResult<u64> {
         self.request_current_consensus(
             CONSENSUS_BLOCK_COUNT_ENDPOINT.to_string(),
             ApiRequestErased::new(()),
@@ -41,7 +17,7 @@ impl WalletFederationApi for FederationApi {
         .await
     }
 
-    async fn consensus_feerate(&self) -> FederationResult<Option<u64>> {
+    pub async fn wallet_consensus_feerate(&self) -> FederationResult<Option<u64>> {
         self.request_current_consensus(
             CONSENSUS_FEERATE_ENDPOINT.to_string(),
             ApiRequestErased::new(()),
@@ -49,7 +25,7 @@ impl WalletFederationApi for FederationApi {
         .await
     }
 
-    async fn federation_wallet(&self) -> FederationResult<Option<FederationWallet>> {
+    pub async fn wallet_federation_wallet(&self) -> FederationResult<Option<FederationWallet>> {
         self.request_current_consensus(
             FEDERATION_WALLET_ENDPOINT.to_string(),
             ApiRequestErased::new(()),
@@ -57,17 +33,17 @@ impl WalletFederationApi for FederationApi {
         .await
     }
 
-    async fn send_fee(&self) -> FederationResult<Option<bitcoin::Amount>> {
+    pub async fn wallet_send_fee(&self) -> FederationResult<Option<bitcoin::Amount>> {
         self.request_current_consensus(SEND_FEE_ENDPOINT.to_string(), ApiRequestErased::new(()))
             .await
     }
 
-    async fn receive_fee(&self) -> FederationResult<Option<bitcoin::Amount>> {
+    pub async fn wallet_receive_fee(&self) -> FederationResult<Option<bitcoin::Amount>> {
         self.request_current_consensus(RECEIVE_FEE_ENDPOINT.to_string(), ApiRequestErased::new(()))
             .await
     }
 
-    async fn pending_tx_chain(&self) -> FederationResult<Vec<TxInfo>> {
+    pub async fn wallet_pending_tx_chain(&self) -> FederationResult<Vec<TxInfo>> {
         self.request_current_consensus(
             PENDING_TRANSACTION_CHAIN_ENDPOINT.to_string(),
             ApiRequestErased::new(()),
@@ -75,7 +51,7 @@ impl WalletFederationApi for FederationApi {
         .await
     }
 
-    async fn output_info_slice(
+    pub async fn wallet_output_info_slice(
         &self,
         start_index: u64,
         end_index: u64,
@@ -87,7 +63,7 @@ impl WalletFederationApi for FederationApi {
         .await
     }
 
-    async fn tx_id(&self, outpoint: OutPoint) -> Option<bitcoin::Txid> {
+    pub async fn wallet_tx_id(&self, outpoint: OutPoint) -> Option<bitcoin::Txid> {
         self.request_current_consensus_retry(
             TRANSACTION_ID_ENDPOINT.to_string(),
             ApiRequestErased::new(outpoint),

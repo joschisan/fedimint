@@ -15,7 +15,6 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use api::WalletFederationApi;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
 use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
@@ -134,25 +133,25 @@ impl WalletClientModule {
     /// Fetch the total value of bitcoin controlled by the federation.
     pub async fn total_value(&self) -> FederationResult<bitcoin::Amount> {
         self.module_api
-            .federation_wallet()
+            .wallet_federation_wallet()
             .await
             .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
     }
 
     /// Fetch the consensus block count of the federation.
     pub async fn block_count(&self) -> FederationResult<u64> {
-        self.module_api.consensus_block_count().await
+        self.module_api.wallet_consensus_block_count().await
     }
 
     /// Fetch the current consensus feerate.
     pub async fn feerate(&self) -> FederationResult<Option<u64>> {
-        self.module_api.consensus_feerate().await
+        self.module_api.wallet_consensus_feerate().await
     }
 
     /// Fetch the current fee required to send an onchain payment.
     pub async fn send_fee(&self) -> Result<bitcoin::Amount, SendError> {
         self.module_api
-            .send_fee()
+            .wallet_send_fee()
             .await
             .map_err(|e| SendError::FederationError(e.to_string()))?
             .ok_or(SendError::NoConsensusFeerateAvailable)
@@ -177,7 +176,7 @@ impl WalletClientModule {
             Some(value) => value,
             None => self
                 .module_api
-                .send_fee()
+                .wallet_send_fee()
                 .await
                 .map_err(|e| SendError::FederationError(e.to_string()))?
                 .ok_or(SendError::NoConsensusFeerateAvailable)?,
@@ -397,7 +396,7 @@ impl WalletClientModule {
 
         let outputs = self
             .module_api
-            .output_info_slice(next_output_index, next_output_index + SLICE_SIZE)
+            .wallet_output_info_slice(next_output_index, next_output_index + SLICE_SIZE)
             .await?;
 
         for output in &outputs {
@@ -425,13 +424,13 @@ impl WalletClientModule {
                 if !output.spent {
                     // In order to not overpay on fees we choose to wait,
                     // the congestion will clear up within a few blocks.
-                    if self.module_api.pending_tx_chain().await?.len() >= 3 {
+                    if self.module_api.wallet_pending_tx_chain().await?.len() >= 3 {
                         return Ok(false);
                     }
 
                     let receive_fee = self
                         .module_api
-                        .receive_fee()
+                        .wallet_receive_fee()
                         .await?
                         .ok_or(anyhow!("No consensus feerate is available"))?;
 
