@@ -6,7 +6,6 @@ use bitcoincore_rpc::jsonrpc::Error::Rpc;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use picomint_core::util::SafeUrl;
 use tokio::task::block_in_place;
-use picomint_core::ChainId;
 
 use crate::Feerate;
 use picomint_logging::{LOG_BITCOIND_CORE, LOG_SERVER};
@@ -87,9 +86,5 @@ impl BitcoindClient {
         Ok(Some(
             block_in_place(|| self.client.get_blockchain_info())?.verification_progress,
         ))
-    }
-
-    pub async fn get_chain_id(&self) -> anyhow::Result<ChainId> {
-        self.get_block_hash(1).await.map(ChainId::new)
     }
 }

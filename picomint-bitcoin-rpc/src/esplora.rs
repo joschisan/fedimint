@@ -1,10 +1,8 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use anyhow::Context;
 use bitcoin::{BlockHash, Transaction};
-use picomint_core::util::{SafeUrl};
-use picomint_core::ChainId;
+use picomint_core::util::SafeUrl;
 
 use crate::Feerate;
 use picomint_logging::{LOG_BITCOIND_ESPLORA, LOG_SERVER};
@@ -14,7 +12,6 @@ use tracing::info;
 pub struct EsploraClient {
     client: esplora_client::AsyncClient,
     url: SafeUrl,
-    cached_chain_id: OnceLock<ChainId>,
 }
 
 impl EsploraClient {
@@ -32,7 +29,6 @@ impl EsploraClient {
         Ok(Self {
             client,
             url: url.clone(),
-            cached_chain_id: OnceLock::new(),
         })
     }
 
@@ -78,15 +74,5 @@ impl EsploraClient {
 
     pub async fn get_sync_progress(&self) -> anyhow::Result<Option<f64>> {
         Ok(None)
-    }
-
-    pub async fn get_chain_id(&self) -> anyhow::Result<ChainId> {
-        if let Some(chain_id) = self.cached_chain_id.get() {
-            return Ok(*chain_id);
-        }
-
-        let chain_id = ChainId::new(self.get_block_hash(1).await?);
-        let _ = self.cached_chain_id.set(chain_id);
-        Ok(chain_id)
     }
 }

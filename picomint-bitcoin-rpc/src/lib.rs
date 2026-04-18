@@ -1,14 +1,13 @@
 pub mod bitcoind;
 pub mod esplora;
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use picomint_core::bitcoin::{Block, BlockHash, Network, Transaction};
 use picomint_core::task::TaskGroup;
-use picomint_core::util::{SafeUrl};
-use picomint_core::ChainId;
+use picomint_core::util::SafeUrl;
 use picomint_logging::LOG_SERVER;
 use tokio::sync::watch;
 use tracing::{debug, warn};
@@ -16,33 +15,16 @@ use tracing::{debug, warn};
 pub use crate::bitcoind::BitcoindClient;
 pub use crate::esplora::EsploraClient;
 
-// Well-known genesis block hashes for different Bitcoin networks
+// Well-known block-hash-at-height-1 values for the Bitcoin networks we
+// recognize. Anything else is assumed to be a regtest / custom chain.
 // <https://blockstream.info/api/block-height/1>
-const MAINNET_CHAIN_ID_STR: &str =
-    "00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048";
+const MAINNET: &str = "00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048";
 // <https://blockstream.info/testnet/api/block-height/1>
-const TESTNET_CHAIN_ID_STR: &str =
-    "00000000b873e79784647a6c82962c70d228557d24a747ea4d1b8bbe878e1206";
+const TESTNET: &str = "00000000b873e79784647a6c82962c70d228557d24a747ea4d1b8bbe878e1206";
 // <https://mempool.space/signet/api/block-height/1>
-const SIGNET_4_CHAIN_ID_STR: &str =
-    "00000086d6b2636cb2a392d45edc4ec544a10024d30141c9adf4bfd9de533b53";
+const SIGNET_4: &str = "00000086d6b2636cb2a392d45edc4ec544a10024d30141c9adf4bfd9de533b53";
 // <https://mutinynet.com/api/block-height/1>
-const MUTINYNET_CHAIN_ID_STR: &str =
-    "000002855893a0a9b24eaffc5efc770558a326fee4fc10c9da22fc19cd2954f9";
-
-/// Derives the Bitcoin network from a chain ID (block height 1 block hash).
-///
-/// Returns the corresponding `Network` for well-known genesis hashes,
-/// or `Network::Regtest` for unknown hashes (custom/private networks).
-pub fn network_from_chain_id(chain_id: ChainId) -> Network {
-    match chain_id.to_string().as_str() {
-        MAINNET_CHAIN_ID_STR => Network::Bitcoin,
-        TESTNET_CHAIN_ID_STR => Network::Testnet,
-        SIGNET_4_CHAIN_ID_STR => Network::Signet,
-        MUTINYNET_CHAIN_ID_STR => Network::Signet,
-        _ => Network::Regtest,
-    }
-}
+const MUTINYNET: &str = "000002855893a0a9b24eaffc5efc770558a326fee4fc10c9da22fc19cd2954f9";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Feerate {
@@ -114,21 +96,12 @@ impl BitcoinBackend {
             BitcoinBackend::Esplora(c) => c.get_sync_progress().await,
         }
     }
-
-    pub async fn get_chain_id(&self) -> Result<ChainId> {
-        match self {
-            BitcoinBackend::Bitcoind(c) => c.get_chain_id().await,
-            BitcoinBackend::Esplora(c) => c.get_chain_id().await,
-        }
-    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BitcoinRpcMonitor {
     rpc: Arc<BitcoinBackend>,
     status_receiver: watch::Receiver<Option<BitcoinRpcStatus>>,
-    /// Cached chain ID — fetched once and never changes.
-    chain_id: OnceLock<ChainId>,
 }
 
 impl BitcoinRpcMonitor {
@@ -169,13 +142,16 @@ impl BitcoinRpcMonitor {
         Self {
             rpc,
             status_receiver,
-            chain_id: OnceLock::new(),
         }
     }
 
     async fn fetch_status(rpc: &BitcoinBackend) -> Result<BitcoinRpcStatus> {
-        let chain_id = rpc.get_chain_id().await?;
-        let network = network_from_chain_id(chain_id);
+        let network = match rpc.get_block_hash(1).await?.to_string().as_str() {
+            MAINNET => Network::Bitcoin,
+            TESTNET => Network::Testnet,
+            SIGNET_4 | MUTINYNET => Network::Signet,
+            _ => Network::Regtest,
+        };
         let block_count = rpc.get_block_count().await?;
         let sync_progress = rpc.get_sync_progress().await?;
 
@@ -224,25 +200,6 @@ impl BitcoinRpcMonitor {
     pub async fn submit_transaction(&self, tx: Transaction) {
         if self.status_receiver.borrow().is_some() {
             self.rpc.submit_transaction(tx).await;
-        }
-    }
-}
-
-impl Clone for BitcoinRpcMonitor {
-    fn clone(&self) -> Self {
-        Self {
-            rpc: self.rpc.clone(),
-            status_receiver: self.status_receiver.clone(),
-            chain_id: self
-                .chain_id
-                .get()
-                .copied()
-                .map(|h| {
-                    let lock = OnceLock::new();
-                    let _ = lock.set(h);
-                    lock
-                })
-                .unwrap_or_default(),
         }
     }
 }
