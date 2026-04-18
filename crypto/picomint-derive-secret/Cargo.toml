@@ -19,6 +19,7 @@ path = "src/lib.rs"
 bls12_381 = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
+hex = { workspace = true }
 hkdf = { workspace = true }
 ring = { workspace = true }
 

@@ -53,7 +53,7 @@ impl OperationId {
 
 impl Display for OperationId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        picomint_core::format_hex(&self.0, f)
+        f.write_str(&hex::encode(self.0))
     }
 }
 

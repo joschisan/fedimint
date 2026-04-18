@@ -38,7 +38,7 @@
 
 extern crate self as picomint_core;
 
-use std::fmt::{self, Debug};
+use std::fmt::Debug;
 use std::ops::{self, Range};
 use std::str::FromStr;
 
@@ -46,11 +46,8 @@ pub use amount::*;
 /// Mostly re-exported for [`Decodable`] macros.
 pub use anyhow;
 pub use bitcoin::hashes::Hash as BitcoinHash;
-use lightning::util::ser::Writeable;
-use lightning_types::features::Bolt11InvoiceFeatures;
 pub use peer_id::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use thiserror::Error;
 pub use {bitcoin, hex, secp256k1};
 
 use picomint_encoding::{Decodable, Encodable};
@@ -401,84 +398,4 @@ impl Decodable for TransactionId {
         r.read_exact(&mut bytes)?;
         Ok(Self::from_byte_array(bytes))
     }
-}
-
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Encodable,
-    Decodable,
-)]
-pub struct Feerate {
-    pub sats_per_kvb: u64,
-}
-
-impl fmt::Display for Feerate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{}sat/kvb", self.sats_per_kvb))
-    }
-}
-
-impl Feerate {
-    pub fn calculate_fee(&self, weight: u64) -> bitcoin::Amount {
-        let sats = weight_to_vbytes(weight) * self.sats_per_kvb / 1000;
-        bitcoin::Amount::from_sat(sats)
-    }
-}
-
-const WITNESS_SCALE_FACTOR: u64 = bitcoin::constants::WITNESS_SCALE_FACTOR as u64;
-
-/// Converts weight to virtual bytes, defined in [BIP-141] as weight / 4
-/// (rounded up to the next integer).
-///
-/// [BIP-141]: https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#transaction-size-calculations
-pub fn weight_to_vbytes(weight: u64) -> u64 {
-    weight.div_ceil(WITNESS_SCALE_FACTOR)
-}
-
-#[derive(Debug, Error)]
-pub enum CoreError {
-    #[error("Mismatching outcome variant: expected {0}, got {1}")]
-    MismatchingVariant(&'static str, &'static str),
-}
-
-// Encode features for a bolt11 invoice without encoding the length.
-// This functionality was available in `lightning` v0.0.123, but has since been
-// removed. See the original code here:
-// https://docs.rs/lightning/0.0.123/src/lightning/ln/features.rs.html#745-750
-// https://docs.rs/lightning/0.0.123/src/lightning/ln/features.rs.html#1008-1012
-pub fn encode_bolt11_invoice_features_without_length(features: &Bolt11InvoiceFeatures) -> Vec<u8> {
-    let mut feature_bytes = vec![];
-    for f in features.le_flags().iter().rev() {
-        f.write(&mut feature_bytes)
-            .expect("Writing to byte vec can't fail");
-    }
-    feature_bytes
-}
-
-/// Outputs hex into an object implementing `fmt::Write`.
-///
-/// Vendored from `bitcoin_hashes` v0.11.0:
-/// <https://docs.rs/bitcoin_hashes/0.11.0/src/bitcoin_hashes/hex.rs.html#173-189>
-pub fn format_hex(data: &[u8], f: &mut std::fmt::Formatter) -> std::fmt::Result {
-    let prec = f.precision().unwrap_or(2 * data.len());
-    let width = f.width().unwrap_or(2 * data.len());
-    for _ in (2 * data.len())..width {
-        f.write_str("0")?;
-    }
-    for ch in data.iter().take(prec / 2) {
-        write!(f, "{:02x}", *ch)?;
-    }
-    if prec < 2 * data.len() && prec % 2 == 1 {
-        write!(f, "{:x}", data[prec / 2] / 16)?;
-    }
-    Ok(())
 }

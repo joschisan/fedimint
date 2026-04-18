@@ -8,7 +8,7 @@ use anyhow::{Result, ensure};
 use picomint_core::bitcoin::{Block, BlockHash, Network, Transaction};
 use picomint_core::task::TaskGroup;
 use picomint_core::util::{SafeUrl};
-use picomint_core::{ChainId, Feerate};
+use picomint_core::ChainId;
 use picomint_logging::LOG_SERVER;
 use tokio::sync::watch;
 use tracing::{debug, warn};
@@ -42,6 +42,11 @@ pub fn network_from_chain_id(chain_id: ChainId) -> Network {
         MUTINYNET_CHAIN_ID_STR => Network::Signet,
         _ => Network::Regtest,
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Feerate {
+    pub sats_per_kvb: u64,
 }
 
 /// Status of the Bitcoin RPC backend as reported by the monitor.

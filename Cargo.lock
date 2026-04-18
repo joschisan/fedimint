@@ -4014,6 +4014,7 @@ name = "picomint-derive-secret"
 version = "0.1.0"
 dependencies = [
  "bls12_381",
+ "hex",
  "picomint-core",
  "picomint-encoding",
  "picomint-hkdf",

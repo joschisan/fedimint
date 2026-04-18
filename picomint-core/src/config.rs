@@ -10,7 +10,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use picomint_encoding::{Decodable, Encodable};
-use crate::format_hex;
 
 // TODO: make configurable
 /// This limits the RAM consumption of a AlephBFT Unit to roughly 50kB
@@ -89,13 +88,13 @@ pub struct FederationIdPrefix([u8; 4]);
 
 impl Display for FederationIdPrefix {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        format_hex(&self.0, f)
+        f.write_str(&::hex::encode(self.0))
     }
 }
 
 impl Display for FederationId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        format_hex(&self.0.to_byte_array(), f)
+        f.write_str(&::hex::encode(self.0.to_byte_array()))
     }
 }
 

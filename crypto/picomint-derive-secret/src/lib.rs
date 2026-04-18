@@ -164,12 +164,10 @@ fn tagged_derive(tag: &[u8; 8], derivation: ChildId) -> [u8; 16] {
 impl std::fmt::Debug for DerivableSecret {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "DerivableSecret#")?;
-        picomint_core::format_hex(
-            &self
-                .kdf
+        f.write_str(&hex::encode(
+            self.kdf
                 .derive::<8>(b"just a debug fingerprint derivation salt"),
-            f,
-        )
+        ))
     }
 }
 

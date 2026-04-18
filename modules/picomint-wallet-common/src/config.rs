@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_core::{Amount, PeerId, weight_to_vbytes};
+use picomint_core::{Amount, PeerId};
 use secp256k1::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,14 @@ pub struct WalletConfigConsensus {
     pub output_fee: Amount,
     /// Bitcoin network (e.g. testnet, bitcoin)
     pub network: Network,
+}
+
+/// Converts weight to virtual bytes, defined in [BIP-141] as weight / 4
+/// (rounded up to the next integer).
+///
+/// [BIP-141]: https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#transaction-size-calculations
+fn weight_to_vbytes(weight: u64) -> u64 {
+    weight.div_ceil(bitcoin::constants::WITNESS_SCALE_FACTOR as u64)
 }
 
 impl WalletConfigConsensus {

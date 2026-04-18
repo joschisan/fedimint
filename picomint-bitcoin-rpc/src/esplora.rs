@@ -4,7 +4,9 @@ use std::sync::OnceLock;
 use anyhow::Context;
 use bitcoin::{BlockHash, Transaction};
 use picomint_core::util::{SafeUrl};
-use picomint_core::{ChainId, Feerate};
+use picomint_core::ChainId;
+
+use crate::Feerate;
 use picomint_logging::{LOG_BITCOIND_ESPLORA, LOG_SERVER};
 use tracing::info;
 
