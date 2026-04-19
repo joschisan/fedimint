@@ -17,7 +17,8 @@ use std::sync::Arc;
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
-use crate::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
+use crate::transaction::builder_next::{Output, TransactionBuilder};
+use picomint_core::wire;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
 use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
@@ -384,59 +385,52 @@ impl LightningClientModule {
             ephemeral_pk,
         };
 
-        let client_output = ClientOutput::<LightningOutput> {
-            output: LightningOutput::Outgoing(contract.clone()),
+        let tx_builder = TransactionBuilder::from_output(Output {
+            output: wire::Output::Ln(LightningOutput::Outgoing(contract.clone())),
             amount: contract.amount,
-        };
-
-        let client_output_bundle = self.client_ctx.make_client_outputs(ClientOutputBundle::<
-            LightningOutput,
-        >::new(vec![
-            client_output,
-        ]));
-
-        let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
+            fee: self.cfg.output_fee,
+        });
 
         let dbtx = self.client_ctx.module_db().begin_write().await;
-        let tx = dbtx.as_ref();
 
-        if tx.insert(&SEND_OPERATION, &operation_id, &()).is_some() {
+        if dbtx
+            .as_ref()
+            .insert(&SEND_OPERATION, &operation_id, &())
+            .is_some()
+        {
             return Err(SendPaymentError::InvoiceAlreadyAttempted(operation_id));
         }
 
         let txid = self
-            .client_ctx
-            .finalize_and_submit_transaction_dbtx(&tx, operation_id, transaction)
+            .mint
+            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
             .await
             .map_err(|e| SendPaymentError::FailedToFundPayment(e.to_string()))?;
 
+        let sm = SendStateMachine {
+            common: SendSMCommon {
+                operation_id,
+                outpoint: OutPoint { txid, out_idx: 0 },
+                contract,
+                gateway_api: Some(gateway_api),
+                invoice: Some(LightningInvoice::Bolt11(invoice.clone())),
+                refund_keypair,
+            },
+            state: SendSMState::Funding,
+        };
+
         self.send_executor
-            .add_state_machine_dbtx(
-                &tx,
-                SendStateMachine {
-                    common: SendSMCommon {
-                        operation_id,
-                        outpoint: OutPoint { txid, out_idx: 0 },
-                        contract,
-                        gateway_api: Some(gateway_api),
-                        invoice: Some(LightningInvoice::Bolt11(invoice.clone())),
-                        refund_keypair,
-                    },
-                    state: SendSMState::Funding,
-                },
-            )
+            .add_state_machine_dbtx(&dbtx.as_ref(), sm)
             .await;
 
+        let event = SendEvent {
+            txid,
+            amount: send_fee.add_to(amount),
+            fee: send_fee.fee(amount),
+        };
+
         self.client_ctx
-            .log_event(
-                &tx,
-                operation_id,
-                SendEvent {
-                    txid,
-                    amount: send_fee.add_to(amount),
-                    fee: send_fee.fee(amount),
-                },
-            )
+            .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
         dbtx.commit().await;

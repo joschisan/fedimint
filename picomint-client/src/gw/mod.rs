@@ -12,7 +12,8 @@ use std::sync::Arc;
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
-use crate::transaction::{ClientOutput, ClientOutputBundle, TransactionBuilder};
+use crate::transaction::builder_next::{Output, TransactionBuilder};
+use picomint_core::wire;
 use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
@@ -283,68 +284,61 @@ impl GatewayClientModule {
 
         let refund_keypair = self.keypair;
 
-        let client_output = ClientOutput::<LightningOutput> {
-            output: LightningOutput::Incoming(contract.clone()),
+        let tx_builder = TransactionBuilder::from_output(Output {
+            output: wire::Output::Ln(LightningOutput::Incoming(contract.clone())),
             amount: contract.commitment.amount,
-        };
-
-        let client_output_bundle = self.client_ctx.make_client_outputs(ClientOutputBundle::<
-            LightningOutput,
-        >::new(vec![
-            client_output,
-        ]));
-        let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
+            fee: self.cfg.output_fee,
+        });
 
         let dbtx = self.client_ctx.module_db().begin_write().await;
-        let tx = dbtx.as_ref();
 
-        if tx.insert(&db::OPERATION, &operation_id, &()).is_some() {
+        if dbtx
+            .as_ref()
+            .insert(&db::OPERATION, &operation_id, &())
+            .is_some()
+        {
             return Ok(());
         }
 
         let txid = self
-            .client_ctx
-            .finalize_and_submit_transaction_dbtx(&tx, operation_id, transaction)
+            .mint
+            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
             .await?;
 
         let outpoint = OutPoint { txid, out_idx: 0 };
 
+        let receive_sm = ReceiveStateMachine {
+            operation_id,
+            contract: contract.clone(),
+            outpoint,
+            refund_keypair,
+        };
+
         self.receive_executor
-            .add_state_machine_dbtx(
-                &tx,
-                ReceiveStateMachine {
-                    operation_id,
-                    contract: contract.clone(),
-                    outpoint,
-                    refund_keypair,
-                },
-            )
+            .add_state_machine_dbtx(&dbtx.as_ref(), receive_sm)
             .await;
+
+        let complete_sm = CompleteStateMachine {
+            common: CompleteSMCommon {
+                operation_id,
+                payment_hash,
+                incoming_chan_id,
+                htlc_id,
+            },
+            state: CompleteSMState::Pending,
+        };
 
         self.complete_executor
-            .add_state_machine_dbtx(
-                &tx,
-                CompleteStateMachine {
-                    common: CompleteSMCommon {
-                        operation_id,
-                        payment_hash,
-                        incoming_chan_id,
-                        htlc_id,
-                    },
-                    state: CompleteSMState::Pending,
-                },
-            )
+            .add_state_machine_dbtx(&dbtx.as_ref(), complete_sm)
             .await;
 
+        let event = ReceiveEvent {
+            txid: outpoint.txid,
+            amount: contract.commitment.amount,
+        };
+
         self.client_ctx
-            .log_event(
-                &tx,
-                operation_id,
-                ReceiveEvent {
-                    txid: outpoint.txid,
-                    amount: contract.commitment.amount,
-                },
-            )
+            .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
         dbtx.commit().await;
@@ -361,53 +355,47 @@ impl GatewayClientModule {
 
         let refund_keypair = self.keypair;
 
-        let client_output = ClientOutput::<LightningOutput> {
-            output: LightningOutput::Incoming(contract.clone()),
+        let tx_builder = TransactionBuilder::from_output(Output {
+            output: wire::Output::Ln(LightningOutput::Incoming(contract.clone())),
             amount: contract.commitment.amount,
-        };
-
-        let client_output_bundle = self.client_ctx.make_client_outputs(ClientOutputBundle::<
-            LightningOutput,
-        >::new(vec![
-            client_output,
-        ]));
-        let transaction = TransactionBuilder::new().with_outputs(client_output_bundle);
+            fee: self.cfg.output_fee,
+        });
 
         let dbtx = self.client_ctx.module_db().begin_write().await;
-        let tx = dbtx.as_ref();
 
-        if tx.insert(&db::OPERATION, &operation_id, &()).is_some() {
+        if dbtx
+            .as_ref()
+            .insert(&db::OPERATION, &operation_id, &())
+            .is_some()
+        {
             return Ok(self.await_receive(operation_id).await);
         }
 
         let txid = self
-            .client_ctx
-            .finalize_and_submit_transaction_dbtx(&tx, operation_id, transaction)
+            .mint
+            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
             .await?;
 
         let outpoint = OutPoint { txid, out_idx: 0 };
 
+        let sm = ReceiveStateMachine {
+            operation_id,
+            contract: contract.clone(),
+            outpoint,
+            refund_keypair,
+        };
+
         self.receive_executor
-            .add_state_machine_dbtx(
-                &tx,
-                ReceiveStateMachine {
-                    operation_id,
-                    contract: contract.clone(),
-                    outpoint,
-                    refund_keypair,
-                },
-            )
+            .add_state_machine_dbtx(&dbtx.as_ref(), sm)
             .await;
 
+        let event = ReceiveEvent {
+            txid: outpoint.txid,
+            amount: contract.commitment.amount,
+        };
+
         self.client_ctx
-            .log_event(
-                &tx,
-                operation_id,
-                ReceiveEvent {
-                    txid: outpoint.txid,
-                    amount: contract.commitment.amount,
-                },
-            )
+            .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
         dbtx.commit().await;
