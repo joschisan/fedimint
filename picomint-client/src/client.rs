@@ -7,7 +7,7 @@ use crate::api::{ApiScope, FederationApi};
 use crate::gw::{GatewayClientModule, IGatewayClient};
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
-use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
+use crate::secret::{Mnemonic, derive_module_secret, derive_root_secret};
 use crate::wallet::WalletClientModule;
 use crate::download_from_invite_code;
 use anyhow::bail;
@@ -20,7 +20,6 @@ use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
-use picomint_derive_secret::DerivableSecret;
 use picomint_eventlog::{EventLogId, PersistedLogEntry};
 use picomint_logging::LOG_CLIENT;
 use picomint_redb::Database;
@@ -29,24 +28,6 @@ use tracing::debug;
 use crate::db::CLIENT_CONFIG;
 
 pub(crate) mod handle;
-
-/// Pre-derivation step for the client root secret. Internally the client
-/// hashes in the federation id so the same input secret is safely reused
-/// across federations.
-#[derive(Clone)]
-pub enum RootSecret {
-    /// Derive an extra round of federation-id into the secret. Applications
-    /// MUST NOT do that derivation themselves.
-    StandardDoubleDerive(DerivableSecret),
-}
-
-impl RootSecret {
-    fn to_inner(&self, federation_id: FederationId) -> DerivableSecret {
-        match self {
-            RootSecret::StandardDoubleDerive(s) => get_default_client_secret(s, &federation_id),
-        }
-    }
-}
 
 /// LN-flavor selection used by the four constructors below.
 enum LnChoice {
@@ -95,12 +76,12 @@ impl Client {
     pub async fn join(
         connectors: Endpoint,
         db: Database,
-        root_secret: RootSecret,
+        mnemonic: &Mnemonic,
         invite: &InviteCode,
     ) -> anyhow::Result<handle::ClientHandle> {
         let config = download_from_invite_code(&connectors, invite).await?;
         Self::init_db(&db, &config).await?;
-        Self::build(connectors, db, root_secret, config, LnChoice::Regular).await
+        Self::build(connectors, db, mnemonic, config, LnChoice::Regular).await
     }
 
     /// Open an existing regular-lightning federation client from a database
@@ -108,12 +89,12 @@ impl Client {
     pub async fn open(
         connectors: Endpoint,
         db: Database,
-        root_secret: RootSecret,
+        mnemonic: &Mnemonic,
     ) -> anyhow::Result<handle::ClientHandle> {
         let config = Self::get_config_from_db(&db)
             .await
             .ok_or_else(|| anyhow::anyhow!("Client database not initialized"))?;
-        Self::build(connectors, db, root_secret, config, LnChoice::Regular).await
+        Self::build(connectors, db, mnemonic, config, LnChoice::Regular).await
     }
 
     /// Gateway-flavor counterpart of [`Client::join`]. Used by the gateway
@@ -122,26 +103,26 @@ impl Client {
     pub async fn join_gateway(
         connectors: Endpoint,
         db: Database,
-        root_secret: RootSecret,
+        mnemonic: &Mnemonic,
         invite: &InviteCode,
         gateway: Arc<dyn IGatewayClient>,
     ) -> anyhow::Result<handle::ClientHandle> {
         let config = download_from_invite_code(&connectors, invite).await?;
         Self::init_db(&db, &config).await?;
-        Self::build(connectors, db, root_secret, config, LnChoice::Gateway(gateway)).await
+        Self::build(connectors, db, mnemonic, config, LnChoice::Gateway(gateway)).await
     }
 
     /// Gateway-flavor counterpart of [`Client::open`].
     pub async fn open_gateway(
         connectors: Endpoint,
         db: Database,
-        root_secret: RootSecret,
+        mnemonic: &Mnemonic,
         gateway: Arc<dyn IGatewayClient>,
     ) -> anyhow::Result<handle::ClientHandle> {
         let config = Self::get_config_from_db(&db)
             .await
             .ok_or_else(|| anyhow::anyhow!("Client database not initialized"))?;
-        Self::build(connectors, db, root_secret, config, LnChoice::Gateway(gateway)).await
+        Self::build(connectors, db, mnemonic, config, LnChoice::Gateway(gateway)).await
     }
 
     async fn init_db(db: &Database, config: &ConsensusConfig) -> anyhow::Result<()> {
@@ -158,7 +139,7 @@ impl Client {
     async fn build(
         connectors: Endpoint,
         db: Database,
-        pre_root_secret: RootSecret,
+        mnemonic: &Mnemonic,
         config: ConsensusConfig,
         ln_choice: LnChoice,
     ) -> anyhow::Result<handle::ClientHandle> {
@@ -168,8 +149,7 @@ impl Client {
             "Building picomint client",
         );
         let fed_id = config.calculate_federation_id();
-        let pre_root_secret = pre_root_secret.to_inner(fed_id);
-        let root_secret = pre_root_secret.federation_key(&fed_id);
+        let root_secret = derive_root_secret(mnemonic, fed_id);
 
         let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
             .iroh_endpoints
@@ -193,7 +173,7 @@ impl Client {
                 fed_id,
                 config.mint.clone(),
                 mint_context,
-                &root_secret.derive_module_secret(ModuleKind::Mint),
+                &derive_module_secret(&root_secret, ModuleKind::Mint),
                 &task_group,
             )
             .await?,
@@ -212,13 +192,13 @@ impl Client {
                 config.wallet.clone(),
                 wallet_context,
                 mint.clone(),
-                &root_secret.derive_module_secret(ModuleKind::Wallet),
+                &derive_module_secret(&root_secret, ModuleKind::Wallet),
                 &task_group,
             )
             .await?,
         );
 
-        let ln_secret = root_secret.derive_module_secret(ModuleKind::Ln);
+        let ln_secret = derive_module_secret(&root_secret, ModuleKind::Ln);
         let ln = match ln_choice {
             LnChoice::Regular => {
                 let ln_context = crate::module::ClientContext::<LightningClientModule>::new(

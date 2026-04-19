@@ -3812,15 +3812,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-bip39"
-version = "0.1.0"
-dependencies = [
- "bip39",
- "picomint-derive-secret",
- "rand 0.8.5",
-]
-
-[[package]]
 name = "picomint-bitcoin-rpc"
 version = "0.1.0"
 dependencies = [
@@ -3844,6 +3835,7 @@ dependencies = [
  "async-channel",
  "async-stream",
  "async-trait",
+ "bip39",
  "bitcoin",
  "bitcoin_hashes",
  "futures",
@@ -4030,7 +4022,6 @@ dependencies = [
  "lightning-invoice",
  "lockable",
  "picomint-base32",
- "picomint-bip39",
  "picomint-client",
  "picomint-core",
  "picomint-encoding",
@@ -4068,7 +4059,6 @@ dependencies = [
  "iroh",
  "lightning-invoice",
  "lightning-types",
- "picomint-bip39",
  "picomint-client",
  "picomint-core",
  "picomint-eventlog",

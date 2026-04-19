@@ -16,7 +16,6 @@ anyhow = { workspace = true }
 async-stream = { workspace = true }
 bitcoin = { workspace = true }
 bitcoincore-rpc = { workspace = true }
-picomint-bip39 = { workspace = true }
 picomint-client = { workspace = true }
 picomint-core = { workspace = true }
 picomint-eventlog = { workspace = true }

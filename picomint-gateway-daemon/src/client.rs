@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
-use picomint_bip39::Mnemonic;
-use picomint_client::{Client, RootSecret};
 use picomint_client::gw::IGatewayClient;
+use picomint_client::{Client, Mnemonic};
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::invite_code::InviteCode;
@@ -65,10 +64,6 @@ impl GatewayClientFactory {
         &self.mnemonic
     }
 
-    fn root_secret(&self) -> RootSecret {
-        RootSecret::StandardDoubleDerive(picomint_bip39::to_root_secret(&self.mnemonic))
-    }
-
     fn client_database(&self, federation_id: FederationId) -> Database {
         self.db.isolate(format!("client-{federation_id}"))
     }
@@ -96,7 +91,7 @@ impl GatewayClientFactory {
         let client = Client::join_gateway(
             self.connectors.clone(),
             self.client_database(federation_id),
-            self.root_secret(),
+            &self.mnemonic,
             invite,
             gateway as Arc<dyn IGatewayClient>,
         )
@@ -124,7 +119,7 @@ impl GatewayClientFactory {
         let client = Client::open_gateway(
             self.connectors.clone(),
             db,
-            self.root_secret(),
+            &self.mnemonic,
             gateway as Arc<dyn IGatewayClient>,
         )
         .await

@@ -10,8 +10,7 @@ use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
-use picomint_bip39::Mnemonic;
-use picomint_client::{Client, ClientHandleArc, RootSecret};
+use picomint_client::{Client, ClientHandleArc, Mnemonic};
 use picomint_core::Amount;
 use picomint_core::invite_code::InviteCode;
 use tokio::process::{Child, Command};
@@ -252,9 +251,8 @@ async fn build_client(
     let db = picomint_redb::Database::open(db_dir.join("database.redb")).await?;
 
     let mnemonic = Mnemonic::generate(12)?;
-    let root_secret = RootSecret::StandardDoubleDerive(picomint_bip39::to_root_secret(&mnemonic));
 
-    let client = Client::join(endpoint, db, root_secret, &invite_code)
+    let client = Client::join(endpoint, db, &mnemonic, &invite_code)
         .await
         .map(Arc::new)?;
 

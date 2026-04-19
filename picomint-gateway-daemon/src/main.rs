@@ -121,7 +121,7 @@ fn main() -> anyhow::Result<()> {
             Some(factory) => factory,
             None => runtime.block_on(GatewayClientFactory::init(
                 gateway_db.clone(),
-                picomint_bip39::random(&mut OsRng),
+                picomint_client::random_mnemonic(&mut OsRng),
             ))?,
         };
 

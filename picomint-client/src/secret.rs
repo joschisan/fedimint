@@ -1,35 +1,43 @@
+//! Mnemonic + per-module key derivation.
+//!
+//! Per-module derivation chain:
+//! ```text
+//! mnemonic
+//!   → seed → HMAC with PICOMINT_CLIENT_NONCE   // DerivableSecret level 0
+//!   → federation_key(fed_id)                    // per-federation root
+//!   → child(ModuleKind as u64)                  // per-module
+//! ```
+
+pub use bip39::{Language, Mnemonic};
 use picomint_core::config::FederationId;
 use picomint_core::core::ModuleKind;
 use picomint_derive_secret::{ChildId, DerivableSecret};
+use rand::{CryptoRng, RngCore};
 
-// Derived from federation-root-secret
-const TYPE_MODULE: ChildId = ChildId(0);
+const PICOMINT_CLIENT_NONCE: &[u8] = b"Picomint Client Salt";
+const EMPTY_PASSPHRASE: &str = "";
+const WORD_COUNT: usize = 12;
 
-pub trait DeriveableSecretClientExt {
-    fn derive_module_secret(&self, kind: ModuleKind) -> DerivableSecret;
+/// Generate a fresh 12-word English BIP39 mnemonic.
+pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Mnemonic {
+    Mnemonic::generate_in_with(rng, Language::English, WORD_COUNT)
+        .expect("Failed to generate mnemonic, bad word count")
 }
 
-impl DeriveableSecretClientExt for DerivableSecret {
-    fn derive_module_secret(&self, kind: ModuleKind) -> DerivableSecret {
-        assert_eq!(self.level(), 0);
-        self.child_key(TYPE_MODULE).child_key(ChildId(kind as u64))
-    }
-}
-
-/// Convenience function to derive picomint-client root secret
-/// using the default (0) wallet number, given a global root secret
-/// that's managed externally by a consumer of picomint-client.
-///
-/// See docs/secret_derivation.md
-///
-/// `global_root_secret/<key-type=per-federation=0>/<federation-id>/
-/// <wallet-number=0>/<key-type=picomint-client=0>`
-pub fn get_default_client_secret(
-    global_root_secret: &DerivableSecret,
-    federation_id: &FederationId,
+/// Derive the per-federation client root secret. Module secrets are derived
+/// from this via [`derive_module_secret`].
+pub(crate) fn derive_root_secret(
+    mnemonic: &Mnemonic,
+    federation_id: FederationId,
 ) -> DerivableSecret {
-    let multi_federation_root_secret = global_root_secret.child_key(ChildId(0));
-    let federation_root_secret = multi_federation_root_secret.federation_key(federation_id);
-    let federation_wallet_root_secret = federation_root_secret.child_key(ChildId(0)); // wallet-number=0
-    federation_wallet_root_secret.child_key(ChildId(0)) // key-type=picomint-client=0
+    DerivableSecret::new_root(
+        mnemonic.to_seed_normalized(EMPTY_PASSPHRASE).as_ref(),
+        PICOMINT_CLIENT_NONCE,
+    )
+    .federation_key(&federation_id)
+}
+
+pub(crate) fn derive_module_secret(root: &DerivableSecret, kind: ModuleKind) -> DerivableSecret {
+    assert_eq!(root.level(), 0);
+    root.child_key(ChildId(kind as u64))
 }
