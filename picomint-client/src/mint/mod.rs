@@ -176,9 +176,8 @@ impl MintClientModule {
 
             if state.next_index == state.total_items {
                 // Persist the recovery-bootstrapped Output SM under the
-                // executor's table. When the module loads and
-                // `issuance_executor.start()` runs, it picks this up via
-                // `get_active_states` and drives it.
+                // executor's table. When the module is constructed, the
+                // executor picks this up via `get_active_states` and drives it.
                 let sm = IssuanceStateMachine {
                     operation_id: OperationId::new_random(),
                     spendable_notes: vec![],
@@ -240,7 +239,8 @@ impl MintClientModule {
             context.module_db().clone(),
             sm_context,
             task_group.clone(),
-        );
+        )
+        .await;
 
         let tx_submission_executor = crate::executor::ModuleExecutor::new(
             db.clone(),
@@ -248,7 +248,8 @@ impl MintClientModule {
                 api: context.global_api(),
             },
             task_group.clone(),
-        );
+        )
+        .await;
 
         Ok(MintClientModule {
             federation_id,
@@ -283,11 +284,6 @@ pub struct MintSmContext {
 }
 
 impl MintClientModule {
-    pub async fn start(&self) {
-        self.tx_submission_executor.start().await;
-        self.issuance_executor.start().await;
-    }
-
     pub fn input_fee(&self) -> Amount {
         self.cfg.input_fee
     }

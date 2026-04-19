@@ -62,10 +62,6 @@ pub struct WalletClientContext {
 }
 
 impl WalletClientModule {
-    pub async fn start(&self) {
-        self.send_executor.start().await;
-    }
-
     pub fn input_fee(&self) -> Amount {
         self.cfg.input_fee
     }
@@ -88,7 +84,8 @@ impl WalletClientModule {
         let sm_context = WalletClientContext {
             client_ctx: context.clone(),
         };
-        let send_executor = ModuleExecutor::new(db.clone(), sm_context, task_group.clone());
+        let send_executor =
+            ModuleExecutor::new(db.clone(), sm_context, task_group.clone()).await;
 
         let module = WalletClientModule {
             root_secret: module_root_secret.clone(),

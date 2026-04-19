@@ -76,14 +76,17 @@ impl GatewayClientModule {
             context.module_db().clone(),
             sm_context.clone(),
             task_group.clone(),
-        );
+        )
+        .await;
         let receive_executor = ModuleExecutor::new(
             context.module_db().clone(),
             sm_context.clone(),
             task_group.clone(),
-        );
+        )
+        .await;
         let complete_executor =
-            ModuleExecutor::new(context.module_db().clone(), sm_context, task_group.clone());
+            ModuleExecutor::new(context.module_db().clone(), sm_context, task_group.clone())
+                .await;
 
         Ok(GatewayClientModule {
             federation_id,
@@ -136,12 +139,6 @@ pub enum FinalReceiveState {
 }
 
 impl GatewayClientModule {
-    pub async fn start(&self) {
-        self.send_executor.start().await;
-        self.receive_executor.start().await;
-        self.complete_executor.start().await;
-    }
-
     pub fn input_fee(&self) -> Amount {
         self.cfg.input_fee
     }

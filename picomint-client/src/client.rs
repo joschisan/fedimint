@@ -63,15 +63,6 @@ pub enum LnFlavor {
     Gateway(Arc<GatewayClientModule>),
 }
 
-impl LnFlavor {
-    async fn start(&self) {
-        match self {
-            LnFlavor::Regular(m) => m.start().await,
-            LnFlavor::Gateway(m) => m.start().await,
-        }
-    }
-}
-
 /// Main client type
 ///
 /// A handle and API to interacting with a single federation. End user
@@ -293,16 +284,7 @@ impl Client {
             task_group: task_group.clone(),
         });
 
-        let handle = handle::ClientHandle::new(client_inner);
-
-        // Mint owns the tx-submission executor; starting it before wallet/ln
-        // ensures any pending submissions are picked up before module-side
-        // SMs start firing claim/refund flows that route through mint.
-        handle.mint.start().await;
-        handle.wallet.start().await;
-        handle.ln.start().await;
-
-        Ok(handle)
+        Ok(handle::ClientHandle::new(client_inner))
     }
 
     pub fn api(&self) -> &FederationApi {

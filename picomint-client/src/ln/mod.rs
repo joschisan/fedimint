@@ -82,11 +82,6 @@ pub struct LightningClientModule {
 }
 
 impl LightningClientModule {
-    pub async fn start(&self) {
-        self.send_executor.start().await;
-        self.receive_executor.start().await;
-    }
-
     pub fn input_fee(&self) -> Amount {
         self.cfg.input_fee
     }
@@ -115,12 +110,14 @@ impl LightningClientModule {
             client_ctx.module_db().clone(),
             sm_context.clone(),
             task_group.clone(),
-        );
+        )
+        .await;
         let receive_executor = ModuleExecutor::new(
             client_ctx.module_db().clone(),
             sm_context,
             task_group.clone(),
-        );
+        )
+        .await;
 
         let module = Self {
             federation_id,
