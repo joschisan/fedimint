@@ -7,6 +7,7 @@ cleanup() {
     echo "Cleaning up..."
     pkill -9 -f "picomint-server-daemon" 2>/dev/null || true
     pkill -9 -f "picomint-gateway-daemon" 2>/dev/null || true
+    pkill -9 -f "picomint-recurring-daemon" 2>/dev/null || true
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 }

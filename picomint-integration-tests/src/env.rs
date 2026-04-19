@@ -27,6 +27,7 @@ pub const NUM_GUARDIANS: usize = 4;
 pub const GW_PORT: u16 = 28175;
 pub const GW_LN_PORT: u16 = 9735;
 pub const TEST_LDK_PORT: u16 = 9736;
+pub const RECURRING_PORT: u16 = 28176;
 
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
@@ -46,6 +47,7 @@ pub struct TestEnv {
     pub invite_code: InviteCode,
     pub gw_data_dir: std::path::PathBuf,
     pub gw_public: String,
+    pub recurring_url: String,
     pub endpoint: Endpoint,
     pub client_counter: AtomicU64,
     /// One per guardian, indexed by peer id. `None` once we've killed it.
@@ -112,6 +114,10 @@ impl TestEnv {
         }))?;
         info!("Gateway ready");
 
+        runtime.block_on(start_recurring_daemon(base, RECURRING_PORT))?;
+        let recurring_url = format!("http://127.0.0.1:{RECURRING_PORT}/");
+        info!("Recurring daemon started on {RECURRING_PORT}");
+
         info!("Connecting gateway to federation...");
         cli::gatewayd_federation_join(&gw_data_dir, invite_code_str.trim())?;
         info!("Gateway connected");
@@ -132,6 +138,7 @@ impl TestEnv {
                 invite_code,
                 gw_data_dir,
                 gw_public,
+                recurring_url,
                 endpoint,
                 client_counter,
                 guardian_processes: Mutex::new(guardian_processes),
@@ -289,6 +296,20 @@ async fn start_picomintd(base: &Path, peer_idx: usize) -> anyhow::Result<Child> 
 
     info!("Started picomintd-{peer_idx} on port {p2p_port} (UI: http://127.0.0.1:{ui_port})");
     Ok(child)
+}
+
+async fn start_recurring_daemon(base: &Path, port: u16) -> anyhow::Result<()> {
+    let log_file = std::fs::File::create(base.join("recurring-daemon.log"))?;
+
+    Command::new("target/debug/picomint-recurring-daemon")
+        .env("IN_TEST_ENV", "1")
+        .env("API_ADDR", format!("127.0.0.1:{port}"))
+        .stdout(log_file.try_clone()?)
+        .stderr(log_file)
+        .spawn()
+        .context("Failed to start picomint-recurring-daemon")?;
+
+    Ok(())
 }
 
 async fn start_gatewayd(base: &Path, name: &str, gw_port: u16, ln_port: u16) -> anyhow::Result<()> {

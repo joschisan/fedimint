@@ -1,15 +1,29 @@
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::pin::pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::ensure;
 use async_stream::stream;
+use axum::Router;
+use axum::extract::Json;
+use axum::http::StatusCode;
+use axum::routing::post;
+use bitcoin::hashes::{Hash, sha256};
+use bitcoin::secp256k1::schnorr::Signature;
+use bitcoin::secp256k1::{Keypair, SECP256K1, SecretKey};
 use futures::StreamExt;
+use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
 use picomint_client::Client;
 use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
 use picomint_core::Amount;
-use picomint_core::ln::Bolt11InvoiceDescription;
+use picomint_core::config::FederationId;
+use picomint_core::ln::endpoint_constants::{ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT};
+use picomint_core::ln::gateway_api::{PaymentFee, RoutingInfo, SendPaymentPayload};
+use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::util::SafeUrl;
 use picomint_eventlog::{EventLogEntry, EventLogId};
+use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::cli;
@@ -286,4 +300,119 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     info!("ln: test_payments passed");
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Mock gateway used by send-path tests.
+//
+// Implements the two HTTP endpoints the client hits on the send path —
+// `routing_info` and `send_payment` — and dispatches scenarios based on the
+// invoice's payment secret. Mirrors the upstream
+// `fedimint-lnv2-tests/tests/mock.rs` pattern, but as a real webserver
+// because picomint doesn't abstract over the gateway connection.
+// ---------------------------------------------------------------------------
+
+const MOCK_GW_PORT: u16 = 28200;
+
+const GATEWAY_SECRET: [u8; 32] = [1; 32];
+const INVOICE_SECRET: [u8; 32] = [2; 32];
+
+const MOCK_PREIMAGE: [u8; 32] = [3; 32];
+
+// Scenario selectors embedded in the invoice's `payment_secret`.
+const PAYABLE_PAYMENT_SECRET: [u8; 32] = [211; 32];
+const UNPAYABLE_PAYMENT_SECRET: [u8; 32] = [212; 32];
+const CRASH_PAYMENT_SECRET: [u8; 32] = [213; 32];
+
+fn gateway_keypair() -> Keypair {
+    SecretKey::from_slice(&GATEWAY_SECRET)
+        .expect("32-byte secret within curve order")
+        .keypair(SECP256K1)
+}
+
+fn payable_invoice() -> Bolt11Invoice {
+    mock_invoice(PAYABLE_PAYMENT_SECRET, Currency::Regtest)
+}
+
+fn unpayable_invoice() -> Bolt11Invoice {
+    mock_invoice(UNPAYABLE_PAYMENT_SECRET, Currency::Regtest)
+}
+
+fn crash_invoice() -> Bolt11Invoice {
+    mock_invoice(CRASH_PAYMENT_SECRET, Currency::Regtest)
+}
+
+fn signet_invoice() -> Bolt11Invoice {
+    mock_invoice(PAYABLE_PAYMENT_SECRET, Currency::Signet)
+}
+
+fn mock_invoice(payment_secret: [u8; 32], currency: Currency) -> Bolt11Invoice {
+    let sk = SecretKey::from_slice(&INVOICE_SECRET).expect("valid secret");
+    let payment_hash = sha256::Hash::hash(&MOCK_PREIMAGE);
+
+    InvoiceBuilder::new(currency)
+        .description(String::new())
+        .payment_hash(payment_hash)
+        .current_timestamp()
+        .min_final_cltv_expiry_delta(0)
+        .payment_secret(PaymentSecret(payment_secret))
+        .amount_milli_satoshis(1_000_000)
+        .expiry_time(Duration::from_secs(3600))
+        .build_signed(|m| SECP256K1.sign_ecdsa_recoverable(m, &sk))
+        .expect("invoice build")
+}
+
+fn mock_gateway_url() -> SafeUrl {
+    format!("http://127.0.0.1:{MOCK_GW_PORT}")
+        .parse()
+        .expect("valid url")
+}
+
+async fn spawn_mock_gateway() -> anyhow::Result<()> {
+    let app = Router::new()
+        .route(ROUTING_INFO_ENDPOINT, post(mock_routing_info))
+        .route(SEND_PAYMENT_ENDPOINT, post(mock_send_payment));
+
+    let addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, MOCK_GW_PORT);
+    let listener = TcpListener::bind(addr).await?;
+
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    Ok(())
+}
+
+async fn mock_routing_info(
+    Json(_federation_id): Json<FederationId>,
+) -> Json<Option<RoutingInfo>> {
+    Json(Some(RoutingInfo {
+        lightning_public_key: gateway_keypair().public_key(),
+        module_public_key: gateway_keypair().public_key(),
+        send_fee_minimum: PaymentFee::TRANSACTION_FEE_DEFAULT,
+        send_fee_default: PaymentFee::TRANSACTION_FEE_DEFAULT,
+        expiration_delta_minimum: 144,
+        expiration_delta_default: 500,
+        receive_fee: PaymentFee::TRANSACTION_FEE_DEFAULT,
+    }))
+}
+
+async fn mock_send_payment(
+    Json(payload): Json<SendPaymentPayload>,
+) -> Result<Json<Result<[u8; 32], Signature>>, StatusCode> {
+    let LightningInvoice::Bolt11(invoice) = payload.invoice;
+
+    let payment_secret = invoice.payment_secret().0;
+
+    if payment_secret == CRASH_PAYMENT_SECRET {
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    if payment_secret == UNPAYABLE_PAYMENT_SECRET {
+        return Ok(Json(Err(
+            gateway_keypair().sign_schnorr(payload.contract.forfeit_message()),
+        )));
+    }
+
+    Ok(Json(Ok(MOCK_PREIMAGE)))
 }
