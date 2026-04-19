@@ -24,6 +24,7 @@ picomint-encoding = { workspace = true }
 picomint-lnurl = { workspace = true }
 picomint-logging = { workspace = true }
 lightning-invoice = { workspace = true }
+rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }

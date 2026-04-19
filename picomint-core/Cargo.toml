@@ -26,6 +26,8 @@ bitcoin = { workspace = true }
 bitcoin_hashes = { workspace = true }
 bitcoin-units = { workspace = true }
 bls12_381 = { workspace = true }
+group = { workspace = true }
+rand_chacha = { workspace = true }
 lightning-invoice = { workspace = true }
 miniscript = { workspace = true, features = ["serde"] }
 picomint-base32 = { workspace = true }

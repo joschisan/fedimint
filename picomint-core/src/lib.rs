@@ -71,6 +71,8 @@ pub mod module;
 /// `PeerId` type
 mod peer_id;
 /// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
+pub mod secret;
+
 pub mod session_outcome;
 /// Task handling, including wasm safe logic
 pub mod task;

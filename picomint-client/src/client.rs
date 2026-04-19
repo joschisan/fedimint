@@ -7,7 +7,7 @@ use crate::api::{ApiScope, FederationApi};
 use crate::gw::{GatewayClientModule, IGatewayClient};
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
-use crate::secret::{Mnemonic, derive_module_secret, derive_root_secret};
+use crate::secret::{Mnemonic, client_root, module_secret};
 use crate::wallet::WalletClientModule;
 use futures::Stream;
 use picomint_core::Amount;
@@ -98,8 +98,8 @@ impl Client {
             version = %env!("CARGO_PKG_VERSION"),
             "Building picomint client",
         );
-        let fed_id = config.calculate_federation_id();
-        let root_secret = derive_root_secret(mnemonic, fed_id);
+        let federation_id = config.calculate_federation_id();
+        let root_secret = client_root(mnemonic, federation_id);
 
         let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
             .iroh_endpoints
@@ -116,14 +116,14 @@ impl Client {
             ApiScope::Mint,
             db.clone(),
             config.clone(),
-            fed_id,
+            federation_id,
         );
         let mint = Arc::new(
             MintClientModule::new(
-                fed_id,
+                federation_id,
                 config.mint.clone(),
                 mint_context,
-                &derive_module_secret(&root_secret, ModuleKind::Mint),
+                &module_secret(&root_secret, ModuleKind::Mint),
                 &task_group,
             )
             .await?,
@@ -135,20 +135,20 @@ impl Client {
             ApiScope::Wallet,
             db.clone(),
             config.clone(),
-            fed_id,
+            federation_id,
         );
         let wallet = Arc::new(
             WalletClientModule::new(
                 config.wallet.clone(),
                 wallet_context,
                 mint.clone(),
-                &derive_module_secret(&root_secret, ModuleKind::Wallet),
+                &module_secret(&root_secret, ModuleKind::Wallet),
                 &task_group,
             )
             .await?,
         );
 
-        let ln_secret = derive_module_secret(&root_secret, ModuleKind::Ln);
+        let ln_secret = module_secret(&root_secret, ModuleKind::Ln);
         let ln = match ln_choice {
             LnChoice::Regular => {
                 let ln_context = crate::module::ClientContext::new(
@@ -157,11 +157,11 @@ impl Client {
                     ApiScope::Ln,
                     db.clone(),
                     config.clone(),
-                    fed_id,
+                    federation_id,
                 );
                 LnFlavor::Regular(Arc::new(
                     LightningClientModule::new(
-                        fed_id,
+                        federation_id,
                         config.ln.clone(),
                         ln_context,
                         mint.clone(),
@@ -178,11 +178,11 @@ impl Client {
                     ApiScope::Ln,
                     db.clone(),
                     config.clone(),
-                    fed_id,
+                    federation_id,
                 );
                 LnFlavor::Gateway(Arc::new(
                     GatewayClientModule::new(
-                        fed_id,
+                        federation_id,
                         config.ln.clone(),
                         gw_context,
                         mint.clone(),
@@ -198,7 +198,7 @@ impl Client {
         Ok(Arc::new(Client {
             config: tokio::sync::RwLock::new(config.clone()),
             db,
-            federation_id: fed_id,
+            federation_id,
             federation_config_meta: config.meta,
             mint,
             wallet,

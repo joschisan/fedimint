@@ -3845,7 +3845,6 @@ dependencies = [
  "lightning-invoice",
  "picomint-base32",
  "picomint-core",
- "picomint-derive-secret",
  "picomint-encoding",
  "picomint-eventlog",
  "picomint-lnurl",
@@ -3883,6 +3882,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.3",
  "gloo-timers",
+ "group",
  "hex",
  "iroh",
  "iroh-base",
@@ -3902,6 +3902,7 @@ dependencies = [
  "picomint-tbs",
  "picomint-tpe",
  "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "redb",
  "reqwest 0.12.22",
  "secp256k1",
@@ -3926,18 +3927,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.104",
-]
-
-[[package]]
-name = "picomint-derive-secret"
-version = "0.1.0"
-dependencies = [
- "bls12_381",
- "hex",
- "picomint-core",
- "picomint-encoding",
- "picomint-hkdf",
- "ring",
 ]
 
 [[package]]
@@ -4040,13 +4029,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-hkdf"
-version = "0.1.0"
-dependencies = [
- "bitcoin_hashes",
-]
-
-[[package]]
 name = "picomint-integration-tests"
 version = "0.1.0"
 dependencies = [
@@ -4108,6 +4090,7 @@ dependencies = [
  "picomint-lnurl",
  "picomint-logging",
  "picomint-tpe",
+ "rand 0.8.5",
  "reqwest 0.12.22",
  "serde",
  "tokio",

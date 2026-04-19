@@ -3,37 +3,18 @@
 //! This library implements an ad-hoc threshold blind signature scheme based on
 //! BLS signatures using the (unrelated) BLS12-381 curve.
 
-use std::collections::BTreeMap;
-use std::io::Write;
-
 use bitcoin::hashes::Hash as BitcoinHash;
 use bitcoin::hashes::sha256;
 use bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective, Scalar, pairing};
-use group::ff::Field;
 use group::{Curve, Group};
-use hex::encode;
 use picomint_encoding::{Decodable, Encodable};
 use rand::SeedableRng;
-
+use std::collections::BTreeMap;
 mod bls_serde;
-use rand::rngs::OsRng;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
-use sha3::Digest;
 
-const HASH_TAG: &[u8] = b"TBS_BLS12-381_";
-const FINGERPRINT_TAG: &[u8] = b"TBS_KFP24_";
-
-fn hash_bytes_to_g1(data: &[u8]) -> G1Projective {
-    let mut hash_engine = sha3::Sha3_256::new();
-
-    hash_engine.update(HASH_TAG);
-    hash_engine.update(data);
-
-    let mut prng = ChaChaRng::from_seed(hash_engine.finalize().into());
-
-    G1Projective::random(&mut prng)
-}
+const TAG: [u8; 30] = *b"PICOMINT_TBS_BLS12_381_MESSAGE";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct SecretKeyShare(#[serde(with = "bls_serde::scalar")] pub Scalar);
@@ -47,7 +28,7 @@ pub struct AggregatePublicKey(#[serde(with = "bls_serde::g2")] pub G2Affine);
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct Message(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
-#[derive(Copy, Clone, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct BlindingKey(#[serde(with = "bls_serde::scalar")] pub Scalar);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
@@ -94,57 +75,15 @@ impl std::hash::Hash for BlindingKey {
     }
 }
 
-impl BlindingKey {
-    pub fn random() -> BlindingKey {
-        // TODO: fix rand incompatibities
-        BlindingKey(Scalar::random(OsRng))
-    }
-
-    fn fingerprint(&self) -> [u8; 32] {
-        let mut hash_engine = sha3::Sha3_256::new();
-        hash_engine.update(FINGERPRINT_TAG);
-        hash_engine.update(self.0.to_bytes());
-        let result = hash_engine.finalize();
-        result.into()
-    }
-}
-
-impl ::core::fmt::Debug for BlindingKey {
-    fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-        let fingerprint = self.fingerprint();
-        let fingerprint_hex = encode(&fingerprint[..]);
-        write!(f, "BlindingKey({fingerprint_hex})")
-    }
-}
-
-impl ::core::fmt::Display for BlindingKey {
-    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        let fingerprint = self.fingerprint();
-        let fingerprint_hex = encode(&fingerprint[..]);
-        write!(f, "{fingerprint_hex}")
-    }
-}
-
 impl Message {
-    pub fn from_bytes(msg: &[u8]) -> Message {
-        Message(hash_bytes_to_g1(msg).to_affine())
-    }
-
-    /// Creates a [`Message`] by hashing the input bytes with SHA-256 using
-    /// the domain separator `PICOMINT_TBS_BLS12_381_MESSAGE`, then mapping
-    /// the hash to a BLS12-381 G1 curve point via a seeded [`ChaChaRng`].
-    pub fn from_bytes_sha256(bytes: &[u8]) -> Message {
-        let mut engine = sha256::HashEngine::default();
-
-        engine
-            .write_all("PICOMINT_TBS_BLS12_381_MESSAGE".as_bytes())
-            .expect("Writing to a hash engine cannot fail");
-
-        engine
-            .write_all(bytes)
-            .expect("Writing to a hash engine cannot fail");
-
-        let seed = sha256::Hash::from_engine(engine).to_byte_array();
+    /// Creates a [`Message`] by hashing a 33-byte compressed public key with
+    /// SHA-256 under the domain separator `PICOMINT_TBS_BLS12_381_MESSAGE`,
+    /// then mapping the hash to a BLS12-381 G1 curve point via a seeded
+    /// [`ChaChaRng`].
+    pub fn from_public_key(bytes: [u8; 33]) -> Message {
+        let seed = (TAG, bytes)
+            .consensus_hash::<sha256::Hash>()
+            .to_byte_array();
 
         Message(G1Projective::random(&mut ChaChaRng::from_seed(seed)).to_affine())
     }

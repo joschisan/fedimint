@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::ops::Mul;
 
 use bitcoin_hashes::{Hash, sha256};
@@ -13,6 +12,8 @@ use rand_chacha::rand_core::SeedableRng;
 use serde::{Deserialize, Serialize};
 
 mod bls_serde;
+
+const TAG: [u8; 30] = *b"PICOMINT_TPE_BLS12_381_MESSAGE";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct SecretKeyShare(#[serde(with = "bls_serde::scalar")] pub Scalar);
@@ -102,25 +103,9 @@ fn hash_to_message(
     ephemeral_pk: &G1Affine,
     commitment: &sha256::Hash,
 ) -> G2Affine {
-    let mut engine = sha256::HashEngine::default();
-
-    engine
-        .write_all("PICOMINT_TPE_BLS12_381_MESSAGE".as_bytes())
-        .expect("Writing to a hash engine cannot fail");
-
-    engine
-        .write_all(encrypted_point)
-        .expect("Writing to a hash engine cannot fail");
-
-    engine
-        .write_all(&ephemeral_pk.to_compressed())
-        .expect("Writing to a hash engine cannot fail");
-
-    engine
-        .write_all(commitment.as_byte_array())
-        .expect("Writing to a hash engine cannot fail");
-
-    let seed = sha256::Hash::from_engine(engine).to_byte_array();
+    let seed = (TAG, encrypted_point, ephemeral_pk, commitment)
+        .consensus_hash::<sha256::Hash>()
+        .to_byte_array();
 
     G2Projective::random(&mut ChaChaRng::from_seed(seed)).to_affine()
 }

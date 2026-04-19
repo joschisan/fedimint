@@ -1,12 +1,19 @@
 use bitcoin_hashes::{Hash, hash160, sha256};
 use picomint_core::mint::{Denomination, MintOutput, nonce_message};
 use picomint_core::secp256k1::rand::Rng;
-use picomint_core::secp256k1::{Keypair, PublicKey, SECP256K1};
-use picomint_derive_secret::{ChildId, DerivableSecret};
+use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedMessage, BlindedSignature, BlindingKey, blind_message, unblind_signature};
 
 use super::{SpendableNote, thread_rng};
+use crate::secret::Secret;
+
+#[derive(Encodable)]
+pub enum RootSecretPath {
+    TweakFilter,
+    NoteNonce,
+    NoteBlinding,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct NoteIssuanceRequest {
@@ -17,7 +24,7 @@ pub struct NoteIssuanceRequest {
 }
 
 impl NoteIssuanceRequest {
-    pub fn new(denomination: Denomination, tweak: [u8; 16], root_secret: &DerivableSecret) -> Self {
+    pub fn new(denomination: Denomination, tweak: [u8; 16], root_secret: &Secret) -> Self {
         let secret = output_secret(denomination, tweak, root_secret);
 
         Self {
@@ -51,11 +58,11 @@ impl NoteIssuanceRequest {
 
 // ============ Grinding Functions ============
 
-pub fn tweak_filter(root_secret: &DerivableSecret) -> [u8; 32] {
-    root_secret.to_random_bytes()
+pub fn tweak_filter(root_secret: &Secret) -> [u8; 32] {
+    root_secret.child(&RootSecretPath::TweakFilter).to_bytes()
 }
 
-pub fn grind_tweak(root_secret: &DerivableSecret) -> [u8; 16] {
+pub fn grind_tweak(root_secret: &Secret) -> [u8; 16] {
     let filter = tweak_filter(root_secret);
 
     loop {
@@ -68,7 +75,7 @@ pub fn grind_tweak(root_secret: &DerivableSecret) -> [u8; 16] {
 }
 
 pub fn check_tweak(tweak: [u8; 16], seed: [u8; 32]) -> bool {
-    (tweak, seed)
+    (seed, tweak)
         .consensus_hash::<sha256::Hash>()
         .to_byte_array()
         .iter()
@@ -84,21 +91,27 @@ pub fn check_nonce(secret: &OutputSecret, nonce_hash: hash160::Hash) -> bool {
 
 // ============ Core Crypto Functions ============
 
-pub struct OutputSecret(DerivableSecret);
-
-pub fn output_secret(
+pub struct OutputSecret {
     denomination: Denomination,
     tweak: [u8; 16],
-    root: &DerivableSecret,
-) -> OutputSecret {
-    OutputSecret(
-        root.child_key(ChildId(u64::from(denomination.0)))
-            .tweak(&tweak),
-    )
+    root: Secret,
+}
+
+pub fn output_secret(denomination: Denomination, tweak: [u8; 16], root: &Secret) -> OutputSecret {
+    OutputSecret {
+        denomination,
+        tweak,
+        root: *root,
+    }
 }
 
 fn keypair(secret: &OutputSecret) -> Keypair {
-    secret.0.clone().to_secp_key(SECP256K1)
+    secret
+        .root
+        .child(&RootSecretPath::NoteNonce)
+        .child(&secret.denomination)
+        .child(&secret.tweak)
+        .to_secp_keypair()
 }
 
 pub fn nonce(secret: &OutputSecret) -> PublicKey {
@@ -106,7 +119,14 @@ pub fn nonce(secret: &OutputSecret) -> PublicKey {
 }
 
 fn blinding_key(secret: &OutputSecret) -> BlindingKey {
-    BlindingKey(secret.0.to_bls12_381_key())
+    BlindingKey(
+        secret
+            .root
+            .child(&RootSecretPath::NoteBlinding)
+            .child(&secret.denomination)
+            .child(&secret.tweak)
+            .to_bls_scalar(),
+    )
 }
 
 pub fn blinded_message(secret: &OutputSecret) -> BlindedMessage {

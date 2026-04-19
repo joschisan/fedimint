@@ -6,8 +6,7 @@ use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use bitcoin::hashes::sha256;
-use bitcoin::secp256k1::{self, PublicKey};
+use bitcoin::secp256k1::{self, Keypair, PublicKey, ecdh};
 use clap::Parser;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
@@ -15,11 +14,11 @@ use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 use picomint_core::ln::endpoint_constants::{CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT};
 use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, PaymentFee, RoutingInfo};
 use picomint_core::ln::lnurl::LnurlRequest;
-use picomint_core::ln::{Bolt11InvoiceDescription, MINIMUM_INCOMING_CONTRACT_AMOUNT, tweak};
-use picomint_core::secp256k1::Scalar;
+use picomint_core::ln::{Bolt11InvoiceDescription, IncomingContractPath, MINIMUM_INCOMING_CONTRACT_AMOUNT};
+use picomint_core::secret::Secret;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;
-use picomint_core::{Amount, BitcoinHash};
+use picomint_core::Amount;
 use picomint_encoding::Encodable;
 use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
 use picomint_logging::TracingSetup;
@@ -153,21 +152,26 @@ async fn create_contract_and_fetch_invoice(
     amount: u64,
     expiry_secs: u32,
 ) -> anyhow::Result<(SafeUrl, Bolt11Invoice)> {
-    let (ephemeral_tweak, ephemeral_pk) = tweak::generate(recipient_pk);
+    let ephemeral_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
-    let scalar = Scalar::from_be_bytes(ephemeral_tweak).expect("Within curve order");
+    let shared_secret =
+        ecdh::SharedSecret::new(&recipient_pk, &ephemeral_keypair.secret_key()).secret_bytes();
+
+    let contract_secret = Secret::new_root(&shared_secret);
+
+    let encryption_seed = contract_secret
+        .child(&IncomingContractPath::EncryptionSeed)
+        .to_bytes();
+
+    let preimage = contract_secret.child(&IncomingContractPath::Preimage).to_bytes();
+
+    let claim_tweak = contract_secret
+        .child(&IncomingContractPath::ClaimKey)
+        .to_secp_scalar();
 
     let claim_pk = recipient_pk
-        .mul_tweak(secp256k1::SECP256K1, &scalar)
+        .mul_tweak(secp256k1::SECP256K1, &claim_tweak)
         .expect("Tweak is valid");
-
-    let encryption_seed = ephemeral_tweak
-        .consensus_hash::<sha256::Hash>()
-        .to_byte_array();
-
-    let preimage = encryption_seed
-        .consensus_hash::<sha256::Hash>()
-        .to_byte_array();
 
     let (routing_info, gateway) = select_gateway(gateways, federation_id).await?;
 
@@ -196,7 +200,7 @@ async fn create_contract_and_fetch_invoice(
         expiration,
         claim_pk,
         routing_info.module_public_key,
-        ephemeral_pk,
+        ephemeral_keypair.public_key(),
     );
 
     let invoice: Bolt11Invoice = gateway_request(

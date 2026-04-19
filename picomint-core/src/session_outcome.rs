@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::io::Write as _;
 
 use bitcoin::hashes::{Hash, sha256};
 use picomint_encoding::{Decodable, Encodable};
@@ -38,28 +37,16 @@ pub struct SessionOutcome {
 }
 
 impl SessionOutcome {
-    /// A blocks header consists of 40 bytes formed by its index in big endian
-    /// bytes concatenated with the merkle root build from the consensus
-    /// hashes of its [`AcceptedItem`]s or 32 zero bytes if the block is
-    /// empty. The use of a merkle tree allows for efficient inclusion
-    /// proofs of accepted consensus items for clients.
-    pub fn header(&self, index: u64) -> [u8; 40] {
-        let mut header = [0; 40];
-
-        header[..8].copy_from_slice(&index.to_be_bytes());
-
-        let leaf_hashes = self
+    /// A block header pairs its index with the merkle root built from the
+    /// consensus hashes of its [`AcceptedItem`]s. The merkle tree allows for
+    /// efficient inclusion proofs of accepted consensus items for clients.
+    /// Empty sessions have no root.
+    pub fn header(&self, index: u64) -> (u64, Option<sha256::Hash>) {
+        let leaves = self
             .items
             .iter()
             .map(Encodable::consensus_hash::<sha256::Hash>);
-
-        if let Some(root) = bitcoin::merkle_tree::calculate_root(leaf_hashes) {
-            header[8..].copy_from_slice(&root.to_byte_array());
-        } else {
-            assert!(self.items.is_empty());
-        }
-
-        header
+        (index, bitcoin::merkle_tree::calculate_root(leaves))
     }
 }
 
@@ -83,16 +70,14 @@ impl SignedSessionOutcome {
         broadcast_public_keys: &BTreeMap<PeerId, PublicKey>,
         block_index: u64,
     ) -> bool {
-        let message = {
-            let mut engine = sha256::HashEngine::default();
-            engine
-                .write_all(broadcast_public_keys.consensus_hash_sha256().as_ref())
-                .expect("Writing to a hash engine can not fail");
-            engine
-                .write_all(&self.session_outcome.header(block_index))
-                .expect("Writing to a hash engine can not fail");
-            Message::from_digest(sha256::Hash::from_engine(engine).to_byte_array())
-        };
+        let message = Message::from_digest(
+            (
+                broadcast_public_keys.consensus_hash::<sha256::Hash>(),
+                self.session_outcome.header(block_index),
+            )
+                .consensus_hash::<sha256::Hash>()
+                .to_byte_array(),
+        );
 
         let threshold = broadcast_public_keys.to_num_peers().threshold();
         if self.signatures.len() < threshold {

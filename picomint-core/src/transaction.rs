@@ -6,7 +6,6 @@
 
 use std::fmt;
 
-use bitcoin::hashes::Hash;
 use picomint_encoding::{Decodable, Encodable};
 use thiserror::Error;
 
@@ -45,14 +44,7 @@ impl Transaction {
     }
 
     pub fn tx_hash_from_parts(inputs: &[wire::Input], outputs: &[wire::Output]) -> TransactionId {
-        let mut engine = TransactionId::engine();
-        inputs
-            .consensus_encode(&mut engine)
-            .expect("write to hash engine can't fail");
-        outputs
-            .consensus_encode(&mut engine)
-            .expect("write to hash engine can't fail");
-        TransactionId::from_engine(engine)
+        (inputs, outputs).consensus_hash::<TransactionId>()
     }
 
     pub fn validate_signatures(

@@ -137,7 +137,7 @@ pub struct OutgoingContract {
     pub expiration: u64,
     pub claim_pk: PublicKey,
     pub refund_pk: PublicKey,
-    pub ephemeral_pk: PublicKey,
+    pub tweak: [u8; 16],
 }
 
 picomint_redb::consensus_value!(OutgoingContract);

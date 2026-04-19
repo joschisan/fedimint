@@ -38,7 +38,7 @@ use picomint_core::secp256k1::rand::{Rng, thread_rng};
 use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, PeerId, TransactionId, wire};
-use picomint_derive_secret::DerivableSecret;
+use crate::secret::Secret;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::Database;
 use picomint_redb::WriteTxRef;
@@ -89,7 +89,7 @@ impl MintClientModule {
         db: &Database,
         api: &FederationApi,
         module_api: &FederationApi,
-        module_root_secret: &DerivableSecret,
+        module_root_secret: &Secret,
     ) -> anyhow::Result<()> {
         let mut state = if let Some(state) = db.begin_read().await.get(&RECOVERY_STATE, &()) {
             state
@@ -207,7 +207,7 @@ impl MintClientModule {
         federation_id: FederationId,
         cfg: MintConfigConsensus,
         context: ClientContext,
-        module_root_secret: &DerivableSecret,
+        module_root_secret: &Secret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<MintClientModule> {
         let (tweak_sender, tweak_receiver) = async_channel::bounded(50);
@@ -266,7 +266,7 @@ impl MintClientModule {
 pub struct MintClientModule {
     federation_id: FederationId,
     cfg: MintConfigConsensus,
-    root_secret: DerivableSecret,
+    root_secret: Secret,
     client_ctx: ClientContext,
     tweak_receiver: async_channel::Receiver<[u8; 16]>,
     tx_submission_executor: crate::executor::ModuleExecutor<TxSubmissionStateMachine>,

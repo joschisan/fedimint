@@ -58,7 +58,7 @@ pub fn tweak_public_key(pk: &PublicKey, tweak: &sha256::Hash) -> PublicKey {
 /// Returns true if the script pubkey potentially belongs to the federation.
 /// This uses a probabilistic filter - only ~1/65536 of P2WSH scripts pass.
 pub fn is_potential_receive(script_pubkey: &ScriptBuf, pks_hash: &sha256::Hash) -> bool {
-    (script_pubkey, pks_hash)
+    (pks_hash, script_pubkey)
         .consensus_hash::<sha256::Hash>()
         .to_byte_array()
         .iter()

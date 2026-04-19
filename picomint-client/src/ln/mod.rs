@@ -18,8 +18,6 @@ use std::sync::Arc;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::transaction::{Output, TransactionBuilder};
-use picomint_core::wire;
-use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
 use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
 use lightning_invoice::{Bolt11Invoice, Currency};
@@ -29,18 +27,25 @@ use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use picomint_core::ln::gateway_api::{PaymentFee, RoutingInfo};
 use picomint_core::ln::{
-    Bolt11InvoiceDescription, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT,
-    lnurl, tweak,
+    Bolt11InvoiceDescription, IncomingContractPath, LightningInvoice, LightningOutput,
+    MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
 };
-use picomint_core::secp256k1::SECP256K1;
 use picomint_core::task::TaskGroup;
+use picomint_core::wire;
+
+#[derive(picomint_encoding::Encodable)]
+enum RootSecretPath {
+    Node,
+    Lnurl,
+    Refund,
+}
+use crate::secret::Secret;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, OutPoint, PeerId};
-use picomint_derive_secret::{ChildId, DerivableSecret};
 use picomint_encoding::Encodable;
 use picomint_redb::WriteTxRef;
-use secp256k1::{Keypair, PublicKey, Scalar, SecretKey, ecdh};
+use secp256k1::{Keypair, PublicKey, SecretKey, ecdh};
 use thiserror::Error;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
 
@@ -73,8 +78,7 @@ pub struct LightningClientModule {
     cfg: LightningConfigConsensus,
     client_ctx: ClientContext,
     mint: Arc<crate::mint::MintClientModule>,
-    keypair: Keypair,
-    lnurl_keypair: Keypair,
+    module_root_secret: Secret,
     send_executor: ModuleExecutor<SendStateMachine>,
     receive_executor: ModuleExecutor<ReceiveStateMachine>,
 }
@@ -94,7 +98,7 @@ impl LightningClientModule {
         cfg: LightningConfigConsensus,
         client_ctx: ClientContext,
         mint: Arc<crate::mint::MintClientModule>,
-        module_root_secret: &DerivableSecret,
+        module_root_secret: &Secret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<Self> {
         let sm_context = LightningClientContext {
@@ -109,24 +113,15 @@ impl LightningClientModule {
             task_group.clone(),
         )
         .await;
-        let receive_executor = ModuleExecutor::new(
-            client_ctx.db().clone(),
-            sm_context,
-            task_group.clone(),
-        )
-        .await;
+        let receive_executor =
+            ModuleExecutor::new(client_ctx.db().clone(), sm_context, task_group.clone()).await;
 
         let module = Self {
             federation_id,
             cfg,
             client_ctx,
             mint,
-            keypair: module_root_secret
-                .child_key(ChildId(0))
-                .to_secp_key(SECP256K1),
-            lnurl_keypair: module_root_secret
-                .child_key(ChildId(1))
-                .to_secp_key(SECP256K1),
+            module_root_secret: *module_root_secret,
             send_executor,
             receive_executor,
         };
@@ -223,12 +218,14 @@ impl LightningClientModule {
         peer: Option<PeerId>,
     ) -> Result<Vec<SafeUrl>, ListGatewaysError> {
         if let Some(peer) = peer {
-            self.client_ctx.module_api()
+            self.client_ctx
+                .module_api()
                 .ln_gateways_from_peer(peer)
                 .await
                 .map_err(|_| ListGatewaysError::FailedToListGateways)
         } else {
-            self.client_ctx.module_api()
+            self.client_ctx
+                .module_api()
                 .ln_gateways()
                 .await
                 .map_err(|_| ListGatewaysError::FailedToListGateways)
@@ -285,11 +282,13 @@ impl LightningClientModule {
 
         let operation_id = OperationId::from_encodable(&invoice.payment_hash());
 
-        let (ephemeral_tweak, ephemeral_pk) = tweak::generate(self.keypair.public_key());
+        let tweak: [u8; 16] = rand::Rng::r#gen(&mut rand::thread_rng());
 
-        let refund_keypair = SecretKey::from_slice(&ephemeral_tweak)
-            .expect("32 bytes, within curve order")
-            .keypair(secp256k1::SECP256K1);
+        let refund_keypair = self
+            .module_root_secret
+            .child(&RootSecretPath::Refund)
+            .child(&tweak)
+            .to_secp_keypair();
 
         let (gateway_api, routing_info) = match gateway {
             Some(gateway_api) => (
@@ -328,7 +327,7 @@ impl LightningClientModule {
             expiration: consensus_block_count + expiration_delta + CONTRACT_CONFIRMATION_BUFFER,
             claim_pk: routing_info.module_public_key,
             refund_pk: refund_keypair.public_key(),
-            ephemeral_pk,
+            tweak,
         };
 
         let tx_builder = TransactionBuilder::from_output(Output {
@@ -402,9 +401,14 @@ impl LightningClientModule {
         description: Bolt11InvoiceDescription,
         gateway: Option<SafeUrl>,
     ) -> Result<(Bolt11Invoice, OperationId), ReceiveError> {
+        let node_keypair = self
+            .module_root_secret
+            .child(&RootSecretPath::Node)
+            .to_secp_keypair();
+
         let (_gateway, contract, invoice) = self
             .create_contract_and_fetch_invoice(
-                self.keypair.public_key(),
+                node_keypair.public_key(),
                 amount,
                 expiry_secs,
                 description,
@@ -416,7 +420,7 @@ impl LightningClientModule {
         let tx = dbtx.as_ref();
 
         let operation_id = self
-            .receive_incoming_contract(&tx, self.keypair.secret_key(), contract)
+            .receive_incoming_contract(&tx, node_keypair.secret_key(), contract)
             .await
             .expect("The contract has been generated with our public key");
 
@@ -430,21 +434,27 @@ impl LightningClientModule {
     /// invoice.
     async fn create_contract_and_fetch_invoice(
         &self,
-        recipient_static_pk: PublicKey,
+        recipient_pk: PublicKey,
         amount: Amount,
         expiry_secs: u32,
         description: Bolt11InvoiceDescription,
         gateway: Option<SafeUrl>,
     ) -> Result<(SafeUrl, IncomingContract, Bolt11Invoice), ReceiveError> {
-        let (ephemeral_tweak, ephemeral_pk) = tweak::generate(recipient_static_pk);
+        let ephemeral_kp = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
-        let encryption_seed = ephemeral_tweak
-            .consensus_hash::<sha256::Hash>()
-            .to_byte_array();
+        let shared_secret = ecdh::SharedSecret::new(&recipient_pk, &ephemeral_kp.secret_key());
 
-        let preimage = encryption_seed
-            .consensus_hash::<sha256::Hash>()
-            .to_byte_array();
+        let contract_secret = Secret::new_root(&shared_secret.secret_bytes());
+
+        let encryption_seed = contract_secret
+            .child(&IncomingContractPath::EncryptionSeed)
+            .to_bytes();
+
+        let preimage = contract_secret.child(&IncomingContractPath::Preimage).to_bytes();
+
+        let claim_tweak = contract_secret
+            .child(&IncomingContractPath::ClaimKey)
+            .to_secp_scalar();
 
         let (gateway, routing_info) = match gateway {
             Some(gateway) => (
@@ -474,11 +484,8 @@ impl LightningClientModule {
             .as_secs()
             .saturating_add(u64::from(expiry_secs));
 
-        let claim_pk = recipient_static_pk
-            .mul_tweak(
-                secp256k1::SECP256K1,
-                &Scalar::from_be_bytes(ephemeral_tweak).expect("Within curve order"),
-            )
+        let claim_pk = recipient_pk
+            .mul_tweak(secp256k1::SECP256K1, &claim_tweak)
             .expect("Tweak is valid");
 
         let contract = IncomingContract::new(
@@ -490,7 +497,7 @@ impl LightningClientModule {
             expiration,
             claim_pk,
             routing_info.module_public_key,
-            ephemeral_pk,
+            ephemeral_kp.public_key(),
         );
 
         let invoice = gateway_http::bolt11_invoice(
@@ -549,15 +556,21 @@ impl LightningClientModule {
         sk: SecretKey,
         contract: &IncomingContract,
     ) -> Option<(Keypair, AggregateDecryptionKey)> {
-        let tweak = ecdh::SharedSecret::new(&contract.commitment.ephemeral_pk, &sk);
+        let shared_secret =
+            ecdh::SharedSecret::new(&contract.commitment.ephemeral_pk, &sk).secret_bytes();
 
-        let encryption_seed = tweak
-            .secret_bytes()
-            .consensus_hash::<sha256::Hash>()
-            .to_byte_array();
+        let contract_secret = Secret::new_root(&shared_secret);
+
+        let encryption_seed = contract_secret
+            .child(&IncomingContractPath::EncryptionSeed)
+            .to_bytes();
+
+        let claim_tweak = contract_secret
+            .child(&IncomingContractPath::ClaimKey)
+            .to_secp_scalar();
 
         let claim_keypair = sk
-            .mul_tweak(&Scalar::from_be_bytes(tweak.secret_bytes()).expect("Within curve order"))
+            .mul_tweak(&claim_tweak)
             .expect("Tweak is valid")
             .keypair(secp256k1::SECP256K1);
 
@@ -600,9 +613,14 @@ impl LightningClientModule {
             gateways
         };
 
+        let lnurl_keypair = self
+            .module_root_secret
+            .child(&RootSecretPath::Lnurl)
+            .to_secp_keypair();
+
         let payload = picomint_base32::encode(&lnurl::LnurlRequest {
             federation_id: self.federation_id,
-            recipient_pk: self.lnurl_keypair.public_key(),
+            recipient_pk: lnurl_keypair.public_key(),
             aggregate_pk: self.cfg.tpe_agg_pk,
             gateways,
         });
@@ -637,10 +655,15 @@ impl LightningClientModule {
             .ln_await_incoming_contracts(stream_index, 128)
             .await;
 
+        let lnurl_keypair = self
+            .module_root_secret
+            .child(&RootSecretPath::Lnurl)
+            .to_secp_keypair();
+
         let dbtx = self.client_ctx.db().begin_write().await;
         let tx = dbtx.as_ref();
         for contract in &contracts {
-            self.receive_incoming_contract(&tx, self.lnurl_keypair.secret_key(), contract.clone())
+            self.receive_incoming_contract(&tx, lnurl_keypair.secret_key(), contract.clone())
                 .await;
         }
 

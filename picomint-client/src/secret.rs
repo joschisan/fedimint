@@ -1,21 +1,18 @@
-//! Mnemonic + per-module key derivation.
+//! Mnemonic-driven client-tree derivation on top of `picomint_core::secret::Secret`.
 //!
-//! Per-module derivation chain:
 //! ```text
 //! mnemonic
-//!   → seed → HMAC with PICOMINT_CLIENT_NONCE   // DerivableSecret level 0
-//!   → federation_key(fed_id)                    // per-federation root
-//!   → child(ModuleKind as u64)                  // per-module
+//!   → Secret::new_root(seed)
+//!   → .child(&federation_id)            // per-federation root
+//!   → .child(&ModuleKind::{Mint,Wallet,Ln})
 //! ```
 
 pub use bip39::{Language, Mnemonic};
 use picomint_core::config::FederationId;
 use picomint_core::core::ModuleKind;
-use picomint_derive_secret::{ChildId, DerivableSecret};
+pub use picomint_core::secret::Secret;
 use rand::{CryptoRng, RngCore};
 
-const PICOMINT_CLIENT_NONCE: &[u8] = b"Picomint Client Salt";
-const EMPTY_PASSPHRASE: &str = "";
 const WORD_COUNT: usize = 12;
 
 /// Generate a fresh 12-word English BIP39 mnemonic.
@@ -24,20 +21,10 @@ pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Mnemonic {
         .expect("Failed to generate mnemonic, bad word count")
 }
 
-/// Derive the per-federation client root secret. Module secrets are derived
-/// from this via [`derive_module_secret`].
-pub(crate) fn derive_root_secret(
-    mnemonic: &Mnemonic,
-    federation_id: FederationId,
-) -> DerivableSecret {
-    DerivableSecret::new_root(
-        mnemonic.to_seed_normalized(EMPTY_PASSPHRASE).as_ref(),
-        PICOMINT_CLIENT_NONCE,
-    )
-    .federation_key(&federation_id)
+pub(crate) fn client_root(mnemonic: &Mnemonic, federation_id: FederationId) -> Secret {
+    Secret::new_root(&mnemonic.to_seed_normalized("")).child(&federation_id)
 }
 
-pub(crate) fn derive_module_secret(root: &DerivableSecret, kind: ModuleKind) -> DerivableSecret {
-    assert_eq!(root.level(), 0);
-    root.child_key(ChildId(kind as u64))
+pub(crate) fn module_secret(root: &Secret, kind: ModuleKind) -> Secret {
+    root.child(&kind)
 }

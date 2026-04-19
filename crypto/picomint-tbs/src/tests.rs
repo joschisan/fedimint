@@ -6,7 +6,9 @@ use bls12_381::{G2Projective, Scalar};
 use group::Curve;
 use group::ff::Field;
 use rand::SeedableRng;
+use rand::rngs::OsRng;
 use rand_chacha::ChaChaRng;
+
 
 use crate::{
     AggregatePublicKey, BlindedSignatureShare, BlindingKey, Message, PublicKeyShare,
@@ -48,8 +50,8 @@ fn test_roundtrip() {
     const PEERS: u64 = 4;
     const THRESHOLD: u64 = 3;
 
-    let message = Message::from_bytes(b"Hello World!");
-    let blinding_key = BlindingKey::random();
+    let message = Message::from_public_key([7_u8; 33]);
+    let blinding_key = BlindingKey(Scalar::random(OsRng));
 
     let b_message = blind_message(message, blinding_key);
 
@@ -70,16 +72,4 @@ fn test_roundtrip() {
     let signature = unblind_signature(blinding_key, signature);
 
     assert!(verify(message, signature, dealer_agg_pk()));
-}
-
-#[test]
-fn test_blindingkey_fingerprint_multiple_calls_same_result() {
-    let bkey = BlindingKey::random();
-    assert_eq!(bkey.fingerprint(), bkey.fingerprint());
-}
-
-#[test]
-fn test_blindingkey_fingerprint_ne_scalar() {
-    let bkey = BlindingKey::random();
-    assert_ne!(bkey.fingerprint(), bkey.0.to_bytes());
 }

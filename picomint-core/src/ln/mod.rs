@@ -14,7 +14,6 @@ pub mod contracts;
 pub mod endpoint_constants;
 pub mod gateway_api;
 pub mod lnurl;
-pub mod tweak;
 
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
@@ -41,6 +40,16 @@ pub enum LightningInvoice {
 }
 
 pub const KIND: ModuleKind = ModuleKind::Ln;
+
+/// Per-contract derivation path for the ECDH-rooted incoming-contract
+/// secret tree. Shared between the contract creator (client receive path,
+/// recurringd) and the claimant (client recover path).
+#[derive(Encodable)]
+pub enum IncomingContractPath {
+    EncryptionSeed,
+    Preimage,
+    ClaimKey,
+}
 
 /// Minimum contract amount to ensure the incoming contract can be claimed
 /// without additional funds.

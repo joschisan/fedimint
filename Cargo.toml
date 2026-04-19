@@ -1,8 +1,6 @@
 
 [workspace]
 members = [
-    "crypto/picomint-derive-secret",
-    "crypto/picomint-hkdf",
     "crypto/picomint-tbs",
     "crypto/picomint-tpe",
     "picomint-base32",
@@ -94,7 +92,6 @@ picomint-base32 = { path = "./picomint-base32", version = "=0.1.0" }
 picomint-client = { path = "./picomint-client", version = "=0.1.0" }
 picomint-core = { path = "./picomint-core", version = "=0.1.0" }
 picomint-derive = { path = "./picomint-derive", version = "=0.1.0" }
-picomint-derive-secret = { path = "./crypto/picomint-derive-secret", version = "=0.1.0" }
 picomint-encoding = { path = "./picomint-encoding", version = "=0.1.0" }
 picomint-eventlog = { path = "./picomint-eventlog", version = "=0.1.0" }
 picomint-gateway-cli-core = { path = "./picomint-gateway-cli-core", version = "=0.1.0" }
@@ -114,7 +111,6 @@ gloo-timers = "0.3.0"
 group = "0.13.0"
 hex = "0.4.3"
 hex-conservative = "1.0.0"
-hkdf = { package = "picomint-hkdf", path = "./crypto/picomint-hkdf", version = "=0.1.0" }
 hyper = "1.6"
 imbl = "5.0.0"
 iroh = { version = "=0.97.0", default-features = false }

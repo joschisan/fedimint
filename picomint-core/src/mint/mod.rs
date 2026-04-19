@@ -141,7 +141,7 @@ pub fn verify_note(note: Note, pk: tbs::AggregatePublicKey) -> bool {
 }
 
 pub fn nonce_message(nonce: PublicKey) -> Message {
-    tbs::Message::from_bytes_sha256(&nonce.serialize())
+    tbs::Message::from_public_key(nonce.serialize())
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]

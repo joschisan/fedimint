@@ -32,8 +32,9 @@ use picomint_core::ln::{LightningInvoice, LightningOutput};
 use picomint_core::secp256k1::Keypair;
 use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
-use picomint_derive_secret::DerivableSecret;
 use picomint_encoding::{Decodable, Encodable};
+
+use crate::secret::Secret;
 use receive_sm::ReceiveStateMachine;
 use secp256k1::schnorr::Signature;
 use send_sm::SendStateMachine;
@@ -46,6 +47,11 @@ use self::complete_sm::{CompleteSMCommon, CompleteSMState, CompleteStateMachine}
 /// Lightning CLTV Delta in blocks
 pub const EXPIRATION_DELTA_MINIMUM: u64 = 144;
 
+#[derive(Encodable)]
+enum RootSecretPath {
+    Node,
+}
+
 impl GatewayClientModule {
     pub async fn new(
         federation_id: FederationId,
@@ -53,12 +59,10 @@ impl GatewayClientModule {
         context: ClientContext,
         mint: Arc<crate::mint::MintClientModule>,
         gateway: Arc<dyn IGatewayClient>,
-        module_root_secret: &DerivableSecret,
+        module_root_secret: &Secret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<GatewayClientModule> {
-        let keypair = module_root_secret
-            .clone()
-            .to_secp_key(picomint_core::secp256k1::SECP256K1);
+        let keypair = module_root_secret.child(&RootSecretPath::Node).to_secp_keypair();
 
         let sm_context = GwSmContext {
             client_ctx: context.clone(),

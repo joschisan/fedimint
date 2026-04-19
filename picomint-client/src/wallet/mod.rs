@@ -31,8 +31,9 @@ use picomint_core::wallet::{
 };
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
-use picomint_derive_secret::{ChildId, DerivableSecret};
 use picomint_encoding::Encodable;
+
+use crate::secret::Secret;
 use picomint_logging::LOG_CLIENT_MODULE_WALLET;
 use secp256k1::Keypair;
 use send_sm::SendStateMachine;
@@ -44,9 +45,14 @@ use tracing::warn;
 /// Number of output info entries to scan per batch.
 const SLICE_SIZE: u64 = 1000;
 
+#[derive(Encodable)]
+enum RootSecretPath {
+    Address,
+}
+
 #[derive(Debug, Clone)]
 pub struct WalletClientModule {
-    root_secret: DerivableSecret,
+    root_secret: Secret,
     cfg: WalletConfigConsensus,
     client_ctx: ClientContext,
     mint: std::sync::Arc<crate::mint::MintClientModule>,
@@ -73,7 +79,7 @@ impl WalletClientModule {
         cfg: WalletConfigConsensus,
         context: ClientContext,
         mint: std::sync::Arc<crate::mint::MintClientModule>,
-        module_root_secret: &DerivableSecret,
+        module_root_secret: &Secret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<WalletClientModule> {
         let sm_context = WalletClientContext {
@@ -229,8 +235,9 @@ impl WalletClientModule {
 
     fn derive_tweak(&self, index: u64) -> Keypair {
         self.root_secret
-            .child_key(ChildId(index))
-            .to_secp_key(secp256k1::SECP256K1)
+            .child(&RootSecretPath::Address)
+            .child(&index)
+            .to_secp_keypair()
     }
 
     /// Find the next valid index starting from (and including) `start_index`.

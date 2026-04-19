@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::io::Write;
 
 use aleph_bft::Keychain as KeychainTrait;
 use bitcoin::hashes::Hash;
@@ -34,29 +33,21 @@ impl Keychain {
     // Tagging messages with the hash of the public key set ensures that peers with
     // an incorrect public key set cannot create signatures that are accepted by
     // their peers.
-    fn tagged_message(&self, message: &[u8]) -> Message {
-        let mut engine = sha256::HashEngine::default();
-
-        engine
-            .write_all(self.message_tag.as_ref())
-            .expect("Writing to a hash engine can not fail");
-
-        engine
-            .write_all(message)
-            .expect("Writing to a hash engine can not fail");
-
-        let hash = sha256::Hash::from_engine(engine);
-
-        Message::from_digest(*hash.as_ref())
+    fn tagged_message<T: Encodable + ?Sized>(&self, message: &T) -> Message {
+        Message::from_digest(
+            (self.message_tag, message)
+                .consensus_hash::<sha256::Hash>()
+                .to_byte_array(),
+        )
     }
 
-    pub fn sign_schnorr(&self, message: &[u8]) -> schnorr::Signature {
+    pub fn sign_schnorr<T: Encodable + ?Sized>(&self, message: &T) -> schnorr::Signature {
         self.keypair.sign_schnorr(self.tagged_message(message))
     }
 
-    pub fn verify_schnorr(
+    pub fn verify_schnorr<T: Encodable + ?Sized>(
         &self,
-        message: &[u8],
+        message: &T,
         signature: &schnorr::Signature,
         peer_id: PeerId,
     ) -> bool {
