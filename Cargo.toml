@@ -15,7 +15,7 @@ members = [
     "picomint-integration-tests",
     "picomint-lnurl",
     "picomint-logging",
-    "picomint-recurringd",
+    "picomint-recurring-daemon",
     "picomint-redb",
     "picomint-bitcoin-rpc",
     "picomint-server-cli",

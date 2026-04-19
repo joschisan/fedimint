@@ -1,17 +1,13 @@
 [package]
-description = "recurringd is a stateless service that allows Picomint users to receive recurring payments via ln"
+description = "Stateless service that allows picomint clients to receive payments via LNURL"
 edition = { workspace = true }
 homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
-name = "picomint-recurringd"
+name = "picomint-recurring-daemon"
 readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
-
-[[bin]]
-name = "picomint-recurringd"
-path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }

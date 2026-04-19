@@ -1,6 +1,6 @@
-# Recurringd
+# Recurring Daemon
 
-`recurringd` is a stateless lnurl proxy service that allows Picomint users to receive lnurl payments via ln.
+`picomint-recurring-daemon` is a stateless LNURL proxy service that allows picomint clients to receive LNURL payments via Lightning.
 
 This service requires no database or persistent state. All payment information is encoded in the LNURL itself, making it easy to deploy on platforms like Digital Ocean App Platform, Fly.io, Railway, etc.
 
@@ -20,10 +20,10 @@ Note that once the invoice is generated, `recurringd` cannot claim the funds for
 ## Command line options
 
 ```text
-Usage: picomint-recurringd [OPTIONS]
+Usage: picomint-recurring-daemon [OPTIONS]
 
 Options:
-      --bind-api <BIND_API>  Address to bind the server to [env: BIND_API=] [default: 0.0.0.0:8176]
+      --api-addr <API_ADDR>  Public HTTP API listen address [env: API_ADDR=] [default: 0.0.0.0:8080]
   -h, --help                 Print help
 ```
 
@@ -37,4 +37,4 @@ Options:
 
 ### Environment Variables
 
-- `BIND_API` - Address to bind the server to (default: `0.0.0.0:8176`)
+- `API_ADDR` - Public HTTP API listen address (default: `0.0.0.0:8080`)

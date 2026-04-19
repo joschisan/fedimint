@@ -37,12 +37,10 @@ const MIN_SENDABLE_MSAT: u64 = 100_000;
 
 #[derive(Debug, Parser)]
 struct CliOpts {
-    /// Address to bind the server to
-    ///
-    /// Should be `0.0.0.0:8176` most of the time, as api connectivity is public
-    /// and direct, and the port should be open in the firewall.
-    #[arg(long, env = "BIND_API", default_value = "0.0.0.0:8176")]
-    bind_api: SocketAddr,
+    /// Public HTTP API listen address. Should be open in the firewall —
+    /// wallets and the paying side hit this directly.
+    #[arg(long, env = "API_ADDR", default_value = "0.0.0.0:8080")]
+    api_addr: SocketAddr,
 }
 
 #[tokio::main]
@@ -62,9 +60,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/invoice/{payload}", get(invoice))
         .layer(cors);
 
-    info!(bind_api = %cli_opts.bind_api, "recurringd started");
+    info!(api_addr = %cli_opts.api_addr, "recurring-daemon started");
 
-    let listener = TcpListener::bind(cli_opts.bind_api).await?;
+    let listener = TcpListener::bind(cli_opts.api_addr).await?;
 
     axum::serve(listener, app).await?;
 
@@ -72,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn health_check(headers: HeaderMap) -> impl IntoResponse {
-    format!("recurringd is up and running at {}", base_url(&headers))
+    format!("recurring-daemon is up and running at {}", base_url(&headers))
 }
 
 fn base_url(headers: &HeaderMap) -> String {
