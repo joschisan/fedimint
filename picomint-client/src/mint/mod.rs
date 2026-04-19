@@ -23,9 +23,11 @@ use std::time::Duration;
 
 use crate::api::FederationApi;
 use crate::module::ClientContext;
+use crate::transaction::builder_next::{self, Input, Output};
 use crate::transaction::{
     ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
 };
+use picomint_core::wire;
 use anyhow::Context as _;
 use bitcoin_hashes::sha256;
 use client_db::{NOTE, RECEIVE_OPERATION, RECOVERY_STATE, RecoveryState};
@@ -290,7 +292,7 @@ impl MintClientModule {
         self.cfg.output_fee
     }
 
-    /// Submission entry point used during the migration to the new
+    /// Balancing submission shim used during the migration to the new
     /// `transaction::builder_next` types. Adapts the new builder to the
     /// legacy `ClientInput`/`ClientOutput` finalize pipeline; will become
     /// the real implementation (with the balance loop folded in) once all
@@ -302,39 +304,23 @@ impl MintClientModule {
         operation_id: OperationId,
         builder: crate::transaction::builder_next::TransactionBuilder,
     ) -> anyhow::Result<picomint_core::TransactionId> {
-        let (inputs, outputs) = builder.into_parts();
-
-        let mut legacy = TransactionBuilder::new();
-
-        if !inputs.is_empty() {
-            let bundle = ClientInputBundle::new(
-                inputs
-                    .into_iter()
-                    .map(|i| ClientInput {
-                        input: i.input,
-                        keys: vec![i.keypair],
-                        amount: i.amount,
-                    })
-                    .collect(),
-            );
-            legacy = legacy.with_inputs(bundle);
-        }
-
-        if !outputs.is_empty() {
-            let bundle = ClientOutputBundle::new(
-                outputs
-                    .into_iter()
-                    .map(|o| ClientOutput {
-                        output: o.output,
-                        amount: o.amount,
-                    })
-                    .collect(),
-            );
-            legacy = legacy.with_outputs(bundle);
-        }
-
         self.client_ctx
-            .finalize_and_submit_transaction_dbtx(dbtx, operation_id, legacy)
+            .finalize_and_submit_transaction_dbtx(dbtx, operation_id, adapt_to_legacy(builder))
+            .await
+    }
+
+    /// Bypass shim used by `MintClientModule::send`, which pre-builds a
+    /// balanced transaction and spawns its own `IssuanceStateMachine` after
+    /// submission. Maps to `Client::submit_tx_builder_dbtx` (no balancing).
+    /// Disappears alongside `finalize_and_submit_transaction` in step 5.
+    pub async fn submit_transaction(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        operation_id: OperationId,
+        builder: crate::transaction::builder_next::TransactionBuilder,
+    ) -> anyhow::Result<picomint_core::TransactionId> {
+        self.client_ctx
+            .submit_tx_builder_dbtx(dbtx, operation_id, adapt_to_legacy(builder))
             .await
     }
 
@@ -652,42 +638,43 @@ impl MintClientModule {
 
         spendable_notes.sort_by_key(|note| note.denomination);
 
-        let inputs = build_inputs(&spendable_notes);
-
         denominations.extend(target_denominations);
 
         denominations.sort();
 
         let (issuance_requests, outputs) = self.build_issuance(denominations).await;
 
-        let input = self
-            .client_ctx
-            .make_client_inputs(ClientInputBundle::new(inputs));
-
-        let output = self
-            .client_ctx
-            .make_client_outputs(ClientOutputBundle::new(outputs));
-
-        let tx_builder = TransactionBuilder::new()
-            .with_inputs(input)
-            .with_outputs(output);
+        let mut tx_builder = builder_next::TransactionBuilder::new();
+        for note in &spendable_notes {
+            tx_builder.add_input(Input {
+                input: wire::Input::Mint(MintInput { note: note.note() }),
+                keypair: note.keypair,
+                amount: note.amount(),
+                fee: self.cfg.input_fee,
+            });
+        }
+        for out in outputs {
+            tx_builder.add_output(Output {
+                output: wire::Output::Mint(out.output),
+                amount: out.amount,
+                fee: self.cfg.output_fee,
+            });
+        }
 
         let txid = self
-            .client_ctx
-            .submit_tx_builder_dbtx(&dbtx.as_ref(), operation_id, tx_builder)
+            .submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
             .await
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
+        let sm = IssuanceStateMachine {
+            operation_id,
+            spendable_notes,
+            txid: Some(txid),
+            issuance_requests,
+        };
+
         self.issuance_executor
-            .add_state_machine_dbtx(
-                &dbtx.as_ref(),
-                IssuanceStateMachine {
-                    operation_id,
-                    spendable_notes,
-                    txid: Some(txid),
-                    issuance_requests,
-                },
-            )
+            .add_state_machine_dbtx(&dbtx.as_ref(), sm)
             .await;
 
         self.client_ctx
@@ -770,38 +757,38 @@ impl MintClientModule {
             return Err(ReceiveECashError::UneconomicalDenomination);
         }
 
-        let spendable_notes = ecash.notes();
-        let inputs = build_inputs(&spendable_notes);
-        let input_bundle = self
-            .client_ctx
-            .make_client_inputs(ClientInputBundle::new(inputs));
+        let mut tx_builder = builder_next::TransactionBuilder::new();
+        for note in ecash.notes() {
+            tx_builder.add_input(Input {
+                input: wire::Input::Mint(MintInput { note: note.note() }),
+                keypair: note.keypair,
+                amount: note.amount(),
+                fee: self.cfg.input_fee,
+            });
+        }
 
         let dbtx = self.client_ctx.module_db().begin_write().await;
-        let tx = dbtx.as_ref();
 
-        if tx.insert(&RECEIVE_OPERATION, &operation_id, &()).is_some() {
+        if dbtx
+            .as_ref()
+            .insert(&RECEIVE_OPERATION, &operation_id, &())
+            .is_some()
+        {
             return Ok(operation_id);
         }
 
         let txid = self
-            .client_ctx
-            .finalize_and_submit_transaction_dbtx(
-                &tx,
-                operation_id,
-                TransactionBuilder::new().with_inputs(input_bundle),
-            )
+            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
             .await
             .map_err(|_| ReceiveECashError::InsufficientFunds)?;
 
+        let event = ReceiveEvent {
+            txid,
+            amount: ecash.amount(),
+        };
+
         self.client_ctx
-            .log_event(
-                &tx,
-                operation_id,
-                ReceiveEvent {
-                    txid,
-                    amount: ecash.amount(),
-                },
-            )
+            .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
         dbtx.commit().await;
@@ -930,4 +917,42 @@ fn represent_amount(mut remaining_amount: Amount) -> Vec<Denomination> {
     }
 
     denominations
+}
+
+/// Adapter from the new `transaction::builder_next::TransactionBuilder` to the
+/// legacy `TransactionBuilder` over `ClientInput`/`ClientOutput`. Removed in
+/// step 6 along with the legacy types.
+fn adapt_to_legacy(builder: crate::transaction::builder_next::TransactionBuilder) -> TransactionBuilder {
+    let (inputs, outputs) = builder.into_parts();
+
+    let mut legacy = TransactionBuilder::new();
+
+    if !inputs.is_empty() {
+        let bundle = ClientInputBundle::new(
+            inputs
+                .into_iter()
+                .map(|i| ClientInput {
+                    input: i.input,
+                    keys: vec![i.keypair],
+                    amount: i.amount,
+                })
+                .collect(),
+        );
+        legacy = legacy.with_inputs(bundle);
+    }
+
+    if !outputs.is_empty() {
+        let bundle = ClientOutputBundle::new(
+            outputs
+                .into_iter()
+                .map(|o| ClientOutput {
+                    output: o.output,
+                    amount: o.amount,
+                })
+                .collect(),
+        );
+        legacy = legacy.with_outputs(bundle);
+    }
+
+    legacy
 }
