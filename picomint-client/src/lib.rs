@@ -56,7 +56,7 @@ use query::FilterMap;
 use tracing::debug;
 
 pub use client::handle::{ClientHandle, ClientHandleArc};
-pub use client::{Client, LnFlavor, RootSecret};
+pub use client::{Client, RootSecret};
 pub use picomint_core::core::{ModuleKind, OperationId};
 
 use picomint_core::TransactionId;

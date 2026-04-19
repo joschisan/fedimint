@@ -144,11 +144,10 @@ impl<S: StateMachine> ModuleExecutor<S> {
         self.inner.get_active_states().await
     }
 
-    /// Like [`Self::add_state_machine_dbtx`] but does not spawn the
-    /// driver task — the state will be picked up by the next call to
-    /// [`Self::start`]. Used by pre-init paths (e.g. recovery) that need
-    /// to seed state before the executor exists. `dbtx` must be scoped
-    /// to the module's DB namespace.
+    /// Like [`Self::add_state_machine_dbtx`] but does not spawn the driver
+    /// task — the state will be picked up by [`Self::new`] when the executor
+    /// is constructed. Used by pre-init paths (e.g. recovery) that need to
+    /// seed state before the executor exists.
     pub async fn add_state_machine_unstarted(dbtx: &WriteTxRef<'_>, state: S) {
         let id = SmId::random();
         assert!(

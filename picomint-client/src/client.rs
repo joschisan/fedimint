@@ -9,9 +9,10 @@ use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
 use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use crate::wallet::WalletClientModule;
-use crate::{TxAcceptEvent, TxRejectEvent, download_from_invite_code};
+use crate::download_from_invite_code;
 use anyhow::bail;
-use futures::{Stream, StreamExt as _};
+use futures::Stream;
+use picomint_core::Amount;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
@@ -19,7 +20,6 @@ use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
-use picomint_core::{Amount, TransactionId};
 use picomint_derive_secret::DerivableSecret;
 use picomint_eventlog::{EventLogId, PersistedLogEntry};
 use picomint_logging::LOG_CLIENT;
@@ -57,7 +57,7 @@ enum LnChoice {
 /// Lightning-module flavor mounted on a client. Regular federation clients
 /// use `Regular`, while the gateway daemon mounts `Gateway`. The two flavors
 /// are mutually exclusive at the same federation instance.
-pub enum LnFlavor {
+pub(crate) enum LnFlavor {
     Regular(Arc<LightningClientModule>),
     Gateway(Arc<GatewayClientModule>),
 }
@@ -319,27 +319,6 @@ impl Client {
     /// Get metadata value from the federation config itself
     pub fn get_config_meta(&self, key: &str) -> Option<String> {
         self.federation_config_meta.get(key).cloned()
-    }
-
-    pub async fn await_tx_accepted(
-        &self,
-        operation_id: OperationId,
-        query_txid: TransactionId,
-    ) -> Result<(), String> {
-        let mut stream = self.subscribe_operation_events(operation_id);
-        while let Some(entry) = stream.next().await {
-            if let Some(ev) = entry.to_event::<TxAcceptEvent>()
-                && ev.txid == query_txid
-            {
-                return Ok(());
-            }
-            if let Some(ev) = entry.to_event::<TxRejectEvent>()
-                && ev.txid == query_txid
-            {
-                return Err(ev.error);
-            }
-        }
-        unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
     pub fn mint(&self) -> &MintClientModule {
