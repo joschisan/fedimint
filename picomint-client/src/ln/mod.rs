@@ -15,7 +15,6 @@ mod send_sm;
 
 use std::sync::Arc;
 
-use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::transaction::{Output, TransactionBuilder};
@@ -74,7 +73,6 @@ pub struct LightningClientModule {
     cfg: LightningConfigConsensus,
     client_ctx: ClientContext,
     mint: Arc<crate::mint::MintClientModule>,
-    module_api: FederationApi,
     keypair: Keypair,
     lnurl_keypair: Keypair,
     send_executor: ModuleExecutor<SendStateMachine>,
@@ -99,7 +97,6 @@ impl LightningClientModule {
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<Self> {
-        let module_api = client_ctx.module_api();
         let sm_context = LightningClientContext {
             federation_id,
             client_ctx: client_ctx.clone(),
@@ -124,7 +121,6 @@ impl LightningClientModule {
             cfg,
             client_ctx,
             mint,
-            module_api,
             keypair: module_root_secret
                 .child_key(ChildId(0))
                 .to_secp_key(SECP256K1),
@@ -157,7 +153,7 @@ impl LightningClientModule {
         // if possible, such that the payment does not go over lightning, reducing
         // fees and latency.
 
-        if let Ok(gateways) = self.module_api.ln_gateways().await {
+        if let Ok(gateways) = self.client_ctx.module_api().ln_gateways().await {
             let mut entries = Vec::new();
             for gateway in gateways {
                 if let Ok(Some(routing_info)) =
@@ -188,7 +184,8 @@ impl LightningClientModule {
         invoice: Option<Bolt11Invoice>,
     ) -> Result<(SafeUrl, RoutingInfo), SelectGatewayError> {
         let gateways = self
-            .module_api
+            .client_ctx
+            .module_api()
             .ln_gateways()
             .await
             .map_err(|e| SelectGatewayError::FailedToRequestGateways(e.to_string()))?;
@@ -226,12 +223,12 @@ impl LightningClientModule {
         peer: Option<PeerId>,
     ) -> Result<Vec<SafeUrl>, ListGatewaysError> {
         if let Some(peer) = peer {
-            self.module_api
+            self.client_ctx.module_api()
                 .ln_gateways_from_peer(peer)
                 .await
                 .map_err(|_| ListGatewaysError::FailedToListGateways)
         } else {
-            self.module_api
+            self.client_ctx.module_api()
                 .ln_gateways()
                 .await
                 .map_err(|_| ListGatewaysError::FailedToListGateways)
@@ -319,7 +316,8 @@ impl LightningClientModule {
         }
 
         let consensus_block_count = self
-            .module_api
+            .client_ctx
+            .module_api()
             .ln_consensus_block_count()
             .await
             .map_err(|e| SendPaymentError::FailedToRequestBlockCount(e.to_string()))?;
@@ -589,7 +587,8 @@ impl LightningClientModule {
             vec![gateway]
         } else {
             let gateways = self
-                .module_api
+                .client_ctx
+                .module_api()
                 .ln_gateways()
                 .await
                 .map_err(|e| GenerateLnurlError::FailedToRequestGateways(e.to_string()))?;
@@ -633,7 +632,8 @@ impl LightningClientModule {
             .unwrap_or(0);
 
         let (contracts, next_index) = self
-            .module_api
+            .client_ctx
+            .module_api()
             .ln_await_incoming_contracts(stream_index, 128)
             .await;
 

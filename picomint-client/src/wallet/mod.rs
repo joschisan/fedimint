@@ -14,7 +14,7 @@ mod send_sm;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::api::{FederationApi, FederationResult};
+use crate::api::FederationResult;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::transaction::{Input, Output, TransactionBuilder};
@@ -34,7 +34,6 @@ use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_derive_secret::{ChildId, DerivableSecret};
 use picomint_encoding::Encodable;
 use picomint_logging::LOG_CLIENT_MODULE_WALLET;
-use picomint_redb::Database;
 use secp256k1::Keypair;
 use send_sm::SendStateMachine;
 use thiserror::Error;
@@ -51,8 +50,6 @@ pub struct WalletClientModule {
     cfg: WalletConfigConsensus,
     client_ctx: ClientContext,
     mint: std::sync::Arc<crate::mint::MintClientModule>,
-    db: Database,
-    module_api: FederationApi,
     send_executor: ModuleExecutor<SendStateMachine>,
 }
 
@@ -79,21 +76,17 @@ impl WalletClientModule {
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<WalletClientModule> {
-        let db = context.db().clone();
-        let module_api = context.module_api();
         let sm_context = WalletClientContext {
             client_ctx: context.clone(),
         };
         let send_executor =
-            ModuleExecutor::new(db.clone(), sm_context, task_group.clone()).await;
+            ModuleExecutor::new(context.db().clone(), sm_context, task_group.clone()).await;
 
         let module = WalletClientModule {
             root_secret: module_root_secret.clone(),
             cfg,
             client_ctx: context,
             mint,
-            db,
-            module_api,
             send_executor,
         };
 
@@ -111,7 +104,7 @@ impl WalletClientModule {
 
     /// Fetch the total value of bitcoin controlled by the federation.
     pub async fn total_value(&self) -> FederationResult<bitcoin::Amount> {
-        self.module_api
+        self.client_ctx.module_api()
             .wallet_federation_wallet()
             .await
             .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
@@ -119,17 +112,17 @@ impl WalletClientModule {
 
     /// Fetch the consensus block count of the federation.
     pub async fn block_count(&self) -> FederationResult<u64> {
-        self.module_api.wallet_consensus_block_count().await
+        self.client_ctx.module_api().wallet_consensus_block_count().await
     }
 
     /// Fetch the current consensus feerate.
     pub async fn feerate(&self) -> FederationResult<Option<u64>> {
-        self.module_api.wallet_consensus_feerate().await
+        self.client_ctx.module_api().wallet_consensus_feerate().await
     }
 
     /// Fetch the current fee required to send an onchain payment.
     pub async fn send_fee(&self) -> Result<bitcoin::Amount, SendError> {
-        self.module_api
+        self.client_ctx.module_api()
             .wallet_send_fee()
             .await
             .map_err(|e| SendError::FederationError(e.to_string()))?
@@ -154,7 +147,8 @@ impl WalletClientModule {
         let fee = match fee {
             Some(value) => value,
             None => self
-                .module_api
+                .client_ctx
+                .module_api()
                 .wallet_send_fee()
                 .await
                 .map_err(|e| SendError::FederationError(e.to_string()))?
@@ -215,7 +209,7 @@ impl WalletClientModule {
     /// address derivation has completed.
     pub async fn receive(&self) -> Address {
         loop {
-            let indices = self.db.begin_read().await.iter(&VALID_ADDRESS_INDEX);
+            let indices = self.client_ctx.db().begin_read().await.iter(&VALID_ADDRESS_INDEX);
 
             if let Some((idx, ())) = indices.into_iter().next_back() {
                 return self.derive_address(idx);
@@ -301,7 +295,8 @@ impl WalletClientModule {
 
         task_group.spawn_cancellable("output-scanner", async move {
             let needs_seed = module
-                .db
+                .client_ctx
+                .db()
                 .begin_read()
                 .await
                 .iter(&VALID_ADDRESS_INDEX)
@@ -309,7 +304,7 @@ impl WalletClientModule {
 
             if needs_seed {
                 let index = module.next_valid_index(0);
-                let dbtx = module.db.begin_write().await;
+                let dbtx = module.client_ctx.db().begin_write().await;
                 assert!(
                     dbtx.insert(&VALID_ADDRESS_INDEX, &index, &()).is_none(),
                     "seed address index already present"
@@ -335,7 +330,7 @@ impl WalletClientModule {
     }
 
     async fn check_outputs(&self) -> anyhow::Result<bool> {
-        let dbtx = self.db.begin_read().await;
+        let dbtx = self.client_ctx.db().begin_read().await;
 
         let next_output_index = dbtx.get(&NEXT_OUTPUT_INDEX, &()).unwrap_or(0);
 
@@ -353,7 +348,8 @@ impl WalletClientModule {
             .collect();
 
         let outputs = self
-            .module_api
+            .client_ctx
+            .module_api()
             .wallet_output_info_slice(next_output_index, next_output_index + SLICE_SIZE)
             .await?;
 
@@ -368,7 +364,7 @@ impl WalletClientModule {
                 if address_index == next_address_index {
                     let index = self.next_valid_index(next_address_index + 1);
 
-                    let dbtx = self.db.begin_write().await;
+                    let dbtx = self.client_ctx.db().begin_write().await;
 
                     dbtx.insert(&VALID_ADDRESS_INDEX, &index, &());
 
@@ -382,12 +378,13 @@ impl WalletClientModule {
                 if !output.spent {
                     // In order to not overpay on fees we choose to wait,
                     // the congestion will clear up within a few blocks.
-                    if self.module_api.wallet_pending_tx_chain().await?.len() >= 3 {
+                    if self.client_ctx.module_api().wallet_pending_tx_chain().await?.len() >= 3 {
                         return Ok(false);
                     }
 
                     let receive_fee = self
-                        .module_api
+                        .client_ctx
+                        .module_api()
                         .wallet_receive_fee()
                         .await?
                         .ok_or(anyhow!("No consensus feerate is available"))?;
@@ -405,7 +402,7 @@ impl WalletClientModule {
                 }
             }
 
-            let dbtx = self.db.begin_write().await;
+            let dbtx = self.client_ctx.db().begin_write().await;
 
             dbtx.insert(&NEXT_OUTPUT_INDEX, &(), &(output.index + 1));
 

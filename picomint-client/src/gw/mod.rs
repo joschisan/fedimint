@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::transaction::{Output, TransactionBuilder};
@@ -57,7 +56,6 @@ impl GatewayClientModule {
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<GatewayClientModule> {
-        let module_api = context.module_api();
         let keypair = module_root_secret
             .clone()
             .to_secp_key(picomint_core::secp256k1::SECP256K1);
@@ -93,7 +91,6 @@ impl GatewayClientModule {
             cfg,
             client_ctx: context,
             mint,
-            module_api,
             keypair,
             gateway,
             send_executor,
@@ -109,7 +106,6 @@ pub struct GatewayClientModule {
     pub cfg: LightningConfigConsensus,
     pub client_ctx: ClientContext,
     pub mint: Arc<crate::mint::MintClientModule>,
-    pub module_api: FederationApi,
     pub keypair: Keypair,
     pub gateway: Arc<dyn IGatewayClient>,
     send_executor: ModuleExecutor<SendStateMachine>,
@@ -183,7 +179,8 @@ impl GatewayClientModule {
         // We need to check that the contract has been confirmed by the federation
         // before we start the state machine to prevent DOS attacks.
         let (contract_id, expiration) = self
-            .module_api
+            .client_ctx
+            .module_api()
             .gw_outgoing_contract_expiration(payload.outpoint)
             .await
             .map_err(|_| anyhow!("The gateway can not reach the federation"))?
