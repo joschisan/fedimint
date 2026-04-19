@@ -107,13 +107,13 @@ impl LightningClientModule {
             input_fee: cfg.input_fee,
         };
         let send_executor = ModuleExecutor::new(
-            client_ctx.module_db().clone(),
+            client_ctx.db().clone(),
             sm_context.clone(),
             task_group.clone(),
         )
         .await;
         let receive_executor = ModuleExecutor::new(
-            client_ctx.module_db().clone(),
+            client_ctx.db().clone(),
             sm_context,
             task_group.clone(),
         )
@@ -167,7 +167,7 @@ impl LightningClientModule {
                 }
             }
 
-            let dbtx = self.client_ctx.module_db().begin_write().await;
+            let dbtx = self.client_ctx.db().begin_write().await;
             {
                 let tx = dbtx.as_ref();
                 for (key, gateway) in entries {
@@ -200,7 +200,7 @@ impl LightningClientModule {
         if let Some(invoice) = invoice
             && let Some(gateway) = self
                 .client_ctx
-                .module_db()
+                .db()
                 .begin_read()
                 .await
                 .get(&GATEWAY, &GatewayKey(invoice.recover_payee_pub_key()))
@@ -339,7 +339,7 @@ impl LightningClientModule {
             fee: self.cfg.output_fee,
         });
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
 
         if dbtx
             .as_ref()
@@ -414,7 +414,7 @@ impl LightningClientModule {
             )
             .await?;
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
         let tx = dbtx.as_ref();
 
         let operation_id = self
@@ -626,7 +626,7 @@ impl LightningClientModule {
     async fn receive_lnurl(&self) {
         let stream_index = self
             .client_ctx
-            .module_db()
+            .db()
             .begin_read()
             .await
             .get(&INCOMING_CONTRACT_STREAM_INDEX, &())
@@ -637,7 +637,7 @@ impl LightningClientModule {
             .ln_await_incoming_contracts(stream_index, 128)
             .await;
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
         let tx = dbtx.as_ref();
         for contract in &contracts {
             self.receive_incoming_contract(&tx, self.lnurl_keypair.secret_key(), contract.clone())

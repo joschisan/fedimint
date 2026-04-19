@@ -79,7 +79,7 @@ impl WalletClientModule {
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<WalletClientModule> {
-        let db = context.module_db().clone();
+        let db = context.db().clone();
         let module_api = context.module_api();
         let sm_context = WalletClientContext {
             client_ctx: context.clone(),
@@ -176,7 +176,7 @@ impl WalletClientModule {
             fee: self.cfg.output_fee,
         });
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
 
         let txid = self
             .mint
@@ -272,7 +272,7 @@ impl WalletClientModule {
             fee: self.cfg.input_fee,
         });
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
 
         let txid = self
             .mint

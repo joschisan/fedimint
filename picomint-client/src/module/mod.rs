@@ -18,15 +18,14 @@ use tracing::warn;
 
 use crate::{TxAcceptEvent, TxRejectEvent};
 
-/// A client context for a module `M`. Bundles the per-module API, db
-/// handles, and federation config that module code reaches for via the
-/// generic parameter.
+/// A client context for a module `M`. Bundles the per-module API, the
+/// shared client db, and federation config that module code reaches for
+/// via the generic parameter.
 pub struct ClientContext<M> {
     kind: ModuleKind,
     api: FederationApi,
     api_scope: ApiScope,
     db: Database,
-    module_db: Database,
     config: ConsensusConfig,
     federation_id: FederationId,
     _marker: marker::PhantomData<M>,
@@ -39,7 +38,6 @@ impl<M> Clone for ClientContext<M> {
             api: self.api.clone(),
             api_scope: self.api_scope,
             db: self.db.clone(),
-            module_db: self.module_db.clone(),
             config: self.config.clone(),
             federation_id: self.federation_id,
             _marker: marker::PhantomData,
@@ -54,13 +52,11 @@ impl<M> fmt::Debug for ClientContext<M> {
 }
 
 impl<M> ClientContext<M> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         kind: ModuleKind,
         api: FederationApi,
         api_scope: ApiScope,
         db: Database,
-        module_db: Database,
         config: ConsensusConfig,
         federation_id: FederationId,
     ) -> Self {
@@ -69,7 +65,6 @@ impl<M> ClientContext<M> {
             api,
             api_scope,
             db,
-            module_db,
             config,
             federation_id,
             _marker: marker::PhantomData,
@@ -86,8 +81,8 @@ impl<M> ClientContext<M> {
         self.api.clone().with_scope(self.api_scope)
     }
 
-    pub fn module_db(&self) -> &Database {
-        &self.module_db
+    pub fn db(&self) -> &Database {
+        &self.db
     }
 
     pub async fn await_tx_accepted(
@@ -200,6 +195,6 @@ impl<M> ClientContext<M> {
                 "Client module logging events of different module than its own. This might become an error in the future."
             );
         }
-        picomint_eventlog::log_event(&dbtx.deisolate(), Some(operation_id), event);
+        picomint_eventlog::log_event(dbtx, Some(operation_id), event);
     }
 }

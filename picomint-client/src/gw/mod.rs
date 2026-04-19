@@ -73,19 +73,19 @@ impl GatewayClientModule {
         };
 
         let send_executor = ModuleExecutor::new(
-            context.module_db().clone(),
+            context.db().clone(),
             sm_context.clone(),
             task_group.clone(),
         )
         .await;
         let receive_executor = ModuleExecutor::new(
-            context.module_db().clone(),
+            context.db().clone(),
             sm_context.clone(),
             task_group.clone(),
         )
         .await;
         let complete_executor =
-            ModuleExecutor::new(context.module_db().clone(), sm_context, task_group.clone())
+            ModuleExecutor::new(context.db().clone(), sm_context, task_group.clone())
                 .await;
 
         Ok(GatewayClientModule {
@@ -213,7 +213,7 @@ impl GatewayClientModule {
             .min_contract_amount(&payload.federation_id, amount)
             .await?;
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
         let tx = dbtx.as_ref();
 
         if tx.insert(&db::OPERATION, &operation_id, &()).is_some() {
@@ -285,7 +285,7 @@ impl GatewayClientModule {
             fee: self.cfg.output_fee,
         });
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
 
         if dbtx
             .as_ref()
@@ -356,7 +356,7 @@ impl GatewayClientModule {
             fee: self.cfg.output_fee,
         });
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
 
         if dbtx
             .as_ref()

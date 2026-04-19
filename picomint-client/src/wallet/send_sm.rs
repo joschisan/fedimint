@@ -25,7 +25,7 @@ pub enum AwaitFundingResult {
 }
 
 impl StateMachine for SendStateMachine {
-    const TABLE_NAME: &'static str = "send-sm";
+    const TABLE_NAME: &'static str = "wallet-send-sm";
 
     type Context = WalletClientContext;
     type Outcome = AwaitFundingResult;

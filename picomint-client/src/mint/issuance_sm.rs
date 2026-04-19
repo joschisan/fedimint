@@ -31,7 +31,7 @@ pub struct IssuanceStateMachine {
 picomint_redb::consensus_value!(IssuanceStateMachine);
 
 impl StateMachine for IssuanceStateMachine {
-    const TABLE_NAME: &'static str = "issuance-sm";
+    const TABLE_NAME: &'static str = "mint-issuance-sm";
 
     type Context = MintSmContext;
     type Outcome = Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>;

@@ -13,13 +13,13 @@ use super::issuance::NoteIssuanceRequest;
 table!(
     RECEIVE_OPERATION,
     OperationId => (),
-    "receive-operation",
+    "mint-receive-operation",
 );
 
 table!(
     NOTE,
     SpendableNote => (),
-    "note",
+    "mint-note",
 );
 
 /// Recovery state that can be checkpointed and resumed
@@ -41,5 +41,5 @@ picomint_redb::consensus_value!(RecoveryState);
 table!(
     RECOVERY_STATE,
     () => RecoveryState,
-    "recovery-state",
+    "mint-recovery-state",
 );

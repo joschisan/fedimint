@@ -186,7 +186,6 @@ impl Client {
             api.clone(),
             ApiScope::Mint,
             db.clone(),
-            db.isolate("mint".to_string()),
             config.clone(),
             fed_id,
         );
@@ -195,7 +194,6 @@ impl Client {
                 fed_id,
                 config.mint.clone(),
                 mint_context,
-                db.clone(),
                 &root_secret.derive_module_secret(ModuleKind::Mint),
                 &task_group,
             )
@@ -207,7 +205,6 @@ impl Client {
             api.clone(),
             ApiScope::Wallet,
             db.clone(),
-            db.isolate("wallet".to_string()),
             config.clone(),
             fed_id,
         );
@@ -230,7 +227,6 @@ impl Client {
                     api.clone(),
                     ApiScope::Ln,
                     db.clone(),
-                    db.isolate("ln".to_string()),
                     config.clone(),
                     fed_id,
                 );
@@ -252,7 +248,6 @@ impl Client {
                     api.clone(),
                     ApiScope::Ln,
                     db.clone(),
-                    db.isolate("ln".to_string()),
                     config.clone(),
                     fed_id,
                 );
@@ -355,21 +350,21 @@ impl Client {
         &'_ self,
     ) -> anyhow::Result<ClientModuleInstance<'_, M>> {
         let tid = TypeId::of::<M>();
-        let (module_any, kind, scope): (&(dyn Any + Send + Sync), ModuleKind, ApiScope) =
+        let (module_any, scope): (&(dyn Any + Send + Sync), ApiScope) =
             if tid == TypeId::of::<MintClientModule>() {
-                (&*self.mint, ModuleKind::Mint, ApiScope::Mint)
+                (&*self.mint, ApiScope::Mint)
             } else if tid == TypeId::of::<WalletClientModule>() {
-                (&*self.wallet, ModuleKind::Wallet, ApiScope::Wallet)
+                (&*self.wallet, ApiScope::Wallet)
             } else if tid == TypeId::of::<LightningClientModule>() {
                 match &self.ln {
-                    LnFlavor::Regular(m) => (&**m, ModuleKind::Ln, ApiScope::Ln),
+                    LnFlavor::Regular(m) => (&**m, ApiScope::Ln),
                     LnFlavor::Gateway(_) => {
                         bail!("LightningClientModule is not mounted on this client")
                     }
                 }
             } else if tid == TypeId::of::<GatewayClientModule>() {
                 match &self.ln {
-                    LnFlavor::Gateway(m) => (&**m, ModuleKind::Ln, ApiScope::Ln),
+                    LnFlavor::Gateway(m) => (&**m, ApiScope::Ln),
                     LnFlavor::Regular(_) => {
                         bail!("GatewayClientModule is not mounted on this client")
                     }
@@ -381,13 +376,8 @@ impl Client {
         let module: &M = module_any
             .downcast_ref::<M>()
             .expect("TypeId of M was just matched");
-        let db = self.db().isolate(match kind {
-            ModuleKind::Mint => "mint".to_string(),
-            ModuleKind::Wallet => "wallet".to_string(),
-            ModuleKind::Ln => "ln".to_string(),
-        });
         Ok(ClientModuleInstance {
-            db,
+            db: self.db().clone(),
             api: self.api().with_scope(scope),
             module,
         })
@@ -403,10 +393,7 @@ impl Client {
 
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {
         let dbtx = self.db().begin_write().await;
-        Ok(self
-            .mint
-            .get_balance(&dbtx.as_ref().isolate("mint".to_string()))
-            .await)
+        Ok(self.mint.get_balance(&dbtx.as_ref()).await)
     }
 
     /// Returns a stream that yields the current client balance every time it
@@ -423,11 +410,7 @@ impl Client {
             loop {
                 let notified = notify.notified();
                 let dbtx = db.begin_write().await;
-                let balance = mint
-                    .get_balance(
-                        &dbtx.as_ref().isolate("mint".to_string()),
-                    )
-                    .await;
+                let balance = mint.get_balance(&dbtx.as_ref()).await;
 
                 // Deduplicate in case modules cannot always tell if the balance actually changed
                 if balance != prev_balance {

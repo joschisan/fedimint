@@ -26,7 +26,7 @@ pub struct ReceiveStateMachine {
 picomint_redb::consensus_value!(ReceiveStateMachine);
 
 impl StateMachine for ReceiveStateMachine {
-    const TABLE_NAME: &'static str = "receive-sm";
+    const TABLE_NAME: &'static str = "ln-receive-sm";
 
     type Context = LightningClientContext;
     type Outcome = Option<OutPoint>;

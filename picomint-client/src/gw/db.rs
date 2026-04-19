@@ -8,5 +8,5 @@ use picomint_redb::table;
 table!(
     OPERATION,
     OperationId => (),
-    "operation",
+    "gw-operation",
 );

@@ -207,7 +207,6 @@ impl MintClientModule {
         federation_id: FederationId,
         cfg: MintConfigConsensus,
         context: ClientContext<MintClientModule>,
-        db: Database,
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<MintClientModule> {
@@ -236,14 +235,14 @@ impl MintClientModule {
         };
 
         let issuance_executor = crate::executor::ModuleExecutor::new(
-            context.module_db().clone(),
+            context.db().clone(),
             sm_context,
             task_group.clone(),
         )
         .await;
 
         let tx_submission_executor = crate::executor::ModuleExecutor::new(
-            db.clone(),
+            context.db().clone(),
             TxSubmissionSmContext {
                 api: context.global_api(),
             },
@@ -297,23 +296,15 @@ impl MintClientModule {
     /// submit the resulting transaction, and spawn the
     /// `IssuanceStateMachine` that tracks the balance-side notes/requests
     /// (if any).
-    ///
-    /// `dbtx` is the caller's writable transaction. It may be scoped to any
-    /// module's namespace; mint reaches both its own isolate (for the
-    /// spendable-note table) and root (for the tx-submission table and the
-    /// event log) via `deisolate`/`isolate`.
     pub async fn finalize_and_submit_transaction(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         mut builder: TransactionBuilder,
     ) -> anyhow::Result<TransactionId> {
-        let root = dbtx.deisolate();
-        let mint_dbtx = root.isolate("mint");
+        let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder).await?;
 
-        let (spendable_notes, issuance_requests) = self.balance(&mint_dbtx, &mut builder).await?;
-
-        let txid = self.submit(&root, operation_id, builder).await?;
+        let txid = self.submit(dbtx, operation_id, builder).await?;
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
             let sm = IssuanceStateMachine {
@@ -322,9 +313,7 @@ impl MintClientModule {
                 txid: Some(txid),
                 issuance_requests,
             };
-            self.issuance_executor
-                .add_state_machine_dbtx(&mint_dbtx, sm)
-                .await;
+            self.issuance_executor.add_state_machine_dbtx(dbtx, sm).await;
         }
 
         Ok(txid)
@@ -387,8 +376,7 @@ impl MintClientModule {
     }
 
     /// Sign the builder, size-check the encoded transaction, and spawn the
-    /// `TxSubmissionStateMachine`. `dbtx` must be the root (deisolated)
-    /// transaction so the state machine row lands in the correct namespace.
+    /// `TxSubmissionStateMachine`.
     async fn submit(
         &self,
         dbtx: &WriteTxRef<'_>,
@@ -424,7 +412,7 @@ impl MintClientModule {
     }
 
     pub fn balance_notify(&self) -> Arc<tokio::sync::Notify> {
-        self.client_ctx.module_db().notify_for_table(&NOTE)
+        self.client_ctx.db().notify_for_table(&NOTE)
     }
 
     async fn select_funding_input(
@@ -535,7 +523,7 @@ impl MintClientModule {
 impl MintClientModule {
     /// Count the `ECash` notes in the client's database by denomination.
     pub async fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
 
         self.get_count_by_denomination_dbtx(&dbtx.as_ref()).await
     }
@@ -565,7 +553,7 @@ impl MintClientModule {
     pub async fn send(&self, amount: Amount) -> Result<ECash, SendECashError> {
         let amount = round_to_multiple(amount, client_denominations().next().unwrap().amount());
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
 
         let ecash = self
             .send_ecash_dbtx(&dbtx.as_ref(), amount)
@@ -608,17 +596,16 @@ impl MintClientModule {
             });
         }
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
-        let mint_dbtx = dbtx.as_ref();
-        let root_dbtx = mint_dbtx.deisolate();
+        let dbtx = self.client_ctx.db().begin_write().await;
+        let tx = dbtx.as_ref();
 
         let (funding_notes, change_requests) = self
-            .balance(&mint_dbtx, &mut builder)
+            .balance(&tx, &mut builder)
             .await
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
         let txid = self
-            .submit(&root_dbtx, operation_id, builder)
+            .submit(&tx, operation_id, builder)
             .await
             .map_err(|_| SendECashError::Failure)?;
 
@@ -631,12 +618,10 @@ impl MintClientModule {
             issuance_requests,
         };
 
-        self.issuance_executor
-            .add_state_machine_dbtx(&mint_dbtx, sm)
-            .await;
+        self.issuance_executor.add_state_machine_dbtx(&tx, sm).await;
 
         self.client_ctx
-            .log_event(&mint_dbtx, operation_id, ReissueEvent { txid })
+            .log_event(&tx, operation_id, ReissueEvent { txid })
             .await;
 
         dbtx.commit().await;
@@ -725,7 +710,7 @@ impl MintClientModule {
             });
         }
 
-        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write().await;
 
         if dbtx
             .as_ref()

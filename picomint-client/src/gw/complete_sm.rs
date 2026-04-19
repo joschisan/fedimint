@@ -53,7 +53,7 @@ pub enum CompleteOutcome {
 }
 
 impl StateMachine for CompleteStateMachine {
-    const TABLE_NAME: &'static str = "complete-sm";
+    const TABLE_NAME: &'static str = "gw-complete-sm";
 
     type Context = GwSmContext;
     type Outcome = CompleteOutcome;

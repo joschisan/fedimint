@@ -12,13 +12,13 @@ picomint_redb::consensus_key!(GatewayKey);
 table!(
     GATEWAY,
     GatewayKey => SafeUrl,
-    "gateway",
+    "ln-gateway",
 );
 
 table!(
     INCOMING_CONTRACT_STREAM_INDEX,
     () => u64,
-    "incoming-contract-stream-index",
+    "ln-incoming-contract-stream-index",
 );
 
 // Tracks that a send operation has been started for this [`OperationId`].
@@ -27,5 +27,5 @@ table!(
 table!(
     SEND_OPERATION,
     OperationId => (),
-    "send-operation",
+    "ln-send-operation",
 );

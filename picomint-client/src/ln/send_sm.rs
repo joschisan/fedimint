@@ -68,7 +68,7 @@ pub enum SendOutcome {
 /// State machine that requests the lightning gateway to pay an invoice on
 /// behalf of a federation client.
 impl StateMachine for SendStateMachine {
-    const TABLE_NAME: &'static str = "send-sm";
+    const TABLE_NAME: &'static str = "ln-send-sm";
 
     type Context = LightningClientContext;
     type Outcome = SendOutcome;

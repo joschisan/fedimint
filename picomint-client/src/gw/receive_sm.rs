@@ -36,7 +36,7 @@ pub struct ReceiveStateMachine {
 picomint_redb::consensus_value!(ReceiveStateMachine);
 
 impl StateMachine for ReceiveStateMachine {
-    const TABLE_NAME: &'static str = "receive-sm";
+    const TABLE_NAME: &'static str = "gw-receive-sm";
 
     type Context = GwSmContext;
     type Outcome = Result<BTreeMap<PeerId, DecryptionKeyShare>, String>;
