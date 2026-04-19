@@ -30,7 +30,6 @@ iroh = { workspace = true, default-features = false }
 ldk-node = { workspace = true }
 lightning-invoice = { workspace = true }
 lightning-types = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

@@ -4050,7 +4050,6 @@ dependencies = [
  "picomint-logging",
  "picomint-redb",
  "picomint-server-cli-core",
- "reqwest 0.12.22",
  "serde",
  "serde_json",
  "tempfile",

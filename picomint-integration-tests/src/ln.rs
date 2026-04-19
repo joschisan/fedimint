@@ -14,15 +14,20 @@ use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::secp256k1::{Keypair, SECP256K1, SecretKey};
 use futures::StreamExt;
 use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
-use picomint_client::Client;
+use picomint_client::ln::SendPaymentError;
 use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
-use picomint_core::Amount;
+use picomint_client::transaction::{Input, TransactionBuilder};
+use picomint_client::{Client, OperationId};
 use picomint_core::config::FederationId;
 use picomint_core::ln::endpoint_constants::{ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT};
 use picomint_core::ln::gateway_api::{PaymentFee, RoutingInfo, SendPaymentPayload};
-use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
+use picomint_core::ln::{
+    Bolt11InvoiceDescription, LightningInput, LightningInvoice, OutgoingWitness,
+};
 use picomint_core::util::SafeUrl;
+use picomint_core::{Amount, OutPoint, wire};
 use picomint_eventlog::{EventLogEntry, EventLogId};
+use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -86,6 +91,16 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     test_payments(env, client_send).await?;
     test_gateway_registration(env).await?;
     test_direct_ln_payments(env).await?;
+
+    let mock_gw = spawn_mock_gateway().await?;
+
+    test_mock_send_exactly_once(client_send, mock_gw.clone()).await?;
+    test_mock_send_refund_forfeit(client_send, mock_gw.clone()).await?;
+    test_mock_wrong_network(client_send, mock_gw.clone()).await?;
+    test_claim_outgoing_contract(client_send, mock_gw.clone()).await?;
+    test_unilateral_refund(env, client_send, mock_gw).await?;
+
+    test_lnurl_recurringd_roundtrip(env).await?;
 
     Ok(())
 }
@@ -302,6 +317,306 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     Ok(())
 }
 
+/// Consume the stream until an entry for `op` matches `predicate`, and
+/// return that entry. Skips events from other operations (the shared
+/// `client_send` accumulates history across tests).
+async fn wait_ln_event<S>(
+    events: &mut std::pin::Pin<&mut S>,
+    op: OperationId,
+    predicate: impl Fn(&LnEvent) -> bool,
+) -> LnEvent
+where
+    S: futures::Stream<Item = (OperationId, LnEvent)>,
+{
+    loop {
+        let Some((event_op, event)) = events.next().await else {
+            panic!("event stream ended while waiting for op {op:?}");
+        };
+
+        if event_op == op && predicate(&event) {
+            return event;
+        }
+    }
+}
+
+async fn wait_tx_accepted(
+    client: &Arc<Client>,
+    op: OperationId,
+    txid: picomint_core::TransactionId,
+) {
+    let mut stream = client.subscribe_operation_events(op);
+
+    while let Some(entry) = stream.next().await {
+        if let Some(ev) = entry.to_event::<picomint_client::TxAcceptEvent>()
+            && ev.txid == txid
+        {
+            return;
+        }
+
+        if let Some(ev) = entry.to_event::<picomint_client::TxRejectEvent>()
+            && ev.txid == txid
+        {
+            panic!("tx {txid} rejected: {}", ev.error);
+        }
+    }
+
+    panic!("operation event stream ended");
+}
+
+async fn test_mock_send_exactly_once(client: &Arc<Client>, mock_gw: SafeUrl) -> anyhow::Result<()> {
+    info!("ln: test_mock_send_exactly_once");
+
+    let ln = client.ln();
+
+    let invoice = payable_invoice();
+
+    let mut events = pin!(ln_event_stream(client));
+
+    let send_op = ln.send(invoice.clone(), Some(mock_gw.clone())).await?;
+
+    wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
+    wait_ln_event(&mut events, send_op, |e| {
+        matches!(e, LnEvent::SendSuccess(_))
+    })
+    .await;
+
+    match ln.send(invoice, Some(mock_gw)).await {
+        Err(SendPaymentError::InvoiceAlreadyAttempted(op)) => assert_eq!(op, send_op),
+        other => panic!("Expected InvoiceAlreadyAttempted, got {other:?}"),
+    }
+
+    info!("ln: test_mock_send_exactly_once passed");
+
+    Ok(())
+}
+
+async fn test_mock_send_refund_forfeit(
+    client: &Arc<Client>,
+    mock_gw: SafeUrl,
+) -> anyhow::Result<()> {
+    info!("ln: test_mock_send_refund_forfeit");
+
+    let mut events = pin!(ln_event_stream(client));
+
+    let send_op = client.ln().send(unpayable_invoice(), Some(mock_gw)).await?;
+
+    wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
+    wait_ln_event(&mut events, send_op, |e| {
+        matches!(e, LnEvent::SendRefund(_))
+    })
+    .await;
+
+    info!("ln: test_mock_send_refund_forfeit passed");
+
+    Ok(())
+}
+
+async fn test_mock_wrong_network(client: &Arc<Client>, mock_gw: SafeUrl) -> anyhow::Result<()> {
+    info!("ln: test_mock_wrong_network");
+
+    match client.ln().send(signet_invoice(), Some(mock_gw)).await {
+        Err(SendPaymentError::WrongCurrency {
+            invoice_currency: Currency::Signet,
+            federation_currency: Currency::Regtest,
+        }) => {}
+        other => panic!("Expected WrongCurrency, got {other:?}"),
+    }
+
+    info!("ln: test_mock_wrong_network passed");
+
+    Ok(())
+}
+
+async fn test_claim_outgoing_contract(
+    client: &Arc<Client>,
+    mock_gw: SafeUrl,
+) -> anyhow::Result<()> {
+    info!("ln: test_claim_outgoing_contract");
+
+    let ln = client.ln();
+
+    let mut events = pin!(ln_event_stream(client));
+
+    // Crash scenario: mock HTTP-500s on `send_payment`, so the client loops
+    // retrying indefinitely — giving us room to claim the on-chain contract
+    // manually before the client ever sees a gateway response.
+    let preimage = [12u8; 32];
+
+    let send_op = ln.send(crash_invoice(preimage), Some(mock_gw)).await?;
+
+    let send_event =
+        match wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await {
+            LnEvent::Send(e) => e,
+            _ => unreachable!(),
+        };
+
+    let outpoint = OutPoint {
+        txid: send_event.txid,
+        out_idx: 0,
+    };
+
+    // Wait for the outgoing-contract tx to be accepted before we try to spend
+    // it as an input.
+    wait_tx_accepted(client, send_op, send_event.txid).await;
+
+    // `SendEvent.amount` is already `send_fee.add_to(invoice_amount)` —
+    // i.e. the on-chain contract amount. No further fee addition here.
+    let tx_builder = TransactionBuilder::from_input(Input {
+        input: wire::Input::Ln(LightningInput::Outgoing(
+            outpoint,
+            OutgoingWitness::Claim(preimage),
+        )),
+        keypair: gateway_keypair(),
+        amount: send_event.amount,
+        fee: ln.input_fee(),
+    });
+
+    let dbtx = client.db().begin_write().await;
+
+    client
+        .mint()
+        .finalize_and_submit_transaction(&dbtx.as_ref(), OperationId::new_random(), tx_builder)
+        .await?;
+
+    dbtx.commit().await;
+
+    wait_ln_event(&mut events, send_op, |e| {
+        matches!(e, LnEvent::SendSuccess(_))
+    })
+    .await;
+
+    info!("ln: test_claim_outgoing_contract passed");
+
+    Ok(())
+}
+
+async fn test_unilateral_refund(
+    env: &TestEnv,
+    client: &Arc<Client>,
+    mock_gw: SafeUrl,
+) -> anyhow::Result<()> {
+    info!("ln: test_unilateral_refund");
+
+    let mut events = pin!(ln_event_stream(client));
+
+    // Same crash scenario — the mock never settles, and without any on-chain
+    // preimage reveal the contract must eventually expire so the client can
+    // pull its funds back via `OutgoingWitness::Refund`.
+    let send_op = client
+        .ln()
+        .send(crash_invoice([13; 32]), Some(mock_gw))
+        .await?;
+
+    wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
+
+    // Contract expiration = consensus_block_count + expiration_delta +
+    // CONTRACT_CONFIRMATION_BUFFER = +62 blocks with the mock's settings.
+    // Mine 100 so the consensus block count comfortably crosses it.
+    env.mine_blocks(100);
+
+    wait_ln_event(&mut events, send_op, |e| {
+        matches!(e, LnEvent::SendRefund(_))
+    })
+    .await;
+
+    info!("ln: test_unilateral_refund passed");
+
+    Ok(())
+}
+
+async fn test_lnurl_recurringd_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
+    info!("ln: test_lnurl_recurringd_roundtrip");
+
+    // Fresh client so the receive-event stream starts empty.
+    let client = env.new_client().await?;
+
+    let gw: SafeUrl = env.gw_public.parse()?;
+    let recurringd: SafeUrl = env.recurring_url.parse()?;
+
+    let lnurl = client
+        .ln()
+        .generate_lnurl(recurringd, Some(gw))
+        .await
+        .map_err(|e| anyhow::anyhow!("generate_lnurl: {e}"))?;
+
+    let pay_url = parse_lnurl(&lnurl).ok_or_else(|| anyhow::anyhow!("parse_lnurl"))?;
+
+    let pay_response = lnurl_request(&pay_url).await.map_err(anyhow::Error::msg)?;
+
+    let invoice_response = get_invoice(&pay_response, 500_000)
+        .await
+        .map_err(anyhow::Error::msg)?;
+
+    let verify_url = invoice_response
+        .verify
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("missing verify url"))?;
+
+    // Pre-payment: verify endpoint returns unsettled + no preimage.
+    let pre = verify_invoice(&verify_url)
+        .await
+        .map_err(anyhow::Error::msg)?;
+
+    ensure!(!pre.settled, "verify should not be settled pre-payment");
+    ensure!(
+        pre.preimage.is_none(),
+        "preimage should be absent pre-payment"
+    );
+
+    // Long-poll `?wait` in parallel with the payment — must return the same
+    // settled response the post-payment GET sees.
+    let wait_task = {
+        let url = format!("{verify_url}?wait");
+        tokio::spawn(async move { verify_invoice(&url).await })
+    };
+
+    let mut events = pin!(ln_event_stream(&client));
+
+    env.ldk_node
+        .bolt11_payment()
+        .send(&invoice_response.pr, None)
+        .map_err(|e| anyhow::anyhow!("ldk pay: {e:?}"))?;
+
+    // Wait for the scanner to claim the contract. Fresh client = no
+    // historical receive events, so the first ReceiveEvent is ours.
+    loop {
+        let Some((_, ev)) = events.next().await else {
+            panic!("event stream ended");
+        };
+
+        if matches!(ev, LnEvent::Receive(_)) {
+            break;
+        }
+    }
+
+    // Post-payment: verify endpoint reflects the preimage, which hashes
+    // back to the invoice's payment hash.
+    let post = verify_invoice(&verify_url)
+        .await
+        .map_err(anyhow::Error::msg)?;
+
+    ensure!(post.settled, "verify should be settled post-payment");
+
+    let preimage = post
+        .preimage
+        .ok_or_else(|| anyhow::anyhow!("no preimage"))?;
+
+    ensure!(
+        sha256::Hash::hash(&preimage) == *invoice_response.pr.payment_hash(),
+        "preimage doesn't match invoice hash"
+    );
+
+    let waited = wait_task.await?.map_err(anyhow::Error::msg)?;
+
+    assert_eq!(waited, post);
+
+    client.shutdown().await;
+
+    info!("ln: test_lnurl_recurringd_roundtrip passed");
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Mock gateway used by send-path tests.
 //
@@ -312,14 +627,16 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
 // because picomint doesn't abstract over the gateway connection.
 // ---------------------------------------------------------------------------
 
-const MOCK_GW_PORT: u16 = 28200;
-
 const GATEWAY_SECRET: [u8; 32] = [1; 32];
 const INVOICE_SECRET: [u8; 32] = [2; 32];
 
-const MOCK_PREIMAGE: [u8; 32] = [3; 32];
+// Scenario selectors: embedded in the invoice's `payment_secret` to pick a
+// branch in `mock_send_payment`; the preimage defines the invoice's
+// `payment_hash` (so the federation's preimage check succeeds server-side
+// and each test's operation_id — derived from the payment hash — is unique).
+const PAYABLE_PREIMAGE: [u8; 32] = [10; 32];
+const UNPAYABLE_PREIMAGE: [u8; 32] = [11; 32];
 
-// Scenario selectors embedded in the invoice's `payment_secret`.
 const PAYABLE_PAYMENT_SECRET: [u8; 32] = [211; 32];
 const UNPAYABLE_PAYMENT_SECRET: [u8; 32] = [212; 32];
 const CRASH_PAYMENT_SECRET: [u8; 32] = [213; 32];
@@ -331,28 +648,34 @@ fn gateway_keypair() -> Keypair {
 }
 
 fn payable_invoice() -> Bolt11Invoice {
-    mock_invoice(PAYABLE_PAYMENT_SECRET, Currency::Regtest)
+    mock_invoice(PAYABLE_PREIMAGE, PAYABLE_PAYMENT_SECRET, Currency::Regtest)
 }
 
 fn unpayable_invoice() -> Bolt11Invoice {
-    mock_invoice(UNPAYABLE_PAYMENT_SECRET, Currency::Regtest)
+    mock_invoice(
+        UNPAYABLE_PREIMAGE,
+        UNPAYABLE_PAYMENT_SECRET,
+        Currency::Regtest,
+    )
 }
 
-fn crash_invoice() -> Bolt11Invoice {
-    mock_invoice(CRASH_PAYMENT_SECRET, Currency::Regtest)
+/// Invoice that triggers the mock's crash branch (HTTP 500, gateway never
+/// resolves). Each caller supplies its own preimage so its operation_id
+/// (derived from the payment hash) is distinct.
+fn crash_invoice(preimage: [u8; 32]) -> Bolt11Invoice {
+    mock_invoice(preimage, CRASH_PAYMENT_SECRET, Currency::Regtest)
 }
 
 fn signet_invoice() -> Bolt11Invoice {
-    mock_invoice(PAYABLE_PAYMENT_SECRET, Currency::Signet)
+    mock_invoice(PAYABLE_PREIMAGE, PAYABLE_PAYMENT_SECRET, Currency::Signet)
 }
 
-fn mock_invoice(payment_secret: [u8; 32], currency: Currency) -> Bolt11Invoice {
+fn mock_invoice(preimage: [u8; 32], payment_secret: [u8; 32], currency: Currency) -> Bolt11Invoice {
     let sk = SecretKey::from_slice(&INVOICE_SECRET).expect("valid secret");
-    let payment_hash = sha256::Hash::hash(&MOCK_PREIMAGE);
 
     InvoiceBuilder::new(currency)
         .description(String::new())
-        .payment_hash(payment_hash)
+        .payment_hash(sha256::Hash::hash(&preimage))
         .current_timestamp()
         .min_final_cltv_expiry_delta(0)
         .payment_secret(PaymentSecret(payment_secret))
@@ -362,37 +685,33 @@ fn mock_invoice(payment_secret: [u8; 32], currency: Currency) -> Bolt11Invoice {
         .expect("invoice build")
 }
 
-fn mock_gateway_url() -> SafeUrl {
-    format!("http://127.0.0.1:{MOCK_GW_PORT}")
-        .parse()
-        .expect("valid url")
-}
-
-async fn spawn_mock_gateway() -> anyhow::Result<()> {
+async fn spawn_mock_gateway() -> anyhow::Result<SafeUrl> {
     let app = Router::new()
         .route(ROUTING_INFO_ENDPOINT, post(mock_routing_info))
         .route(SEND_PAYMENT_ENDPOINT, post(mock_send_payment));
 
-    let addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, MOCK_GW_PORT);
-    let listener = TcpListener::bind(addr).await?;
+    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).await?;
+
+    let addr = listener.local_addr()?;
 
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
 
-    Ok(())
+    Ok(format!("http://{addr}").parse().expect("valid url"))
 }
 
-async fn mock_routing_info(
-    Json(_federation_id): Json<FederationId>,
-) -> Json<Option<RoutingInfo>> {
+async fn mock_routing_info(Json(_federation_id): Json<FederationId>) -> Json<Option<RoutingInfo>> {
+    // Short expiration deltas keep the unilateral-refund test fast — the
+    // federation's consensus block count must advance past the contract's
+    // expiration for `await_preimage` to return `None`.
     Json(Some(RoutingInfo {
         lightning_public_key: gateway_keypair().public_key(),
         module_public_key: gateway_keypair().public_key(),
         send_fee_minimum: PaymentFee::TRANSACTION_FEE_DEFAULT,
         send_fee_default: PaymentFee::TRANSACTION_FEE_DEFAULT,
-        expiration_delta_minimum: 144,
-        expiration_delta_default: 500,
+        expiration_delta_minimum: 50,
+        expiration_delta_default: 50,
         receive_fee: PaymentFee::TRANSACTION_FEE_DEFAULT,
     }))
 }
@@ -410,9 +729,9 @@ async fn mock_send_payment(
 
     if payment_secret == UNPAYABLE_PAYMENT_SECRET {
         return Ok(Json(Err(
-            gateway_keypair().sign_schnorr(payload.contract.forfeit_message()),
+            gateway_keypair().sign_schnorr(payload.contract.forfeit_message())
         )));
     }
 
-    Ok(Json(Ok(MOCK_PREIMAGE)))
+    Ok(Json(Ok(PAYABLE_PREIMAGE)))
 }
