@@ -50,7 +50,6 @@ pub(crate) enum LnFlavor {
 /// for them to finish.
 pub struct Client {
     config: tokio::sync::RwLock<ConsensusConfig>,
-    connectors: Endpoint,
     db: Database,
     federation_id: FederationId,
     federation_config_meta: BTreeMap<String, String>,
@@ -199,7 +198,6 @@ impl Client {
         Ok(Arc::new(Client {
             config: tokio::sync::RwLock::new(config.clone()),
             db,
-            connectors,
             federation_id: fed_id,
             federation_config_meta: config.meta,
             mint,
@@ -221,19 +219,10 @@ impl Client {
         &self.api
     }
 
-    pub fn api_clone(&self) -> FederationApi {
-        self.api.clone()
-    }
-
     /// Returns a stream that emits the current connection status of all peers
     /// whenever any peer's status changes. Emits initial state immediately.
     pub fn connection_status_stream(&self) -> impl Stream<Item = BTreeMap<PeerId, bool>> {
         self.api.connection_status_stream()
-    }
-
-    /// Get the [`TaskGroup`] that is tied to Client's lifetime.
-    pub fn task_group(&self) -> &TaskGroup {
-        &self.task_group
     }
 
     pub fn federation_id(&self) -> FederationId {
@@ -277,10 +266,6 @@ impl Client {
 
     pub fn db(&self) -> &Database {
         &self.db
-    }
-
-    pub fn endpoints(&self) -> &Endpoint {
-        &self.connectors
     }
 
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {

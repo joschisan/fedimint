@@ -155,11 +155,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("mint: double_spend_is_rejected passed");
 
-    client_receive
-        .task_group()
-        .clone()
-        .shutdown_join_all(None)
-        .await?;
+    client_receive.shutdown().await;
 
     Ok(())
 }

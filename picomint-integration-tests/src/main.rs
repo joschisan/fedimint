@@ -37,7 +37,7 @@ fn main() -> anyhow::Result<()> {
 
     info!("Shutting down the primary test client!");
 
-    runtime.block_on(client_send.task_group().clone().shutdown_join_all(None))?;
+    runtime.block_on(client_send.shutdown());
 
     info!("Running guardian backup/restore test...");
     runtime.block_on(restore::run_test(&env))?;
