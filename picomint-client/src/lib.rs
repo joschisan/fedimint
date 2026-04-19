@@ -54,7 +54,6 @@ use picomint_logging::LOG_CLIENT_NET;
 use query::FilterMap;
 use tracing::debug;
 
-pub use client::handle::{ClientHandle, ClientHandleArc};
 pub use client::Client;
 pub use secret::{Mnemonic, random as random_mnemonic};
 pub use picomint_core::core::{ModuleKind, OperationId};

@@ -82,7 +82,7 @@ impl GatewayClientFactory {
         &self,
         invite: &InviteCode,
         gateway: Arc<AppState>,
-    ) -> anyhow::Result<picomint_client::ClientHandleArc> {
+    ) -> anyhow::Result<Arc<picomint_client::Client>> {
         let config = picomint_client::download(&self.connectors, invite).await?;
 
         let dbtx = self.db.begin_write().await;
@@ -106,7 +106,7 @@ impl GatewayClientFactory {
         &self,
         federation_id: &FederationId,
         gateway: Arc<AppState>,
-    ) -> anyhow::Result<Option<picomint_client::ClientHandleArc>> {
+    ) -> anyhow::Result<Option<Arc<picomint_client::Client>>> {
         match self.read_config(federation_id).await {
             Some(config) => self.open(config, gateway).await.map(Some),
             None => Ok(None),
@@ -117,7 +117,7 @@ impl GatewayClientFactory {
         &self,
         config: ConsensusConfig,
         gateway: Arc<AppState>,
-    ) -> anyhow::Result<picomint_client::ClientHandleArc> {
+    ) -> anyhow::Result<Arc<picomint_client::Client>> {
         Client::new_gateway(
             self.connectors.clone(),
             self.client_database(config.calculate_federation_id()),
@@ -126,7 +126,6 @@ impl GatewayClientFactory {
             gateway as Arc<dyn IGatewayClient>,
         )
         .await
-        .map(Arc::new)
         .map_err(|e| anyhow::anyhow!("Client open error: {e}"))
     }
 

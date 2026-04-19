@@ -23,8 +23,6 @@ use picomint_logging::LOG_CLIENT;
 use picomint_redb::Database;
 use tracing::debug;
 
-pub(crate) mod handle;
-
 /// LN-flavor selection used by the two constructors below.
 enum LnChoice {
     Regular,
@@ -46,12 +44,10 @@ pub(crate) enum LnFlavor {
 /// the same time, will need to instantiate and manage multiple instances of
 /// this struct.
 ///
-/// Under the hood it is starting and managing service tasks, state machines,
-/// database and other resources required.
-///
-/// This type is shared externally and internally, and
-/// [`crate::ClientHandle`] is responsible for external lifecycle management
-/// and resource freeing of the [`Client`].
+/// Under the hood it owns service tasks, state machines, database, and other
+/// resources. Dropping the last [`Arc<Client>`] cancels all spawned tasks
+/// (best-effort, non-blocking); call [`Client::shutdown`] explicitly to wait
+/// for them to finish.
 pub struct Client {
     config: tokio::sync::RwLock<ConsensusConfig>,
     connectors: Endpoint,
@@ -74,7 +70,7 @@ impl Client {
         db: Database,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
-    ) -> anyhow::Result<handle::ClientHandle> {
+    ) -> anyhow::Result<Arc<Self>> {
         Self::build(connectors, db, mnemonic, config, LnChoice::Regular).await
     }
 
@@ -87,7 +83,7 @@ impl Client {
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
         gateway: Arc<dyn IGatewayClient>,
-    ) -> anyhow::Result<handle::ClientHandle> {
+    ) -> anyhow::Result<Arc<Self>> {
         Self::build(connectors, db, mnemonic, config, LnChoice::Gateway(gateway)).await
     }
 
@@ -97,7 +93,7 @@ impl Client {
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
         ln_choice: LnChoice,
-    ) -> anyhow::Result<handle::ClientHandle> {
+    ) -> anyhow::Result<Arc<Self>> {
         debug!(
             target: LOG_CLIENT,
             version = %env!("CARGO_PKG_VERSION"),
@@ -200,7 +196,7 @@ impl Client {
             }
         };
 
-        let client_inner = Arc::new(Client {
+        Ok(Arc::new(Client {
             config: tokio::sync::RwLock::new(config.clone()),
             db,
             connectors,
@@ -210,10 +206,15 @@ impl Client {
             wallet,
             ln,
             api,
-            task_group: task_group.clone(),
-        });
+            task_group,
+        }))
+    }
 
-        Ok(handle::ClientHandle::new(client_inner))
+    /// Cancel all spawned tasks and wait for them to finish. No timeout —
+    /// blocks until every state machine driver and background task has
+    /// observed cancellation and exited cleanly.
+    pub async fn shutdown(&self) {
+        let _ = self.task_group.clone().shutdown_join_all(None).await;
     }
 
     pub fn api(&self) -> &FederationApi {
@@ -386,5 +387,14 @@ impl Client {
 impl fmt::Debug for Client {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Client")
+    }
+}
+
+/// Cancel-only on drop. Spawned tasks observe the cancellation token at
+/// the next await and unwind. Callers wanting to wait for tasks to
+/// complete should `client.shutdown().await` first.
+impl Drop for Client {
+    fn drop(&mut self) {
+        self.task_group.shutdown();
     }
 }

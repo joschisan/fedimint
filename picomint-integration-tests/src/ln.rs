@@ -1,9 +1,10 @@
 use std::pin::pin;
+use std::sync::Arc;
 
 use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
-use picomint_client::ClientHandleArc;
+use picomint_client::Client;
 use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
 use picomint_core::Amount;
 use picomint_core::ln::Bolt11InvoiceDescription;
@@ -24,7 +25,7 @@ enum LnEvent {
 }
 
 fn ln_event_stream(
-    client: &ClientHandleArc,
+    client: &Arc<Client>,
 ) -> impl futures::Stream<Item = (picomint_core::core::OperationId, LnEvent)> {
     let client = client.clone();
     let notify = client.event_notify();
@@ -67,7 +68,7 @@ fn try_parse_ln_event(
     None
 }
 
-pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::Result<()> {
+pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
     test_payments(env, client_send).await?;
     test_gateway_registration(env).await?;
     test_direct_ln_payments(env).await?;
@@ -158,7 +159,7 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Result<()> {
+async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()> {
     info!("ln: test_payments");
 
     let ln = client.ln();

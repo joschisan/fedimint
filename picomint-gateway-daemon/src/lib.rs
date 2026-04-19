@@ -36,7 +36,7 @@ use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
-use picomint_client::ClientHandleArc;
+use picomint_client::Client;
 use picomint_client::gw::{
     EXPIRATION_DELTA_MINIMUM, FinalReceiveState, IGatewayClient, LightningRpcError, PaymentAction,
 };
@@ -74,7 +74,7 @@ pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 
 #[derive(Clone)]
 pub struct AppState {
-    pub clients: Arc<RwLock<BTreeMap<FederationId, ClientHandleArc>>>,
+    pub clients: Arc<RwLock<BTreeMap<FederationId, Arc<Client>>>>,
     pub node: Arc<ldk_node::Node>,
     pub client_factory: GatewayClientFactory,
     pub gateway_db: Database,
@@ -99,7 +99,7 @@ impl std::fmt::Debug for AppState {
 
 impl AppState {
     /// Retrieves a client for a given federation.
-    pub async fn select_client(&self, federation_id: FederationId) -> Option<ClientHandleArc> {
+    pub async fn select_client(&self, federation_id: FederationId) -> Option<Arc<Client>> {
         self.clients.read().await.get(&federation_id).cloned()
     }
 
@@ -130,7 +130,7 @@ impl AppState {
     /// Verifies that the federation's lightning module network matches the
     /// gateway's network.
     pub async fn check_federation_network(
-        client: &ClientHandleArc,
+        client: &Arc<Client>,
         network: Network,
     ) -> anyhow::Result<()> {
         let federation_id = client.federation_id();
@@ -153,7 +153,7 @@ impl AppState {
     }
 
     /// Get the name of a federation from its client config.
-    pub async fn federation_name(client: &ClientHandleArc) -> Option<String> {
+    pub async fn federation_name(client: &Arc<Client>) -> Option<String> {
         client.config().await.federation_name()
     }
 
@@ -416,7 +416,7 @@ impl AppState {
         &self,
         payment_image: PaymentImage,
         amount_msats: u64,
-    ) -> anyhow::Result<(IncomingContract, ClientHandleArc)> {
+    ) -> anyhow::Result<(IncomingContract, Arc<Client>)> {
         let registered_incoming_contract = self
             .gateway_db
             .begin_read()

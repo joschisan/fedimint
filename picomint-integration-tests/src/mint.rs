@@ -1,9 +1,10 @@
 use std::pin::pin;
+use std::sync::Arc;
 
 use async_stream::stream;
 use futures::StreamExt;
 use picomint_client::mint::{ReceiveEvent, SendEvent};
-use picomint_client::{ClientHandleArc, TxAcceptEvent, TxRejectEvent};
+use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_eventlog::{EventLogEntry, EventLogId};
@@ -19,7 +20,7 @@ enum MintEvent {
 }
 
 fn mint_event_stream(
-    client: &ClientHandleArc,
+    client: &Arc<Client>,
 ) -> impl futures::Stream<Item = (OperationId, MintEvent)> {
     let client = client.clone();
     let notify = client.event_notify();
@@ -56,7 +57,7 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent
 
 /// Await the tx outcome (TxAccept or TxReject) for a specific operation_id.
 async fn await_tx_outcome(
-    client: &ClientHandleArc,
+    client: &Arc<Client>,
     operation_id: OperationId,
 ) -> Result<(), String> {
     let mut stream = client.subscribe_operation_events(operation_id);
@@ -71,7 +72,7 @@ async fn await_tx_outcome(
     unreachable!("stream only ends at client shutdown")
 }
 
-pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::Result<()> {
+pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
     info!("mint: send_and_receive (10 iterations) + double_spend_is_rejected");
 
     let client_receive = env.new_client().await?;

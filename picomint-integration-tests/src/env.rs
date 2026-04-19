@@ -10,7 +10,7 @@ use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
-use picomint_client::{Client, ClientHandleArc, Mnemonic};
+use picomint_client::{Client, Mnemonic};
 use picomint_core::Amount;
 use picomint_core::invite_code::InviteCode;
 use tokio::process::{Child, Command};
@@ -53,7 +53,7 @@ pub struct TestEnv {
 }
 
 impl TestEnv {
-    pub fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<(Self, ClientHandleArc)> {
+    pub fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<(Self, Arc<Client>)> {
         let data_dir = tempfile::TempDir::new()?.keep();
         let base = data_dir.as_path();
         info!("Test data directory: {}", base.display());
@@ -181,7 +181,7 @@ impl TestEnv {
         Ok(client)
     }
 
-    pub async fn new_client(&self) -> anyhow::Result<ClientHandleArc> {
+    pub async fn new_client(&self) -> anyhow::Result<Arc<Client>> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
         build_client(
             self.endpoint.clone(),
@@ -209,7 +209,7 @@ impl TestEnv {
 
     pub async fn pegin(
         &self,
-        client: &ClientHandleArc,
+        client: &Arc<Client>,
         amount: bitcoin::Amount,
     ) -> anyhow::Result<()> {
         let wallet = client.wallet();
@@ -244,7 +244,7 @@ async fn build_client(
     invite_code: InviteCode,
     data_dir: std::path::PathBuf,
     n: u64,
-) -> anyhow::Result<ClientHandleArc> {
+) -> anyhow::Result<Arc<Client>> {
     let db_dir = data_dir.join(format!("client-{n}"));
     tokio::fs::create_dir_all(&db_dir).await?;
 
@@ -254,9 +254,7 @@ async fn build_client(
 
     let config = picomint_client::download(&endpoint, &invite_code).await?;
 
-    let client = Client::new(endpoint, db, &mnemonic, config)
-        .await
-        .map(Arc::new)?;
+    let client = Client::new(endpoint, db, &mnemonic, config).await?;
 
     info!("Created client-{n}");
     Ok(client)
