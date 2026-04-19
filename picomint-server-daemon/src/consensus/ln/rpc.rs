@@ -28,7 +28,9 @@ pub async fn await_incoming_contract(
     loop {
         // Wait for the contract to appear, or time out periodically to check
         // expiration against consensus time.
-        let wait = ln.db.wait_key(&INCOMING_CONTRACT_OUTPOINT, &contract_id);
+        let wait = ln.db.wait_table_check(&INCOMING_CONTRACT_OUTPOINT, |tx| {
+            tx.get(&INCOMING_CONTRACT_OUTPOINT, &contract_id)
+        });
 
         if let Ok((outpoint, _tx)) = timeout(Duration::from_secs(10), wait).await {
             return Ok(Some(outpoint));
@@ -51,7 +53,9 @@ pub async fn await_preimage(
     (outpoint, expiration): (OutPoint, u64),
 ) -> Result<Option<[u8; 32]>, ApiError> {
     loop {
-        let wait = ln.db.wait_key(&PREIMAGE, &outpoint);
+        let wait = ln
+            .db
+            .wait_table_check(&PREIMAGE, |tx| tx.get(&PREIMAGE, &outpoint));
 
         if let Ok((preimage, _tx)) = timeout(Duration::from_secs(10), wait).await {
             return Ok(Some(preimage));
@@ -107,11 +111,12 @@ pub async fn await_incoming_contracts(
         ));
     }
 
-    let filter = |next_index: Option<u64>| next_index.filter(|i| *i > start);
-
     let (mut next_index, tx) = ln
         .db
-        .wait_key_check(&INCOMING_CONTRACT_STREAM_INDEX, &(), filter)
+        .wait_table_check(&INCOMING_CONTRACT_STREAM_INDEX, |tx| {
+            tx.get(&INCOMING_CONTRACT_STREAM_INDEX, &())
+                .filter(|i| *i > start)
+        })
         .await;
 
     let mut contracts = Vec::new();

@@ -276,23 +276,6 @@ impl Database {
         }
     }
 
-    /// Wait until `key` exists in `table`. Returns the value together with the
-    /// [`ReadTransaction`] that observed it, so the caller can continue reading
-    /// without opening a second tx.
-    pub async fn wait_key<WK, K, WV, V>(
-        &self,
-        def: &NativeTableDef<WK, WV>,
-        key: &K,
-    ) -> (V, ReadTransaction)
-    where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
-    {
-        self.wait_key_check(def, key, |v| v).await
-    }
-
     /// Notification future for the next commit on this database. Fires on
     /// every committed write, regardless of which tables were touched.
     ///
@@ -318,34 +301,26 @@ impl Database {
         self.inner.notify_for(&def.resolved_name(&self.prefix))
     }
 
-    /// Wait until `check` on the current value returns `Some(T)`, then return
-    /// `(T, ReadTransaction)`. The returned tx is the one that observed the
-    /// matched state. `check` is called once on entry and again after every
-    /// commit that touches `(table, key)`.
-    pub async fn wait_key_check<WK, K, WV, V, T>(
+    /// Wait until `check` returns `Some(T)`, then return `(T, ReadTransaction)`.
+    /// The returned tx is the one that observed the matched state. `check` is
+    /// called once on entry and again after every commit that touches `table`.
+    pub async fn wait_table_check<WK, WV, T>(
         &self,
         def: &NativeTableDef<WK, WV>,
-        key: &K,
-        mut check: impl FnMut(Option<V>) -> Option<T>,
+        mut check: impl FnMut(&ReadTransaction) -> Option<T>,
     ) -> (T, ReadTransaction)
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
+        WK: redb::Key + 'static,
+        WV: redb::Value + 'static,
     {
-        let resolved = def.resolved_name(&self.prefix);
-
-        let notify = self.inner.notify_for(&resolved);
+        let notify = self.notify_for_table(def);
 
         loop {
             let notified = notify.notified();
 
             let tx = self.begin_read().await;
 
-            let current = tx.get(def, key);
-
-            if let Some(t) = check(current) {
+            if let Some(t) = check(&tx) {
                 return (t, tx);
             }
 
@@ -1063,7 +1038,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wait_key_wakes_after_commit() {
+    async fn wait_table_check_wakes_after_commit() {
         let db = Database::open_in_memory();
 
         let db_writer = db.clone();
@@ -1074,14 +1049,16 @@ mod tests {
             tx.commit().await;
         });
 
-        let (value, _tx) = db.wait_key(&USERS, &1).await;
+        let (value, _tx) = db
+            .wait_table_check(&USERS, |tx| tx.get(&USERS, &1))
+            .await;
         assert_eq!(value, "alice");
 
         writer.await.unwrap();
     }
 
     #[tokio::test]
-    async fn wait_key_check_returns_consistent_tx() {
+    async fn wait_table_check_returns_consistent_tx() {
         let db = Database::open_in_memory();
 
         let tx = db.begin_write().await;
@@ -1097,7 +1074,9 @@ mod tests {
         });
 
         let (v, tx) = db
-            .wait_key_check(&BALANCES, &1, |v| v.filter(|n| *n >= 100))
+            .wait_table_check(&BALANCES, |tx| {
+                tx.get(&BALANCES, &1).filter(|n| *n >= 100)
+            })
             .await;
 
         assert_eq!(v, 150);

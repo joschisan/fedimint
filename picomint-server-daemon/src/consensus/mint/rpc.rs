@@ -22,21 +22,14 @@ pub async fn signature_shares(
     // Wait until any BLINDED_SIGNATURE_SHARE for this txid exists. All mint
     // outputs of a given tx are signed atomically in the same consensus
     // commit, so observing one implies all are present.
-    let notify = mint.db.notify_for_table(&BLINDED_SIGNATURE_SHARE);
+    let (signatures, _tx) = mint
+        .db
+        .wait_table_check(&BLINDED_SIGNATURE_SHARE, |tx| {
+            Some(collect_signature_shares(tx, txid)).filter(|s| !s.is_empty())
+        })
+        .await;
 
-    loop {
-        let notified = notify.notified();
-
-        let read = mint.db.begin_read().await;
-
-        let signatures = collect_signature_shares(&read, txid);
-
-        if !signatures.is_empty() {
-            return Ok(signatures);
-        }
-
-        notified.await;
-    }
+    Ok(signatures)
 }
 
 pub async fn signature_shares_recovery(
