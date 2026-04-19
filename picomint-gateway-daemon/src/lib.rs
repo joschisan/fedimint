@@ -391,14 +391,27 @@ impl AppState {
 
         let operation_id = OperationId::from_encodable(&registered_contract.contract);
 
-        if !wait {
-            return Ok(VerifyResponse {
-                settled: false,
-                preimage: None,
-            });
-        }
-
-        let state = client.gw().await_receive(operation_id).await;
+        // Non-wait: report the current settled state, if any, without blocking.
+        // A short timeout is enough because `await_receive` resolves
+        // immediately when the settle event is already in the event log.
+        let state = if wait {
+            client.gw().await_receive(operation_id).await
+        } else {
+            match tokio::time::timeout(
+                Duration::from_millis(50),
+                client.gw().await_receive(operation_id),
+            )
+            .await
+            {
+                Ok(state) => state,
+                Err(_) => {
+                    return Ok(VerifyResponse {
+                        settled: false,
+                        preimage: None,
+                    });
+                }
+            }
+        };
 
         let preimage = match state {
             FinalReceiveState::Success(preimage) => Ok(preimage),
