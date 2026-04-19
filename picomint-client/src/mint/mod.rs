@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use crate::api::FederationApi;
 use crate::module::ClientContext;
-use crate::transaction::builder_next::{Input, Output, TransactionBuilder};
+use crate::transaction::{Input, Output, TransactionBuilder};
 use crate::transaction::{Transaction, TxSubmissionSmContext, TxSubmissionStateMachine};
 use anyhow::{Context as _, bail};
 use bitcoin_hashes::sha256;

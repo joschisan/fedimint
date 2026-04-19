@@ -17,7 +17,7 @@ use std::sync::Arc;
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
-use crate::transaction::builder_next::{Output, TransactionBuilder};
+use crate::transaction::{Output, TransactionBuilder};
 use picomint_core::wire;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
@@ -118,7 +118,6 @@ pub struct LightningClientModule {
     federation_id: FederationId,
     cfg: LightningConfigConsensus,
     client_ctx: ClientContext<Self>,
-    #[allow(dead_code)] // wired up in step 3 when callers migrate to mint.finalize_and_submit
     mint: Arc<crate::mint::MintClientModule>,
     module_api: FederationApi,
     keypair: Keypair,

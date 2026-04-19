@@ -1,133 +1,29 @@
 use bitcoin::key::Keypair;
-use bitcoin::secp256k1;
-use itertools::multiunzip;
+use bitcoin::secp256k1::{self, Secp256k1};
+use bitcoin_hashes::Hash;
 use picomint_core::Amount;
 use picomint_core::transaction::Transaction;
 use picomint_core::wire;
-use picomint_logging::LOG_CLIENT;
-use secp256k1::Secp256k1;
-use tracing::warn;
 
 #[derive(Clone, Debug)]
-pub struct ClientInput<I = wire::Input> {
-    pub input: I,
-    pub keys: Vec<Keypair>,
+pub struct Input {
+    pub input: wire::Input,
+    pub keypair: Keypair,
     pub amount: Amount,
-}
-
-impl<I> ClientInput<I>
-where
-    wire::Input: From<I>,
-{
-    pub fn into_wire(self) -> ClientInput<wire::Input> {
-        ClientInput {
-            input: self.input.into(),
-            keys: self.keys,
-            amount: self.amount,
-        }
-    }
-}
-
-/// A group of inputs contributed to a transaction.
-#[derive(Clone, Debug)]
-pub struct ClientInputBundle<I = wire::Input> {
-    pub(crate) inputs: Vec<ClientInput<I>>,
-}
-
-impl<I> ClientInputBundle<I> {
-    pub fn new(inputs: Vec<ClientInput<I>>) -> Self {
-        Self { inputs }
-    }
-
-    pub fn inputs(&self) -> &[ClientInput<I>] {
-        &self.inputs
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.inputs.is_empty()
-    }
-}
-
-impl<I> ClientInputBundle<I>
-where
-    wire::Input: From<I>,
-{
-    pub fn into_wire(self) -> ClientInputBundle<wire::Input> {
-        ClientInputBundle {
-            inputs: self
-                .inputs
-                .into_iter()
-                .map(ClientInput::into_wire)
-                .collect(),
-        }
-    }
+    pub fee: Amount,
 }
 
 #[derive(Clone, Debug)]
-pub struct ClientOutput<O = wire::Output> {
-    pub output: O,
+pub struct Output {
+    pub output: wire::Output,
     pub amount: Amount,
-}
-
-impl<O> ClientOutput<O>
-where
-    wire::Output: From<O>,
-{
-    pub fn into_wire(self) -> ClientOutput<wire::Output> {
-        ClientOutput {
-            output: self.output.into(),
-            amount: self.amount,
-        }
-    }
-}
-
-/// A group of outputs contributed to a transaction.
-#[derive(Clone, Debug)]
-pub struct ClientOutputBundle<O = wire::Output> {
-    pub(crate) outputs: Vec<ClientOutput<O>>,
-}
-
-impl<O> ClientOutputBundle<O> {
-    pub fn new(outputs: Vec<ClientOutput<O>>) -> Self {
-        if outputs.is_empty() {
-            warn!(target: LOG_CLIENT, "Empty output bundle will be illegal in the future");
-        }
-        Self { outputs }
-    }
-
-    pub fn outputs(&self) -> &[ClientOutput<O>] {
-        &self.outputs
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.outputs.is_empty()
-    }
-
-    pub fn with(mut self, other: Self) -> Self {
-        self.outputs.extend(other.outputs);
-        self
-    }
-}
-
-impl<O> ClientOutputBundle<O>
-where
-    wire::Output: From<O>,
-{
-    pub fn into_wire(self) -> ClientOutputBundle<wire::Output> {
-        ClientOutputBundle {
-            outputs: self
-                .outputs
-                .into_iter()
-                .map(ClientOutput::into_wire)
-                .collect(),
-        }
-    }
+    pub fee: Amount,
 }
 
 #[derive(Default, Clone, Debug)]
 pub struct TransactionBuilder {
-    inputs: Vec<ClientInputBundle>,
-    outputs: Vec<ClientOutputBundle>,
+    inputs: Vec<Input>,
+    outputs: Vec<Output>,
 }
 
 impl TransactionBuilder {
@@ -135,43 +31,66 @@ impl TransactionBuilder {
         Self::default()
     }
 
-    pub fn with_inputs(mut self, inputs: ClientInputBundle) -> Self {
-        self.inputs.push(inputs);
-        self
+    pub fn from_input(input: Input) -> Self {
+        Self {
+            inputs: vec![input],
+            outputs: Vec::new(),
+        }
     }
 
-    pub fn with_outputs(mut self, outputs: ClientOutputBundle) -> Self {
-        self.outputs.push(outputs);
-        self
+    pub fn from_output(output: Output) -> Self {
+        Self {
+            inputs: Vec::new(),
+            outputs: vec![output],
+        }
     }
 
-    /// Build the signed `Transaction`. Signature collection happens here;
-    /// all SM spawning now lives outside the builder.
-    pub fn build<C>(self, secp_ctx: &Secp256k1<C>) -> Transaction
-    where
-        C: secp256k1::Signing + secp256k1::Verification,
-    {
-        let (inputs, input_keys): (Vec<_>, Vec<_>) = multiunzip(
-            self.inputs
-                .into_iter()
-                .flat_map(|bundle| bundle.inputs.into_iter())
-                .map(|input| (input.input, input.keys)),
-        );
+    pub fn add_input(&mut self, input: Input) {
+        self.inputs.push(input);
+    }
 
-        let outputs: Vec<_> = self
-            .outputs
-            .into_iter()
-            .flat_map(|bundle| bundle.outputs.into_iter())
-            .map(|output| output.output)
-            .collect();
+    pub fn add_output(&mut self, output: Output) {
+        self.outputs.push(output);
+    }
+
+    pub fn input_amount(&self) -> Amount {
+        self.inputs.iter().map(|i| i.amount).sum()
+    }
+
+    pub fn output_amount(&self) -> Amount {
+        self.outputs.iter().map(|o| o.amount).sum()
+    }
+
+    pub fn total_fee(&self) -> Amount {
+        self.inputs.iter().map(|i| i.fee).sum::<Amount>() + self.outputs.iter().map(|o| o.fee).sum()
+    }
+
+    /// Funding shortfall: how much additional input value is required to
+    /// cover the current outputs and fees. Zero when the builder is balanced
+    /// or overfunded.
+    pub fn deficit(&self) -> Amount {
+        (self.output_amount() + self.total_fee()).saturating_sub(self.input_amount())
+    }
+
+    /// Overfunding: how much input value remains beyond what the current
+    /// outputs and fees consume. Zero when the builder is balanced or
+    /// underfunded.
+    pub fn excess_input(&self) -> Amount {
+        self.input_amount().saturating_sub(self.output_amount() + self.total_fee())
+    }
+
+    pub fn build(self) -> Transaction {
+        let inputs: Vec<wire::Input> = self.inputs.iter().map(|i| i.input.clone()).collect();
+        let outputs: Vec<wire::Output> = self.outputs.into_iter().map(|o| o.output).collect();
 
         let txid = Transaction::tx_hash_from_parts(&inputs, &outputs);
-        let msg = secp256k1::Message::from_digest_slice(&txid[..]).expect("txid has right length");
 
-        let signatures = input_keys
+        let message = secp256k1::Message::from_digest(txid.as_raw_hash().to_byte_array());
+
+        let signatures = self
+            .inputs
             .iter()
-            .flatten()
-            .map(|keypair| secp_ctx.sign_schnorr(&msg, keypair))
+            .map(|i| Secp256k1::new().sign_schnorr(&message, &i.keypair))
             .collect();
 
         Transaction {
@@ -179,13 +98,5 @@ impl TransactionBuilder {
             outputs,
             signatures,
         }
-    }
-
-    pub fn inputs(&self) -> impl Iterator<Item = &ClientInput> {
-        self.inputs.iter().flat_map(|i| i.inputs.iter())
-    }
-
-    pub fn outputs(&self) -> impl Iterator<Item = &ClientOutput> {
-        self.outputs.iter().flat_map(|i| i.outputs.iter())
     }
 }

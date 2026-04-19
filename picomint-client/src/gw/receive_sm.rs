@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::api::ServerError;
 use crate::executor::StateMachine;
 use crate::query::FilterMapThreshold;
-use crate::transaction::builder_next::{Input, TransactionBuilder};
+use crate::transaction::{Input, TransactionBuilder};
 use picomint_core::wire;
 use anyhow::anyhow;
 use picomint_core::core::OperationId;

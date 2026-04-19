@@ -1,8 +1,7 @@
 use core::fmt;
 use std::marker;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::Arc;
 
-use crate::Client;
 use crate::api::{ApiScope, FederationApi};
 use futures::StreamExt as _;
 use picomint_core::TransactionId;
@@ -10,7 +9,7 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
-use picomint_core::util::{BoxFuture, BoxStream};
+use picomint_core::util::BoxStream;
 use picomint_eventlog::{EVENT_LOG, Event, EventLogId, PersistedLogEntry};
 use picomint_logging::LOG_CLIENT;
 use picomint_redb::{Database, WriteTxRef};
@@ -19,38 +18,10 @@ use tracing::warn;
 
 use crate::{TxAcceptEvent, TxRejectEvent};
 
-/// Late-bound weak reference to the owning `Client`, shared between
-/// `ClientContext`s and set once by the builder after the `Client` is
-/// constructed.
-pub(crate) type LateClient = Arc<OnceLock<Weak<Client>>>;
-
-/// Return type of [`ClientModule::create_final_inputs_and_outputs`]. The
-/// primary module contributes inputs/outputs to balance a partial
-/// transaction and — once the final txid is known — spawns any state
-/// machines it needs to track those contributions.
-///
-/// `spawn_sms` is invoked exactly once by the submission path, *after*
-/// the txid is computed.
-pub struct FinalContribution<I, O> {
-    pub inputs: Vec<crate::transaction::ClientInput<I>>,
-    pub outputs: Vec<crate::transaction::ClientOutput<O>>,
-    pub spawn_sms: SpawnSms,
-}
-
-pub type SpawnSms = Box<
-    dyn for<'a> FnOnce(&'a WriteTxRef<'_>, TransactionId) -> BoxFuture<'a, ()>
-        + 'static
-        + Send
-        + Sync,
->;
-
-/// A client context for a module `M`.
-///
-/// Client modules can interact with the whole client through this struct.
-/// All concrete handles are stored directly; only the transaction finalize
-/// methods reach back to the full `Client` via a late-bound [`LateClient`].
+/// A client context for a module `M`. Bundles the per-module API, db
+/// handles, and federation config that module code reaches for via the
+/// generic parameter.
 pub struct ClientContext<M> {
-    client: LateClient,
     kind: ModuleKind,
     api: FederationApi,
     api_scope: ApiScope,
@@ -64,7 +35,6 @@ pub struct ClientContext<M> {
 impl<M> Clone for ClientContext<M> {
     fn clone(&self) -> Self {
         Self {
-            client: self.client.clone(),
             kind: self.kind,
             api: self.api.clone(),
             api_scope: self.api_scope,
@@ -86,7 +56,6 @@ impl<M> fmt::Debug for ClientContext<M> {
 impl<M> ClientContext<M> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        client: LateClient,
         kind: ModuleKind,
         api: FederationApi,
         api_scope: ApiScope,
@@ -96,7 +65,6 @@ impl<M> ClientContext<M> {
         federation_id: FederationId,
     ) -> Self {
         Self {
-            client,
             kind,
             api,
             api_scope,

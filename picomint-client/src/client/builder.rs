@@ -5,7 +5,6 @@ use crate::api::{ApiScope, FederationApi};
 use crate::gw::{GatewayClientInit, IGatewayClient};
 use crate::ln::LightningClientInit;
 use crate::mint::MintClientInit;
-use crate::module::LateClient;
 use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use crate::wallet::WalletClientInit;
 use crate::{Endpoint, download_from_invite_code};
@@ -243,12 +242,9 @@ impl ClientBuilder {
 
         let task_group = TaskGroup::new();
 
-        let final_client: LateClient = Arc::new(std::sync::OnceLock::new());
-
         let root_secret = Self::federation_root_secret(&pre_root_secret, &config);
 
         let mint_context = crate::module::ClientContext::new(
-            final_client.clone(),
             ModuleKind::Mint,
             api.clone(),
             ApiScope::Mint,
@@ -271,7 +267,6 @@ impl ClientBuilder {
         );
 
         let wallet_context = crate::module::ClientContext::new(
-            final_client.clone(),
             ModuleKind::Wallet,
             api.clone(),
             ApiScope::Wallet,
@@ -295,7 +290,6 @@ impl ClientBuilder {
         let ln = match self.ln_init {
             LnInit::Regular(init) => {
                 let ln_context = crate::module::ClientContext::new(
-                    final_client.clone(),
                     ModuleKind::Ln,
                     api.clone(),
                     ApiScope::Ln,
@@ -318,7 +312,6 @@ impl ClientBuilder {
             }
             LnInit::Gateway(init) => {
                 let ln_context = crate::module::ClientContext::new(
-                    final_client.clone(),
                     ModuleKind::Ln,
                     api.clone(),
                     ApiScope::Ln,
@@ -354,13 +347,7 @@ impl ClientBuilder {
             task_group: task_group.clone(),
         });
 
-        let client_iface = std::sync::Arc::<Client>::downgrade(&client_inner);
-
         let client_arc = ClientHandle::new(client_inner);
-
-        final_client
-            .set(client_iface.clone())
-            .expect("LateClient already set");
 
         // Mint owns the tx-submission executor; starting it before wallet/ln
         // ensures any pending submissions are picked up before module-side

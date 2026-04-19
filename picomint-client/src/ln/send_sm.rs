@@ -1,5 +1,5 @@
 use crate::executor::StateMachine;
-use crate::transaction::builder_next::{Input, TransactionBuilder};
+use crate::transaction::{Input, TransactionBuilder};
 use picomint_core::wire;
 use anyhow::ensure;
 use bitcoin::hashes::sha256;

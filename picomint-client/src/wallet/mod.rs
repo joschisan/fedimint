@@ -17,7 +17,7 @@ use std::time::Duration;
 use crate::api::{FederationApi, FederationResult};
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
-use crate::transaction::builder_next::{Input, Output, TransactionBuilder};
+use crate::transaction::{Input, Output, TransactionBuilder};
 use anyhow::anyhow;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
@@ -50,7 +50,6 @@ pub struct WalletClientModule {
     root_secret: DerivableSecret,
     cfg: WalletConfigConsensus,
     client_ctx: ClientContext<Self>,
-    #[allow(dead_code)] // wired up in step 3 when callers migrate to mint.finalize_and_submit
     mint: std::sync::Arc<crate::mint::MintClientModule>,
     db: Database,
     module_api: FederationApi,

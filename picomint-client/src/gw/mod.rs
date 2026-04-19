@@ -12,7 +12,7 @@ use std::sync::Arc;
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
-use crate::transaction::builder_next::{Output, TransactionBuilder};
+use crate::transaction::{Output, TransactionBuilder};
 use picomint_core::wire;
 use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
@@ -111,7 +111,6 @@ pub struct GatewayClientModule {
     pub federation_id: FederationId,
     pub cfg: LightningConfigConsensus,
     pub client_ctx: ClientContext<Self>,
-    #[allow(dead_code)] // wired up in step 3 when callers migrate to mint.finalize_and_submit
     pub mint: Arc<crate::mint::MintClientModule>,
     pub module_api: FederationApi,
     pub keypair: Keypair,
