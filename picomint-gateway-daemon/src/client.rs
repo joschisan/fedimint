@@ -12,8 +12,6 @@ use picomint_redb::Database;
 use crate::AppState;
 use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
 
-
-
 #[derive(Debug, Clone)]
 pub struct GatewayClientFactory {
     db: Database,
@@ -78,26 +76,26 @@ impl GatewayClientFactory {
             .get(&CLIENT_CONFIG, federation_id)
     }
 
-    /// Join a federation for the first time. Idempotent: if a config for
-    /// this federation is already persisted, this is equivalent to
-    /// [`Self::load`].
+    /// Join a federation for the first time. Errors if a config for this
+    /// federation is already persisted — use [`Self::load`] in that case.
     pub async fn join(
         &self,
         invite: &InviteCode,
         gateway: Arc<AppState>,
     ) -> anyhow::Result<picomint_client::ClientHandleArc> {
-        let federation_id = invite.federation_id();
+        let config = picomint_client::download(&self.connectors, invite).await?;
 
-        let config = match self.read_config(&federation_id).await {
-            Some(config) => config,
-            None => {
-                let config = picomint_client::download(&self.connectors, invite).await?;
-                let dbtx = self.db.begin_write().await;
-                dbtx.as_ref().insert(&CLIENT_CONFIG, &federation_id, &config);
-                dbtx.commit().await;
-                config
-            }
-        };
+        let dbtx = self.db.begin_write().await;
+
+        if dbtx
+            .as_ref()
+            .insert(&CLIENT_CONFIG, &config.calculate_federation_id(), &config)
+            .is_some()
+        {
+            anyhow::bail!("Federation is already joined");
+        }
+
+        dbtx.commit().await;
 
         self.open(config, gateway).await
     }
