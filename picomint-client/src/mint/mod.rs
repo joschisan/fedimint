@@ -592,17 +592,19 @@ impl MintClientModule {
         let target_denominations = represent_amount(amount);
 
         // Build target issuance requests up-front. Their outputs go into the
-        // builder; the balance loop pulls funding from the wallet and emits
-        // change. We merge change requests with target requests below so a
-        // single `IssuanceStateMachine` processes both.
-        let target_requests: Vec<NoteIssuanceRequest> = futures::stream::iter(target_denominations)
-            .zip(self.tweak_receiver.clone())
-            .map(|(d, tweak)| NoteIssuanceRequest::new(d, tweak, &self.root_secret))
-            .collect()
-            .await;
+        // builder first; the balance loop then pulls funding from the wallet
+        // and appends change outputs. We extend `issuance_requests` with the
+        // change requests after balance so the order matches the transaction's
+        // outputs and a single `IssuanceStateMachine` can process both.
+        let mut issuance_requests: Vec<NoteIssuanceRequest> =
+            futures::stream::iter(target_denominations)
+                .zip(self.tweak_receiver.clone())
+                .map(|(d, tweak)| NoteIssuanceRequest::new(d, tweak, &self.root_secret))
+                .collect()
+                .await;
 
         let mut builder = TransactionBuilder::new();
-        for request in &target_requests {
+        for request in &issuance_requests {
             builder.add_output(Output {
                 output: wire::Output::Mint(request.output()),
                 amount: request.denomination.amount(),
@@ -624,8 +626,7 @@ impl MintClientModule {
             .await
             .map_err(|_| SendECashError::Failure)?;
 
-        let mut issuance_requests = change_requests;
-        issuance_requests.extend(target_requests);
+        issuance_requests.extend(change_requests);
 
         let sm = IssuanceStateMachine {
             operation_id,
