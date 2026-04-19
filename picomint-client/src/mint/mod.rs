@@ -23,12 +23,9 @@ use std::time::Duration;
 
 use crate::api::FederationApi;
 use crate::module::ClientContext;
-use crate::transaction::builder_next::{self, Input, Output};
-use crate::transaction::{
-    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
-};
-use picomint_core::wire;
-use anyhow::Context as _;
+use crate::transaction::builder_next::{Input, Output, TransactionBuilder};
+use crate::transaction::{Transaction, TxSubmissionSmContext, TxSubmissionStateMachine};
+use anyhow::{Context as _, bail};
 use bitcoin_hashes::sha256;
 use client_db::{NOTE, RECEIVE_OPERATION, RECOVERY_STATE, RecoveryState};
 pub use events::*;
@@ -36,11 +33,11 @@ use futures::StreamExt;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::mint::config::{MintConfigConsensus, client_denominations};
-use picomint_core::mint::{Denomination, MintInput, MintOutput, Note, RecoveryItem};
+use picomint_core::mint::{Denomination, MintInput, Note, RecoveryItem};
 use picomint_core::secp256k1::rand::{Rng, thread_rng};
 use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_core::task::TaskGroup;
-use picomint_core::{Amount, PeerId};
+use picomint_core::{Amount, PeerId, TransactionId, wire};
 use picomint_derive_secret::DerivableSecret;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::Database;
@@ -216,6 +213,7 @@ impl MintClientInit {
         federation_id: FederationId,
         cfg: MintConfigConsensus,
         context: ClientContext<MintClientModule>,
+        db: Database,
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<MintClientModule> {
@@ -249,12 +247,21 @@ impl MintClientInit {
             task_group.clone(),
         );
 
+        let tx_submission_executor = crate::executor::ModuleExecutor::new(
+            db.clone(),
+            TxSubmissionSmContext {
+                api: context.global_api(),
+            },
+            task_group.clone(),
+        );
+
         Ok(MintClientModule {
             federation_id,
             cfg,
             root_secret: module_root_secret.clone(),
             client_ctx: context,
             tweak_receiver,
+            tx_submission_executor,
             issuance_executor,
         })
     }
@@ -267,6 +274,7 @@ pub struct MintClientModule {
     root_secret: DerivableSecret,
     client_ctx: ClientContext<Self>,
     tweak_receiver: async_channel::Receiver<[u8; 16]>,
+    tx_submission_executor: crate::executor::ModuleExecutor<TxSubmissionStateMachine>,
     issuance_executor: crate::executor::ModuleExecutor<IssuanceStateMachine>,
 }
 
@@ -281,6 +289,7 @@ pub struct MintSmContext {
 
 impl MintClientModule {
     pub async fn start(&self) {
+        self.tx_submission_executor.start().await;
         self.issuance_executor.start().await;
     }
 
@@ -292,104 +301,127 @@ impl MintClientModule {
         self.cfg.output_fee
     }
 
-    /// Balancing submission shim used during the migration to the new
-    /// `transaction::builder_next` types. Adapts the new builder to the
-    /// legacy `ClientInput`/`ClientOutput` finalize pipeline; will become
-    /// the real implementation (with the balance loop folded in) once all
-    /// callers have been migrated and submission ownership has been moved
-    /// from `Client` into `MintClientModule`.
+    /// Balance the builder against mint's wallet (pulling funding notes when
+    /// underfunded, generating change outputs when overfunded), sign and
+    /// submit the resulting transaction, and spawn the
+    /// `IssuanceStateMachine` that tracks the balance-side notes/requests
+    /// (if any).
+    ///
+    /// `dbtx` is the caller's writable transaction. It may be scoped to any
+    /// module's namespace; mint reaches both its own isolate (for the
+    /// spendable-note table) and root (for the tx-submission table and the
+    /// event log) via `deisolate`/`isolate`.
     pub async fn finalize_and_submit_transaction(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
-        builder: crate::transaction::builder_next::TransactionBuilder,
-    ) -> anyhow::Result<picomint_core::TransactionId> {
-        self.client_ctx
-            .finalize_and_submit_transaction_dbtx(dbtx, operation_id, adapt_to_legacy(builder))
-            .await
+        mut builder: TransactionBuilder,
+    ) -> anyhow::Result<TransactionId> {
+        let root = dbtx.deisolate();
+        let mint_dbtx = root.isolate("mint");
+
+        let (spendable_notes, issuance_requests) = self.balance(&mint_dbtx, &mut builder).await?;
+
+        let txid = self.submit(&root, operation_id, builder).await?;
+
+        if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
+            let sm = IssuanceStateMachine {
+                operation_id,
+                spendable_notes,
+                txid: Some(txid),
+                issuance_requests,
+            };
+            self.issuance_executor
+                .add_state_machine_dbtx(&mint_dbtx, sm)
+                .await;
+        }
+
+        Ok(txid)
     }
 
-    /// Bypass shim used by `MintClientModule::send`, which pre-builds a
-    /// balanced transaction and spawns its own `IssuanceStateMachine` after
-    /// submission. Maps to `Client::submit_tx_builder_dbtx` (no balancing).
-    /// Disappears alongside `finalize_and_submit_transaction` in step 5.
-    pub async fn submit_transaction(
+    /// Mint-side transaction balancing. Pulls funding notes from the wallet
+    /// when the builder is underfunded, then absorbs any excess as change
+    /// outputs. Sub-denomination dust below `smallest_denom + output_fee` is
+    /// left as implicit federation revenue.
+    async fn balance(
         &self,
         dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        builder: crate::transaction::builder_next::TransactionBuilder,
-    ) -> anyhow::Result<picomint_core::TransactionId> {
-        self.client_ctx
-            .submit_tx_builder_dbtx(dbtx, operation_id, adapt_to_legacy(builder))
-            .await
-    }
-
-    pub async fn create_final_inputs_and_outputs(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        mut input_amount: Amount,
-        mut output_amount: Amount,
-    ) -> anyhow::Result<crate::module::FinalContribution<MintInput, MintOutput>> {
+        builder: &mut TransactionBuilder,
+    ) -> anyhow::Result<(Vec<SpendableNote>, Vec<NoteIssuanceRequest>)> {
         let mut spendable_notes = self
-            .select_funding_input(dbtx, output_amount.saturating_sub(input_amount))
+            .select_funding_input(dbtx, builder.deficit())
             .await
             .context("Insufficient funds")?;
 
-        for note in &spendable_notes {
-            self.remove_spendable_note(dbtx, note).await;
-        }
-
-        input_amount += spendable_notes.iter().map(SpendableNote::amount).sum();
-
-        output_amount += self.cfg.input_fee * spendable_notes.len() as u64;
-
-        assert!(output_amount <= input_amount);
-
-        let mut denominations = self
-            .select_output_denominations(dbtx, self.cfg.output_fee, input_amount - output_amount)
-            .await;
-
-        output_amount += denominations
-            .iter()
-            .map(|denomination| denomination.amount() + self.cfg.output_fee)
-            .sum();
-
-        assert!(output_amount <= input_amount);
-
-        // We sort the notes by denomination to minimize the leaked information.
+        // Sort by denomination to minimize information leaked about
+        // which notes the wallet held.
         spendable_notes.sort_by_key(|note| note.denomination);
 
-        let inputs = build_inputs(&spendable_notes);
+        for note in &spendable_notes {
+            self.remove_spendable_note(dbtx, note).await;
+            builder.add_input(Input {
+                input: wire::Input::Mint(MintInput { note: note.note() }),
+                keypair: note.keypair,
+                amount: note.amount(),
+                fee: self.cfg.input_fee,
+            });
+        }
 
-        // We sort the amounts to minimize the leaked information.
-        denominations.sort();
+        assert_eq!(builder.deficit(), Amount::ZERO);
 
-        let (issuance_requests, outputs) = self.build_issuance(denominations).await;
+        let mut denoms = self
+            .select_output_denominations(dbtx, self.cfg.output_fee, builder.excess_input())
+            .await;
 
-        let issuance_executor = self.issuance_executor.clone();
+        // Sort to minimize information leaked about the change shape.
+        denoms.sort();
 
-        let spawn_sms: crate::module::SpawnSms = Box::new(move |dbtx, txid| {
-            Box::pin(async move {
-                issuance_executor
-                    .add_state_machine_dbtx(
-                        dbtx,
-                        IssuanceStateMachine {
-                            operation_id,
-                            spendable_notes,
-                            txid: Some(txid),
-                            issuance_requests,
-                        },
-                    )
-                    .await;
-            })
-        });
+        let issuance_requests: Vec<NoteIssuanceRequest> = futures::stream::iter(denoms)
+            .zip(self.tweak_receiver.clone())
+            .map(|(d, tweak)| NoteIssuanceRequest::new(d, tweak, &self.root_secret))
+            .collect()
+            .await;
 
-        Ok(crate::module::FinalContribution {
-            inputs,
-            outputs,
-            spawn_sms,
-        })
+        for request in &issuance_requests {
+            builder.add_output(Output {
+                output: wire::Output::Mint(request.output()),
+                amount: request.denomination.amount(),
+                fee: self.cfg.output_fee,
+            });
+        }
+
+        assert_eq!(builder.deficit(), Amount::ZERO);
+
+        Ok((spendable_notes, issuance_requests))
+    }
+
+    /// Sign the builder, size-check the encoded transaction, and spawn the
+    /// `TxSubmissionStateMachine`. `dbtx` must be the root (deisolated)
+    /// transaction so the state machine row lands in the correct namespace.
+    async fn submit(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        operation_id: OperationId,
+        builder: TransactionBuilder,
+    ) -> anyhow::Result<TransactionId> {
+        let transaction = builder.build();
+
+        if transaction.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
+            bail!("The generated transaction is too large.");
+        }
+
+        let txid = transaction.tx_hash();
+
+        let sm = TxSubmissionStateMachine {
+            operation_id,
+            transaction,
+        };
+
+        self.tx_submission_executor
+            .add_state_machine_dbtx(dbtx, sm)
+            .await;
+
+        Ok(txid)
     }
 
     pub async fn get_balance(&self, dbtx: &WriteTxRef<'_>) -> Amount {
@@ -509,41 +541,7 @@ impl MintClientModule {
     }
 }
 
-fn build_inputs(notes: &[SpendableNote]) -> Vec<ClientInput<MintInput>> {
-    notes
-        .iter()
-        .map(|spendable_note| ClientInput {
-            input: MintInput {
-                note: spendable_note.note(),
-            },
-            keys: vec![spendable_note.keypair],
-            amount: spendable_note.amount(),
-        })
-        .collect()
-}
-
 impl MintClientModule {
-    async fn build_issuance(
-        &self,
-        requested_denominations: Vec<Denomination>,
-    ) -> (Vec<NoteIssuanceRequest>, Vec<ClientOutput<MintOutput>>) {
-        let issuance_requests = futures::stream::iter(requested_denominations)
-            .zip(self.tweak_receiver.clone())
-            .map(|(d, tweak)| NoteIssuanceRequest::new(d, tweak, &self.root_secret))
-            .collect::<Vec<NoteIssuanceRequest>>()
-            .await;
-
-        let outputs = issuance_requests
-            .iter()
-            .map(|request| ClientOutput {
-                output: request.output(),
-                amount: request.denomination.amount(),
-            })
-            .collect();
-
-        (issuance_requests, outputs)
-    }
-
     /// Count the `ECash` notes in the client's database by denomination.
     pub async fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
         let dbtx = self.client_ctx.module_db().begin_write().await;
@@ -596,89 +594,57 @@ impl MintClientModule {
             .map_err(|_| SendECashError::Offline)?;
 
         let operation_id = OperationId::new_random();
-
         let target_denominations = represent_amount(amount);
 
-        let mut output_amount: Amount = target_denominations
-            .iter()
-            .map(|denomination| denomination.amount() + self.cfg.output_fee)
-            .sum();
-
-        let dbtx = self.client_ctx.module_db().begin_write().await;
-
-        let mut spendable_notes = self
-            .select_funding_input(&dbtx.as_ref(), output_amount)
-            .await
-            .ok_or(SendECashError::InsufficientBalance)?;
-
-        for note in &spendable_notes {
-            self.remove_spendable_note(&dbtx.as_ref(), note).await;
-        }
-
-        let input_amount = spendable_notes.iter().map(SpendableNote::amount).sum();
-
-        output_amount += self.cfg.input_fee * spendable_notes.len() as u64;
-
-        assert!(output_amount <= input_amount);
-
-        let mut denominations = self
-            .select_output_denominations(
-                &dbtx.as_ref(),
-                self.cfg.output_fee,
-                input_amount - output_amount,
-            )
+        // Build target issuance requests up-front. Their outputs go into the
+        // builder; the balance loop pulls funding from the wallet and emits
+        // change. We merge change requests with target requests below so a
+        // single `IssuanceStateMachine` processes both.
+        let target_requests: Vec<NoteIssuanceRequest> = futures::stream::iter(target_denominations)
+            .zip(self.tweak_receiver.clone())
+            .map(|(d, tweak)| NoteIssuanceRequest::new(d, tweak, &self.root_secret))
+            .collect()
             .await;
 
-        output_amount += denominations
-            .iter()
-            .map(|denomination| denomination.amount() + self.cfg.output_fee)
-            .sum();
-
-        assert!(output_amount <= input_amount);
-
-        spendable_notes.sort_by_key(|note| note.denomination);
-
-        denominations.extend(target_denominations);
-
-        denominations.sort();
-
-        let (issuance_requests, outputs) = self.build_issuance(denominations).await;
-
-        let mut tx_builder = builder_next::TransactionBuilder::new();
-        for note in &spendable_notes {
-            tx_builder.add_input(Input {
-                input: wire::Input::Mint(MintInput { note: note.note() }),
-                keypair: note.keypair,
-                amount: note.amount(),
-                fee: self.cfg.input_fee,
-            });
-        }
-        for out in outputs {
-            tx_builder.add_output(Output {
-                output: wire::Output::Mint(out.output),
-                amount: out.amount,
+        let mut builder = TransactionBuilder::new();
+        for request in &target_requests {
+            builder.add_output(Output {
+                output: wire::Output::Mint(request.output()),
+                amount: request.denomination.amount(),
                 fee: self.cfg.output_fee,
             });
         }
 
-        let txid = self
-            .submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
+        let dbtx = self.client_ctx.module_db().begin_write().await;
+        let mint_dbtx = dbtx.as_ref();
+        let root_dbtx = mint_dbtx.deisolate();
+
+        let (funding_notes, change_requests) = self
+            .balance(&mint_dbtx, &mut builder)
             .await
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
+        let txid = self
+            .submit(&root_dbtx, operation_id, builder)
+            .await
+            .map_err(|_| SendECashError::Failure)?;
+
+        let mut issuance_requests = change_requests;
+        issuance_requests.extend(target_requests);
+
         let sm = IssuanceStateMachine {
             operation_id,
-            spendable_notes,
+            spendable_notes: funding_notes,
             txid: Some(txid),
             issuance_requests,
         };
 
         self.issuance_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), sm)
+            .add_state_machine_dbtx(&mint_dbtx, sm)
             .await;
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, ReissueEvent { txid })
+            .log_event(&mint_dbtx, operation_id, ReissueEvent { txid })
             .await;
 
         dbtx.commit().await;
@@ -757,7 +723,7 @@ impl MintClientModule {
             return Err(ReceiveECashError::UneconomicalDenomination);
         }
 
-        let mut tx_builder = builder_next::TransactionBuilder::new();
+        let mut tx_builder = TransactionBuilder::new();
         for note in ecash.notes() {
             tx_builder.add_input(Input {
                 input: wire::Input::Mint(MintInput { note: note.note() }),
@@ -917,42 +883,4 @@ fn represent_amount(mut remaining_amount: Amount) -> Vec<Denomination> {
     }
 
     denominations
-}
-
-/// Adapter from the new `transaction::builder_next::TransactionBuilder` to the
-/// legacy `TransactionBuilder` over `ClientInput`/`ClientOutput`. Removed in
-/// step 6 along with the legacy types.
-fn adapt_to_legacy(builder: crate::transaction::builder_next::TransactionBuilder) -> TransactionBuilder {
-    let (inputs, outputs) = builder.into_parts();
-
-    let mut legacy = TransactionBuilder::new();
-
-    if !inputs.is_empty() {
-        let bundle = ClientInputBundle::new(
-            inputs
-                .into_iter()
-                .map(|i| ClientInput {
-                    input: i.input,
-                    keys: vec![i.keypair],
-                    amount: i.amount,
-                })
-                .collect(),
-        );
-        legacy = legacy.with_inputs(bundle);
-    }
-
-    if !outputs.is_empty() {
-        let bundle = ClientOutputBundle::new(
-            outputs
-                .into_iter()
-                .map(|o| ClientOutput {
-                    output: o.output,
-                    amount: o.amount,
-                })
-                .collect(),
-        );
-        legacy = legacy.with_outputs(bundle);
-    }
-
-    legacy
 }

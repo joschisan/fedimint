@@ -17,7 +17,6 @@ use picomint_redb::{Database, WriteTxRef};
 use tokio::sync::Notify;
 use tracing::warn;
 
-use crate::transaction::{ClientInputBundle, ClientOutputBundle, TransactionBuilder};
 use crate::{TxAcceptEvent, TxRejectEvent};
 
 /// Late-bound weak reference to the owning `Client`, shared between
@@ -119,65 +118,6 @@ impl<M> ClientContext<M> {
         self.api.clone().with_scope(self.api_scope)
     }
 
-    /// Lift a typed [`ClientOutputBundle`] into a wire-level one.
-    pub fn make_client_outputs<O>(&self, output: ClientOutputBundle<O>) -> ClientOutputBundle
-    where
-        picomint_core::wire::Output: From<O>,
-    {
-        output.into_wire()
-    }
-
-    /// Lift a typed [`ClientInputBundle`] into a wire-level one.
-    pub fn make_client_inputs<I>(&self, inputs: ClientInputBundle<I>) -> ClientInputBundle
-    where
-        picomint_core::wire::Input: From<I>,
-    {
-        inputs.into_wire()
-    }
-
-    fn client(&self) -> Arc<Client> {
-        self.client
-            .get()
-            .expect("client must be set before contexts are used")
-            .upgrade()
-            .expect("client must outlive its module contexts")
-    }
-
-    pub async fn finalize_and_submit_transaction(
-        &self,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        self.client()
-            .finalize_and_submit_transaction(operation_id, tx_builder)
-            .await
-    }
-
-    pub async fn finalize_and_submit_transaction_dbtx(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        self.client()
-            .finalize_and_submit_transaction_dbtx(&dbtx.deisolate(), operation_id, tx_builder)
-            .await
-    }
-
-    /// Submit an already-funded/balanced [`TransactionBuilder`] directly,
-    /// bypassing the primary module's `create_final_inputs_and_outputs`. The
-    /// caller is responsible for every input and output.
-    pub async fn submit_tx_builder_dbtx(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        self.client()
-            .submit_tx_builder_dbtx(&dbtx.deisolate(), operation_id, tx_builder)
-            .await
-    }
-
     pub fn module_db(&self) -> &Database {
         &self.module_db
     }
@@ -221,22 +161,6 @@ impl<M> ClientContext<M> {
             .next()
             .expect("A federation always has at least one guardian");
         InviteCode::new(endpoints.node_id, *peer, self.federation_id)
-    }
-
-    pub async fn claim_inputs<I>(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        inputs: ClientInputBundle<I>,
-        operation_id: OperationId,
-    ) -> anyhow::Result<TransactionId>
-    where
-        picomint_core::wire::Input: From<I>,
-    {
-        let tx_builder = TransactionBuilder::new().with_inputs(inputs.into_wire());
-
-        self.client()
-            .finalize_and_submit_transaction_inner(&dbtx.deisolate(), operation_id, tx_builder)
-            .await
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.

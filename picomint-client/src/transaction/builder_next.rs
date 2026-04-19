@@ -75,6 +75,20 @@ impl TransactionBuilder {
         self.inputs.iter().map(|i| i.fee).sum::<Amount>() + self.outputs.iter().map(|o| o.fee).sum()
     }
 
+    /// Funding shortfall: how much additional input value is required to
+    /// cover the current outputs and fees. Zero when the builder is balanced
+    /// or overfunded.
+    pub fn deficit(&self) -> Amount {
+        (self.output_amount() + self.total_fee()).saturating_sub(self.input_amount())
+    }
+
+    /// Overfunding: how much input value remains beyond what the current
+    /// outputs and fees consume. Zero when the builder is balanced or
+    /// underfunded.
+    pub fn excess_input(&self) -> Amount {
+        self.input_amount().saturating_sub(self.output_amount() + self.total_fee())
+    }
+
     pub fn build(self) -> Transaction {
         let inputs: Vec<wire::Input> = self.inputs.iter().map(|i| i.input.clone()).collect();
         let outputs: Vec<wire::Output> = self.outputs.into_iter().map(|o| o.output).collect();

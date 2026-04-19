@@ -5,31 +5,22 @@ use std::sync::Arc;
 
 use crate::Endpoint;
 use crate::api::{ApiScope, FederationApi};
-use crate::executor::ModuleExecutor;
 use crate::gw::GatewayClientModule;
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
-use crate::transaction::{TransactionBuilder, TxSubmissionStateMachine};
 use crate::wallet::WalletClientModule;
 use crate::{ClientModuleInstance, TxAcceptEvent, TxRejectEvent};
 use anyhow::bail;
-use bitcoin::key::Secp256k1;
-use bitcoin::secp256k1;
 use futures::{Stream, StreamExt as _};
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
-use picomint_core::transaction::Transaction;
 use picomint_core::util::BoxStream;
-use picomint_core::wire;
 use picomint_core::{Amount, PeerId, TransactionId};
-use picomint_encoding::Encodable as _;
 use picomint_eventlog::{EventLogId, PersistedLogEntry};
-use picomint_logging::LOG_CLIENT_NET_API;
-use picomint_redb::{Database, WriteTxRef};
-use tracing::{debug, warn};
+use picomint_redb::Database;
 
 use crate::ClientBuilder;
 use crate::db::CLIENT_CONFIG;
@@ -38,29 +29,14 @@ pub(crate) mod builder;
 pub(crate) mod handle;
 
 /// Lightning-module flavor mounted on a client. Regular federation clients
-/// use `Regular`, while the gateway daemon mounts `Gateway`. The two variants
-/// share `Common = LightningModuleTypes` on the federation, so they are
-/// mutually exclusive at instance id `1`.
+/// use `Regular`, while the gateway daemon mounts `Gateway`. The two flavors
+/// are mutually exclusive at the same federation instance.
 pub enum LnFlavor {
     Regular(Arc<LightningClientModule>),
     Gateway(Arc<GatewayClientModule>),
 }
 
 impl LnFlavor {
-    fn input_fee(&self) -> Amount {
-        match self {
-            LnFlavor::Regular(m) => m.input_fee(),
-            LnFlavor::Gateway(m) => m.input_fee(),
-        }
-    }
-
-    fn output_fee(&self) -> Amount {
-        match self {
-            LnFlavor::Regular(m) => m.output_fee(),
-            LnFlavor::Gateway(m) => m.output_fee(),
-        }
-    }
-
     async fn start(&self) {
         match self {
             LnFlavor::Regular(m) => m.start().await,
@@ -91,10 +67,7 @@ pub struct Client {
     pub(crate) mint: Arc<MintClientModule>,
     pub(crate) wallet: Arc<WalletClientModule>,
     pub(crate) ln: LnFlavor,
-    tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine>,
     pub(crate) api: FederationApi,
-    secp_ctx: Secp256k1<secp256k1::All>,
-
     task_group: TaskGroup,
 }
 
@@ -140,214 +113,9 @@ impl Client {
         self.config.read().await.clone()
     }
 
-    /// Returns the input amount and output amount of a transaction
-    ///
-    /// # Panics
-    /// If any of the input or output versions in the transaction builder are
-    /// unknown by the respective module.
-    fn transaction_builder_get_balance(&self, builder: &TransactionBuilder) -> (Amount, Amount) {
-        // FIXME: prevent overflows, currently not suitable for untrusted input
-        let mut in_amount = Amount::ZERO;
-        let mut out_amount = Amount::ZERO;
-        let mut fee_amount = Amount::ZERO;
-
-        for input in builder.inputs() {
-            let item_fee = match &input.input {
-                wire::Input::Mint(_) => self.mint.input_fee(),
-                wire::Input::Ln(_) => self.ln.input_fee(),
-                wire::Input::Wallet(_) => self.wallet.input_fee(),
-            };
-
-            in_amount += input.amount;
-            fee_amount += item_fee;
-        }
-
-        for output in builder.outputs() {
-            let item_fee = match &output.output {
-                wire::Output::Mint(_) => self.mint.output_fee(),
-                wire::Output::Ln(_) => self.ln.output_fee(),
-                wire::Output::Wallet(_) => self.wallet.output_fee(),
-            };
-
-            out_amount += output.amount;
-            fee_amount += item_fee;
-        }
-
-        out_amount += fee_amount;
-        (in_amount, out_amount)
-    }
-
     /// Get metadata value from the federation config itself
     pub fn get_config_meta(&self, key: &str) -> Option<String> {
         self.federation_config_meta.get(key).cloned()
-    }
-
-    /// Adds funding to a transaction or removes over-funding via change.
-    ///
-    /// Returns the built transaction, the primary module's post-finalize
-    /// spawn callback (if any) and its associated input/output ranges.
-    async fn finalize_transaction(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        mut partial_transaction: TransactionBuilder,
-    ) -> anyhow::Result<(TransactionBuilder, Option<crate::module::SpawnSms>)> {
-        let (in_amount, out_amount) = self.transaction_builder_get_balance(&partial_transaction);
-
-        let mut spawn_sms: Option<crate::module::SpawnSms> = None;
-
-        if in_amount != out_amount {
-            let contribution = self
-                .mint
-                .create_final_inputs_and_outputs(
-                    &dbtx.isolate("mint".to_string()),
-                    operation_id,
-                    in_amount,
-                    out_amount,
-                )
-                .await?;
-
-            let wire_inputs = contribution
-                .inputs
-                .into_iter()
-                .map(crate::transaction::ClientInput::into_wire)
-                .collect();
-            let wire_outputs = contribution
-                .outputs
-                .into_iter()
-                .map(crate::transaction::ClientOutput::into_wire)
-                .collect();
-
-            partial_transaction = partial_transaction
-                .with_inputs(crate::transaction::ClientInputBundle::new(wire_inputs));
-            partial_transaction = partial_transaction
-                .with_outputs(crate::transaction::ClientOutputBundle::new(wire_outputs));
-            spawn_sms = Some(contribution.spawn_sms);
-        }
-
-        let (input_amount, output_amount) =
-            self.transaction_builder_get_balance(&partial_transaction);
-
-        assert!(input_amount >= output_amount, "Transaction is underfunded");
-
-        Ok((partial_transaction, spawn_sms))
-    }
-
-    /// Add funding and/or change to the transaction builder as needed, finalize
-    /// the transaction and submit it to the federation.
-    ///
-    /// ## Errors
-    /// The function will return an error if the operation with given ID already
-    /// exists.
-    ///
-    /// ## Panics
-    /// The function will panic if the database transaction collides with
-    /// other and fails with others too often, this should not happen except for
-    /// excessively concurrent scenarios.
-    pub async fn finalize_and_submit_transaction(
-        &self,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        let dbtx = self.db.begin_write().await;
-        let result = self
-            .finalize_and_submit_transaction_dbtx(&dbtx.as_ref(), operation_id, tx_builder)
-            .await?;
-        dbtx.commit().await;
-        Ok(result)
-    }
-
-    /// See [`Self::finalize_and_submit_transaction`], just inside a database
-    /// transaction.
-    pub async fn finalize_and_submit_transaction_dbtx(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        self.finalize_and_submit_transaction_inner(dbtx, operation_id, tx_builder)
-            .await
-    }
-
-    pub(crate) async fn finalize_and_submit_transaction_inner(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        let (tx_builder, spawn_sms) = self
-            .finalize_transaction(dbtx, operation_id, tx_builder)
-            .await?;
-
-        let txid = self
-            .submit_tx_builder_dbtx(dbtx, operation_id, tx_builder)
-            .await?;
-
-        if let Some(spawn_sms) = spawn_sms {
-            spawn_sms(dbtx, txid).await;
-        }
-
-        Ok(txid)
-    }
-
-    /// Build a [`TransactionBuilder`] into a wire [`Transaction`], verify its
-    /// size, and spawn the [`TxSubmissionStateMachine`] that drives it to the
-    /// federation. Does **not** call the primary module's
-    /// `create_final_inputs_and_outputs` — the caller is responsible for
-    /// producing a fully funded/balanced builder.
-    pub async fn submit_tx_builder_dbtx(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        tx_builder: TransactionBuilder,
-    ) -> anyhow::Result<TransactionId> {
-        let transaction = tx_builder.build(&self.secp_ctx);
-
-        if transaction.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
-            let inputs = transaction
-                .inputs
-                .iter()
-                .map(|i| i.module_kind())
-                .collect::<Vec<_>>();
-            let outputs = transaction
-                .outputs
-                .iter()
-                .map(|o| o.module_kind())
-                .collect::<Vec<_>>();
-            warn!(
-                target: LOG_CLIENT_NET_API,
-                size=%transaction.consensus_encode_to_vec().len(),
-                ?inputs,
-                ?outputs,
-                "Transaction too large",
-            );
-            debug!(target: LOG_CLIENT_NET_API, ?transaction, "transaction details");
-            bail!(
-                "The generated transaction would be rejected by the federation for being too large."
-            );
-        }
-
-        let txid = transaction.tx_hash();
-
-        debug!(
-            target: LOG_CLIENT_NET_API,
-            %txid,
-            %operation_id,
-            ?transaction,
-            "Submitting transaction",
-        );
-
-        self.tx_submission_executor
-            .add_state_machine_dbtx(
-                dbtx,
-                TxSubmissionStateMachine {
-                    operation_id,
-                    transaction,
-                },
-            )
-            .await;
-
-        Ok(txid)
     }
 
     pub async fn await_tx_accepted(

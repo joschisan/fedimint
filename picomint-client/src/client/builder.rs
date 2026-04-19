@@ -2,17 +2,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::api::{ApiScope, FederationApi};
-use crate::executor::ModuleExecutor;
 use crate::gw::{GatewayClientInit, IGatewayClient};
 use crate::ln::LightningClientInit;
 use crate::mint::MintClientInit;
 use crate::module::LateClient;
 use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
-use crate::transaction::TxSubmissionSmContext;
 use crate::wallet::WalletClientInit;
 use crate::{Endpoint, download_from_invite_code};
 use anyhow::bail;
-use bitcoin::key::Secp256k1;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
@@ -266,6 +263,7 @@ impl ClientBuilder {
                     fed_id,
                     config.mint.clone(),
                     mint_context,
+                    db.clone(),
                     &root_secret.derive_module_secret(ModuleKind::Mint),
                     &task_group,
                 )
@@ -343,12 +341,6 @@ impl ClientBuilder {
             }
         };
 
-        let tx_submission_executor = ModuleExecutor::new(
-            db.clone(),
-            TxSubmissionSmContext { api: api.clone() },
-            task_group.clone(),
-        );
-
         let client_inner = Arc::new(Client {
             config: tokio::sync::RwLock::new(config.clone()),
             db: db.clone(),
@@ -358,9 +350,7 @@ impl ClientBuilder {
             mint,
             wallet,
             ln,
-            tx_submission_executor,
             api: api.clone(),
-            secp_ctx: Secp256k1::new(),
             task_group: task_group.clone(),
         });
 
@@ -372,11 +362,9 @@ impl ClientBuilder {
             .set(client_iface.clone())
             .expect("LateClient already set");
 
-        client_arc.tx_submission_executor.start().await;
-
-        // Module `start` is called *after* `final_client.set` so that any
-        // per-module executors spawned here can safely resolve the weak
-        // client reference from their transition contexts.
+        // Mint owns the tx-submission executor; starting it before wallet/ln
+        // ensures any pending submissions are picked up before module-side
+        // SMs start firing claim/refund flows that route through mint.
         client_arc.mint.start().await;
         client_arc.wallet.start().await;
         client_arc.ln.start().await;
