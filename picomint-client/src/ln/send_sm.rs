@@ -91,7 +91,6 @@ impl StateMachine for SendStateMachine {
                         self.common.contract.clone(),
                         invoice,
                         self.common.refund_keypair,
-                        ctx.clone(),
                     ) => SendOutcome::GatewayResponse(response),
                     preimage = await_preimage_sm(
                         self.common.outpoint,
@@ -124,7 +123,7 @@ impl StateMachine for SendStateMachine {
     }
 }
 
-#[instrument(target = LOG_CLIENT_MODULE_LN, skip(refund_keypair, ctx))]
+#[instrument(target = LOG_CLIENT_MODULE_LN, skip(refund_keypair))]
 async fn gateway_send_payment_sm(
     gateway_api: SafeUrl,
     federation_id: FederationId,
@@ -132,22 +131,19 @@ async fn gateway_send_payment_sm(
     contract: OutgoingContract,
     invoice: LightningInvoice,
     refund_keypair: Keypair,
-    ctx: LightningClientContext,
 ) -> Result<[u8; 32], Signature> {
     (|| async {
-        let payment_result = ctx
-            .gateway_conn
-            .send_payment(
-                gateway_api.clone(),
-                federation_id,
-                outpoint,
-                contract.clone(),
-                invoice.clone(),
-                refund_keypair.sign_schnorr(secp256k1::Message::from_digest(
-                    *invoice.consensus_hash::<sha256::Hash>().as_ref(),
-                )),
-            )
-            .await?;
+        let payment_result = crate::ln::gateway_http::send_payment(
+            gateway_api.clone(),
+            federation_id,
+            outpoint,
+            contract.clone(),
+            invoice.clone(),
+            refund_keypair.sign_schnorr(secp256k1::Message::from_digest(
+                *invoice.consensus_hash::<sha256::Hash>().as_ref(),
+            )),
+        )
+        .await?;
 
         ensure!(
             contract.verify_gateway_response(&payment_result),

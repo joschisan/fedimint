@@ -18,7 +18,6 @@ pub mod tweak;
 
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
-pub use gateway_connection::GatewayApi;
 use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
@@ -29,7 +28,6 @@ use crate::core::ModuleKind;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
 use crate::{Amount, OutPoint};
 
-mod gateway_connection;
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Bolt11InvoiceDescription {

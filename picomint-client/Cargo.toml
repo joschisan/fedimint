@@ -42,8 +42,10 @@ iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false }
 itertools = { workspace = true }
 rand = { workspace = true }
+reqwest = { workspace = true }
 secp256k1 = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time", "macros", "rt"] }

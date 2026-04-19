@@ -1,3 +1,7 @@
+//! Wire types shared between picomint clients and the gateway daemon.
+//! The HTTP request helpers themselves live client-side
+//! (`picomint_client::ln::gateway_http`).
+
 use std::ops::Add;
 use std::str::FromStr;
 
@@ -5,120 +9,13 @@ use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::schnorr::Signature;
 use lightning_invoice::{Bolt11Invoice, RoutingFees};
 use picomint_encoding::{Decodable, Encodable};
-use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
+use crate::Amount;
+use crate::OutPoint;
 use crate::config::FederationId;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
-use crate::ln::endpoint_constants::{
-    CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
-};
-use crate::ln::gateway_connection::GatewayError;
-use crate::ln::{Bolt11InvoiceDescription, GatewayApi, LightningInvoice};
-use crate::util::SafeUrl;
-use crate::{Amount, OutPoint};
-
-#[async_trait::async_trait]
-pub trait GatewayConnection: std::fmt::Debug {
-    async fn routing_info(
-        &self,
-        gateway_api: SafeUrl,
-        federation_id: &FederationId,
-    ) -> Result<Option<RoutingInfo>, GatewayError>;
-
-    async fn bolt11_invoice(
-        &self,
-        gateway_api: SafeUrl,
-        federation_id: FederationId,
-        contract: IncomingContract,
-        amount: Amount,
-        description: Bolt11InvoiceDescription,
-        expiry_secs: u32,
-    ) -> Result<Bolt11Invoice, GatewayError>;
-
-    async fn send_payment(
-        &self,
-        gateway_api: SafeUrl,
-        federation_id: FederationId,
-        outpoint: OutPoint,
-        contract: OutgoingContract,
-        invoice: LightningInvoice,
-        auth: Signature,
-    ) -> Result<Result<[u8; 32], Signature>, GatewayError>;
-}
-
-#[derive(Debug, Clone)]
-pub struct RealGatewayConnection {
-    pub api: GatewayApi,
-}
-
-#[async_trait::async_trait]
-impl GatewayConnection for RealGatewayConnection {
-    async fn routing_info(
-        &self,
-        gateway_api: SafeUrl,
-        federation_id: &FederationId,
-    ) -> Result<Option<RoutingInfo>, GatewayError> {
-        self.api
-            .request(
-                &gateway_api,
-                Method::POST,
-                ROUTING_INFO_ENDPOINT,
-                Some(federation_id),
-            )
-            .await
-    }
-
-    async fn bolt11_invoice(
-        &self,
-        gateway_api: SafeUrl,
-        federation_id: FederationId,
-        contract: IncomingContract,
-        amount: Amount,
-        description: Bolt11InvoiceDescription,
-        expiry_secs: u32,
-    ) -> Result<Bolt11Invoice, GatewayError> {
-        self.api
-            .request(
-                &gateway_api,
-                Method::POST,
-                CREATE_BOLT11_INVOICE_ENDPOINT,
-                Some(CreateBolt11InvoicePayload {
-                    federation_id,
-                    contract,
-                    amount,
-                    description,
-                    expiry_secs,
-                }),
-            )
-            .await
-    }
-
-    async fn send_payment(
-        &self,
-        gateway_api: SafeUrl,
-        federation_id: FederationId,
-        outpoint: OutPoint,
-        contract: OutgoingContract,
-        invoice: LightningInvoice,
-        auth: Signature,
-    ) -> Result<Result<[u8; 32], Signature>, GatewayError> {
-        self.api
-            .request(
-                &gateway_api,
-                Method::POST,
-                SEND_PAYMENT_ENDPOINT,
-                Some(SendPaymentPayload {
-                    federation_id,
-                    outpoint,
-                    contract,
-                    invoice,
-                    auth,
-                }),
-            )
-            .await
-    }
-}
+use crate::ln::{Bolt11InvoiceDescription, LightningInvoice};
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CreateBolt11InvoicePayload {

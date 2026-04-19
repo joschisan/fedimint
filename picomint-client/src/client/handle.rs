@@ -29,12 +29,6 @@ impl ClientHandle {
             inner: inner.into(),
         }
     }
-
-    pub fn start_executor(&self) {
-        // All module state machines now run on per-module `ModuleExecutor`s
-        // started eagerly by `ClientModule::start`. Kept as a no-op so
-        // external callers don't have to care.
-    }
 }
 
 impl ops::Deref for ClientHandle {

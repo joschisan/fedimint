@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
-use anyhow::{bail, ensure};
-use axum::extract::{Path, Query, State};
+use anyhow::{anyhow, bail, ensure};
+use axum::extract::{Path, Query};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -12,13 +12,10 @@ use clap::Parser;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
-use picomint_core::ln::gateway_api::{
-    GatewayConnection, PaymentFee, RealGatewayConnection, RoutingInfo,
-};
+use picomint_core::ln::endpoint_constants::{CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT};
+use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, PaymentFee, RoutingInfo};
 use picomint_core::ln::lnurl::LnurlRequest;
-use picomint_core::ln::{
-    Bolt11InvoiceDescription, GatewayApi, MINIMUM_INCOMING_CONTRACT_AMOUNT, tweak,
-};
+use picomint_core::ln::{Bolt11InvoiceDescription, MINIMUM_INCOMING_CONTRACT_AMOUNT, tweak};
 use picomint_core::secp256k1::Scalar;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;
@@ -26,7 +23,10 @@ use picomint_core::{Amount, BitcoinHash};
 use picomint_encoding::Encodable;
 use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
 use picomint_logging::TracingSetup;
-use serde::{Deserialize, Serialize};
+use reqwest::Method;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use tokio::net::TcpListener;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
@@ -46,22 +46,11 @@ struct CliOpts {
     bind_api: SocketAddr,
 }
 
-#[derive(Clone)]
-struct AppState {
-    gateway_conn: RealGatewayConnection,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     TracingSetup::default().init()?;
 
     let cli_opts = CliOpts::parse();
-
-    let state = AppState {
-        gateway_conn: RealGatewayConnection {
-            api: GatewayApi::new(),
-        },
-    };
 
     let cors = CorsLayer::new()
         .allow_origin(cors::Any)
@@ -72,8 +61,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(health_check))
         .route("/pay/{payload}", get(pay))
         .route("/invoice/{payload}", get(invoice))
-        .layer(cors)
-        .with_state(state);
+        .layer(cors);
 
     info!(bind_api = %cli_opts.bind_api, "recurringd started");
 
@@ -121,7 +109,6 @@ struct GetInvoiceParams {
 async fn invoice(
     Path(payload): Path<String>,
     Query(params): Query<GetInvoiceParams>,
-    State(state): State<AppState>,
 ) -> Json<LnurlResponse<InvoiceResponse>> {
     let Ok(request) = picomint_base32::decode::<LnurlRequest>(&payload) else {
         return Json(LnurlResponse::error("Failed to decode payload"));
@@ -141,7 +128,6 @@ async fn invoice(
         request.gateways,
         params.amount,
         3600, // standard expiry time of one hour
-        &state.gateway_conn,
     )
     .await
     {
@@ -159,7 +145,6 @@ async fn invoice(
     }))
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn create_contract_and_fetch_invoice(
     federation_id: FederationId,
     recipient_pk: PublicKey,
@@ -167,7 +152,6 @@ async fn create_contract_and_fetch_invoice(
     gateways: Vec<SafeUrl>,
     amount: u64,
     expiry_secs: u32,
-    gateway_conn: &RealGatewayConnection,
 ) -> anyhow::Result<(SafeUrl, Bolt11Invoice)> {
     let (ephemeral_tweak, ephemeral_pk) = tweak::generate(recipient_pk);
 
@@ -185,7 +169,7 @@ async fn create_contract_and_fetch_invoice(
         .consensus_hash::<sha256::Hash>()
         .to_byte_array();
 
-    let (routing_info, gateway) = select_gateway(gateways, federation_id, gateway_conn).await?;
+    let (routing_info, gateway) = select_gateway(gateways, federation_id).await?;
 
     ensure!(
         routing_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT),
@@ -215,16 +199,18 @@ async fn create_contract_and_fetch_invoice(
         ephemeral_pk,
     );
 
-    let invoice = gateway_conn
-        .bolt11_invoice(
-            gateway.clone(),
+    let invoice: Bolt11Invoice = gateway_request(
+        &gateway,
+        CREATE_BOLT11_INVOICE_ENDPOINT,
+        &CreateBolt11InvoicePayload {
             federation_id,
-            contract.clone(),
-            Amount::from_msats(amount),
-            Bolt11InvoiceDescription::Direct("LNURL Payment".to_string()),
+            contract: contract.clone(),
+            amount: Amount::from_msats(amount),
+            description: Bolt11InvoiceDescription::Direct("LNURL Payment".to_string()),
             expiry_secs,
-        )
-        .await?;
+        },
+    )
+    .await?;
 
     ensure!(
         invoice.payment_hash() == &preimage.consensus_hash(),
@@ -242,16 +228,42 @@ async fn create_contract_and_fetch_invoice(
 async fn select_gateway(
     gateways: Vec<SafeUrl>,
     federation_id: FederationId,
-    gateway_conn: &RealGatewayConnection,
 ) -> anyhow::Result<(RoutingInfo, SafeUrl)> {
     for gateway in gateways {
-        if let Ok(Some(routing_info)) = gateway_conn
-            .routing_info(gateway.clone(), &federation_id)
-            .await
+        if let Ok(routing_info) =
+            gateway_request::<_, Option<RoutingInfo>>(&gateway, ROUTING_INFO_ENDPOINT, &federation_id)
+                .await
+            && let Some(routing_info) = routing_info
         {
             return Ok((routing_info, gateway));
         }
     }
 
     bail!("All gateways are offline or do not support this federation")
+}
+
+/// One-shot POST to a gateway endpoint with a JSON payload, returning the
+/// JSON-decoded response.
+async fn gateway_request<P: Serialize, T: DeserializeOwned>(
+    base_url: &SafeUrl,
+    route: &str,
+    payload: &P,
+) -> anyhow::Result<T> {
+    let url = base_url.join(route).expect("Invalid base url");
+
+    let response = reqwest::Client::new()
+        .request(Method::POST, url.to_unsafe())
+        .json(payload)
+        .send()
+        .await
+        .map_err(|e| anyhow!("Could not connect to gateway: {e}"))?;
+
+    if response.status() != reqwest::StatusCode::OK {
+        bail!("Gateway returned an unexpected status: {}", response.status());
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| anyhow!("Failed to parse gateway response: {e}"))
 }

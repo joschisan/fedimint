@@ -108,7 +108,7 @@ impl Client {
         root_secret: RootSecret,
         invite: &InviteCode,
     ) -> anyhow::Result<handle::ClientHandle> {
-        let (config, _) = download_from_invite_code(&connectors, invite).await?;
+        let config = download_from_invite_code(&connectors, invite).await?;
         Self::init_db(&db, &config).await?;
         Self::build(connectors, db, root_secret, config, LnChoice::Regular).await
     }
@@ -136,7 +136,7 @@ impl Client {
         invite: &InviteCode,
         gateway: Arc<dyn IGatewayClient>,
     ) -> anyhow::Result<handle::ClientHandle> {
-        let (config, _) = download_from_invite_code(&connectors, invite).await?;
+        let config = download_from_invite_code(&connectors, invite).await?;
         Self::init_db(&db, &config).await?;
         Self::build(connectors, db, root_secret, config, LnChoice::Gateway(gateway)).await
     }

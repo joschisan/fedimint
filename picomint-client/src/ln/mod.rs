@@ -9,6 +9,7 @@ pub use picomint_core::ln as common;
 mod api;
 mod db;
 pub mod events;
+mod gateway_http;
 mod receive_sm;
 mod send_sm;
 
@@ -27,12 +28,10 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
-use picomint_core::ln::gateway_api::{
-    GatewayConnection, PaymentFee, RealGatewayConnection, RoutingInfo,
-};
+use picomint_core::ln::gateway_api::{PaymentFee, RoutingInfo};
 use picomint_core::ln::{
-    Bolt11InvoiceDescription, GatewayApi, LightningInvoice, LightningOutput,
-    MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl, tweak,
+    Bolt11InvoiceDescription, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT,
+    lnurl, tweak,
 };
 use picomint_core::secp256k1::SECP256K1;
 use picomint_core::task::TaskGroup;
@@ -64,7 +63,6 @@ pub type ReceiveResult = Result<(Bolt11Invoice, OperationId), ReceiveError>;
 #[derive(Debug, Clone)]
 pub struct LightningClientContext {
     pub(crate) federation_id: FederationId,
-    pub(crate) gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
     pub(crate) client_ctx: ClientContext<LightningClientModule>,
     pub(crate) mint: Arc<crate::mint::MintClientModule>,
     pub(crate) input_fee: Amount,
@@ -79,7 +77,6 @@ pub struct LightningClientModule {
     module_api: FederationApi,
     keypair: Keypair,
     lnurl_keypair: Keypair,
-    gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
     send_executor: ModuleExecutor<SendStateMachine>,
     receive_executor: ModuleExecutor<ReceiveStateMachine>,
 }
@@ -108,13 +105,8 @@ impl LightningClientModule {
         task_group: &TaskGroup,
     ) -> anyhow::Result<Self> {
         let module_api = client_ctx.module_api();
-        let gateway_conn: Arc<dyn GatewayConnection + Send + Sync> =
-            Arc::new(RealGatewayConnection {
-                api: GatewayApi::new(),
-            });
         let sm_context = LightningClientContext {
             federation_id,
-            gateway_conn: gateway_conn.clone(),
             client_ctx: client_ctx.clone(),
             mint: mint.clone(),
             input_fee: cfg.input_fee,
@@ -142,7 +134,6 @@ impl LightningClientModule {
             lnurl_keypair: module_root_secret
                 .child_key(ChildId(1))
                 .to_secp_key(SECP256K1),
-            gateway_conn,
             send_executor,
             receive_executor,
         };
@@ -172,10 +163,8 @@ impl LightningClientModule {
         if let Ok(gateways) = self.module_api.ln_gateways().await {
             let mut entries = Vec::new();
             for gateway in gateways {
-                if let Ok(Some(routing_info)) = self
-                    .gateway_conn
-                    .routing_info(gateway.clone(), &self.federation_id)
-                    .await
+                if let Ok(Some(routing_info)) =
+                    gateway_http::routing_info(gateway.clone(), &self.federation_id).await
                 {
                     entries.push((routing_info.lightning_public_key, gateway));
                 }
@@ -258,8 +247,7 @@ impl LightningClientModule {
         &self,
         gateway: &SafeUrl,
     ) -> Result<Option<RoutingInfo>, RoutingInfoError> {
-        self.gateway_conn
-            .routing_info(gateway.clone(), &self.federation_id)
+        gateway_http::routing_info(gateway.clone(), &self.federation_id)
             .await
             .map_err(|_| RoutingInfoError::FailedToRequestRoutingInfo)
     }
@@ -510,18 +498,16 @@ impl LightningClientModule {
             ephemeral_pk,
         );
 
-        let invoice = self
-            .gateway_conn
-            .bolt11_invoice(
-                gateway.clone(),
-                self.federation_id,
-                contract.clone(),
-                amount,
-                description,
-                expiry_secs,
-            )
-            .await
-            .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?;
+        let invoice = gateway_http::bolt11_invoice(
+            gateway.clone(),
+            self.federation_id,
+            contract.clone(),
+            amount,
+            description,
+            expiry_secs,
+        )
+        .await
+        .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?;
 
         if invoice.payment_hash() != &preimage.consensus_hash() {
             return Err(ReceiveError::InvalidInvoice);
