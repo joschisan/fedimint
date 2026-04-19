@@ -11,7 +11,6 @@ use bitcoincore_rpc::RpcApi;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use picomint_bip39::Mnemonic;
-use picomint_client::wallet::WalletClientModule;
 use picomint_client::{Client, ClientHandleArc, RootSecret};
 use picomint_core::Amount;
 use picomint_core::invite_code::InviteCode;
@@ -214,7 +213,7 @@ impl TestEnv {
         client: &ClientHandleArc,
         amount: bitcoin::Amount,
     ) -> anyhow::Result<()> {
-        let wallet = client.get_first_module::<WalletClientModule>()?;
+        let wallet = client.wallet();
         let addr = wallet.receive().await;
         info!(%addr, "Pegin address ready");
 

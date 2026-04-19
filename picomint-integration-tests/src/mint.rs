@@ -2,7 +2,7 @@ use std::pin::pin;
 
 use async_stream::stream;
 use futures::StreamExt;
-use picomint_client::mint::{MintClientModule, ReceiveEvent, SendEvent};
+use picomint_client::mint::{ReceiveEvent, SendEvent};
 use picomint_client::{ClientHandleArc, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
@@ -83,7 +83,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
         info!("Sending ecash payment {} of 10", i + 1);
 
         let ecash = client_send
-            .get_first_module::<MintClientModule>()?
+            .mint()
             .send(Amount::from_sats(1_000))
             .await?;
 
@@ -92,7 +92,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
         };
 
         let operation_id = client_receive
-            .get_first_module::<MintClientModule>()?
+            .mint()
             .receive(ecash)
             .await?;
 
@@ -111,7 +111,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
     info!("mint: double_spend_is_rejected");
 
     let ecash = client_send
-        .get_first_module::<MintClientModule>()?
+        .mint()
         .send(Amount::from_sats(1_000))
         .await?;
 
@@ -121,7 +121,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
 
     // First receive succeeds (sender receives own ecash back)
     let operation_id = client_send
-        .get_first_module::<MintClientModule>()?
+        .mint()
         .receive(ecash.clone())
         .await?;
 
@@ -136,7 +136,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
 
     // Second receive with same ecash is rejected
     let operation_id = client_receive
-        .get_first_module::<MintClientModule>()?
+        .mint()
         .receive(ecash)
         .await?;
 

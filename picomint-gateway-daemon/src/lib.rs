@@ -38,8 +38,7 @@ use lightning_invoice::{
 };
 use picomint_client::ClientHandleArc;
 use picomint_client::gw::{
-    EXPIRATION_DELTA_MINIMUM, FinalReceiveState, GatewayClientModule, IGatewayClient,
-    LightningRpcError, PaymentAction,
+    EXPIRATION_DELTA_MINIMUM, FinalReceiveState, IGatewayClient, LightningRpcError, PaymentAction,
 };
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -208,13 +207,11 @@ impl AppState {
 // Lightning Gateway implementation
 impl AppState {
     async fn public_key(&self, federation_id: &FederationId) -> Option<PublicKey> {
-        self.clients.read().await.get(federation_id).map(|client| {
-            client
-                .get_first_module::<GatewayClientModule>()
-                .expect("Must have client module")
-                .keypair
-                .public_key()
-        })
+        self.clients
+            .read()
+            .await
+            .get(federation_id)
+            .map(|client| client.gw().keypair.public_key())
     }
 
     pub async fn routing_info(
@@ -246,8 +243,7 @@ impl AppState {
         self.select_client(payload.federation_id)
             .await
             .context("Federation not connected")?
-            .get_first_module::<GatewayClientModule>()
-            .expect("Must have client module")
+            .gw()
             .send_payment(payload)
             .await
             .map_err(|e| anyhow::anyhow!(format!("Outgoing payment error: {e}")))
@@ -402,11 +398,7 @@ impl AppState {
             });
         }
 
-        let state = client
-            .get_first_module::<GatewayClientModule>()
-            .expect("Must have client module")
-            .await_receive(operation_id)
-            .await;
+        let state = client.gw().await_receive(operation_id).await;
 
         let preimage = match state {
             FinalReceiveState::Success(preimage) => Ok(preimage),
@@ -504,8 +496,7 @@ impl IGatewayClient for AppState {
 
         let federation_id = client.federation_id();
         let final_state = client
-            .get_first_module::<GatewayClientModule>()
-            .expect("Must have client module")
+            .gw()
             .relay_direct_swap(
                 contract,
                 invoice

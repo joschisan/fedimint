@@ -5,7 +5,6 @@ use async_stream::stream;
 use bitcoincore_rpc::RpcApi;
 use futures::StreamExt;
 use picomint_client::ClientHandleArc;
-use picomint_client::wallet::WalletClientModule;
 use picomint_client::wallet::events::{
     ReceiveEvent, SendConfirmEvent, SendEvent, SendFailureEvent,
 };
@@ -87,7 +86,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
     info!(address = %external_address, "Sending on-chain to external address");
 
     let operation_id = client_send
-        .get_first_module::<WalletClientModule>()?
+        .wallet()
         .send(
             external_address.as_unchecked().clone(),
             bitcoin::Amount::from_sat(100_000),
@@ -120,7 +119,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &ClientHandleArc) -> anyhow::
     info!("wallet: zero_fee_send_aborts");
 
     let abort_op = client_send
-        .get_first_module::<WalletClientModule>()?
+        .wallet()
         .send(
             external_address.as_unchecked().clone(),
             bitcoin::Amount::from_sat(100_000),

@@ -13,7 +13,6 @@ use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use picomint_client::gw::Preimage;
-use picomint_client::mint::MintClientModule;
 use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
@@ -576,10 +575,8 @@ async fn module_mint_send(
         .await
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
-    let mint_module = client
-        .get_first_module::<MintClientModule>()
-        .map_err(|e| CliError::internal(e))?;
-    let ecash = mint_module
+    let ecash = client
+        .mint()
         .send(payload.amount)
         .await
         .map_err(|e| CliError::internal(e))?;
@@ -608,12 +605,11 @@ async fn module_mint_receive(
         .await
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
-    let mint = client
-        .get_first_module::<MintClientModule>()
-        .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
     let amount = ecash.amount();
 
-    mint.receive(ecash)
+    client
+        .mint()
+        .receive(ecash)
         .await
         .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
 
@@ -632,11 +628,7 @@ async fn module_wallet_receive(
         .await
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
-    let wallet_module = client
-        .get_first_module::<picomint_client::wallet::WalletClientModule>()
-        .map_err(|_| CliError::internal("No wallet module found"))?;
-
-    let address = wallet_module.receive().await;
+    let address = client.wallet().receive().await;
     Ok(Json(WalletReceiveResponse {
         address: address.as_unchecked().clone(),
     }))

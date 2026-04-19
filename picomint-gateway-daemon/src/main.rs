@@ -17,7 +17,6 @@ use bitcoin::Network;
 use bitcoin::hashes::{Hash as _, sha256};
 use clap::{ArgGroup, Parser};
 use lightning::types::payment::PaymentHash;
-use picomint_client::gw::GatewayClientModule;
 use picomint_core::Amount;
 use picomint_core::ln::gateway_api::PaymentFee;
 use picomint_core::util::SafeUrl;
@@ -308,8 +307,7 @@ async fn try_handle_lightning_payment_ln(
         .await?;
 
     if let Err(err) = client
-        .get_first_module::<GatewayClientModule>()
-        .expect("Must have client module")
+        .gw()
         .relay_incoming_htlc(hash, 0, 0, contract, amount_msat)
         .await
     {

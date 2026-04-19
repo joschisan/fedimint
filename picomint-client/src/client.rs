@@ -1,4 +1,3 @@
-use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
 use std::fmt::{self, Formatter};
 use std::sync::Arc;
@@ -10,7 +9,7 @@ use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
 use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use crate::wallet::WalletClientModule;
-use crate::{ClientModuleInstance, TxAcceptEvent, TxRejectEvent, download_from_invite_code};
+use crate::{TxAcceptEvent, TxRejectEvent, download_from_invite_code};
 use anyhow::bail;
 use futures::{Stream, StreamExt as _};
 use picomint_core::PeerId;
@@ -343,44 +342,30 @@ impl Client {
         unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
-    /// Returns a typed module client instance by type. Uses `TypeId` dispatch
-    /// over the fixed module set (`MintClientModule` / `WalletClientModule` /
-    /// `LightningClientModule` / `GatewayClientModule`).
-    pub fn get_first_module<M: Any + Send + Sync + 'static>(
-        &'_ self,
-    ) -> anyhow::Result<ClientModuleInstance<'_, M>> {
-        let tid = TypeId::of::<M>();
-        let (module_any, scope): (&(dyn Any + Send + Sync), ApiScope) =
-            if tid == TypeId::of::<MintClientModule>() {
-                (&*self.mint, ApiScope::Mint)
-            } else if tid == TypeId::of::<WalletClientModule>() {
-                (&*self.wallet, ApiScope::Wallet)
-            } else if tid == TypeId::of::<LightningClientModule>() {
-                match &self.ln {
-                    LnFlavor::Regular(m) => (&**m, ApiScope::Ln),
-                    LnFlavor::Gateway(_) => {
-                        bail!("LightningClientModule is not mounted on this client")
-                    }
-                }
-            } else if tid == TypeId::of::<GatewayClientModule>() {
-                match &self.ln {
-                    LnFlavor::Gateway(m) => (&**m, ApiScope::Ln),
-                    LnFlavor::Regular(_) => {
-                        bail!("GatewayClientModule is not mounted on this client")
-                    }
-                }
-            } else {
-                bail!("Unknown client module type");
-            };
+    pub fn mint(&self) -> &MintClientModule {
+        &self.mint
+    }
 
-        let module: &M = module_any
-            .downcast_ref::<M>()
-            .expect("TypeId of M was just matched");
-        Ok(ClientModuleInstance {
-            db: self.db().clone(),
-            api: self.api().with_scope(scope),
-            module,
-        })
+    pub fn wallet(&self) -> &WalletClientModule {
+        &self.wallet
+    }
+
+    /// Regular-flavor lightning module. Panics if this client mounts the
+    /// gateway flavor instead.
+    pub fn ln(&self) -> &LightningClientModule {
+        match &self.ln {
+            LnFlavor::Regular(m) => m,
+            LnFlavor::Gateway(_) => panic!("LightningClientModule is not mounted on this client"),
+        }
+    }
+
+    /// Gateway-flavor lightning module. Panics if this client mounts the
+    /// regular flavor instead.
+    pub fn gw(&self) -> &GatewayClientModule {
+        match &self.ln {
+            LnFlavor::Gateway(m) => m,
+            LnFlavor::Regular(_) => panic!("GatewayClientModule is not mounted on this client"),
+        }
     }
 
     pub fn db(&self) -> &Database {

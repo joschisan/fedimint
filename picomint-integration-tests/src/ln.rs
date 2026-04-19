@@ -4,7 +4,6 @@ use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
 use picomint_client::ClientHandleArc;
-use picomint_client::ln::LightningClientModule;
 use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
 use picomint_core::Amount;
 use picomint_core::ln::Bolt11InvoiceDescription;
@@ -118,7 +117,7 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
     info!("ln: test_gateway_registration");
 
     let client = env.new_client().await?;
-    let ln = client.get_first_module::<LightningClientModule>()?;
+    let ln = client.ln();
 
     let gateway = env.gw_public.clone();
 
@@ -162,7 +161,7 @@ async fn test_gateway_registration(env: &TestEnv) -> anyhow::Result<()> {
 async fn test_payments(env: &TestEnv, client: &ClientHandleArc) -> anyhow::Result<()> {
     info!("ln: test_payments");
 
-    let ln = client.get_first_module::<LightningClientModule>()?;
+    let ln = client.ln();
 
     let gw: SafeUrl = env.gw_public.parse()?;
 
