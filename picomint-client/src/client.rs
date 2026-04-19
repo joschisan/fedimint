@@ -151,7 +151,7 @@ impl Client {
         let ln_secret = derive_module_secret(&root_secret, ModuleKind::Ln);
         let ln = match ln_choice {
             LnChoice::Regular => {
-                let ln_context = crate::module::ClientContext::<LightningClientModule>::new(
+                let ln_context = crate::module::ClientContext::new(
                     ModuleKind::Ln,
                     api.clone(),
                     ApiScope::Ln,
@@ -172,7 +172,7 @@ impl Client {
                 ))
             }
             LnChoice::Gateway(gateway) => {
-                let gw_context = crate::module::ClientContext::<GatewayClientModule>::new(
+                let gw_context = crate::module::ClientContext::new(
                     ModuleKind::Ln,
                     api.clone(),
                     ApiScope::Ln,

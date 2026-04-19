@@ -51,7 +51,7 @@ impl GatewayClientModule {
     pub async fn new(
         federation_id: FederationId,
         cfg: LightningConfigConsensus,
-        context: ClientContext<GatewayClientModule>,
+        context: ClientContext,
         mint: Arc<crate::mint::MintClientModule>,
         gateway: Arc<dyn IGatewayClient>,
         module_root_secret: &DerivableSecret,
@@ -107,7 +107,7 @@ impl GatewayClientModule {
 pub struct GatewayClientModule {
     pub federation_id: FederationId,
     pub cfg: LightningConfigConsensus,
-    pub client_ctx: ClientContext<Self>,
+    pub client_ctx: ClientContext,
     pub mint: Arc<crate::mint::MintClientModule>,
     pub module_api: FederationApi,
     pub keypair: Keypair,
@@ -122,7 +122,7 @@ pub struct GatewayClientModule {
 /// into gw) but does NOT hold `Arc<GatewayClientModule>` itself.
 #[derive(Debug, Clone)]
 pub struct GwSmContext {
-    pub client_ctx: ClientContext<GatewayClientModule>,
+    pub client_ctx: ClientContext,
     pub mint: Arc<crate::mint::MintClientModule>,
     pub input_fee: Amount,
     pub keypair: Keypair,
@@ -415,7 +415,7 @@ impl GatewayClientModule {
 }
 
 pub(crate) async fn await_receive_from_log(
-    client_ctx: &ClientContext<GatewayClientModule>,
+    client_ctx: &ClientContext,
     operation_id: OperationId,
 ) -> FinalReceiveState {
     use futures::StreamExt as _;

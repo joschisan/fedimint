@@ -206,7 +206,7 @@ impl MintClientModule {
     pub async fn new(
         federation_id: FederationId,
         cfg: MintConfigConsensus,
-        context: ClientContext<MintClientModule>,
+        context: ClientContext,
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<MintClientModule> {
@@ -267,7 +267,7 @@ pub struct MintClientModule {
     federation_id: FederationId,
     cfg: MintConfigConsensus,
     root_secret: DerivableSecret,
-    client_ctx: ClientContext<Self>,
+    client_ctx: ClientContext,
     tweak_receiver: async_channel::Receiver<[u8; 16]>,
     tx_submission_executor: crate::executor::ModuleExecutor<TxSubmissionStateMachine>,
     issuance_executor: crate::executor::ModuleExecutor<IssuanceStateMachine>,
@@ -277,7 +277,7 @@ pub struct MintClientModule {
 /// plus the immutable config data SMs need.
 #[derive(Debug, Clone)]
 pub struct MintSmContext {
-    pub client_ctx: ClientContext<MintClientModule>,
+    pub client_ctx: ClientContext,
     pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
     pub tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, tbs::PublicKeyShare>>,
 }

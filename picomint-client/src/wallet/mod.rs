@@ -49,7 +49,7 @@ const SLICE_SIZE: u64 = 1000;
 pub struct WalletClientModule {
     root_secret: DerivableSecret,
     cfg: WalletConfigConsensus,
-    client_ctx: ClientContext<Self>,
+    client_ctx: ClientContext,
     mint: std::sync::Arc<crate::mint::MintClientModule>,
     db: Database,
     module_api: FederationApi,
@@ -58,7 +58,7 @@ pub struct WalletClientModule {
 
 #[derive(Debug, Clone)]
 pub struct WalletClientContext {
-    pub client_ctx: ClientContext<WalletClientModule>,
+    pub client_ctx: ClientContext,
 }
 
 impl WalletClientModule {
@@ -74,7 +74,7 @@ impl WalletClientModule {
 impl WalletClientModule {
     pub async fn new(
         cfg: WalletConfigConsensus,
-        context: ClientContext<WalletClientModule>,
+        context: ClientContext,
         mint: std::sync::Arc<crate::mint::MintClientModule>,
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,

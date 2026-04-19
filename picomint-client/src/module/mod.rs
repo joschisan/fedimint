@@ -1,5 +1,3 @@
-use core::fmt;
-use std::marker;
 use std::sync::Arc;
 
 use crate::api::{ApiScope, FederationApi};
@@ -18,40 +16,19 @@ use tracing::warn;
 
 use crate::{TxAcceptEvent, TxRejectEvent};
 
-/// A client context for a module `M`. Bundles the per-module API, the
-/// shared client db, and federation config that module code reaches for
-/// via the generic parameter.
-pub struct ClientContext<M> {
+/// Per-module bundle of API handles, the shared client db, and federation
+/// config. Each module is constructed with one of these.
+#[derive(Debug, Clone)]
+pub struct ClientContext {
     kind: ModuleKind,
     api: FederationApi,
     api_scope: ApiScope,
     db: Database,
     config: ConsensusConfig,
     federation_id: FederationId,
-    _marker: marker::PhantomData<M>,
 }
 
-impl<M> Clone for ClientContext<M> {
-    fn clone(&self) -> Self {
-        Self {
-            kind: self.kind,
-            api: self.api.clone(),
-            api_scope: self.api_scope,
-            db: self.db.clone(),
-            config: self.config.clone(),
-            federation_id: self.federation_id,
-            _marker: marker::PhantomData,
-        }
-    }
-}
-
-impl<M> fmt::Debug for ClientContext<M> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("ClientContext")
-    }
-}
-
-impl<M> ClientContext<M> {
+impl ClientContext {
     pub fn new(
         kind: ModuleKind,
         api: FederationApi,
@@ -67,7 +44,6 @@ impl<M> ClientContext<M> {
             db,
             config,
             federation_id,
-            _marker: marker::PhantomData,
         }
     }
 

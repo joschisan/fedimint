@@ -63,7 +63,7 @@ pub type ReceiveResult = Result<(Bolt11Invoice, OperationId), ReceiveError>;
 #[derive(Debug, Clone)]
 pub struct LightningClientContext {
     pub(crate) federation_id: FederationId,
-    pub(crate) client_ctx: ClientContext<LightningClientModule>,
+    pub(crate) client_ctx: ClientContext,
     pub(crate) mint: Arc<crate::mint::MintClientModule>,
     pub(crate) input_fee: Amount,
 }
@@ -72,7 +72,7 @@ pub struct LightningClientContext {
 pub struct LightningClientModule {
     federation_id: FederationId,
     cfg: LightningConfigConsensus,
-    client_ctx: ClientContext<Self>,
+    client_ctx: ClientContext,
     mint: Arc<crate::mint::MintClientModule>,
     module_api: FederationApi,
     keypair: Keypair,
@@ -94,7 +94,7 @@ impl LightningClientModule {
     pub async fn new(
         federation_id: FederationId,
         cfg: LightningConfigConsensus,
-        client_ctx: ClientContext<Self>,
+        client_ctx: ClientContext,
         mint: Arc<crate::mint::MintClientModule>,
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
