@@ -50,12 +50,3 @@ impl Event for ReceiveEvent {
     const MODULE: Option<ModuleKind> = Some(picomint_core::ln::KIND);
     const KIND: EventKind = EventKind::from_static("receive");
 }
-
-/// Emitted when the incoming contract expires before a payment arrives.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ReceiveExpiryEvent;
-
-impl Event for ReceiveExpiryEvent {
-    const MODULE: Option<ModuleKind> = Some(picomint_core::ln::KIND);
-    const KIND: EventKind = EventKind::from_static("receive-expiry");
-}

@@ -1,4 +1,3 @@
-use picomint_core::ln::ContractId;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::util::SafeUrl;
 use picomint_core::{OutPoint, PeerId};
@@ -21,12 +20,6 @@ table!(
     INCOMING_CONTRACT,
     OutPoint => IncomingContract,
     "incoming-contract",
-);
-
-table!(
-    INCOMING_CONTRACT_OUTPOINT,
-    ContractId => OutPoint,
-    "incoming-contract-outpoint",
 );
 
 table!(
@@ -54,8 +47,9 @@ table!(
 );
 
 // Incoming contracts are indexed in three ways:
-// 1) A sequential stream: `stream_index (u64)` -> `IncomingContract` for
-//    efficient streaming reads via range queries on `INCOMING_CONTRACT_STREAM`.
+// 1) A sequential stream: `stream_index (u64)` -> `(OutPoint, IncomingContract)`
+//    for efficient streaming reads via range queries on
+//    `INCOMING_CONTRACT_STREAM`.
 // 2) A monotonically-increasing index (`INCOMING_CONTRACT_STREAM_INDEX` -> u64)
 //    that stores the next stream index to assign, used to wait for new incoming
 //    contracts.
@@ -70,7 +64,7 @@ table!(
 
 table!(
     INCOMING_CONTRACT_STREAM,
-    u64 => IncomingContract,
+    u64 => (OutPoint, IncomingContract),
     "incoming-contract-stream",
 );
 

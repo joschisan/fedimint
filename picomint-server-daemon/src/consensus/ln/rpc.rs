@@ -12,40 +12,13 @@ use tpe::DecryptionKeyShare;
 
 use super::Lightning;
 use super::db::{
-    DECRYPTION_KEY_SHARE, GATEWAY, INCOMING_CONTRACT_OUTPOINT, INCOMING_CONTRACT_STREAM,
-    INCOMING_CONTRACT_STREAM_INDEX, OUTGOING_CONTRACT, PREIMAGE,
+    DECRYPTION_KEY_SHARE, GATEWAY, INCOMING_CONTRACT_STREAM, INCOMING_CONTRACT_STREAM_INDEX,
+    OUTGOING_CONTRACT, PREIMAGE,
 };
 
 pub async fn consensus_block_count(ln: &Lightning, _: ()) -> Result<u64, ApiError> {
     let tx = ln.db.begin_read().await;
     Ok(ln.consensus_block_count(&tx))
-}
-
-pub async fn await_incoming_contract(
-    ln: &Lightning,
-    (contract_id, expiration): (ContractId, u64),
-) -> Result<Option<OutPoint>, ApiError> {
-    loop {
-        // Wait for the contract to appear, or time out periodically to check
-        // expiration against consensus time.
-        let wait = ln.db.wait_table_check(&INCOMING_CONTRACT_OUTPOINT, |tx| {
-            tx.get(&INCOMING_CONTRACT_OUTPOINT, &contract_id)
-        });
-
-        if let Ok((outpoint, _tx)) = timeout(Duration::from_secs(10), wait).await {
-            return Ok(Some(outpoint));
-        }
-
-        let tx = ln.db.begin_read().await;
-
-        if let Some(outpoint) = tx.get(&INCOMING_CONTRACT_OUTPOINT, &contract_id) {
-            return Ok(Some(outpoint));
-        }
-
-        if expiration <= ln.consensus_unix_time(&tx) {
-            return Ok(None);
-        }
-    }
 }
 
 pub async fn await_preimage(
@@ -104,7 +77,7 @@ pub async fn outgoing_contract_expiration(
 pub async fn await_incoming_contracts(
     ln: &Lightning,
     (start, batch): (u64, u64),
-) -> Result<(Vec<IncomingContract>, u64), ApiError> {
+) -> Result<(Vec<(OutPoint, IncomingContract)>, u64), ApiError> {
     if batch == 0 {
         return Err(ApiError::bad_request(
             "Batch size must be greater than 0".to_string(),
@@ -125,8 +98,8 @@ pub async fn await_incoming_contracts(
 
     let mut results = Vec::with_capacity(contracts.len());
 
-    for (key, contract) in contracts {
-        results.push(contract);
+    for (key, entry) in contracts {
+        results.push(entry);
         next_index = key + 1;
     }
 

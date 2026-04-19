@@ -10,14 +10,13 @@ mod api;
 mod db;
 pub mod events;
 mod gateway_http;
-mod receive_sm;
 mod send_sm;
 
 use std::sync::Arc;
 
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
-use crate::transaction::{Output, TransactionBuilder};
+use crate::transaction::{Input, Output, TransactionBuilder};
 use bitcoin::secp256k1;
 use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
 use lightning_invoice::{Bolt11Invoice, Currency};
@@ -27,16 +26,15 @@ use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use picomint_core::ln::gateway_api::{PaymentFee, RoutingInfo};
 use picomint_core::ln::{
-    Bolt11InvoiceDescription, IncomingContractPath, LightningInvoice, LightningOutput,
-    MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
+    Bolt11InvoiceDescription, IncomingContractPath, LightningInput, LightningInvoice,
+    LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
 };
 use picomint_core::task::TaskGroup;
 use picomint_core::wire;
 
 #[derive(picomint_encoding::Encodable)]
 enum RootSecretPath {
-    Node,
-    Lnurl,
+    Receive,
     Refund,
 }
 use crate::secret::Secret;
@@ -49,8 +47,7 @@ use secp256k1::{Keypair, PublicKey, SecretKey, ecdh};
 use thiserror::Error;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
 
-use self::events::SendEvent;
-use self::receive_sm::ReceiveStateMachine;
+use self::events::{ReceiveEvent, SendEvent};
 use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine};
 
 /// Number of blocks until outgoing lightning contracts times out and user
@@ -61,8 +58,6 @@ const EXPIRATION_DELTA_LIMIT: u64 = 1440;
 const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;
 
 pub type SendResult = Result<OperationId, SendPaymentError>;
-
-pub type ReceiveResult = Result<(Bolt11Invoice, OperationId), ReceiveError>;
 
 #[derive(Debug, Clone)]
 pub struct LightningClientContext {
@@ -80,7 +75,6 @@ pub struct LightningClientModule {
     mint: Arc<crate::mint::MintClientModule>,
     module_root_secret: Secret,
     send_executor: ModuleExecutor<SendStateMachine>,
-    receive_executor: ModuleExecutor<ReceiveStateMachine>,
 }
 
 impl LightningClientModule {
@@ -107,13 +101,7 @@ impl LightningClientModule {
             mint: mint.clone(),
             input_fee: cfg.input_fee,
         };
-        let send_executor = ModuleExecutor::new(
-            client_ctx.db().clone(),
-            sm_context.clone(),
-            task_group.clone(),
-        )
-        .await;
-        let receive_executor =
+        let send_executor =
             ModuleExecutor::new(client_ctx.db().clone(), sm_context, task_group.clone()).await;
 
         let module = Self {
@@ -123,10 +111,9 @@ impl LightningClientModule {
             mint,
             module_root_secret: *module_root_secret,
             send_executor,
-            receive_executor,
         };
 
-        module.spawn_receive_lnurl_task(task_group);
+        module.spawn_receive_scan_task(task_group);
 
         module.spawn_gateway_map_update_task(task_group);
 
@@ -400,33 +387,20 @@ impl LightningClientModule {
         expiry_secs: u32,
         description: Bolt11InvoiceDescription,
         gateway: Option<SafeUrl>,
-    ) -> Result<(Bolt11Invoice, OperationId), ReceiveError> {
-        let node_keypair = self
+    ) -> Result<Bolt11Invoice, ReceiveError> {
+        let receive_keypair = self
             .module_root_secret
-            .child(&RootSecretPath::Node)
+            .child(&RootSecretPath::Receive)
             .to_secp_keypair();
 
-        let (_gateway, contract, invoice) = self
-            .create_contract_and_fetch_invoice(
-                node_keypair.public_key(),
-                amount,
-                expiry_secs,
-                description,
-                gateway,
-            )
-            .await?;
-
-        let dbtx = self.client_ctx.db().begin_write().await;
-        let tx = dbtx.as_ref();
-
-        let operation_id = self
-            .receive_incoming_contract(&tx, node_keypair.secret_key(), contract)
-            .await
-            .expect("The contract has been generated with our public key");
-
-        dbtx.commit().await;
-
-        Ok((invoice, operation_id))
+        self.create_contract_and_fetch_invoice(
+            receive_keypair.public_key(),
+            amount,
+            expiry_secs,
+            description,
+            gateway,
+        )
+        .await
     }
 
     /// Create an incoming contract locked to a public key derived from the
@@ -439,7 +413,7 @@ impl LightningClientModule {
         expiry_secs: u32,
         description: Bolt11InvoiceDescription,
         gateway: Option<SafeUrl>,
-    ) -> Result<(SafeUrl, IncomingContract, Bolt11Invoice), ReceiveError> {
+    ) -> Result<Bolt11Invoice, ReceiveError> {
         let ephemeral_kp = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
         let shared_secret = ecdh::SharedSecret::new(&recipient_pk, &ephemeral_kp.secret_key());
@@ -450,7 +424,9 @@ impl LightningClientModule {
             .child(&IncomingContractPath::EncryptionSeed)
             .to_bytes();
 
-        let preimage = contract_secret.child(&IncomingContractPath::Preimage).to_bytes();
+        let preimage = contract_secret
+            .child(&IncomingContractPath::Preimage)
+            .to_bytes();
 
         let claim_tweak = contract_secret
             .child(&IncomingContractPath::ClaimKey)
@@ -519,36 +495,45 @@ impl LightningClientModule {
             return Err(ReceiveError::IncorrectInvoiceAmount);
         }
 
-        Ok((gateway, contract, invoice))
+        Ok(invoice)
     }
 
-    // Receive an incoming contract locked to a public key derived from our
-    // static module public key. Takes the caller's dbtx so the spawn is atomic
-    // with any surrounding state changes (e.g. advancing the lnurl stream
-    // index in [`Self::receive_lnurl`]).
+    /// Try to claim a streamed incoming contract: decrypt with the caller's
+    /// secret key, and if it's ours submit the claim input + log the
+    /// `ReceiveEvent` in the caller's dbtx (which also advances the scanner's
+    /// stream index atomically).
     async fn receive_incoming_contract(
         &self,
         dbtx: &WriteTxRef<'_>,
         sk: SecretKey,
-        contract: IncomingContract,
-    ) -> Option<OperationId> {
-        let operation_id = OperationId::from_encodable(&contract.clone());
+        outpoint: OutPoint,
+        contract: &IncomingContract,
+    ) {
+        let Some((claim_keypair, agg_dk)) = self.recover_contract_keys(sk, contract) else {
+            return;
+        };
 
-        let (claim_keypair, agg_decryption_key) = self.recover_contract_keys(sk, &contract)?;
+        let tx_builder = TransactionBuilder::from_input(Input {
+            input: wire::Input::Ln(LightningInput::Incoming(outpoint, agg_dk)),
+            keypair: claim_keypair,
+            amount: contract.commitment.amount,
+            fee: self.cfg.input_fee,
+        });
 
-        self.receive_executor
-            .add_state_machine_dbtx(
-                dbtx,
-                ReceiveStateMachine {
-                    operation_id,
-                    contract,
-                    claim_keypair,
-                    agg_decryption_key,
-                },
-            )
-            .await;
+        let operation_id = OperationId::from_encodable(&outpoint);
 
-        Some(operation_id)
+        let txid = self
+            .mint
+            .finalize_and_submit_transaction(dbtx, operation_id, tx_builder)
+            .await
+            .expect("Cannot claim input, additional funding needed");
+
+        let event = ReceiveEvent {
+            txid,
+            amount: contract.commitment.amount,
+        };
+
+        self.client_ctx.log_event(dbtx, operation_id, event).await;
     }
 
     fn recover_contract_keys(
@@ -613,14 +598,14 @@ impl LightningClientModule {
             gateways
         };
 
-        let lnurl_keypair = self
+        let receive_keypair = self
             .module_root_secret
-            .child(&RootSecretPath::Lnurl)
+            .child(&RootSecretPath::Receive)
             .to_secp_keypair();
 
         let payload = picomint_base32::encode(&lnurl::LnurlRequest {
             federation_id: self.federation_id,
-            recipient_pk: lnurl_keypair.public_key(),
+            recipient_pk: receive_keypair.public_key(),
             aggregate_pk: self.cfg.tpe_agg_pk,
             gateways,
         });
@@ -630,17 +615,17 @@ impl LightningClientModule {
         )))
     }
 
-    fn spawn_receive_lnurl_task(&self, task_group: &TaskGroup) {
+    fn spawn_receive_scan_task(&self, task_group: &TaskGroup) {
         let module = self.clone();
 
-        task_group.spawn_cancellable("receive_lnurl_task", async move {
+        task_group.spawn_cancellable("receive_scan_task", async move {
             loop {
-                module.receive_lnurl().await;
+                module.receive_scan().await;
             }
         });
     }
 
-    async fn receive_lnurl(&self) {
+    async fn receive_scan(&self) {
         let stream_index = self
             .client_ctx
             .db()
@@ -649,25 +634,26 @@ impl LightningClientModule {
             .get(&INCOMING_CONTRACT_STREAM_INDEX, &())
             .unwrap_or(0);
 
-        let (contracts, next_index) = self
+        let (entries, next_index) = self
             .client_ctx
             .module_api()
             .ln_await_incoming_contracts(stream_index, 128)
             .await;
 
-        let lnurl_keypair = self
+        let sk = self
             .module_root_secret
-            .child(&RootSecretPath::Lnurl)
-            .to_secp_keypair();
+            .child(&RootSecretPath::Receive)
+            .to_secp_keypair()
+            .secret_key();
 
         let dbtx = self.client_ctx.db().begin_write().await;
-        let tx = dbtx.as_ref();
-        for contract in &contracts {
-            self.receive_incoming_contract(&tx, lnurl_keypair.secret_key(), contract.clone())
+
+        for (outpoint, contract) in &entries {
+            self.receive_incoming_contract(&dbtx.as_ref(), sk, *outpoint, contract)
                 .await;
         }
 
-        tx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &next_index);
+        dbtx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &next_index);
 
         dbtx.commit().await;
     }

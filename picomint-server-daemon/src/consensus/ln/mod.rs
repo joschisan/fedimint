@@ -16,9 +16,8 @@ use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
 use picomint_core::ln::endpoint_constants::{
-    AWAIT_INCOMING_CONTRACT_ENDPOINT, AWAIT_INCOMING_CONTRACTS_ENDPOINT, AWAIT_PREIMAGE_ENDPOINT,
-    CONSENSUS_BLOCK_COUNT_ENDPOINT, DECRYPTION_KEY_SHARE_ENDPOINT, GATEWAYS_ENDPOINT,
-    OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
+    AWAIT_INCOMING_CONTRACTS_ENDPOINT, AWAIT_PREIMAGE_ENDPOINT, CONSENSUS_BLOCK_COUNT_ENDPOINT,
+    DECRYPTION_KEY_SHARE_ENDPOINT, GATEWAYS_ENDPOINT, OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
 };
 use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
@@ -40,8 +39,8 @@ use crate::handler;
 
 use self::db::{
     BLOCK_COUNT_VOTE, DECRYPTION_KEY_SHARE, GATEWAY, INCOMING_CONTRACT, INCOMING_CONTRACT_INDEX,
-    INCOMING_CONTRACT_OUTPOINT, INCOMING_CONTRACT_STREAM, INCOMING_CONTRACT_STREAM_INDEX,
-    OUTGOING_CONTRACT, PREIMAGE, UNIX_TIME_VOTE,
+    INCOMING_CONTRACT_STREAM, INCOMING_CONTRACT_STREAM_INDEX, OUTGOING_CONTRACT, PREIMAGE,
+    UNIX_TIME_VOTE,
 };
 
 /// Run DKG for the lightning module, producing a fresh `LightningConfig` for
@@ -251,15 +250,13 @@ impl Lightning {
 
                 dbtx.insert(&INCOMING_CONTRACT, &outpoint, contract);
 
-                dbtx.insert(
-                    &INCOMING_CONTRACT_OUTPOINT,
-                    &contract.contract_id(),
-                    &outpoint,
-                );
-
                 let stream_index = dbtx.get(&INCOMING_CONTRACT_STREAM_INDEX, &()).unwrap_or(0);
 
-                dbtx.insert(&INCOMING_CONTRACT_STREAM, &stream_index, contract);
+                dbtx.insert(
+                    &INCOMING_CONTRACT_STREAM,
+                    &stream_index,
+                    &(outpoint, contract.clone()),
+                );
 
                 dbtx.insert(&INCOMING_CONTRACT_INDEX, &outpoint, &stream_index);
 
@@ -314,7 +311,6 @@ impl Lightning {
     ) -> Result<Vec<u8>, ApiError> {
         match method {
             CONSENSUS_BLOCK_COUNT_ENDPOINT => handler!(consensus_block_count, self, req).await,
-            AWAIT_INCOMING_CONTRACT_ENDPOINT => handler!(await_incoming_contract, self, req).await,
             AWAIT_PREIMAGE_ENDPOINT => handler!(await_preimage, self, req).await,
             DECRYPTION_KEY_SHARE_ENDPOINT => handler!(decryption_key_share, self, req).await,
             OUTGOING_CONTRACT_EXPIRATION_ENDPOINT => {

@@ -1,5 +1,4 @@
 // Federation endpoints
-pub const AWAIT_INCOMING_CONTRACT_ENDPOINT: &str = "await_incoming_contract";
 pub const AWAIT_PREIMAGE_ENDPOINT: &str = "await_preimage";
 pub const AWAIT_INCOMING_CONTRACTS_ENDPOINT: &str = "await_incoming_contracts";
 pub const DECRYPTION_KEY_SHARE_ENDPOINT: &str = "decryption_key_share";

@@ -2,11 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::api::{FederationApi, FederationResult, ServerResult};
 use crate::query::FilterMapThreshold;
-use picomint_core::ln::ContractId;
 use picomint_core::ln::contracts::IncomingContract;
 use picomint_core::ln::endpoint_constants::{
-    AWAIT_INCOMING_CONTRACT_ENDPOINT, AWAIT_INCOMING_CONTRACTS_ENDPOINT, AWAIT_PREIMAGE_ENDPOINT,
-    CONSENSUS_BLOCK_COUNT_ENDPOINT, GATEWAYS_ENDPOINT,
+    AWAIT_INCOMING_CONTRACTS_ENDPOINT, AWAIT_PREIMAGE_ENDPOINT, CONSENSUS_BLOCK_COUNT_ENDPOINT,
+    GATEWAYS_ENDPOINT,
 };
 use picomint_core::module::ApiRequestErased;
 use picomint_core::util::SafeUrl;
@@ -18,18 +17,6 @@ impl FederationApi {
         self.request_current_consensus(
             CONSENSUS_BLOCK_COUNT_ENDPOINT.to_string(),
             ApiRequestErased::new(()),
-        )
-        .await
-    }
-
-    pub async fn ln_await_incoming_contract(
-        &self,
-        contract_id: &ContractId,
-        expiration: u64,
-    ) -> Option<OutPoint> {
-        self.request_current_consensus_retry::<Option<OutPoint>>(
-            AWAIT_INCOMING_CONTRACT_ENDPOINT.to_string(),
-            ApiRequestErased::new((contract_id, expiration)),
         )
         .await
     }
@@ -46,7 +33,7 @@ impl FederationApi {
         &self,
         start: u64,
         n: u64,
-    ) -> (Vec<IncomingContract>, u64) {
+    ) -> (Vec<(OutPoint, IncomingContract)>, u64) {
         self.request_current_consensus_retry(
             AWAIT_INCOMING_CONTRACTS_ENDPOINT.to_string(),
             ApiRequestErased::new((start, n)),

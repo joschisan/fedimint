@@ -208,7 +208,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     info!("Testing payment from LDK node to client (half of first send)...");
 
     {
-        let (invoice, receive_op) = ln
+        let invoice = ln
             .receive(
                 Amount::from_msats(500_000),
                 300,
@@ -219,10 +219,9 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
 
         env.ldk_node.bolt11_payment().send(&invoice, None)?;
 
-        let Some((op, LnEvent::Receive(_))) = events.next().await else {
+        let Some((_op, LnEvent::Receive(_))) = events.next().await else {
             panic!("Expected Receive event");
         };
-        assert_eq!(op, receive_op);
 
         // Verify the freestanding LDK node observes the payment as successful,
         // i.e. the gateway settled the HTLC back to it via the CompleteSM.
