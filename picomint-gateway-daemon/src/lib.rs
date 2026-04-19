@@ -109,7 +109,7 @@ impl AppState {
 
         let federations = self.client_factory.list_federations().await;
 
-        for (federation_id, _config) in federations {
+        for federation_id in federations {
             let gateway = Arc::new(self.clone());
             match self.client_factory.load(&federation_id, gateway).await {
                 Ok(Some(client)) => {

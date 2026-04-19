@@ -252,7 +252,9 @@ async fn build_client(
 
     let mnemonic = Mnemonic::generate(12)?;
 
-    let client = Client::join(endpoint, db, &mnemonic, &invite_code)
+    let config = picomint_client::download(&endpoint, &invite_code).await?;
+
+    let client = Client::new(endpoint, db, &mnemonic, config)
         .await
         .map(Arc::new)?;
 

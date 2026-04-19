@@ -9,8 +9,6 @@ use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
 use crate::secret::{Mnemonic, derive_module_secret, derive_root_secret};
 use crate::wallet::WalletClientModule;
-use crate::download_from_invite_code;
-use anyhow::bail;
 use futures::Stream;
 use picomint_core::Amount;
 use picomint_core::PeerId;
@@ -25,11 +23,9 @@ use picomint_logging::LOG_CLIENT;
 use picomint_redb::Database;
 use tracing::debug;
 
-use crate::db::CLIENT_CONFIG;
-
 pub(crate) mod handle;
 
-/// LN-flavor selection used by the four constructors below.
+/// LN-flavor selection used by the two constructors below.
 enum LnChoice {
     Regular,
     Gateway(Arc<dyn IGatewayClient>),
@@ -73,67 +69,26 @@ impl Client {
     /// Join a federation for the first time using a regular lightning
     /// flavor. Downloads the federation config via the invite, persists it,
     /// and brings up the client.
-    pub async fn join(
+    pub async fn new(
         connectors: Endpoint,
         db: Database,
         mnemonic: &Mnemonic,
-        invite: &InviteCode,
+        config: ConsensusConfig,
     ) -> anyhow::Result<handle::ClientHandle> {
-        let config = download_from_invite_code(&connectors, invite).await?;
-        Self::init_db(&db, &config).await?;
         Self::build(connectors, db, mnemonic, config, LnChoice::Regular).await
     }
 
-    /// Open an existing regular-lightning federation client from a database
-    /// that was previously initialized via [`Client::join`].
-    pub async fn open(
-        connectors: Endpoint,
-        db: Database,
-        mnemonic: &Mnemonic,
-    ) -> anyhow::Result<handle::ClientHandle> {
-        let config = Self::get_config_from_db(&db)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Client database not initialized"))?;
-        Self::build(connectors, db, mnemonic, config, LnChoice::Regular).await
-    }
-
-    /// Gateway-flavor counterpart of [`Client::join`]. Used by the gateway
+    /// Gateway-flavor counterpart of [`Client::new`]. Used by the gateway
     /// daemon, which mounts its own [`IGatewayClient`] in place of the
     /// regular lightning module.
-    pub async fn join_gateway(
+    pub async fn new_gateway(
         connectors: Endpoint,
         db: Database,
         mnemonic: &Mnemonic,
-        invite: &InviteCode,
+        config: ConsensusConfig,
         gateway: Arc<dyn IGatewayClient>,
     ) -> anyhow::Result<handle::ClientHandle> {
-        let config = download_from_invite_code(&connectors, invite).await?;
-        Self::init_db(&db, &config).await?;
         Self::build(connectors, db, mnemonic, config, LnChoice::Gateway(gateway)).await
-    }
-
-    /// Gateway-flavor counterpart of [`Client::open`].
-    pub async fn open_gateway(
-        connectors: Endpoint,
-        db: Database,
-        mnemonic: &Mnemonic,
-        gateway: Arc<dyn IGatewayClient>,
-    ) -> anyhow::Result<handle::ClientHandle> {
-        let config = Self::get_config_from_db(&db)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Client database not initialized"))?;
-        Self::build(connectors, db, mnemonic, config, LnChoice::Gateway(gateway)).await
-    }
-
-    async fn init_db(db: &Database, config: &ConsensusConfig) -> anyhow::Result<()> {
-        if Self::is_initialized(db).await {
-            bail!("Client database already initialized")
-        }
-        debug!(target: LOG_CLIENT, "Initializing client database");
-        let dbtx = db.begin_write().await;
-        dbtx.as_ref().insert(&CLIENT_CONFIG, &(), config);
-        dbtx.commit().await;
-        Ok(())
     }
 
     async fn build(
@@ -278,14 +233,6 @@ impl Client {
     /// Get the [`TaskGroup`] that is tied to Client's lifetime.
     pub fn task_group(&self) -> &TaskGroup {
         &self.task_group
-    }
-
-    pub async fn get_config_from_db(db: &Database) -> Option<ConsensusConfig> {
-        db.begin_read().await.as_ref().get(&CLIENT_CONFIG, &())
-    }
-
-    pub async fn is_initialized(db: &Database) -> bool {
-        Self::get_config_from_db(db).await.is_some()
     }
 
     pub fn federation_id(&self) -> FederationId {

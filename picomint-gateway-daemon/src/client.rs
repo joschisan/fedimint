@@ -12,6 +12,8 @@ use picomint_redb::Database;
 use crate::AppState;
 use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
 
+
+
 #[derive(Debug, Clone)]
 pub struct GatewayClientFactory {
     db: Database,
@@ -68,14 +70,17 @@ impl GatewayClientFactory {
         self.db.isolate(format!("client-{federation_id}"))
     }
 
-    async fn save_config(&self, config: &ConsensusConfig) {
-        let dbtx = self.db.begin_write().await;
-        dbtx.as_ref()
-            .insert(&CLIENT_CONFIG, &config.calculate_federation_id(), config);
-        dbtx.commit().await;
+    async fn read_config(&self, federation_id: &FederationId) -> Option<ConsensusConfig> {
+        self.db
+            .begin_read()
+            .await
+            .as_ref()
+            .get(&CLIENT_CONFIG, federation_id)
     }
 
-    /// Join a federation for the first time.
+    /// Join a federation for the first time. Idempotent: if a config for
+    /// this federation is already persisted, this is equivalent to
+    /// [`Self::load`].
     pub async fn join(
         &self,
         invite: &InviteCode,
@@ -83,56 +88,59 @@ impl GatewayClientFactory {
     ) -> anyhow::Result<picomint_client::ClientHandleArc> {
         let federation_id = invite.federation_id();
 
-        // Idempotent: if already joined, just load
-        if let Some(client) = self.load(&federation_id, gateway.clone()).await? {
-            return Ok(client);
-        }
+        let config = match self.read_config(&federation_id).await {
+            Some(config) => config,
+            None => {
+                let config = picomint_client::download(&self.connectors, invite).await?;
+                let dbtx = self.db.begin_write().await;
+                dbtx.as_ref().insert(&CLIENT_CONFIG, &federation_id, &config);
+                dbtx.commit().await;
+                config
+            }
+        };
 
-        let client = Client::join_gateway(
-            self.connectors.clone(),
-            self.client_database(federation_id),
-            &self.mnemonic,
-            invite,
-            gateway as Arc<dyn IGatewayClient>,
-        )
-        .await
-        .map(Arc::new)
-        .map_err(|e| anyhow::anyhow!("Client creation error: {e}"))?;
-
-        self.save_config(&client.config().await).await;
-
-        Ok(client)
+        self.open(config, gateway).await
     }
 
-    /// Load an existing client for a federation.
+    /// Open the client for a federation whose config is already persisted.
+    /// Returns `None` if no config is stored for `federation_id`.
     pub async fn load(
         &self,
         federation_id: &FederationId,
         gateway: Arc<AppState>,
     ) -> anyhow::Result<Option<picomint_client::ClientHandleArc>> {
-        let db = self.client_database(*federation_id);
-
-        if !Client::is_initialized(&db).await {
-            return Ok(None);
+        match self.read_config(federation_id).await {
+            Some(config) => self.open(config, gateway).await.map(Some),
+            None => Ok(None),
         }
+    }
 
-        let client = Client::open_gateway(
+    async fn open(
+        &self,
+        config: ConsensusConfig,
+        gateway: Arc<AppState>,
+    ) -> anyhow::Result<picomint_client::ClientHandleArc> {
+        Client::new_gateway(
             self.connectors.clone(),
-            db,
+            self.client_database(config.calculate_federation_id()),
             &self.mnemonic,
+            config,
             gateway as Arc<dyn IGatewayClient>,
         )
         .await
         .map(Arc::new)
-        .map_err(|e| anyhow::anyhow!("Client open error: {e}"))?;
-
-        self.save_config(&client.config().await).await;
-
-        Ok(Some(client))
+        .map_err(|e| anyhow::anyhow!("Client open error: {e}"))
     }
 
-    /// List all federation configs stored in the database.
-    pub async fn list_federations(&self) -> Vec<(FederationId, ConsensusConfig)> {
-        self.db.begin_read().await.as_ref().iter(&CLIENT_CONFIG)
+    /// List all federation ids the gateway has joined.
+    pub async fn list_federations(&self) -> Vec<FederationId> {
+        self.db
+            .begin_read()
+            .await
+            .as_ref()
+            .iter(&CLIENT_CONFIG)
+            .into_iter()
+            .map(|(federation_id, _config)| federation_id)
+            .collect()
     }
 }

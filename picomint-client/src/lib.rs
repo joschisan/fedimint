@@ -1,9 +1,10 @@
 //! Picomint client library.
 //!
 //! [`Client`] is the entry point for applications interacting with one
-//! federation. Use [`Client::join`] / [`Client::open`] for regular clients
-//! and [`Client::join_gateway`] / [`Client::open_gateway`] for the gateway
-//! daemon's flavor.
+//! federation. Use [`Client::new`] for regular clients and
+//! [`Client::new_gateway`] for the gateway daemon's flavor — both take a
+//! [`ConsensusConfig`] that the integrator obtained via [`download`] (from
+//! an invite code) and persists itself.
 //!
 //! Per-module logic lives in [`mod@mint`], [`mod@wallet`], [`mod@ln`], and
 //! [`mod@gw`]. Each module owns its own state machines and exposes a
@@ -18,8 +19,6 @@
 pub mod api;
 /// Core [`Client`]
 mod client;
-/// Database keys used by the client
-pub mod db;
 /// Environment variables
 pub mod envs;
 /// Per-module typed state machine executor
@@ -91,7 +90,7 @@ pub struct GetInviteCodeRequest {
 
 /// Downloads the [`ConsensusConfig`] using the peers advertised in the invite
 /// code, then re-verifies it with the full peer set from the config itself.
-pub async fn download_from_invite_code(
+pub async fn download(
     endpoint: &Endpoint,
     invite: &InviteCode,
 ) -> anyhow::Result<ConsensusConfig> {
