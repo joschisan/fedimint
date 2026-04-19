@@ -136,9 +136,13 @@ async fn invoice(
 
     info!(%params.amount, %gateway, "Created invoice");
 
+    let verify = gateway
+        .join(&format!("verify/{}", invoice.payment_hash()))
+        .expect("verify/{hash} is a valid relative path");
+
     Json(LnurlResponse::Ok(InvoiceResponse {
         pr: invoice.clone(),
-        verify: Some(format!("{}/verify/{}", gateway, invoice.payment_hash())),
+        verify: Some(verify.to_string()),
     }))
 }
 
