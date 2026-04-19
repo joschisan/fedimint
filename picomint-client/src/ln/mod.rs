@@ -79,6 +79,7 @@ impl LightningClientInit {
         federation_id: FederationId,
         cfg: LightningConfigConsensus,
         context: ClientContext<LightningClientModule>,
+        mint: Arc<crate::mint::MintClientModule>,
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<LightningClientModule> {
@@ -93,6 +94,7 @@ impl LightningClientInit {
             federation_id,
             cfg,
             context,
+            mint,
             module_api,
             module_root_secret,
             gateway_conn,
@@ -113,6 +115,8 @@ pub struct LightningClientModule {
     federation_id: FederationId,
     cfg: LightningConfigConsensus,
     client_ctx: ClientContext<Self>,
+    #[allow(dead_code)] // wired up in step 3 when callers migrate to mint.finalize_and_submit
+    mint: Arc<crate::mint::MintClientModule>,
     module_api: FederationApi,
     keypair: Keypair,
     lnurl_keypair: Keypair,
@@ -140,6 +144,7 @@ impl LightningClientModule {
         federation_id: FederationId,
         cfg: LightningConfigConsensus,
         client_ctx: ClientContext<Self>,
+        mint: Arc<crate::mint::MintClientModule>,
         module_api: FederationApi,
         module_root_secret: &DerivableSecret,
         gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
@@ -165,6 +170,7 @@ impl LightningClientModule {
             federation_id,
             cfg,
             client_ctx,
+            mint,
             module_api,
             keypair: module_root_secret
                 .child_key(ChildId(0))

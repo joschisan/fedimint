@@ -8,7 +8,6 @@ use picomint_core::Amount;
 use picomint_core::transaction::Transaction;
 use picomint_core::wire;
 
-
 #[derive(Clone, Debug)]
 pub struct Input {
     pub input: wire::Input,
@@ -57,6 +56,13 @@ impl TransactionBuilder {
         self.outputs.push(output);
     }
 
+    /// Temporary accessor used by the migration shim that adapts the new
+    /// builder to the legacy `ClientInput`/`ClientOutput` finalize path. Will
+    /// be deleted with the legacy types.
+    pub fn into_parts(self) -> (Vec<Input>, Vec<Output>) {
+        (self.inputs, self.outputs)
+    }
+
     pub fn input_amount(&self) -> Amount {
         self.inputs.iter().map(|i| i.amount).sum()
     }
@@ -70,8 +76,6 @@ impl TransactionBuilder {
     }
 
     pub fn build(self) -> Transaction {
-        let secp_ctx = Secp256k1::new();
-
         let inputs: Vec<wire::Input> = self.inputs.iter().map(|i| i.input.clone()).collect();
         let outputs: Vec<wire::Output> = self.outputs.into_iter().map(|o| o.output).collect();
 
@@ -82,7 +86,7 @@ impl TransactionBuilder {
         let signatures = self
             .inputs
             .iter()
-            .map(|i| secp_ctx.sign_schnorr(&message, &i.keypair))
+            .map(|i| Secp256k1::new().sign_schnorr(&message, &i.keypair))
             .collect();
 
         Transaction {

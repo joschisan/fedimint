@@ -290,6 +290,54 @@ impl MintClientModule {
         self.cfg.output_fee
     }
 
+    /// Submission entry point used during the migration to the new
+    /// `transaction::builder_next` types. Adapts the new builder to the
+    /// legacy `ClientInput`/`ClientOutput` finalize pipeline; will become
+    /// the real implementation (with the balance loop folded in) once all
+    /// callers have been migrated and submission ownership has been moved
+    /// from `Client` into `MintClientModule`.
+    pub async fn finalize_and_submit_transaction(
+        &self,
+        dbtx: &WriteTxRef<'_>,
+        operation_id: OperationId,
+        builder: crate::transaction::builder_next::TransactionBuilder,
+    ) -> anyhow::Result<picomint_core::TransactionId> {
+        let (inputs, outputs) = builder.into_parts();
+
+        let mut legacy = TransactionBuilder::new();
+
+        if !inputs.is_empty() {
+            let bundle = ClientInputBundle::new(
+                inputs
+                    .into_iter()
+                    .map(|i| ClientInput {
+                        input: i.input,
+                        keys: vec![i.keypair],
+                        amount: i.amount,
+                    })
+                    .collect(),
+            );
+            legacy = legacy.with_inputs(bundle);
+        }
+
+        if !outputs.is_empty() {
+            let bundle = ClientOutputBundle::new(
+                outputs
+                    .into_iter()
+                    .map(|o| ClientOutput {
+                        output: o.output,
+                        amount: o.amount,
+                    })
+                    .collect(),
+            );
+            legacy = legacy.with_outputs(bundle);
+        }
+
+        self.client_ctx
+            .finalize_and_submit_transaction_dbtx(dbtx, operation_id, legacy)
+            .await
+    }
+
     pub async fn create_final_inputs_and_outputs(
         &self,
         dbtx: &WriteTxRef<'_>,

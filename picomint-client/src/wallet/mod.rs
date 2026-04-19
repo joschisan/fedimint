@@ -51,6 +51,8 @@ pub struct WalletClientModule {
     root_secret: DerivableSecret,
     cfg: WalletConfigConsensus,
     client_ctx: ClientContext<Self>,
+    #[allow(dead_code)] // wired up in step 3 when callers migrate to mint.finalize_and_submit
+    mint: std::sync::Arc<crate::mint::MintClientModule>,
     db: Database,
     module_api: FederationApi,
     send_executor: ModuleExecutor<SendStateMachine>,
@@ -83,6 +85,7 @@ impl WalletClientInit {
         &self,
         cfg: WalletConfigConsensus,
         context: ClientContext<WalletClientModule>,
+        mint: std::sync::Arc<crate::mint::MintClientModule>,
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<WalletClientModule> {
@@ -97,6 +100,7 @@ impl WalletClientInit {
             root_secret: module_root_secret.clone(),
             cfg,
             client_ctx: context,
+            mint,
             db,
             module_api,
             send_executor,

@@ -287,6 +287,7 @@ impl ClientBuilder {
                 .init(
                     config.wallet.clone(),
                     wallet_context,
+                    mint.clone(),
                     &root_secret.derive_module_secret(ModuleKind::Wallet),
                     &task_group,
                 )
@@ -310,6 +311,7 @@ impl ClientBuilder {
                         fed_id,
                         config.ln.clone(),
                         ln_context,
+                        mint.clone(),
                         &root_secret.derive_module_secret(ModuleKind::Ln),
                         &task_group,
                     )
@@ -332,6 +334,7 @@ impl ClientBuilder {
                         fed_id,
                         config.ln.clone(),
                         ln_context,
+                        mint.clone(),
                         &root_secret.derive_module_secret(ModuleKind::Ln),
                         &task_group,
                     )
