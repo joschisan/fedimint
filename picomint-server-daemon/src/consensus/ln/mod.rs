@@ -282,29 +282,29 @@ impl Lightning {
     pub async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
         // Both incoming and outgoing contracts represent liabilities to the federation
         // since they are obligations to issue notes.
-        audit.add_items(
-            ModuleKind::Ln,
-            dbtx.iter(&OUTGOING_CONTRACT)
-                .into_iter()
-                .map(|(outpoint, contract)| {
-                    (
-                        format!("OutgoingContract({outpoint:?})"),
-                        -(contract.amount.msats as i64),
-                    )
-                }),
-        );
+        let outgoing_items = dbtx.iter(&OUTGOING_CONTRACT, |r| {
+            r.map(|(outpoint, contract)| {
+                (
+                    format!("OutgoingContract({outpoint:?})"),
+                    -(contract.amount.msats as i64),
+                )
+            })
+            .collect::<Vec<_>>()
+        });
 
-        audit.add_items(
-            ModuleKind::Ln,
-            dbtx.iter(&INCOMING_CONTRACT)
-                .into_iter()
-                .map(|(outpoint, contract)| {
-                    (
-                        format!("IncomingContract({outpoint:?})"),
-                        -(contract.commitment.amount.msats as i64),
-                    )
-                }),
-        );
+        audit.add_items(ModuleKind::Ln, outgoing_items);
+
+        let incoming_items = dbtx.iter(&INCOMING_CONTRACT, |r| {
+            r.map(|(outpoint, contract)| {
+                (
+                    format!("IncomingContract({outpoint:?})"),
+                    -(contract.commitment.amount.msats as i64),
+                )
+            })
+            .collect::<Vec<_>>()
+        });
+
+        audit.add_items(ModuleKind::Ln, incoming_items);
     }
 
     pub async fn handle_api(
@@ -340,11 +340,9 @@ impl Lightning {
     pub(crate) fn consensus_block_count(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
-        let mut counts = dbtx
-            .iter(&BLOCK_COUNT_VOTE)
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect::<Vec<u64>>();
+        let mut counts = dbtx.iter(&BLOCK_COUNT_VOTE, |r| {
+            r.map(|(_, v)| v).collect::<Vec<u64>>()
+        });
 
         counts.sort_unstable();
 
@@ -362,11 +360,9 @@ impl Lightning {
     pub(crate) fn consensus_unix_time(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
-        let mut times = dbtx
-            .iter(&UNIX_TIME_VOTE)
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect::<Vec<u64>>();
+        let mut times = dbtx.iter(&UNIX_TIME_VOTE, |r| {
+            r.map(|(_, v)| v).collect::<Vec<u64>>()
+        });
 
         times.sort_unstable();
 
@@ -403,9 +399,6 @@ impl Lightning {
         self.db
             .begin_read()
             .await
-            .iter(&GATEWAY)
-            .into_iter()
-            .map(|(url, ())| url)
-            .collect()
+            .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect())
     }
 }

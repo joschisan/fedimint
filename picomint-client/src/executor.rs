@@ -162,9 +162,7 @@ impl<S: StateMachine> Inner<S> {
         self.db
             .begin_read()
             .await
-            .iter(&table::<S>())
-            .into_iter()
-            .collect()
+            .iter(&table::<S>(), |r| r.collect())
     }
 
     fn spawn_drive(self: Arc<Self>, id: SmId, state: S) {

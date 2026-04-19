@@ -102,10 +102,7 @@ impl Mint {
         self.db
             .begin_read()
             .await
-            .iter(&ISSUANCE_COUNTER)
-            .into_iter()
-            .filter(|(_, count)| *count > 0)
-            .collect()
+            .iter(&ISSUANCE_COUNTER, |r| r.filter(|(_, count)| *count > 0).collect())
     }
 }
 
@@ -223,15 +220,15 @@ impl Mint {
     }
 
     pub async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
-        let items = dbtx
-            .iter(&ISSUANCE_COUNTER)
-            .into_iter()
-            .map(|(denomination, count)| {
+        let items = dbtx.iter(&ISSUANCE_COUNTER, |r| {
+            r.map(|(denomination, count)| {
                 (
                     format!("IssuanceCounter({denomination:?})"),
                     -((denomination.amount().msats * count) as i64),
                 )
-            });
+            })
+            .collect::<Vec<_>>()
+        });
 
         audit.add_items(ModuleKind::Mint, items);
     }
@@ -255,8 +252,7 @@ impl Mint {
 }
 
 pub(crate) fn get_recovery_count(dbtx: &impl picomint_redb::DbRead) -> u64 {
-    dbtx.iter(&RECOVERY_ITEM)
-        .into_iter()
-        .next_back()
-        .map_or(0, |(idx, _)| idx + 1)
+    dbtx.iter(&RECOVERY_ITEM, |r| {
+        r.next_back().map_or(0, |(k, _)| k + 1)
+    })
 }

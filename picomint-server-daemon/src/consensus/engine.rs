@@ -215,7 +215,10 @@ impl ConsensusEngine {
     }
 
     async fn is_recovery(&self) -> bool {
-        !self.db.begin_read().await.iter(&ALEPH_UNITS).is_empty()
+        self.db
+            .begin_read()
+            .await
+            .iter(&ALEPH_UNITS, |r| r.next().is_some())
     }
 
     pub async fn complete_signed_session_outcome(
@@ -484,10 +487,7 @@ impl ConsensusEngine {
         self.db
             .begin_read()
             .await
-            .iter(&ACCEPTED_ITEM)
-            .into_iter()
-            .map(|(_, item)| item)
-            .collect()
+            .iter(&ACCEPTED_ITEM, |r| r.map(|(_, item)| item).collect())
     }
 
     pub async fn complete_session(
@@ -638,8 +638,7 @@ impl ConsensusEngine {
 }
 
 pub async fn get_finished_session_count_static(tx: &ReadTransaction) -> u64 {
-    tx.iter(&SIGNED_SESSION_OUTCOME)
-        .into_iter()
-        .next_back()
-        .map_or(0, |(k, _)| k + 1)
+    tx.iter(&SIGNED_SESSION_OUTCOME, |r| {
+        r.next_back().map_or(0, |(k, _)| k + 1)
+    })
 }

@@ -424,11 +424,8 @@ impl MintClientModule {
         let mut target_notes = Vec::new();
         let mut excess_notes = Vec::new();
 
-        let all_notes: Vec<SpendableNote> = dbtx
-            .iter(&NOTE)
-            .into_iter()
-            .map(|(note, ())| note)
-            .collect();
+        let all_notes: Vec<SpendableNote> =
+            dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
 
         for amount in client_denominations().rev() {
             let notes_amount: Vec<SpendableNote> = all_notes
@@ -532,13 +529,15 @@ impl MintClientModule {
         &self,
         dbtx: &WriteTxRef<'_>,
     ) -> BTreeMap<Denomination, u64> {
-        let mut acc = BTreeMap::new();
-        for (note, ()) in dbtx.iter(&NOTE) {
-            acc.entry(note.denomination)
-                .and_modify(|count| *count += 1)
-                .or_insert(1);
-        }
-        acc
+        dbtx.iter(&NOTE, |r| {
+            let mut acc = BTreeMap::new();
+            for (note, ()) in r {
+                acc.entry(note.denomination)
+                    .and_modify(|count| *count += 1)
+                    .or_insert(1);
+            }
+            acc
+        })
     }
 
     /// Send `ECash` for the given amount. The
@@ -639,11 +638,8 @@ impl MintClientModule {
         dbtx: &WriteTxRef<'_>,
         mut remaining_amount: Amount,
     ) -> Result<Option<ECash>, Infallible> {
-        let mut sorted: Vec<SpendableNote> = dbtx
-            .iter(&NOTE)
-            .into_iter()
-            .map(|(note, ())| note)
-            .collect();
+        let mut sorted: Vec<SpendableNote> =
+            dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
         sorted.sort_by(|a, b| b.denomination.cmp(&a.denomination));
 
         let mut notes = vec![];

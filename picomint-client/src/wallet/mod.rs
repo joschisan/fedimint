@@ -215,9 +215,14 @@ impl WalletClientModule {
     /// address derivation has completed.
     pub async fn receive(&self) -> Address {
         loop {
-            let indices = self.client_ctx.db().begin_read().await.iter(&VALID_ADDRESS_INDEX);
+            let idx = self
+                .client_ctx
+                .db()
+                .begin_read()
+                .await
+                .iter(&VALID_ADDRESS_INDEX, |r| r.next_back().map(|(k, _)| k));
 
-            if let Some((idx, ())) = indices.into_iter().next_back() {
+            if let Some(idx) = idx {
                 return self.derive_address(idx);
             }
 
@@ -301,15 +306,14 @@ impl WalletClientModule {
         let module = self.clone();
 
         task_group.spawn_cancellable("output-scanner", async move {
-            let needs_seed = module
+            let has_seed = module
                 .client_ctx
                 .db()
                 .begin_read()
                 .await
-                .iter(&VALID_ADDRESS_INDEX)
-                .is_empty();
+                .iter(&VALID_ADDRESS_INDEX, |r| r.next().is_some());
 
-            if needs_seed {
+            if !has_seed {
                 let index = module.next_valid_index(0);
                 let dbtx = module.client_ctx.db().begin_write().await;
                 assert!(
@@ -341,11 +345,8 @@ impl WalletClientModule {
 
         let next_output_index = dbtx.get(&NEXT_OUTPUT_INDEX, &()).unwrap_or(0);
 
-        let mut valid_indices: Vec<u64> = dbtx
-            .iter(&VALID_ADDRESS_INDEX)
-            .into_iter()
-            .map(|(idx, ())| idx)
-            .collect();
+        let mut valid_indices: Vec<u64> =
+            dbtx.iter(&VALID_ADDRESS_INDEX, |r| r.map(|(idx, ())| idx).collect());
 
         drop(dbtx);
 

@@ -70,21 +70,18 @@ fn collect_signature_shares(
     tx: &ReadTransaction,
     txid: TransactionId,
 ) -> Vec<BlindedSignatureShare> {
-    tx.range(
-        &BLINDED_SIGNATURE_SHARE,
-        OutPoint { txid, out_idx: 0 }..OutPoint {
-            txid,
-            out_idx: u64::MAX,
-        },
-    )
-    .into_iter()
-    .map(|(_, v)| v)
-    .collect()
+    let bounds = OutPoint { txid, out_idx: 0 }..OutPoint {
+        txid,
+        out_idx: u64::MAX,
+    };
+
+    tx.range(&BLINDED_SIGNATURE_SHARE, bounds, |r| {
+        r.map(|(_, v)| v).collect()
+    })
 }
 
 fn collect_recovery_slice(tx: &ReadTransaction, range: (u64, u64)) -> Vec<RecoveryItem> {
-    tx.range(&RECOVERY_ITEM, range.0..range.1)
-        .into_iter()
-        .map(|(_, v)| v)
-        .collect()
+    tx.range(&RECOVERY_ITEM, range.0..range.1, |r| {
+        r.map(|(_, v)| v).collect()
+    })
 }

@@ -135,9 +135,6 @@ impl GatewayClientFactory {
             .begin_read()
             .await
             .as_ref()
-            .iter(&CLIENT_CONFIG)
-            .into_iter()
-            .map(|(federation_id, _config)| federation_id)
-            .collect()
+            .iter(&CLIENT_CONFIG, |r| r.map(|(id, _)| id).collect())
     }
 }

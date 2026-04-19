@@ -543,6 +543,45 @@ impl ReadTxRef<'_> {
 
 use std::ops::RangeBounds;
 
+/// Closure-scoped iterator over a redb table. Wraps [`redb::Range`] so callers
+/// receive owned `(K, V)` pairs directly — decoding and error unwrapping happen
+/// here so that call sites aren't peppered with `.expect(...)` / `.value()`.
+pub struct RedbIter<'a, WK, K, WV, V>
+where
+    WK: for<'b> redb::Key<SelfType<'b> = K> + 'static,
+    WV: for<'b> redb::Value<SelfType<'b> = V> + 'static,
+{
+    inner: redb::Range<'a, WK, WV>,
+}
+
+impl<'a, WK, K, WV, V> Iterator for RedbIter<'a, WK, K, WV, V>
+where
+    WK: for<'b> redb::Key<SelfType<'b> = K> + 'static,
+    WV: for<'b> redb::Value<SelfType<'b> = V> + 'static,
+{
+    type Item = (K, V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|r| {
+            let (k, v) = r.expect("redb iter item failed");
+            (k.value(), v.value())
+        })
+    }
+}
+
+impl<'a, WK, K, WV, V> DoubleEndedIterator for RedbIter<'a, WK, K, WV, V>
+where
+    WK: for<'b> redb::Key<SelfType<'b> = K> + 'static,
+    WV: for<'b> redb::Value<SelfType<'b> = V> + 'static,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|r| {
+            let (k, v) = r.expect("redb iter item failed");
+            (k.value(), v.value())
+        })
+    }
+}
+
 impl<'tx> WriteTxRef<'tx> {
     pub fn insert<WK, K, WV, V>(
         &self,
@@ -607,41 +646,45 @@ impl<'tx> WriteTxRef<'tx> {
         })
     }
 
-    pub fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
+    pub fn iter<WK, K, WV, V, R>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+    ) -> R
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
+        K: 'static,
+        V: 'static,
     {
-        use redb::ReadableTable as _;
         self.with_native_table(def, |t| {
-            t.iter()
-                .expect("redb iter failed")
-                .map(|r| {
-                    let (k, v) = r.expect("redb iter item failed");
-                    (k.value(), v.value())
-                })
-                .collect()
+            let mut iter = RedbIter {
+                inner: t.iter().expect("redb iter failed"),
+            };
+            f(&mut iter)
         })
     }
 
-    pub fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
+    pub fn range<WK, K, WV, V, B, R>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        range: B,
+        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+    ) -> R
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
-        R: RangeBounds<K>,
+        K: 'static,
+        V: 'static,
+        B: RangeBounds<K>,
     {
         self.with_native_table(def, |t| {
-            t.range::<&K>((range.start_bound(), range.end_bound()))
-                .expect("redb range failed")
-                .map(|r| {
-                    let (k, v) = r.expect("redb range item failed");
-                    (k.value(), v.value())
-                })
-                .collect()
+            let mut iter = RedbIter {
+                inner: t
+                    .range::<&K>((range.start_bound(), range.end_bound()))
+                    .expect("redb range failed"),
+            };
+            f(&mut iter)
         })
     }
 }
@@ -660,42 +703,48 @@ impl ReadTxRef<'_> {
         .flatten()
     }
 
-    pub fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
+    pub fn iter<WK, K, WV, V, R>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+    ) -> R
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
+        K: 'static,
+        V: 'static,
+        R: Default,
     {
-        use redb::ReadableTable as _;
         self.with_native_table(def, |t| {
-            t.iter()
-                .expect("redb iter failed")
-                .map(|r| {
-                    let (k, v) = r.expect("redb iter item failed");
-                    (k.value(), v.value())
-                })
-                .collect()
+            let mut iter = RedbIter {
+                inner: t.iter().expect("redb iter failed"),
+            };
+            f(&mut iter)
         })
         .unwrap_or_default()
     }
 
-    pub fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
+    pub fn range<WK, K, WV, V, B, R>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        range: B,
+        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+    ) -> R
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
-        R: RangeBounds<K>,
+        K: 'static,
+        V: 'static,
+        B: RangeBounds<K>,
+        R: Default,
     {
         self.with_native_table(def, |t| {
-            t.range::<&K>((range.start_bound(), range.end_bound()))
-                .expect("redb range failed")
-                .map(|r| {
-                    let (k, v) = r.expect("redb range item failed");
-                    (k.value(), v.value())
-                })
-                .collect()
+            let mut iter = RedbIter {
+                inner: t
+                    .range::<&K>((range.start_bound(), range.end_bound()))
+                    .expect("redb range failed"),
+            };
+            f(&mut iter)
         })
         .unwrap_or_default()
     }
@@ -716,20 +765,31 @@ pub trait DbRead {
         K: Debug + 'static,
         V: Debug + 'static;
 
-    fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
+    fn iter<WK, K, WV, V, R>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+    ) -> R
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static;
+        K: 'static,
+        V: 'static,
+        R: Default;
 
-    fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
+    fn range<WK, K, WV, V, B, R>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        range: B,
+        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+    ) -> R
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
-        R: RangeBounds<K>;
+        K: 'static,
+        V: 'static,
+        B: RangeBounds<K>,
+        R: Default;
 }
 
 pub trait DbWrite: DbRead {
@@ -768,25 +828,36 @@ macro_rules! impl_db_read_via_inherent {
                 <$ty>::get(self, def, key)
             }
 
-            fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
+            fn iter<WK, K, WV, V, R>(
+                &self,
+                def: &NativeTableDef<WK, WV>,
+                f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+            ) -> R
             where
                 WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
                 WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-                K: Debug + 'static,
-                V: Debug + 'static,
+                K: 'static,
+                V: 'static,
+                R: Default,
             {
-                <$ty>::iter(self, def)
+                <$ty>::iter(self, def, f)
             }
 
-            fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
+            fn range<WK, K, WV, V, B, R>(
+                &self,
+                def: &NativeTableDef<WK, WV>,
+                range: B,
+                f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+            ) -> R
             where
                 WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
                 WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-                K: Debug + 'static,
-                V: Debug + 'static,
-                R: RangeBounds<K>,
+                K: 'static,
+                V: 'static,
+                B: RangeBounds<K>,
+                R: Default,
             {
-                <$ty>::range(self, def, range)
+                <$ty>::range(self, def, range, f)
             }
         }
     };
@@ -848,25 +919,36 @@ impl ReadTransaction {
         self.as_ref().get(def, key)
     }
 
-    pub fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
+    pub fn iter<WK, K, WV, V, R>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+    ) -> R
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
+        K: 'static,
+        V: 'static,
+        R: Default,
     {
-        self.as_ref().iter(def)
+        self.as_ref().iter(def, f)
     }
 
-    pub fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
+    pub fn range<WK, K, WV, V, B, R>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        range: B,
+        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+    ) -> R
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
-        R: RangeBounds<K>,
+        K: 'static,
+        V: 'static,
+        B: RangeBounds<K>,
+        R: Default,
     {
-        self.as_ref().range(def, range)
+        self.as_ref().range(def, range, f)
     }
 }
 
@@ -914,25 +996,36 @@ impl WriteTransaction {
         self.as_ref().get(def, key)
     }
 
-    pub fn iter<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>) -> Vec<(K, V)>
+    pub fn iter<WK, K, WV, V, R>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+    ) -> R
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
+        K: 'static,
+        V: 'static,
+        R: Default,
     {
-        self.as_ref().iter(def)
+        self.as_ref().iter(def, f)
     }
 
-    pub fn range<WK, K, WV, V, R>(&self, def: &NativeTableDef<WK, WV>, range: R) -> Vec<(K, V)>
+    pub fn range<WK, K, WV, V, B, R>(
+        &self,
+        def: &NativeTableDef<WK, WV>,
+        range: B,
+        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+    ) -> R
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
         WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
-        R: RangeBounds<K>,
+        K: 'static,
+        V: 'static,
+        B: RangeBounds<K>,
+        R: Default,
     {
-        self.as_ref().range(def, range)
+        self.as_ref().range(def, range, f)
     }
 }
 
@@ -1032,7 +1125,7 @@ mod tests {
         tx.commit().await;
 
         let tx = db.begin_read().await;
-        let items = tx.range(&BALANCES, 3u64..7u64);
+        let items = tx.range(&BALANCES, 3u64..7u64, |r| r.collect::<Vec<_>>());
 
         assert_eq!(items, vec![(3, 30), (4, 40), (5, 50), (6, 60)]);
     }

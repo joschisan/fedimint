@@ -119,18 +119,18 @@ pub async fn await_incoming_contracts(
         })
         .await;
 
-    let mut contracts = Vec::new();
+    let contracts = tx.range(&INCOMING_CONTRACT_STREAM, start..u64::MAX, |r| {
+        r.take(batch as usize).collect::<Vec<_>>()
+    });
 
-    for (key, contract) in tx
-        .range(&INCOMING_CONTRACT_STREAM, start..u64::MAX)
-        .into_iter()
-        .take(batch as usize)
-    {
-        contracts.push(contract);
+    let mut results = Vec::with_capacity(contracts.len());
+
+    for (key, contract) in contracts {
+        results.push(contract);
         next_index = key + 1;
     }
 
-    Ok((contracts, next_index))
+    Ok((results, next_index))
 }
 
 pub async fn gateways(ln: &Lightning, _: ()) -> Result<Vec<SafeUrl>, ApiError> {
@@ -138,8 +138,5 @@ pub async fn gateways(ln: &Lightning, _: ()) -> Result<Vec<SafeUrl>, ApiError> {
         .db
         .begin_read()
         .await
-        .iter(&GATEWAY)
-        .into_iter()
-        .map(|(url, ())| url)
-        .collect())
+        .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect()))
 }
