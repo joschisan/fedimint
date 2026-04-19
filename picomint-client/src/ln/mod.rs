@@ -61,49 +61,6 @@ pub type SendResult = Result<OperationId, SendPaymentError>;
 
 pub type ReceiveResult = Result<(Bolt11Invoice, OperationId), ReceiveError>;
 
-#[derive(Clone, Default)]
-pub struct LightningClientInit {
-    pub gateway_conn: Option<Arc<dyn GatewayConnection + Send + Sync>>,
-}
-
-impl std::fmt::Debug for LightningClientInit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LightningClientInit")
-            .field("gateway_conn", &self.gateway_conn)
-            .finish()
-    }
-}
-
-impl LightningClientInit {
-    pub async fn init(
-        &self,
-        federation_id: FederationId,
-        cfg: LightningConfigConsensus,
-        context: ClientContext<LightningClientModule>,
-        mint: Arc<crate::mint::MintClientModule>,
-        module_root_secret: &DerivableSecret,
-        task_group: &TaskGroup,
-    ) -> anyhow::Result<LightningClientModule> {
-        let gateway_conn = if let Some(gateway_conn) = self.gateway_conn.clone() {
-            gateway_conn
-        } else {
-            let api = GatewayApi::new();
-            Arc::new(RealGatewayConnection { api })
-        };
-        let module_api = context.module_api();
-        Ok(LightningClientModule::new(
-            federation_id,
-            cfg,
-            context,
-            mint,
-            module_api,
-            module_root_secret,
-            gateway_conn,
-            task_group,
-        ))
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct LightningClientContext {
     pub(crate) federation_id: FederationId,
@@ -142,16 +99,19 @@ impl LightningClientModule {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn new(
+    pub async fn new(
         federation_id: FederationId,
         cfg: LightningConfigConsensus,
         client_ctx: ClientContext<Self>,
         mint: Arc<crate::mint::MintClientModule>,
-        module_api: FederationApi,
         module_root_secret: &DerivableSecret,
-        gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
         task_group: &TaskGroup,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
+        let module_api = client_ctx.module_api();
+        let gateway_conn: Arc<dyn GatewayConnection + Send + Sync> =
+            Arc::new(RealGatewayConnection {
+                api: GatewayApi::new(),
+            });
         let sm_context = LightningClientContext {
             federation_id,
             gateway_conn: gateway_conn.clone(),
@@ -191,7 +151,7 @@ impl LightningClientModule {
 
         module.spawn_gateway_map_update_task(task_group);
 
-        module
+        Ok(module)
     }
 
     fn spawn_gateway_map_update_task(&self, task_group: &TaskGroup) {

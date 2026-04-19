@@ -5,28 +5,55 @@ use std::sync::Arc;
 
 use crate::Endpoint;
 use crate::api::{ApiScope, FederationApi};
-use crate::gw::GatewayClientModule;
+use crate::gw::{GatewayClientModule, IGatewayClient};
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
+use crate::secret::{DeriveableSecretClientExt as _, get_default_client_secret};
 use crate::wallet::WalletClientModule;
-use crate::{ClientModuleInstance, TxAcceptEvent, TxRejectEvent};
+use crate::{ClientModuleInstance, TxAcceptEvent, TxRejectEvent, download_from_invite_code};
 use anyhow::bail;
 use futures::{Stream, StreamExt as _};
+use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{ModuleKind, OperationId};
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
-use picomint_core::{Amount, PeerId, TransactionId};
+use picomint_core::{Amount, TransactionId};
+use picomint_derive_secret::DerivableSecret;
 use picomint_eventlog::{EventLogId, PersistedLogEntry};
+use picomint_logging::LOG_CLIENT;
 use picomint_redb::Database;
+use tracing::debug;
 
-use crate::ClientBuilder;
 use crate::db::CLIENT_CONFIG;
 
-pub(crate) mod builder;
 pub(crate) mod handle;
+
+/// Pre-derivation step for the client root secret. Internally the client
+/// hashes in the federation id so the same input secret is safely reused
+/// across federations.
+#[derive(Clone)]
+pub enum RootSecret {
+    /// Derive an extra round of federation-id into the secret. Applications
+    /// MUST NOT do that derivation themselves.
+    StandardDoubleDerive(DerivableSecret),
+}
+
+impl RootSecret {
+    fn to_inner(&self, federation_id: FederationId) -> DerivableSecret {
+        match self {
+            RootSecret::StandardDoubleDerive(s) => get_default_client_secret(s, &federation_id),
+        }
+    }
+}
+
+/// LN-flavor selection used by the four constructors below.
+enum LnChoice {
+    Regular,
+    Gateway(Arc<dyn IGatewayClient>),
+}
 
 /// Lightning-module flavor mounted on a client. Regular federation clients
 /// use `Regular`, while the gateway daemon mounts `Gateway`. The two flavors
@@ -72,10 +99,210 @@ pub struct Client {
 }
 
 impl Client {
-    /// Initialize a client builder that can be configured to create a new
-    /// client.
-    pub async fn builder() -> anyhow::Result<ClientBuilder> {
-        Ok(ClientBuilder::new())
+    /// Join a federation for the first time using a regular lightning
+    /// flavor. Downloads the federation config via the invite, persists it,
+    /// and brings up the client.
+    pub async fn join(
+        connectors: Endpoint,
+        db: Database,
+        root_secret: RootSecret,
+        invite: &InviteCode,
+    ) -> anyhow::Result<handle::ClientHandle> {
+        let (config, _) = download_from_invite_code(&connectors, invite).await?;
+        Self::init_db(&db, &config).await?;
+        Self::build(connectors, db, root_secret, config, LnChoice::Regular).await
+    }
+
+    /// Open an existing regular-lightning federation client from a database
+    /// that was previously initialized via [`Client::join`].
+    pub async fn open(
+        connectors: Endpoint,
+        db: Database,
+        root_secret: RootSecret,
+    ) -> anyhow::Result<handle::ClientHandle> {
+        let config = Self::get_config_from_db(&db)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Client database not initialized"))?;
+        Self::build(connectors, db, root_secret, config, LnChoice::Regular).await
+    }
+
+    /// Gateway-flavor counterpart of [`Client::join`]. Used by the gateway
+    /// daemon, which mounts its own [`IGatewayClient`] in place of the
+    /// regular lightning module.
+    pub async fn join_gateway(
+        connectors: Endpoint,
+        db: Database,
+        root_secret: RootSecret,
+        invite: &InviteCode,
+        gateway: Arc<dyn IGatewayClient>,
+    ) -> anyhow::Result<handle::ClientHandle> {
+        let (config, _) = download_from_invite_code(&connectors, invite).await?;
+        Self::init_db(&db, &config).await?;
+        Self::build(connectors, db, root_secret, config, LnChoice::Gateway(gateway)).await
+    }
+
+    /// Gateway-flavor counterpart of [`Client::open`].
+    pub async fn open_gateway(
+        connectors: Endpoint,
+        db: Database,
+        root_secret: RootSecret,
+        gateway: Arc<dyn IGatewayClient>,
+    ) -> anyhow::Result<handle::ClientHandle> {
+        let config = Self::get_config_from_db(&db)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Client database not initialized"))?;
+        Self::build(connectors, db, root_secret, config, LnChoice::Gateway(gateway)).await
+    }
+
+    async fn init_db(db: &Database, config: &ConsensusConfig) -> anyhow::Result<()> {
+        if Self::is_initialized(db).await {
+            bail!("Client database already initialized")
+        }
+        debug!(target: LOG_CLIENT, "Initializing client database");
+        let dbtx = db.begin_write().await;
+        dbtx.as_ref().insert(&CLIENT_CONFIG, &(), config);
+        dbtx.commit().await;
+        Ok(())
+    }
+
+    async fn build(
+        connectors: Endpoint,
+        db: Database,
+        pre_root_secret: RootSecret,
+        config: ConsensusConfig,
+        ln_choice: LnChoice,
+    ) -> anyhow::Result<handle::ClientHandle> {
+        debug!(
+            target: LOG_CLIENT,
+            version = %env!("CARGO_PKG_VERSION"),
+            "Building picomint client",
+        );
+        let fed_id = config.calculate_federation_id();
+        let pre_root_secret = pre_root_secret.to_inner(fed_id);
+        let root_secret = pre_root_secret.federation_key(&fed_id);
+
+        let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
+            .iroh_endpoints
+            .iter()
+            .map(|(peer, endpoints)| (*peer, endpoints.node_id))
+            .collect();
+        let api: FederationApi = FederationApi::new(connectors.clone(), peer_node_ids);
+
+        let task_group = TaskGroup::new();
+
+        let mint_context = crate::module::ClientContext::new(
+            ModuleKind::Mint,
+            api.clone(),
+            ApiScope::Mint,
+            db.clone(),
+            db.isolate("mint".to_string()),
+            config.clone(),
+            fed_id,
+        );
+        let mint = Arc::new(
+            MintClientModule::new(
+                fed_id,
+                config.mint.clone(),
+                mint_context,
+                db.clone(),
+                &root_secret.derive_module_secret(ModuleKind::Mint),
+                &task_group,
+            )
+            .await?,
+        );
+
+        let wallet_context = crate::module::ClientContext::new(
+            ModuleKind::Wallet,
+            api.clone(),
+            ApiScope::Wallet,
+            db.clone(),
+            db.isolate("wallet".to_string()),
+            config.clone(),
+            fed_id,
+        );
+        let wallet = Arc::new(
+            WalletClientModule::new(
+                config.wallet.clone(),
+                wallet_context,
+                mint.clone(),
+                &root_secret.derive_module_secret(ModuleKind::Wallet),
+                &task_group,
+            )
+            .await?,
+        );
+
+        let ln_secret = root_secret.derive_module_secret(ModuleKind::Ln);
+        let ln = match ln_choice {
+            LnChoice::Regular => {
+                let ln_context = crate::module::ClientContext::<LightningClientModule>::new(
+                    ModuleKind::Ln,
+                    api.clone(),
+                    ApiScope::Ln,
+                    db.clone(),
+                    db.isolate("ln".to_string()),
+                    config.clone(),
+                    fed_id,
+                );
+                LnFlavor::Regular(Arc::new(
+                    LightningClientModule::new(
+                        fed_id,
+                        config.ln.clone(),
+                        ln_context,
+                        mint.clone(),
+                        &ln_secret,
+                        &task_group,
+                    )
+                    .await?,
+                ))
+            }
+            LnChoice::Gateway(gateway) => {
+                let gw_context = crate::module::ClientContext::<GatewayClientModule>::new(
+                    ModuleKind::Ln,
+                    api.clone(),
+                    ApiScope::Ln,
+                    db.clone(),
+                    db.isolate("ln".to_string()),
+                    config.clone(),
+                    fed_id,
+                );
+                LnFlavor::Gateway(Arc::new(
+                    GatewayClientModule::new(
+                        fed_id,
+                        config.ln.clone(),
+                        gw_context,
+                        mint.clone(),
+                        gateway,
+                        &ln_secret,
+                        &task_group,
+                    )
+                    .await?,
+                ))
+            }
+        };
+
+        let client_inner = Arc::new(Client {
+            config: tokio::sync::RwLock::new(config.clone()),
+            db,
+            connectors,
+            federation_id: fed_id,
+            federation_config_meta: config.meta,
+            mint,
+            wallet,
+            ln,
+            api,
+            task_group: task_group.clone(),
+        });
+
+        let handle = handle::ClientHandle::new(client_inner);
+
+        // Mint owns the tx-submission executor; starting it before wallet/ln
+        // ensures any pending submissions are picked up before module-side
+        // SMs start firing claim/refund flows that route through mint.
+        handle.mint.start().await;
+        handle.wallet.start().await;
+        handle.ln.start().await;
+
+        Ok(handle)
     }
 
     pub fn api(&self) -> &FederationApi {

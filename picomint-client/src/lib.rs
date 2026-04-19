@@ -116,9 +116,8 @@ use picomint_logging::LOG_CLIENT_NET;
 use query::FilterMap;
 use tracing::debug;
 
-pub use client::builder::{ClientBuilder, ClientPreview, LnInit, RootSecret};
 pub use client::handle::{ClientHandle, ClientHandleArc};
-pub use client::{Client, LnFlavor};
+pub use client::{Client, LnFlavor, RootSecret};
 pub use picomint_core::core::{ModuleKind, OperationId};
 
 use picomint_core::TransactionId;

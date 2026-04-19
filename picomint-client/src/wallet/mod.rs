@@ -75,12 +75,8 @@ impl WalletClientModule {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct WalletClientInit;
-
-impl WalletClientInit {
-    pub async fn init(
-        &self,
+impl WalletClientModule {
+    pub async fn new(
         cfg: WalletConfigConsensus,
         context: ClientContext<WalletClientModule>,
         mint: std::sync::Arc<crate::mint::MintClientModule>,

@@ -252,17 +252,10 @@ async fn build_client(
 
     let db = picomint_redb::Database::open(db_dir.join("database.redb")).await?;
 
-    let builder = Client::builder().await?;
-
-    let connectors = endpoint;
-
     let mnemonic = Mnemonic::generate(12)?;
     let root_secret = RootSecret::StandardDoubleDerive(picomint_bip39::to_root_secret(&mnemonic));
 
-    let client = builder
-        .preview(connectors, &invite_code)
-        .await?
-        .join(db, root_secret)
+    let client = Client::join(endpoint, db, root_secret, &invite_code)
         .await
         .map(Arc::new)?;
 

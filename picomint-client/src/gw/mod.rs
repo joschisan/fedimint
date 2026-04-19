@@ -47,18 +47,13 @@ use self::complete_sm::{CompleteSMCommon, CompleteSMState, CompleteStateMachine}
 /// Lightning CLTV Delta in blocks
 pub const EXPIRATION_DELTA_MINIMUM: u64 = 144;
 
-#[derive(Debug, Clone)]
-pub struct GatewayClientInit {
-    pub gateway: Arc<dyn IGatewayClient>,
-}
-
-impl GatewayClientInit {
-    pub async fn init(
-        &self,
+impl GatewayClientModule {
+    pub async fn new(
         federation_id: FederationId,
         cfg: LightningConfigConsensus,
         context: ClientContext<GatewayClientModule>,
         mint: Arc<crate::mint::MintClientModule>,
+        gateway: Arc<dyn IGatewayClient>,
         module_root_secret: &DerivableSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<GatewayClientModule> {
@@ -66,7 +61,6 @@ impl GatewayClientInit {
         let keypair = module_root_secret
             .clone()
             .to_secp_key(picomint_core::secp256k1::SECP256K1);
-        let gateway = self.gateway.clone();
 
         let sm_context = GwSmContext {
             client_ctx: context.clone(),

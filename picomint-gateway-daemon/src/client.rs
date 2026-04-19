@@ -3,7 +3,8 @@ use std::sync::Arc;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use picomint_bip39::Mnemonic;
-use picomint_client::{Client, ClientBuilder, RootSecret};
+use picomint_client::{Client, RootSecret};
+use picomint_client::gw::IGatewayClient;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::invite_code::InviteCode;
@@ -72,14 +73,6 @@ impl GatewayClientFactory {
         self.db.isolate(format!("client-{federation_id}"))
     }
 
-    async fn client_builder(&self, gateway: Arc<AppState>) -> anyhow::Result<ClientBuilder> {
-        let mut builder = Client::builder()
-            .await
-            .map_err(|e| anyhow::anyhow!("Client creation error: {e}"))?;
-        builder.with_gateway_ln(gateway);
-        Ok(builder)
-    }
-
     async fn save_config(&self, config: &ConsensusConfig) {
         let dbtx = self.db.begin_write().await;
         dbtx.as_ref()
@@ -100,15 +93,16 @@ impl GatewayClientFactory {
             return Ok(client);
         }
 
-        let builder = self.client_builder(gateway).await?;
-
-        let client = builder
-            .preview(self.connectors.clone(), invite)
-            .await?
-            .join(self.client_database(federation_id), self.root_secret())
-            .await
-            .map(Arc::new)
-            .map_err(|e| anyhow::anyhow!("Client creation error: {e}"))?;
+        let client = Client::join_gateway(
+            self.connectors.clone(),
+            self.client_database(federation_id),
+            self.root_secret(),
+            invite,
+            gateway as Arc<dyn IGatewayClient>,
+        )
+        .await
+        .map(Arc::new)
+        .map_err(|e| anyhow::anyhow!("Client creation error: {e}"))?;
 
         self.save_config(&client.config().await).await;
 
@@ -127,13 +121,15 @@ impl GatewayClientFactory {
             return Ok(None);
         }
 
-        let builder = self.client_builder(gateway).await?;
-
-        let client = builder
-            .open(self.connectors.clone(), db, self.root_secret())
-            .await
-            .map(Arc::new)
-            .map_err(|e| anyhow::anyhow!("Client open error: {e}"))?;
+        let client = Client::open_gateway(
+            self.connectors.clone(),
+            db,
+            self.root_secret(),
+            gateway as Arc<dyn IGatewayClient>,
+        )
+        .await
+        .map(Arc::new)
+        .map_err(|e| anyhow::anyhow!("Client open error: {e}"))?;
 
         self.save_config(&client.config().await).await;
 

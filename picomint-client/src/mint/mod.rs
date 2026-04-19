@@ -84,12 +84,8 @@ impl SpendableNote {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct MintClientInit;
-
-impl MintClientInit {
+impl MintClientModule {
     pub async fn recover(
-        &self,
         db: &Database,
         api: &FederationApi,
         module_api: &FederationApi,
@@ -208,8 +204,7 @@ impl MintClientInit {
         }
     }
 
-    pub async fn init(
-        &self,
+    pub async fn new(
         federation_id: FederationId,
         cfg: MintConfigConsensus,
         context: ClientContext<MintClientModule>,
