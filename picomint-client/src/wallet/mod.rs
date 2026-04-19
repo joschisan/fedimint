@@ -17,9 +17,7 @@ use std::time::Duration;
 use crate::api::{FederationApi, FederationResult};
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
-use crate::transaction::{
-    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, TransactionBuilder,
-};
+use crate::transaction::builder_next::{Input, Output, TransactionBuilder};
 use anyhow::anyhow;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
@@ -31,6 +29,7 @@ use picomint_core::wallet::config::WalletConfigConsensus;
 use picomint_core::wallet::{
     StandardScript, WalletInput, WalletOutput, descriptor, is_potential_receive,
 };
+use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_derive_secret::{ChildId, DerivableSecret};
 use picomint_encoding::Encodable;
@@ -175,55 +174,44 @@ impl WalletClientModule {
         let destination = StandardScript::from_address(&address.clone().assume_checked())
             .ok_or(SendError::UnsupportedAddress)?;
 
-        let client_output = ClientOutput::<WalletOutput> {
-            output: WalletOutput {
+        let tx_builder = TransactionBuilder::from_output(Output {
+            output: wire::Output::Wallet(WalletOutput {
                 destination,
                 value,
                 fee,
-            },
+            }),
             amount: Amount::from_sats((value + fee).to_sat()),
-        };
-
-        let client_output_bundle =
-            self.client_ctx
-                .make_client_outputs(ClientOutputBundle::<WalletOutput>::new(vec![client_output]));
+            fee: self.cfg.output_fee,
+        });
 
         let dbtx = self.client_ctx.module_db().begin_write().await;
-        let tx = dbtx.as_ref();
 
         let txid = self
-            .client_ctx
-            .finalize_and_submit_transaction_dbtx(
-                &tx,
-                operation_id,
-                TransactionBuilder::new().with_outputs(client_output_bundle),
-            )
+            .mint
+            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
             .await
             .map_err(|_| SendError::InsufficientFunds)?;
 
+        let sm = SendStateMachine {
+            operation_id,
+            outpoint: OutPoint { txid, out_idx: 0 },
+            value,
+            fee,
+        };
+
         self.send_executor
-            .add_state_machine_dbtx(
-                &tx,
-                SendStateMachine {
-                    operation_id,
-                    outpoint: OutPoint { txid, out_idx: 0 },
-                    value,
-                    fee,
-                },
-            )
+            .add_state_machine_dbtx(&dbtx.as_ref(), sm)
             .await;
 
+        let event = SendEvent {
+            txid,
+            address,
+            value,
+            fee,
+        };
+
         self.client_ctx
-            .log_event(
-                &tx,
-                operation_id,
-                SendEvent {
-                    txid,
-                    address,
-                    value,
-                    fee,
-                },
-            )
+            .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
         dbtx.commit().await;
@@ -281,44 +269,34 @@ impl WalletClientModule {
     ) -> (OperationId, TransactionId) {
         let operation_id = OperationId::new_random();
 
-        let client_input = ClientInput::<WalletInput> {
-            input: WalletInput {
+        let tx_builder = TransactionBuilder::from_input(Input {
+            input: wire::Input::Wallet(WalletInput {
                 output_index,
                 fee,
                 tweak: self.derive_tweak(address_index).public_key(),
-            },
-            keys: vec![self.derive_tweak(address_index)],
+            }),
+            keypair: self.derive_tweak(address_index),
             amount: Amount::from_sats((value - fee).to_sat()),
-        };
-
-        let client_input_bundle =
-            self.client_ctx
-                .make_client_inputs(ClientInputBundle::<WalletInput>::new(vec![client_input]));
+            fee: self.cfg.input_fee,
+        });
 
         let dbtx = self.client_ctx.module_db().begin_write().await;
-        let tx = dbtx.as_ref();
 
         let txid = self
-            .client_ctx
-            .finalize_and_submit_transaction_dbtx(
-                &tx,
-                operation_id,
-                TransactionBuilder::new().with_inputs(client_input_bundle),
-            )
+            .mint
+            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
             .await
             .expect("Input amount is sufficient to finalize transaction");
 
+        let event = ReceiveEvent {
+            txid,
+            address: self.derive_address(address_index).as_unchecked().clone(),
+            value,
+            fee,
+        };
+
         self.client_ctx
-            .log_event(
-                &tx,
-                operation_id,
-                ReceiveEvent {
-                    txid,
-                    address: self.derive_address(address_index).as_unchecked().clone(),
-                    value,
-                    fee,
-                },
-            )
+            .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
         dbtx.commit().await;
