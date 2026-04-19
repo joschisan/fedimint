@@ -70,6 +70,8 @@ impl GatewayClientInit {
 
         let sm_context = GwSmContext {
             client_ctx: context.clone(),
+            mint: mint.clone(),
+            input_fee: cfg.input_fee,
             keypair,
             tpe_agg_pk: cfg.tpe_agg_pk,
             tpe_pks: cfg.tpe_pks.clone(),
@@ -119,11 +121,14 @@ pub struct GatewayClientModule {
     complete_executor: ModuleExecutor<CompleteStateMachine>,
 }
 
-/// Lean context handed to per-SM executors. Does NOT hold the module itself
-/// — that would create a cycle (module → executor → Inner → ctx → module).
+/// Lean context handed to per-SM executors. Holds `Arc<MintClientModule>`
+/// (no cycle — gw owns its executor → ctx → mint, mint does not reach back
+/// into gw) but does NOT hold `Arc<GatewayClientModule>` itself.
 #[derive(Debug, Clone)]
 pub struct GwSmContext {
     pub client_ctx: ClientContext<GatewayClientModule>,
+    pub mint: Arc<crate::mint::MintClientModule>,
+    pub input_fee: Amount,
     pub keypair: Keypair,
     pub tpe_agg_pk: AggregatePublicKey,
     pub tpe_pks: BTreeMap<PeerId, PublicKeyShare>,

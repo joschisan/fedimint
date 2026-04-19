@@ -106,9 +106,11 @@ impl LightningClientInit {
 
 #[derive(Debug, Clone)]
 pub struct LightningClientContext {
-    federation_id: FederationId,
-    gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
+    pub(crate) federation_id: FederationId,
+    pub(crate) gateway_conn: Arc<dyn GatewayConnection + Send + Sync>,
     pub(crate) client_ctx: ClientContext<LightningClientModule>,
+    pub(crate) mint: Arc<crate::mint::MintClientModule>,
+    pub(crate) input_fee: Amount,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +157,8 @@ impl LightningClientModule {
             federation_id,
             gateway_conn: gateway_conn.clone(),
             client_ctx: client_ctx.clone(),
+            mint: mint.clone(),
+            input_fee: cfg.input_fee,
         };
         let send_executor = ModuleExecutor::new(
             client_ctx.module_db().clone(),

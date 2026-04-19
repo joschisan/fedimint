@@ -1,5 +1,6 @@
 use crate::executor::StateMachine;
-use crate::transaction::{ClientInput, ClientInputBundle};
+use crate::transaction::builder_next::{Input, TransactionBuilder};
+use picomint_core::wire;
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
@@ -177,22 +178,19 @@ async fn transition_gateway_send_payment_sm(
                 .await;
         }
         Err(signature) => {
-            let client_input = ClientInput::<LightningInput> {
-                input: LightningInput::Outgoing(
+            let tx_builder = TransactionBuilder::from_input(Input {
+                input: wire::Input::Ln(LightningInput::Outgoing(
                     old_state.common.outpoint,
                     OutgoingWitness::Cancel(signature),
-                ),
+                )),
+                keypair: old_state.common.refund_keypair,
                 amount: old_state.common.contract.amount,
-                keys: vec![old_state.common.refund_keypair],
-            };
+                fee: ctx.input_fee,
+            });
 
             let txid = ctx
-                .client_ctx
-                .claim_inputs(
-                    dbtx,
-                    ClientInputBundle::new(vec![client_input]),
-                    old_state.common.operation_id,
-                )
+                .mint
+                .finalize_and_submit_transaction(dbtx, old_state.common.operation_id, tx_builder)
                 .await
                 .expect("Cannot claim input, additional funding needed");
 
@@ -246,19 +244,19 @@ async fn transition_preimage_sm(
         return;
     }
 
-    let client_input = ClientInput::<LightningInput> {
-        input: LightningInput::Outgoing(old_state.common.outpoint, OutgoingWitness::Refund),
+    let tx_builder = TransactionBuilder::from_input(Input {
+        input: wire::Input::Ln(LightningInput::Outgoing(
+            old_state.common.outpoint,
+            OutgoingWitness::Refund,
+        )),
+        keypair: old_state.common.refund_keypair,
         amount: old_state.common.contract.amount,
-        keys: vec![old_state.common.refund_keypair],
-    };
+        fee: ctx.input_fee,
+    });
 
     let txid = ctx
-        .client_ctx
-        .claim_inputs(
-            dbtx,
-            ClientInputBundle::new(vec![client_input]),
-            old_state.common.operation_id,
-        )
+        .mint
+        .finalize_and_submit_transaction(dbtx, old_state.common.operation_id, tx_builder)
         .await
         .expect("Cannot claim input, additional funding needed");
 

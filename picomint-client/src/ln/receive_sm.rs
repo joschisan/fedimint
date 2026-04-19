@@ -1,5 +1,6 @@
 use crate::executor::StateMachine;
-use crate::transaction::{ClientInput, ClientInputBundle};
+use crate::transaction::builder_next::{Input, TransactionBuilder};
+use picomint_core::wire;
 use picomint_core::OutPoint;
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInput;
@@ -53,31 +54,26 @@ impl StateMachine for ReceiveStateMachine {
             return None;
         };
 
-        let client_input = ClientInput::<LightningInput> {
-            input: LightningInput::Incoming(outpoint, self.agg_decryption_key),
+        let tx_builder = TransactionBuilder::from_input(Input {
+            input: wire::Input::Ln(LightningInput::Incoming(outpoint, self.agg_decryption_key)),
+            keypair: self.claim_keypair,
             amount: self.contract.commitment.amount,
-            keys: vec![self.claim_keypair],
-        };
+            fee: ctx.input_fee,
+        });
 
         let txid = ctx
-            .client_ctx
-            .claim_inputs(
-                dbtx,
-                ClientInputBundle::new(vec![client_input]),
-                self.operation_id,
-            )
+            .mint
+            .finalize_and_submit_transaction(dbtx, self.operation_id, tx_builder)
             .await
             .expect("Cannot claim input, additional funding needed");
 
+        let event = ReceiveEvent {
+            txid,
+            amount: self.contract.commitment.amount,
+        };
+
         ctx.client_ctx
-            .log_event(
-                dbtx,
-                self.operation_id,
-                ReceiveEvent {
-                    txid,
-                    amount: self.contract.commitment.amount,
-                },
-            )
+            .log_event(dbtx, self.operation_id, event)
             .await;
 
         None

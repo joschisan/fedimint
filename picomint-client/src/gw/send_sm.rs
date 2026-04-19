@@ -1,5 +1,6 @@
 use crate::executor::StateMachine;
-use crate::transaction::{ClientInput, ClientInputBundle};
+use crate::transaction::builder_next::{Input, TransactionBuilder};
+use picomint_core::wire;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::OutgoingContract;
@@ -105,34 +106,29 @@ impl StateMachine for SendStateMachine {
     ) -> Option<Self> {
         match outcome {
             Ok(payment_response) => {
-                let client_input = ClientInput::<LightningInput> {
-                    input: LightningInput::Outgoing(
+                let tx_builder = TransactionBuilder::from_input(Input {
+                    input: wire::Input::Ln(LightningInput::Outgoing(
                         self.outpoint,
                         OutgoingWitness::Claim(payment_response.preimage),
-                    ),
+                    )),
+                    keypair: self.claim_keypair,
                     amount: self.contract.amount,
-                    keys: vec![self.claim_keypair],
-                };
+                    fee: ctx.input_fee,
+                });
 
                 let txid = ctx
-                    .client_ctx
-                    .claim_inputs(
-                        dbtx,
-                        ClientInputBundle::new(vec![client_input]),
-                        self.operation_id,
-                    )
+                    .mint
+                    .finalize_and_submit_transaction(dbtx, self.operation_id, tx_builder)
                     .await
                     .expect("Cannot claim input, additional funding needed");
 
+                let event = SendSuccessEvent {
+                    preimage: payment_response.preimage,
+                    txid,
+                };
+
                 ctx.client_ctx
-                    .log_event(
-                        dbtx,
-                        self.operation_id,
-                        SendSuccessEvent {
-                            preimage: payment_response.preimage,
-                            txid,
-                        },
-                    )
+                    .log_event(dbtx, self.operation_id, event)
                     .await;
             }
             Err(_) => {
