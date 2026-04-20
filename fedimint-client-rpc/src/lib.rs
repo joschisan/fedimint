@@ -19,7 +19,7 @@ use fedimint_core::util::{BoxFuture, BoxStream};
 use fedimint_core::{Amount, TieredCounts, impl_db_record};
 use fedimint_derive_secret::{ChildId, DerivableSecret};
 use fedimint_ln_client::{LightningClientInit, LightningClientModule};
-use fedimint_meta_client::MetaClientInit;
+use fedimint_meta_client::{MetaClientInit, MetaClientModule};
 use fedimint_mint_client::{MintClientInit, MintClientModule, OOBNotes};
 use fedimint_wallet_client::{WalletClientInit, WalletClientModule};
 use futures::StreamExt;
@@ -365,6 +365,13 @@ impl RpcGlobalState {
                         .get_first_module::<WalletClientModule>()?
                         .inner();
                     let mut stream = wallet.handle_rpc(method, payload).await;
+                    while let Some(item) = stream.next().await {
+                        yield item?;
+                    }
+                }
+                "meta" => {
+                    let meta = client.get_first_module::<MetaClientModule>()?.inner();
+                    let mut stream = meta.handle_rpc(method, payload).await;
                     while let Some(item) = stream.next().await {
                         yield item?;
                     }

@@ -11,6 +11,7 @@ pub mod states;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use anyhow::Context as _;
 use api::MetaFederationApi;
 use common::{KIND, MetaConsensusValue, MetaKey, MetaValue};
 use db::DbKeyPrefix;
@@ -28,11 +29,14 @@ use fedimint_core::module::{
     Amounts, ApiAuth, ApiVersion, ModuleCommon, ModuleInit, MultiApiVersion,
 };
 use fedimint_core::util::backoff_util::FibonacciBackoff;
-use fedimint_core::util::{backoff_util, retry};
+use fedimint_core::util::{BoxStream, backoff_util, retry};
 use fedimint_core::{PeerId, apply, async_trait_maybe_send};
 use fedimint_logging::LOG_CLIENT_MODULE_META;
 pub use fedimint_meta_common as common;
 use fedimint_meta_common::{DEFAULT_META_KEY, MetaCommonInit, MetaModuleTypes};
+use futures::stream;
+use serde::Deserialize;
+use serde_json::json;
 use states::MetaStateMachine;
 use strum::IntoEnumIterator;
 use tracing::{debug, warn};
@@ -98,6 +102,29 @@ impl MetaClientModule {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct GetConsensusValueRequest {
+    key: MetaKey,
+}
+
+fn format_rpc_consensus_value_response(
+    maybe_consensus_value: Option<MetaConsensusValue>,
+) -> anyhow::Result<serde_json::Value> {
+    Ok(match maybe_consensus_value {
+        Some(MetaConsensusValue { revision, value }) => {
+            let value = value
+                .to_json_lossy()
+                .context("deserializing consensus value as json")?;
+
+            json!({
+                "revision": revision,
+                "value": value,
+            })
+        }
+        None => serde_json::Value::Null,
+    })
+}
+
 /// Data needed by the state machine
 #[derive(Debug, Clone)]
 pub struct MetaClientContext {
@@ -137,6 +164,23 @@ impl ClientModule for MetaClientModule {
         _output: &<Self::Common as ModuleCommon>::Output,
     ) -> Option<Amounts> {
         unreachable!()
+    }
+
+    async fn handle_rpc(
+        &self,
+        method: String,
+        request: serde_json::Value,
+    ) -> BoxStream<'_, anyhow::Result<serde_json::Value>> {
+        Box::pin(stream::once(async move {
+            match method.as_str() {
+                "get_consensus_value" => {
+                    let req: GetConsensusValueRequest = serde_json::from_value(request)?;
+                    let maybe_consensus_value = self.get_consensus_value(req.key).await?;
+                    format_rpc_consensus_value_response(maybe_consensus_value)
+                }
+                _ => Err(anyhow::format_err!("Unknown method: {method}")),
+            }
+        }))
     }
 
     #[cfg(feature = "cli")]
@@ -277,5 +321,40 @@ async fn get_meta_module_value(
             }
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fedimint_meta_common::MetaValue;
+    use serde_json::json;
+
+    use super::{MetaConsensusValue, format_rpc_consensus_value_response};
+
+    #[test]
+    fn formats_consensus_value_as_json() {
+        let response = format_rpc_consensus_value_response(Some(MetaConsensusValue {
+            revision: 7,
+            value: MetaValue::from(br#"{"welcome_message":"hello"}"#.as_slice()),
+        }))
+        .expect("valid json meta value should format");
+
+        assert_eq!(
+            response,
+            json!({
+                "revision": 7,
+                "value": {
+                    "welcome_message": "hello",
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn formats_missing_consensus_value_as_null() {
+        let response =
+            format_rpc_consensus_value_response(None).expect("null response should format");
+
+        assert_eq!(response, serde_json::Value::Null);
     }
 }
