@@ -22,13 +22,13 @@ pub struct GatewayClientFactory {
 impl GatewayClientFactory {
     /// Initialize a new factory, storing the mnemonic entropy in the database.
     pub async fn init(db: Database, mnemonic: Mnemonic) -> anyhow::Result<Self> {
-        let dbtx = db.begin_write().await;
+        let dbtx = db.begin_write();
         assert!(
             dbtx.as_ref()
                 .insert(&ROOT_ENTROPY, &(), &mnemonic.to_entropy())
                 .is_none()
         );
-        dbtx.commit().await;
+        dbtx.commit();
 
         let endpoint = Endpoint::builder(N0).bind().await?;
 
@@ -41,7 +41,7 @@ impl GatewayClientFactory {
 
     /// Try to load an existing factory from the database.
     pub async fn try_load(db: Database) -> anyhow::Result<Option<Self>> {
-        let entropy = db.begin_read().await.as_ref().get(&ROOT_ENTROPY, &());
+        let entropy = db.begin_read().as_ref().get(&ROOT_ENTROPY, &());
 
         match entropy {
             Some(entropy) => {
@@ -71,7 +71,6 @@ impl GatewayClientFactory {
     async fn read_config(&self, federation_id: &FederationId) -> Option<ConsensusConfig> {
         self.db
             .begin_read()
-            .await
             .as_ref()
             .get(&CLIENT_CONFIG, federation_id)
     }
@@ -85,7 +84,7 @@ impl GatewayClientFactory {
     ) -> anyhow::Result<Arc<picomint_client::Client>> {
         let config = picomint_client::download(&self.connectors, invite).await?;
 
-        let dbtx = self.db.begin_write().await;
+        let dbtx = self.db.begin_write();
 
         if dbtx
             .as_ref()
@@ -95,7 +94,7 @@ impl GatewayClientFactory {
             anyhow::bail!("Federation is already joined");
         }
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         self.open(config, gateway).await
     }
@@ -133,7 +132,6 @@ impl GatewayClientFactory {
     pub async fn list_federations(&self) -> Vec<FederationId> {
         self.db
             .begin_read()
-            .await
             .as_ref()
             .iter(&CLIENT_CONFIG, |r| r.map(|(id, _)| id).collect())
     }

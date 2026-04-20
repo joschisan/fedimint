@@ -269,7 +269,6 @@ pub fn subscribe_operation_events(
             let notified = event_notify.notified();
             let batch = db
                 .begin_read()
-                .await
                 .as_ref()
                 .with_native_table(&EVENT_LOG_BY_OPERATION, |t| {
                     t.range((operation_id, next_id)..(operation_id, EventLogId::LOG_END))

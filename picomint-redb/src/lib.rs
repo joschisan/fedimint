@@ -199,10 +199,8 @@ impl Debug for Database {
 impl Database {
     /// Open (or create) a redb database at `path`. The only fallible entry
     /// point; every other public method panics internally on redb errors.
-    pub async fn open(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let path = path.as_ref().to_owned();
-
-        let env = tokio::task::spawn_blocking(move || redb::Database::create(path)).await??;
+    pub fn open(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let env = redb::Database::create(path.as_ref())?;
 
         Ok(Self {
             inner: Arc::new(DatabaseInner {
@@ -244,12 +242,11 @@ impl Database {
         }
     }
 
-    pub async fn begin_write(&self) -> WriteTransaction {
-        let db = self.inner.clone();
-
-        let tx = tokio::task::spawn_blocking(move || db.env.begin_write())
-            .await
-            .expect("spawn_blocking panicked")
+    pub fn begin_write(&self) -> WriteTransaction {
+        let tx = self
+            .inner
+            .env
+            .begin_write()
             .expect("redb begin_write failed");
 
         WriteTransaction {
@@ -261,12 +258,11 @@ impl Database {
         }
     }
 
-    pub async fn begin_read(&self) -> ReadTransaction {
-        let db = self.inner.clone();
-
-        let tx = tokio::task::spawn_blocking(move || db.env.begin_read())
-            .await
-            .expect("spawn_blocking panicked")
+    pub fn begin_read(&self) -> ReadTransaction {
+        let tx = self
+            .inner
+            .env
+            .begin_read()
             .expect("redb begin_read failed");
 
         ReadTransaction {
@@ -318,7 +314,7 @@ impl Database {
         loop {
             let notified = notify.notified();
 
-            let tx = self.begin_read().await;
+            let tx = self.begin_read();
 
             if let Some(t) = check(&tx) {
                 return (t, tx);
@@ -418,7 +414,7 @@ impl WriteTransaction {
         self.as_ref().on_commit(f);
     }
 
-    pub async fn commit(self) {
+    pub fn commit(self) {
         let Self {
             tx,
             db,
@@ -427,10 +423,7 @@ impl WriteTransaction {
             ..
         } = self;
 
-        tokio::task::spawn_blocking(move || tx.commit())
-            .await
-            .expect("spawn_blocking panicked")
-            .expect("redb commit failed");
+        tx.commit().expect("redb commit failed");
 
         for name in touched.into_inner().expect("touched poisoned") {
             db.notify_for(&name).notify_waiters();
@@ -1048,83 +1041,83 @@ mod tests {
     table!(USERS, u64 => String, "users");
     table!(BALANCES, u64 => u64, "balances");
 
-    #[tokio::test]
-    async fn basic_read_write() {
+    #[test]
+    fn basic_read_write() {
         let db = Database::open_in_memory();
 
-        let tx = db.begin_write().await;
+        let tx = db.begin_write();
         tx.insert(&USERS, &1, &"alice".to_string());
         tx.insert(&USERS, &2, &"bob".to_string());
         tx.insert(&BALANCES, &1, &100);
-        tx.commit().await;
+        tx.commit();
 
-        let tx = db.begin_read().await;
+        let tx = db.begin_read();
         assert_eq!(tx.get(&USERS, &1), Some("alice".to_string()));
         assert_eq!(tx.get(&USERS, &2), Some("bob".to_string()));
         assert_eq!(tx.get(&USERS, &3), None);
         assert_eq!(tx.get(&BALANCES, &1), Some(100));
     }
 
-    #[tokio::test]
-    async fn uncommitted_writes_are_discarded() {
+    #[test]
+    fn uncommitted_writes_are_discarded() {
         let db = Database::open_in_memory();
 
-        let tx = db.begin_write().await;
+        let tx = db.begin_write();
         tx.insert(&USERS, &1, &"alice".to_string());
         drop(tx);
 
-        let tx = db.begin_read().await;
+        let tx = db.begin_read();
         assert_eq!(tx.get(&USERS, &1), None);
     }
 
-    #[tokio::test]
-    async fn isolation_separates_namespaces() {
+    #[test]
+    fn isolation_separates_namespaces() {
         let db = Database::open_in_memory();
         let client_a = db.isolate("client_a");
         let client_b = db.isolate("client_b");
 
-        let tx = client_a.begin_write().await;
+        let tx = client_a.begin_write();
         tx.insert(&USERS, &1, &"alice".to_string());
-        tx.commit().await;
+        tx.commit();
 
-        let tx = client_b.begin_write().await;
+        let tx = client_b.begin_write();
         tx.insert(&USERS, &1, &"bob".to_string());
-        tx.commit().await;
+        tx.commit();
 
         assert_eq!(
-            client_a.begin_read().await.get(&USERS, &1),
+            client_a.begin_read().get(&USERS, &1),
             Some("alice".to_string())
         );
         assert_eq!(
-            client_b.begin_read().await.get(&USERS, &1),
+            client_b.begin_read().get(&USERS, &1),
             Some("bob".to_string())
         );
     }
 
-    #[tokio::test]
-    async fn nested_isolation_composes() {
+    #[test]
+    fn nested_isolation_composes() {
         let db = Database::open_in_memory();
         let nested = db.isolate("gateway").isolate("client_7").isolate("mint");
 
-        let tx = nested.begin_write().await;
+        let tx = nested.begin_write();
         tx.insert(&BALANCES, &42, &999);
-        tx.commit().await;
+        tx.commit();
 
-        assert_eq!(nested.begin_read().await.get(&BALANCES, &42), Some(999));
-        assert_eq!(db.begin_read().await.get(&BALANCES, &42), None);
+        assert_eq!(nested.begin_read().get(&BALANCES, &42), Some(999));
+        assert_eq!(db.begin_read().get(&BALANCES, &42), None);
     }
 
-    #[tokio::test]
-    async fn range_iterates_sorted() {
+    #[test]
+    fn range_iterates_sorted() {
         let db = Database::open_in_memory();
 
-        let tx = db.begin_write().await;
+        let tx = db.begin_write();
         for i in 0u64..10 {
             tx.insert(&BALANCES, &i, &(i * 10));
         }
-        tx.commit().await;
+        tx.commit();
 
-        let tx = db.begin_read().await;
+        let tx = db.begin_read();
         let items = tx.range(&BALANCES, 3u64..7u64, |r| r.collect::<Vec<_>>());
 
         assert_eq!(items, vec![(3, 30), (4, 40), (5, 50), (6, 60)]);
@@ -1135,11 +1128,11 @@ mod tests {
         let db = Database::open_in_memory();
 
         let db_writer = db.clone();
-        let writer = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let tx = db_writer.begin_write().await;
+        let writer = tokio::task::spawn_blocking(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            let tx = db_writer.begin_write();
             tx.insert(&USERS, &1, &"alice".to_string());
-            tx.commit().await;
+            tx.commit();
         });
 
         let (value, _tx) = db
@@ -1154,16 +1147,16 @@ mod tests {
     async fn wait_table_check_returns_consistent_tx() {
         let db = Database::open_in_memory();
 
-        let tx = db.begin_write().await;
+        let tx = db.begin_write();
         tx.insert(&BALANCES, &1, &50);
-        tx.commit().await;
+        tx.commit();
 
         let db_writer = db.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let tx = db_writer.begin_write().await;
+        tokio::task::spawn_blocking(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            let tx = db_writer.begin_write();
             tx.insert(&BALANCES, &1, &150);
-            tx.commit().await;
+            tx.commit();
         });
 
         let (v, tx) = db
@@ -1176,28 +1169,28 @@ mod tests {
         assert_eq!(tx.get(&BALANCES, &1), Some(150));
     }
 
-    #[tokio::test]
-    async fn on_commit_fires_after_commit() {
+    #[test]
+    fn on_commit_fires_after_commit() {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let db = Database::open_in_memory();
         let fired = Arc::new(AtomicBool::new(false));
 
-        let tx = db.begin_write().await;
+        let tx = db.begin_write();
         tx.insert(&USERS, &1, &"alice".to_string());
         let f = fired.clone();
         tx.on_commit(move || f.store(true, Ordering::SeqCst));
         assert!(!fired.load(Ordering::SeqCst));
-        tx.commit().await;
+        tx.commit();
 
         assert!(fired.load(Ordering::SeqCst));
     }
 
-    #[tokio::test]
-    async fn shared_tx_with_module_isolation() {
+    #[test]
+    fn shared_tx_with_module_isolation() {
         let db = Database::open_in_memory();
 
-        let tx = db.begin_write().await;
+        let tx = db.begin_write();
 
         tx.insert(&USERS, &0, &"root".to_string());
 
@@ -1207,27 +1200,27 @@ mod tests {
         let m2 = tx.isolate("m2");
         m2.insert(&USERS, &1, &"bob".to_string());
 
-        tx.commit().await;
+        tx.commit();
 
-        assert_eq!(db.begin_read().await.get(&USERS, &0), Some("root".into()));
+        assert_eq!(db.begin_read().get(&USERS, &0), Some("root".into()));
         assert_eq!(
-            db.begin_read().await.isolate("m1").get(&USERS, &1),
+            db.begin_read().isolate("m1").get(&USERS, &1),
             Some("alice".into())
         );
         assert_eq!(
-            db.begin_read().await.isolate("m2").get(&USERS, &1),
+            db.begin_read().isolate("m2").get(&USERS, &1),
             Some("bob".into())
         );
     }
 
-    #[tokio::test]
-    async fn on_commit_does_not_fire_if_dropped() {
+    #[test]
+    fn on_commit_does_not_fire_if_dropped() {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let db = Database::open_in_memory();
         let fired = Arc::new(AtomicBool::new(false));
 
-        let tx = db.begin_write().await;
+        let tx = db.begin_write();
         let f = fired.clone();
         tx.on_commit(move || f.store(true, Ordering::SeqCst));
         drop(tx);

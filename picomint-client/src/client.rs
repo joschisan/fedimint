@@ -269,7 +269,7 @@ impl Client {
     }
 
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {
-        let dbtx = self.db().begin_write().await;
+        let dbtx = self.db().begin_write();
         Ok(self.mint.get_balance(&dbtx.as_ref()).await)
     }
 
@@ -286,7 +286,7 @@ impl Client {
             let mut prev_balance = initial_balance;
             loop {
                 let notified = notify.notified();
-                let dbtx = db.begin_write().await;
+                let dbtx = db.begin_write();
                 let balance = mint.get_balance(&dbtx.as_ref()).await;
 
                 // Deduplicate in case modules cannot always tell if the balance actually changed
@@ -335,7 +335,6 @@ impl Client {
         let end = pos.saturating_add(limit);
         self.db
             .begin_read()
-            .await
             .as_ref()
             .with_native_table(&picomint_eventlog::EVENT_LOG, |t| {
                 t.range(pos..end)

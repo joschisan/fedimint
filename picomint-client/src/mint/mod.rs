@@ -91,7 +91,7 @@ impl MintClientModule {
         module_api: &FederationApi,
         module_root_secret: &Secret,
     ) -> anyhow::Result<()> {
-        let mut state = if let Some(state) = db.begin_read().await.get(&RECOVERY_STATE, &()) {
+        let mut state = if let Some(state) = db.begin_read().get(&RECOVERY_STATE, &()) {
             state
         } else {
             RecoveryState {
@@ -169,7 +169,7 @@ impl MintClientModule {
 
             state.next_index += items.len() as u64;
 
-            let dbtx = db.begin_write().await;
+            let dbtx = db.begin_write();
             let tx = dbtx.as_ref();
 
             tx.insert(&RECOVERY_STATE, &(), &state);
@@ -187,12 +187,12 @@ impl MintClientModule {
 
                 crate::executor::ModuleExecutor::add_state_machine_unstarted(&tx, sm).await;
 
-                dbtx.commit().await;
+                dbtx.commit();
 
                 return Ok(());
             }
 
-            dbtx.commit().await;
+            dbtx.commit();
 
             tracing::info!(
                 target: picomint_logging::LOG_CLIENT,
@@ -520,7 +520,7 @@ impl MintClientModule {
 impl MintClientModule {
     /// Count the `ECash` notes in the client's database by denomination.
     pub async fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
 
         self.get_count_by_denomination_dbtx(&dbtx.as_ref()).await
     }
@@ -552,14 +552,14 @@ impl MintClientModule {
     pub async fn send(&self, amount: Amount) -> Result<ECash, SendECashError> {
         let amount = round_to_multiple(amount, client_denominations().next().unwrap().amount());
 
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
 
         let ecash = self
             .send_ecash_dbtx(&dbtx.as_ref(), amount)
             .await
             .expect("Infallible");
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         if let Some(ecash) = ecash {
             return Ok(ecash);
@@ -595,7 +595,7 @@ impl MintClientModule {
             });
         }
 
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
         let tx = dbtx.as_ref();
 
         let (funding_notes, change_requests) = self
@@ -623,7 +623,7 @@ impl MintClientModule {
             .log_event(&tx, operation_id, ReissueEvent { txid })
             .await;
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         self.client_ctx
             .subscribe_operation_events_typed::<events::IssuanceComplete>(operation_id)
@@ -706,7 +706,7 @@ impl MintClientModule {
             });
         }
 
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
 
         if dbtx
             .as_ref()
@@ -730,7 +730,7 @@ impl MintClientModule {
             .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         Ok(operation_id)
     }

@@ -314,7 +314,7 @@ impl AppState {
             )
             .await?;
 
-        let dbtx = self.gateway_db.begin_write().await;
+        let dbtx = self.gateway_db.begin_write();
 
         if dbtx
             .as_ref()
@@ -334,7 +334,7 @@ impl AppState {
             ));
         }
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         Ok(invoice)
     }
@@ -377,7 +377,6 @@ impl AppState {
         let registered_contract = self
             .gateway_db
             .begin_read()
-            .await
             .as_ref()
             .get(
                 &REGISTERED_INCOMING_CONTRACT,
@@ -434,7 +433,6 @@ impl AppState {
         let registered_incoming_contract = self
             .gateway_db
             .begin_read()
-            .await
             .as_ref()
             .get(&REGISTERED_INCOMING_CONTRACT, &payment_image)
             .context("Incoming payment error: No corresponding decryption contract available")?;

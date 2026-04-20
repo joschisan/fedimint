@@ -38,7 +38,7 @@ pub async fn signature_shares_recovery(
 ) -> Result<Vec<BlindedSignatureShare>, ApiError> {
     let mut shares = Vec::new();
 
-    let tx = mint.db.begin_read().await;
+    let tx = mint.db.begin_read();
 
     for message in messages {
         let share = tx
@@ -52,17 +52,17 @@ pub async fn signature_shares_recovery(
 }
 
 pub async fn recovery_slice(mint: &Mint, range: (u64, u64)) -> Result<Vec<RecoveryItem>, ApiError> {
-    let tx = mint.db.begin_read().await;
+    let tx = mint.db.begin_read();
     Ok(collect_recovery_slice(&tx, range))
 }
 
 pub async fn recovery_slice_hash(mint: &Mint, range: (u64, u64)) -> Result<sha256::Hash, ApiError> {
-    let tx = mint.db.begin_read().await;
+    let tx = mint.db.begin_read();
     Ok(collect_recovery_slice(&tx, range).consensus_hash::<sha256::Hash>())
 }
 
 pub async fn recovery_count(mint: &Mint, _: ()) -> Result<u64, ApiError> {
-    let tx = mint.db.begin_read().await;
+    let tx = mint.db.begin_read();
     Ok(super::get_recovery_count(&tx))
 }
 

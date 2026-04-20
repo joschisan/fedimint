@@ -161,7 +161,6 @@ impl<S: StateMachine> Inner<S> {
     async fn get_active_states(&self) -> Vec<(SmId, S)> {
         self.db
             .begin_read()
-            .await
             .iter(&table::<S>(), |r| r.collect())
     }
 
@@ -177,17 +176,17 @@ impl<S: StateMachine> Inner<S> {
         loop {
             let outcome = state.trigger(&self.context).await;
 
-            let tx = self.db.begin_write().await;
+            let tx = self.db.begin_write();
 
             match state.transition(&self.context, &tx.as_ref(), outcome).await {
                 Some(new_state) => {
                     tx.insert(&table::<S>(), &id, &new_state);
-                    tx.commit().await;
+                    tx.commit();
                     state = new_state;
                 }
                 None => {
                     tx.remove(&table::<S>(), &id);
-                    tx.commit().await;
+                    tx.commit();
                     return;
                 }
             }

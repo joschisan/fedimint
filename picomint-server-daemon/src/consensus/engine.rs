@@ -217,7 +217,6 @@ impl ConsensusEngine {
     async fn is_recovery(&self) -> bool {
         self.db
             .begin_read()
-            .await
             .iter(&ALEPH_UNITS, |r| r.next().is_some())
     }
 
@@ -486,7 +485,6 @@ impl ConsensusEngine {
     pub async fn pending_accepted_items(&self) -> Vec<AcceptedItem> {
         self.db
             .begin_read()
-            .await
             .iter(&ACCEPTED_ITEM, |r| r.map(|(_, item)| item).collect())
     }
 
@@ -495,7 +493,7 @@ impl ConsensusEngine {
         session_index: u64,
         signed_session_outcome: SignedSessionOutcome,
     ) {
-        let tx = self.db.begin_write().await;
+        let tx = self.db.begin_write();
 
         tx.as_ref().delete_table(&ALEPH_UNITS);
         tx.as_ref().delete_table(&ACCEPTED_ITEM);
@@ -510,7 +508,7 @@ impl ConsensusEngine {
             "We tried to overwrite a signed session outcome"
         );
 
-        tx.commit().await;
+        tx.commit();
     }
 
     #[instrument(target = LOG_CONSENSUS, skip(self, item), level = "info")]
@@ -533,7 +531,7 @@ impl ConsensusEngine {
             .expect("No ci status sender for peer")
             .send_replace(Some(session_index));
 
-        let tx = self.db.begin_write().await;
+        let tx = self.db.begin_write();
 
         // When we recover from a mid-session crash aleph bft will replay the units that
         // were already processed before the crash. We therefore skip all consensus
@@ -578,7 +576,7 @@ impl ConsensusEngine {
             "Processed consensus item"
         );
 
-        tx.commit().await;
+        tx.commit();
 
         Ok(())
     }
@@ -633,7 +631,7 @@ impl ConsensusEngine {
     /// Returns the number of sessions already saved in the database. This count
     /// **does not** include the currently running session.
     async fn get_finished_session_count(&self) -> u64 {
-        get_finished_session_count_static(&self.db.begin_read().await).await
+        get_finished_session_count_static(&self.db.begin_read()).await
     }
 }
 

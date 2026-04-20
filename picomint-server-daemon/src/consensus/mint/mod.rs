@@ -101,7 +101,6 @@ impl Mint {
     pub async fn note_distribution_ui(&self) -> BTreeMap<Denomination, u64> {
         self.db
             .begin_read()
-            .await
             .iter(&ISSUANCE_COUNTER, |r| r.filter(|(_, count)| *count > 0).collect())
     }
 }

@@ -145,7 +145,7 @@ impl LightningClientModule {
                 }
             }
 
-            let dbtx = self.client_ctx.db().begin_write().await;
+            let dbtx = self.client_ctx.db().begin_write();
             {
                 let tx = dbtx.as_ref();
                 for (key, gateway) in entries {
@@ -153,7 +153,7 @@ impl LightningClientModule {
                 }
             }
 
-            dbtx.commit().await;
+            dbtx.commit();
         }
     }
 
@@ -181,7 +181,6 @@ impl LightningClientModule {
                 .client_ctx
                 .db()
                 .begin_read()
-                .await
                 .get(&GATEWAY, &GatewayKey(invoice.recover_payee_pub_key()))
                 .filter(|gateway| gateways.contains(gateway))
             && let Ok(Some(routing_info)) = self.routing_info(&gateway).await
@@ -323,7 +322,7 @@ impl LightningClientModule {
             fee: self.cfg.output_fee,
         });
 
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
 
         if dbtx
             .as_ref()
@@ -365,7 +364,7 @@ impl LightningClientModule {
             .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         Ok(operation_id)
     }
@@ -630,7 +629,6 @@ impl LightningClientModule {
             .client_ctx
             .db()
             .begin_read()
-            .await
             .get(&INCOMING_CONTRACT_STREAM_INDEX, &())
             .unwrap_or(0);
 
@@ -646,7 +644,7 @@ impl LightningClientModule {
             .to_secp_keypair()
             .secret_key();
 
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
 
         for (outpoint, contract) in &entries {
             self.receive_incoming_contract(&dbtx.as_ref(), sk, *outpoint, contract)
@@ -655,7 +653,7 @@ impl LightningClientModule {
 
         dbtx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &next_index);
 
-        dbtx.commit().await;
+        dbtx.commit();
     }
 }
 

@@ -214,7 +214,7 @@ impl GatewayClientModule {
             .min_contract_amount(&payload.federation_id, amount)
             .await?;
 
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
         let tx = dbtx.as_ref();
 
         if tx.insert(&db::OPERATION, &operation_id, &()).is_some() {
@@ -247,7 +247,7 @@ impl GatewayClientModule {
             )
             .await;
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         Ok(self.subscribe_send(operation_id).await)
     }
@@ -286,7 +286,7 @@ impl GatewayClientModule {
             fee: self.cfg.output_fee,
         });
 
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
 
         if dbtx
             .as_ref()
@@ -337,7 +337,7 @@ impl GatewayClientModule {
             .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         Ok(())
     }
@@ -357,7 +357,7 @@ impl GatewayClientModule {
             fee: self.cfg.output_fee,
         });
 
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
 
         if dbtx
             .as_ref()
@@ -394,7 +394,7 @@ impl GatewayClientModule {
             .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         Ok(self.await_receive(operation_id).await)
     }

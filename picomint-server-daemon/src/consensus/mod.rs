@@ -144,7 +144,7 @@ pub async fn run(
         move |task_handle| async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             while !task_handle.is_shutting_down() {
-                let tx = db.begin_read().await;
+                let tx = db.begin_read();
                 for item in server
                     .mint
                     .consensus_proposal(&tx.isolate(MINT_NS.to_string()))

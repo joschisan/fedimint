@@ -112,8 +112,7 @@ fn main() -> anyhow::Result<()> {
         .install_default()
         .ok();
 
-    let gateway_db =
-        runtime.block_on(picomint_redb::Database::open(opts.data_dir.join(DB_FILE)))?;
+    let gateway_db = picomint_redb::Database::open(opts.data_dir.join(DB_FILE))?;
 
     // 3. Load or init client factory (mnemonic)
     let client_factory =

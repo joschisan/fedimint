@@ -370,31 +370,30 @@ impl Lightning {
     }
 
     pub async fn consensus_block_count_ui(&self) -> u64 {
-        self.consensus_block_count(&self.db.begin_read().await)
+        self.consensus_block_count(&self.db.begin_read())
     }
 
     pub async fn consensus_unix_time_ui(&self) -> u64 {
-        self.consensus_unix_time(&self.db.begin_read().await)
+        self.consensus_unix_time(&self.db.begin_read())
     }
 
     pub async fn add_gateway_ui(&self, gateway: SafeUrl) -> bool {
-        let tx = self.db.begin_write().await;
+        let tx = self.db.begin_write();
         let is_new_entry = tx.insert(&GATEWAY, &gateway, &()).is_none();
-        tx.commit().await;
+        tx.commit();
         is_new_entry
     }
 
     pub async fn remove_gateway_ui(&self, gateway: SafeUrl) -> bool {
-        let tx = self.db.begin_write().await;
+        let tx = self.db.begin_write();
         let entry_existed = tx.remove(&GATEWAY, &gateway).is_some();
-        tx.commit().await;
+        tx.commit();
         entry_existed
     }
 
     pub async fn gateways_ui(&self) -> Vec<SafeUrl> {
         self.db
             .begin_read()
-            .await
             .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect())
     }
 }

@@ -44,7 +44,7 @@ async fn sanity_subscribe_operation_events() {
         },
         async {
             for i in 0..=4 {
-                let dbtx = db.begin_write().await;
+                let dbtx = db.begin_write();
                 log_event_raw(
                     &dbtx.as_ref(),
                     EventKind::from(format!("{i}")),
@@ -53,7 +53,7 @@ async fn sanity_subscribe_operation_events() {
                     vec![],
                 );
 
-                dbtx.commit().await;
+                dbtx.commit();
             }
 
             Ok(())

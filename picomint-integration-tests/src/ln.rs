@@ -471,14 +471,14 @@ async fn test_claim_outgoing_contract(
         fee: ln.input_fee(),
     });
 
-    let dbtx = client.db().begin_write().await;
+    let dbtx = client.db().begin_write();
 
     client
         .mint()
         .finalize_and_submit_transaction(&dbtx.as_ref(), OperationId::new_random(), tx_builder)
         .await?;
 
-    dbtx.commit().await;
+    dbtx.commit();
 
     wait_ln_event(&mut events, send_op, |e| {
         matches!(e, LnEvent::SendSuccess(_))

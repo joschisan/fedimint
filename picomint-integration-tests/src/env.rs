@@ -255,7 +255,7 @@ async fn build_client(
     let db_dir = data_dir.join(format!("client-{n}"));
     tokio::fs::create_dir_all(&db_dir).await?;
 
-    let db = picomint_redb::Database::open(db_dir.join("database.redb")).await?;
+    let db = picomint_redb::Database::open(db_dir.join("database.redb"))?;
 
     let mnemonic = Mnemonic::generate(12)?;
 

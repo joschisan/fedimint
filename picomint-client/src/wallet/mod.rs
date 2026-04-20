@@ -176,7 +176,7 @@ impl WalletClientModule {
             fee: self.cfg.output_fee,
         });
 
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
 
         let txid = self
             .mint
@@ -206,7 +206,7 @@ impl WalletClientModule {
             .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         Ok(operation_id)
     }
@@ -219,7 +219,6 @@ impl WalletClientModule {
                 .client_ctx
                 .db()
                 .begin_read()
-                .await
                 .iter(&VALID_ADDRESS_INDEX, |r| r.next_back().map(|(k, _)| k));
 
             if let Some(idx) = idx {
@@ -278,7 +277,7 @@ impl WalletClientModule {
             fee: self.cfg.input_fee,
         });
 
-        let dbtx = self.client_ctx.db().begin_write().await;
+        let dbtx = self.client_ctx.db().begin_write();
 
         let txid = self
             .mint
@@ -297,7 +296,7 @@ impl WalletClientModule {
             .log_event(&dbtx.as_ref(), operation_id, event)
             .await;
 
-        dbtx.commit().await;
+        dbtx.commit();
 
         (operation_id, txid)
     }
@@ -310,17 +309,16 @@ impl WalletClientModule {
                 .client_ctx
                 .db()
                 .begin_read()
-                .await
                 .iter(&VALID_ADDRESS_INDEX, |r| r.next().is_some());
 
             if !has_seed {
                 let index = module.next_valid_index(0);
-                let dbtx = module.client_ctx.db().begin_write().await;
+                let dbtx = module.client_ctx.db().begin_write();
                 assert!(
                     dbtx.insert(&VALID_ADDRESS_INDEX, &index, &()).is_none(),
                     "seed address index already present"
                 );
-                dbtx.commit().await;
+                dbtx.commit();
             }
 
             loop {
@@ -341,7 +339,7 @@ impl WalletClientModule {
     }
 
     async fn check_outputs(&self) -> anyhow::Result<bool> {
-        let dbtx = self.client_ctx.db().begin_read().await;
+        let dbtx = self.client_ctx.db().begin_read();
 
         let next_output_index = dbtx.get(&NEXT_OUTPUT_INDEX, &()).unwrap_or(0);
 
@@ -372,11 +370,11 @@ impl WalletClientModule {
                 if address_index == next_address_index {
                     let index = self.next_valid_index(next_address_index + 1);
 
-                    let dbtx = self.client_ctx.db().begin_write().await;
+                    let dbtx = self.client_ctx.db().begin_write();
 
                     dbtx.insert(&VALID_ADDRESS_INDEX, &index, &());
 
-                    dbtx.commit().await;
+                    dbtx.commit();
 
                     valid_indices.push(index);
 
@@ -410,11 +408,11 @@ impl WalletClientModule {
                 }
             }
 
-            let dbtx = self.client_ctx.db().begin_write().await;
+            let dbtx = self.client_ctx.db().begin_write();
 
             dbtx.insert(&NEXT_OUTPUT_INDEX, &(), &(output.index + 1));
 
-            dbtx.commit().await;
+            dbtx.commit();
         }
 
         Ok(!outputs.is_empty())

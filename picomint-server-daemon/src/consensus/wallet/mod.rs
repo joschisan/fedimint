@@ -543,7 +543,6 @@ impl Wallet {
             loop {
                 let unconfirmed_txs: Vec<FederationTx> = db
                     .begin_read()
-                    .await
                     .iter(&UNCONFIRMED_TX, |r| r.map(|(_, v)| v).collect());
 
                 for unconfirmed_tx in unconfirmed_txs {
@@ -942,54 +941,54 @@ impl Wallet {
 
     /// Get the current federation wallet info for UI display
     pub async fn federation_wallet_ui(&self) -> Option<FederationWallet> {
-        self.db.begin_read().await.get(&FEDERATION_WALLET, &())
+        self.db.begin_read().get(&FEDERATION_WALLET, &())
     }
 
     /// Get the current consensus block count for UI display
     pub async fn consensus_block_count_ui(&self) -> u64 {
-        let dbtx = self.db.begin_write().await;
+        let dbtx = self.db.begin_write();
         let result = self.consensus_block_count(&dbtx.as_ref());
-        dbtx.commit().await;
+        dbtx.commit();
         result
     }
 
     /// Get the current consensus feerate for UI display
     pub async fn consensus_feerate_ui(&self) -> Option<u64> {
-        let dbtx = self.db.begin_write().await;
+        let dbtx = self.db.begin_write();
         let result = self.consensus_feerate(&dbtx.as_ref()).map(|f| f / 1000);
-        dbtx.commit().await;
+        dbtx.commit();
         result
     }
 
     /// Get the current send fee for UI display
     pub async fn send_fee_ui(&self) -> Option<Amount> {
-        let dbtx = self.db.begin_write().await;
+        let dbtx = self.db.begin_write();
         let result = self.send_fee(&dbtx.as_ref());
-        dbtx.commit().await;
+        dbtx.commit();
         result
     }
 
     /// Get the current receive fee for UI display
     pub async fn receive_fee_ui(&self) -> Option<Amount> {
-        let dbtx = self.db.begin_write().await;
+        let dbtx = self.db.begin_write();
         let result = self.receive_fee(&dbtx.as_ref());
-        dbtx.commit().await;
+        dbtx.commit();
         result
     }
 
     /// Get the current pending transaction info for UI display
     pub async fn pending_tx_chain_ui(&self) -> Vec<TxInfo> {
-        let dbtx = self.db.begin_write().await;
+        let dbtx = self.db.begin_write();
         let result = self.pending_tx_chain(&dbtx.as_ref());
-        dbtx.commit().await;
+        dbtx.commit();
         result
     }
 
     /// Get the current transaction log for UI display
     pub async fn tx_chain_ui(&self) -> Vec<TxInfo> {
-        let dbtx = self.db.begin_write().await;
+        let dbtx = self.db.begin_write();
         let result = self.tx_chain(&dbtx.as_ref());
-        dbtx.commit().await;
+        dbtx.commit();
         result
     }
 

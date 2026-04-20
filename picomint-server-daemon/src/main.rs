@@ -108,7 +108,6 @@ async fn main() -> anyhow::Result<Infallible> {
     };
 
     let db = picomint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
-        .await
         .expect("Failed to open picomint-server-daemon database");
 
     let bitcoin_backend = Arc::new(

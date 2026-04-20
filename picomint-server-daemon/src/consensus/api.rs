@@ -61,7 +61,7 @@ impl ConsensusApi {
         &self,
         transaction: Transaction,
     ) -> Result<(), TransactionError> {
-        let tx = self.db.begin_write().await;
+        let tx = self.db.begin_write();
 
         if tx
             .get(&ACCEPTED_TRANSACTION, &transaction.tx_hash())
@@ -86,7 +86,7 @@ impl ConsensusApi {
         loop {
             let commit = self.db.wait_commit();
 
-            let tx = self.db.begin_write().await;
+            let tx = self.db.begin_write();
 
             if tx
                 .get(&ACCEPTED_TRANSACTION, &transaction.tx_hash())
@@ -104,13 +104,13 @@ impl ConsensusApi {
     }
 
     pub async fn session_count(&self) -> u64 {
-        get_finished_session_count_static(&self.db.begin_read().await).await
+        get_finished_session_count_static(&self.db.begin_read()).await
     }
 
     pub async fn federation_audit(&self) -> AuditSummary {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
-        let tx = self.db.begin_write().await;
+        let tx = self.db.begin_write();
 
         let mut audit = Audit::default();
 

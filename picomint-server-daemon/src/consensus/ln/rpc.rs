@@ -17,7 +17,7 @@ use super::db::{
 };
 
 pub async fn consensus_block_count(ln: &Lightning, _: ()) -> Result<u64, ApiError> {
-    let tx = ln.db.begin_read().await;
+    let tx = ln.db.begin_read();
     Ok(ln.consensus_block_count(&tx))
 }
 
@@ -34,7 +34,7 @@ pub async fn await_preimage(
             return Ok(Some(preimage));
         }
 
-        let tx = ln.db.begin_read().await;
+        let tx = ln.db.begin_read();
 
         if let Some(preimage) = tx.get(&PREIMAGE, &outpoint) {
             return Ok(Some(preimage));
@@ -52,7 +52,6 @@ pub async fn decryption_key_share(
 ) -> Result<DecryptionKeyShare, ApiError> {
     ln.db
         .begin_read()
-        .await
         .get(&DECRYPTION_KEY_SHARE, &outpoint)
         .ok_or_else(|| ApiError::bad_request("No decryption key share found".to_string()))
 }
@@ -61,7 +60,7 @@ pub async fn outgoing_contract_expiration(
     ln: &Lightning,
     outpoint: OutPoint,
 ) -> Result<Option<(ContractId, u64)>, ApiError> {
-    let tx = ln.db.begin_read().await;
+    let tx = ln.db.begin_read();
 
     let Some(contract) = tx.get(&OUTGOING_CONTRACT, &outpoint) else {
         return Ok(None);
@@ -110,6 +109,5 @@ pub async fn gateways(ln: &Lightning, _: ()) -> Result<Vec<SafeUrl>, ApiError> {
     Ok(ln
         .db
         .begin_read()
-        .await
         .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect()))
 }

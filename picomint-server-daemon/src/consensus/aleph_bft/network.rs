@@ -107,7 +107,6 @@ impl aleph_bft::Network<NetworkData> for Network {
                     if let Some(outcome) = self
                         .db
                         .begin_read()
-                        .await
                         .get(&SIGNED_SESSION_OUTCOME, &their_session)
                     {
                         self.connections.send(
