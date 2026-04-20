@@ -185,7 +185,7 @@ impl MintClientModule {
                     issuance_requests: state.requests.into_values().collect(),
                 };
 
-                crate::executor::ModuleExecutor::add_state_machine_unstarted(&tx, sm).await;
+                crate::executor::ModuleExecutor::add_state_machine_unstarted(&tx, sm);
 
                 dbtx.commit();
 
@@ -304,7 +304,7 @@ impl MintClientModule {
     ) -> anyhow::Result<TransactionId> {
         let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder).await?;
 
-        let txid = self.submit(dbtx, operation_id, builder).await?;
+        let txid = self.submit(dbtx, operation_id, builder)?;
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
             let sm = IssuanceStateMachine {
@@ -313,7 +313,7 @@ impl MintClientModule {
                 txid: Some(txid),
                 issuance_requests,
             };
-            self.issuance_executor.add_state_machine_dbtx(dbtx, sm).await;
+            self.issuance_executor.add_state_machine_dbtx(dbtx, sm);
         }
 
         Ok(txid)
@@ -330,7 +330,6 @@ impl MintClientModule {
     ) -> anyhow::Result<(Vec<SpendableNote>, Vec<NoteIssuanceRequest>)> {
         let mut spendable_notes = self
             .select_funding_input(dbtx, builder.deficit())
-            .await
             .context("Insufficient funds")?;
 
         // Sort by denomination to minimize information leaked about
@@ -338,7 +337,7 @@ impl MintClientModule {
         spendable_notes.sort_by_key(|note| note.denomination);
 
         for note in &spendable_notes {
-            self.remove_spendable_note(dbtx, note).await;
+            self.remove_spendable_note(dbtx, note);
             builder.add_input(Input {
                 input: wire::Input::Mint(MintInput { note: note.note() }),
                 keypair: note.keypair,
@@ -349,9 +348,8 @@ impl MintClientModule {
 
         assert_eq!(builder.deficit(), Amount::ZERO);
 
-        let mut denoms = self
-            .select_output_denominations(dbtx, self.cfg.output_fee, builder.excess_input())
-            .await;
+        let mut denoms =
+            self.select_output_denominations(dbtx, self.cfg.output_fee, builder.excess_input());
 
         // Sort to minimize information leaked about the change shape.
         denoms.sort();
@@ -377,7 +375,7 @@ impl MintClientModule {
 
     /// Sign the builder, size-check the encoded transaction, and spawn the
     /// `TxSubmissionStateMachine`.
-    async fn submit(
+    fn submit(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
@@ -397,15 +395,13 @@ impl MintClientModule {
         };
 
         self.tx_submission_executor
-            .add_state_machine_dbtx(dbtx, sm)
-            .await;
+            .add_state_machine_dbtx(dbtx, sm);
 
         Ok(txid)
     }
 
-    pub async fn get_balance(&self, dbtx: &WriteTxRef<'_>) -> Amount {
+    pub fn get_balance(&self, dbtx: &impl picomint_redb::DbRead) -> Amount {
         self.get_count_by_denomination_dbtx(dbtx)
-            .await
             .into_iter()
             .map(|(denomination, count)| denomination.amount().mul_u64(count))
             .sum()
@@ -415,7 +411,7 @@ impl MintClientModule {
         self.client_ctx.db().notify_for_table(&NOTE)
     }
 
-    async fn select_funding_input(
+    fn select_funding_input(
         &self,
         dbtx: &WriteTxRef<'_>,
         mut excess_output: Amount,
@@ -474,13 +470,13 @@ impl MintClientModule {
         None
     }
 
-    async fn select_output_denominations(
+    fn select_output_denominations(
         &self,
         dbtx: &WriteTxRef<'_>,
         output_fee: Amount,
         mut excess_input: Amount,
     ) -> Vec<Denomination> {
-        let n_denominations = self.get_count_by_denomination_dbtx(dbtx).await;
+        let n_denominations = self.get_count_by_denomination_dbtx(dbtx);
 
         let mut output_denominations = Vec::new();
 
@@ -519,15 +515,15 @@ impl MintClientModule {
 
 impl MintClientModule {
     /// Count the `ECash` notes in the client's database by denomination.
-    pub async fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
+    pub fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
         let dbtx = self.client_ctx.db().begin_write();
 
-        self.get_count_by_denomination_dbtx(&dbtx.as_ref()).await
+        self.get_count_by_denomination_dbtx(&dbtx.as_ref())
     }
 
-    async fn get_count_by_denomination_dbtx(
+    fn get_count_by_denomination_dbtx(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &impl picomint_redb::DbRead,
     ) -> BTreeMap<Denomination, u64> {
         dbtx.iter(&NOTE, |r| {
             let mut acc = BTreeMap::new();
@@ -556,7 +552,6 @@ impl MintClientModule {
 
         let ecash = self
             .send_ecash_dbtx(&dbtx.as_ref(), amount)
-            .await
             .expect("Infallible");
 
         dbtx.commit();
@@ -605,7 +600,6 @@ impl MintClientModule {
 
         let txid = self
             .submit(&tx, operation_id, builder)
-            .await
             .map_err(|_| SendECashError::Failure)?;
 
         issuance_requests.extend(change_requests);
@@ -617,11 +611,10 @@ impl MintClientModule {
             issuance_requests,
         };
 
-        self.issuance_executor.add_state_machine_dbtx(&tx, sm).await;
+        self.issuance_executor.add_state_machine_dbtx(&tx, sm);
 
         self.client_ctx
-            .log_event(&tx, operation_id, ReissueEvent { txid })
-            .await;
+            .log_event(&tx, operation_id, ReissueEvent { txid });
 
         dbtx.commit();
 
@@ -633,7 +626,7 @@ impl MintClientModule {
         Box::pin(self.send(amount)).await
     }
 
-    async fn send_ecash_dbtx(
+    fn send_ecash_dbtx(
         &self,
         dbtx: &WriteTxRef<'_>,
         mut remaining_amount: Amount,
@@ -658,7 +651,7 @@ impl MintClientModule {
         }
 
         for spendable_note in &notes {
-            self.remove_spendable_note(dbtx, spendable_note).await;
+            self.remove_spendable_note(dbtx, spendable_note);
         }
 
         let ecash = ECash::new(self.federation_id, notes);
@@ -673,8 +666,7 @@ impl MintClientModule {
                     amount,
                     ecash: picomint_base32::encode(&ecash),
                 },
-            )
-            .await;
+            );
 
         Ok(Some(ecash))
     }
@@ -727,15 +719,14 @@ impl MintClientModule {
         };
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event)
-            .await;
+            .log_event(&dbtx.as_ref(), operation_id, event);
 
         dbtx.commit();
 
         Ok(operation_id)
     }
 
-    async fn remove_spendable_note(&self, dbtx: &WriteTxRef<'_>, spendable_note: &SpendableNote) {
+    fn remove_spendable_note(&self, dbtx: &WriteTxRef<'_>, spendable_note: &SpendableNote) {
         dbtx.remove(&NOTE, spendable_note)
             .expect("Must delete existing spendable note");
     }

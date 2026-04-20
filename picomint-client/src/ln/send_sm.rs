@@ -165,13 +165,11 @@ async fn transition_gateway_send_payment_sm(
 ) {
     match gateway_response {
         Ok(preimage) => {
-            ctx.client_ctx
-                .log_event(
-                    dbtx,
-                    old_state.common.operation_id,
-                    SendSuccessEvent { preimage },
-                )
-                .await;
+            ctx.client_ctx.log_event(
+                dbtx,
+                old_state.common.operation_id,
+                SendSuccessEvent { preimage },
+            );
         }
         Err(signature) => {
             let tx_builder = TransactionBuilder::from_input(Input {
@@ -190,13 +188,11 @@ async fn transition_gateway_send_payment_sm(
                 .await
                 .expect("Cannot claim input, additional funding needed");
 
-            ctx.client_ctx
-                .log_event(
-                    dbtx,
-                    old_state.common.operation_id,
-                    SendRefundEvent { txid },
-                )
-                .await;
+            ctx.client_ctx.log_event(
+                dbtx,
+                old_state.common.operation_id,
+                SendRefundEvent { txid },
+            );
         }
     }
 }
@@ -229,13 +225,11 @@ async fn transition_preimage_sm(
     preimage: Option<[u8; 32]>,
 ) {
     if let Some(preimage) = preimage {
-        ctx.client_ctx
-            .log_event(
-                dbtx,
-                old_state.common.operation_id,
-                SendSuccessEvent { preimage },
-            )
-            .await;
+        ctx.client_ctx.log_event(
+            dbtx,
+            old_state.common.operation_id,
+            SendSuccessEvent { preimage },
+        );
 
         return;
     }
@@ -256,11 +250,9 @@ async fn transition_preimage_sm(
         .await
         .expect("Cannot claim input, additional funding needed");
 
-    ctx.client_ctx
-        .log_event(
-            dbtx,
-            old_state.common.operation_id,
-            SendRefundEvent { txid },
-        )
-        .await;
+    ctx.client_ctx.log_event(
+        dbtx,
+        old_state.common.operation_id,
+        SendRefundEvent { txid },
+    );
 }

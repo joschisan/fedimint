@@ -369,11 +369,11 @@ impl Lightning {
         times.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    pub async fn consensus_block_count_ui(&self) -> u64 {
+    pub fn consensus_block_count_ui(&self) -> u64 {
         self.consensus_block_count(&self.db.begin_read())
     }
 
-    pub async fn consensus_unix_time_ui(&self) -> u64 {
+    pub fn consensus_unix_time_ui(&self) -> u64 {
         self.consensus_unix_time(&self.db.begin_read())
     }
 
@@ -391,7 +391,7 @@ impl Lightning {
         entry_existed
     }
 
-    pub async fn gateways_ui(&self) -> Vec<SafeUrl> {
+    pub fn gateways_ui(&self) -> Vec<SafeUrl> {
         self.db
             .begin_read()
             .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect())

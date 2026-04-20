@@ -128,15 +128,13 @@ impl StateMachine for SendStateMachine {
                 };
 
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, event)
-                    .await;
+                    .log_event(dbtx, self.operation_id, event);
             }
             Err(_) => {
                 let signature = ctx.keypair.sign_schnorr(self.contract.forfeit_message());
 
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, SendCancelEvent { signature })
-                    .await;
+                    .log_event(dbtx, self.operation_id, SendCancelEvent { signature });
             }
         }
 

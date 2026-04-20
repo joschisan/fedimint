@@ -91,8 +91,7 @@ impl StateMachine for IssuanceStateMachine {
 
             if !verify_note(spendable_note.note(), pk) {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, OutputFailureEvent)
-                    .await;
+                    .log_event(dbtx, self.operation_id, OutputFailureEvent);
 
                 return None;
             }
@@ -102,8 +101,7 @@ impl StateMachine for IssuanceStateMachine {
 
         if let Some(txid) = self.txid {
             ctx.client_ctx
-                .log_event(dbtx, self.operation_id, IssuanceComplete { txid })
-                .await;
+                .log_event(dbtx, self.operation_id, IssuanceComplete { txid });
         }
 
         None

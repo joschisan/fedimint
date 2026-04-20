@@ -3,14 +3,14 @@ use maud::{Markup, PreEscaped, html};
 // Function to render the Wallet module UI section
 pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
     let network = wallet.network_ui();
-    let federation_wallet = wallet.federation_wallet_ui().await;
-    let consensus_block_count = wallet.consensus_block_count_ui().await;
-    let consensus_fee_rate = wallet.consensus_feerate_ui().await;
-    let send_fee = wallet.send_fee_ui().await;
-    let receive_fee = wallet.receive_fee_ui().await;
-    let pending_tx_chain = wallet.pending_tx_chain_ui().await;
-    let tx_chain = wallet.tx_chain_ui().await;
-    let recovery_keys = wallet.recovery_keys_ui().await;
+    let federation_wallet = wallet.federation_wallet_ui();
+    let consensus_block_count = wallet.consensus_block_count_ui();
+    let consensus_fee_rate = wallet.consensus_feerate_ui();
+    let send_fee = wallet.send_fee_ui();
+    let receive_fee = wallet.receive_fee_ui();
+    let pending_tx_chain = wallet.pending_tx_chain_ui();
+    let tx_chain = wallet.tx_chain_ui();
+    let recovery_keys = wallet.recovery_keys_ui();
 
     let total_pending_vbytes = pending_tx_chain.iter().map(|info| info.vbytes).sum::<u64>();
 

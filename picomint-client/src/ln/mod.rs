@@ -351,8 +351,7 @@ impl LightningClientModule {
         };
 
         self.send_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), sm)
-            .await;
+            .add_state_machine_dbtx(&dbtx.as_ref(), sm);
 
         let event = SendEvent {
             txid,
@@ -361,8 +360,7 @@ impl LightningClientModule {
         };
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event)
-            .await;
+            .log_event(&dbtx.as_ref(), operation_id, event);
 
         dbtx.commit();
 
@@ -532,7 +530,7 @@ impl LightningClientModule {
             amount: contract.commitment.amount,
         };
 
-        self.client_ctx.log_event(dbtx, operation_id, event).await;
+        self.client_ctx.log_event(dbtx, operation_id, event);
     }
 
     fn recover_contract_keys(

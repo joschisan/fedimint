@@ -158,7 +158,7 @@ impl ClientContext {
         )
     }
 
-    pub async fn log_event<E>(&self, dbtx: &WriteTxRef<'_>, operation_id: OperationId, event: E)
+    pub fn log_event<E>(&self, dbtx: &WriteTxRef<'_>, operation_id: OperationId, event: E)
     where
         E: Event + Send,
     {

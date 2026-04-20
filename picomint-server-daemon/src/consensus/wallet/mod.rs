@@ -89,7 +89,7 @@ pub struct SpentTxOut {
     pub tweak: sha256::Hash,
 }
 
-fn pending_txs_unordered(dbtx: &WriteTxRef<'_>) -> Vec<FederationTx> {
+fn pending_txs_unordered(dbtx: &impl picomint_redb::DbRead) -> Vec<FederationTx> {
     let unsigned: Vec<FederationTx> =
         dbtx.iter(&UNSIGNED_TX, |r| r.map(|(_, v)| v).collect());
 
@@ -744,7 +744,7 @@ impl Wallet {
         rates.get(num_peers.threshold() - 1).copied()
     }
 
-    pub fn consensus_fee(&self, dbtx: &WriteTxRef<'_>, tx_vbytes: u64) -> Option<Amount> {
+    pub fn consensus_fee(&self, dbtx: &impl picomint_redb::DbRead, tx_vbytes: u64) -> Option<Amount> {
         // The minimum feerate is a protection against a catastrophic error in the
         // feerate estimation and limits the length of the pending transaction stack.
 
@@ -775,11 +775,11 @@ impl Wallet {
         Some(Amount::from_sat(tx_fee.max(stack_fee)))
     }
 
-    pub fn send_fee(&self, dbtx: &WriteTxRef<'_>) -> Option<Amount> {
+    pub fn send_fee(&self, dbtx: &impl picomint_redb::DbRead) -> Option<Amount> {
         self.consensus_fee(dbtx, self.cfg.consensus.send_tx_vbytes)
     }
 
-    pub fn receive_fee(&self, dbtx: &WriteTxRef<'_>) -> Option<Amount> {
+    pub fn receive_fee(&self, dbtx: &impl picomint_redb::DbRead) -> Option<Amount> {
         self.consensus_fee(dbtx, self.cfg.consensus.receive_tx_vbytes)
     }
 
@@ -884,7 +884,7 @@ impl Wallet {
         }
     }
 
-    fn tx_id(&self, dbtx: &WriteTxRef<'_>, outpoint: OutPoint) -> Option<Txid> {
+    fn tx_id(&self, dbtx: &impl picomint_redb::DbRead, outpoint: OutPoint) -> Option<Txid> {
         let index = dbtx.get(&TX_INFO_INDEX, &outpoint)?;
 
         dbtx.get(&TX_INFO, &index).map(|entry| entry.txid)
@@ -892,7 +892,7 @@ impl Wallet {
 
     fn get_outputs(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &impl picomint_redb::DbRead,
         start_index: u64,
         end_index: u64,
     ) -> Vec<OutputInfo> {
@@ -913,7 +913,7 @@ impl Wallet {
         })
     }
 
-    fn pending_tx_chain(&self, dbtx: &WriteTxRef<'_>) -> Vec<TxInfo> {
+    fn pending_tx_chain(&self, dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
         let n_pending = pending_txs_unordered(dbtx).len();
 
         let mut items: Vec<TxInfo> =
@@ -924,7 +924,7 @@ impl Wallet {
         items
     }
 
-    fn tx_chain(&self, dbtx: &WriteTxRef<'_>) -> Vec<TxInfo> {
+    fn tx_chain(&self, dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
         dbtx.iter(&TX_INFO, |r| r.map(|(_, v)| v).collect())
     }
 
@@ -940,62 +940,44 @@ impl Wallet {
     }
 
     /// Get the current federation wallet info for UI display
-    pub async fn federation_wallet_ui(&self) -> Option<FederationWallet> {
+    pub fn federation_wallet_ui(&self) -> Option<FederationWallet> {
         self.db.begin_read().get(&FEDERATION_WALLET, &())
     }
 
     /// Get the current consensus block count for UI display
-    pub async fn consensus_block_count_ui(&self) -> u64 {
-        let dbtx = self.db.begin_write();
-        let result = self.consensus_block_count(&dbtx.as_ref());
-        dbtx.commit();
-        result
+    pub fn consensus_block_count_ui(&self) -> u64 {
+        self.consensus_block_count(&self.db.begin_read())
     }
 
     /// Get the current consensus feerate for UI display
-    pub async fn consensus_feerate_ui(&self) -> Option<u64> {
-        let dbtx = self.db.begin_write();
-        let result = self.consensus_feerate(&dbtx.as_ref()).map(|f| f / 1000);
-        dbtx.commit();
-        result
+    pub fn consensus_feerate_ui(&self) -> Option<u64> {
+        self.consensus_feerate(&self.db.begin_read()).map(|f| f / 1000)
     }
 
     /// Get the current send fee for UI display
-    pub async fn send_fee_ui(&self) -> Option<Amount> {
-        let dbtx = self.db.begin_write();
-        let result = self.send_fee(&dbtx.as_ref());
-        dbtx.commit();
-        result
+    pub fn send_fee_ui(&self) -> Option<Amount> {
+        self.send_fee(&self.db.begin_read())
     }
 
     /// Get the current receive fee for UI display
-    pub async fn receive_fee_ui(&self) -> Option<Amount> {
-        let dbtx = self.db.begin_write();
-        let result = self.receive_fee(&dbtx.as_ref());
-        dbtx.commit();
-        result
+    pub fn receive_fee_ui(&self) -> Option<Amount> {
+        self.receive_fee(&self.db.begin_read())
     }
 
     /// Get the current pending transaction info for UI display
-    pub async fn pending_tx_chain_ui(&self) -> Vec<TxInfo> {
-        let dbtx = self.db.begin_write();
-        let result = self.pending_tx_chain(&dbtx.as_ref());
-        dbtx.commit();
-        result
+    pub fn pending_tx_chain_ui(&self) -> Vec<TxInfo> {
+        self.pending_tx_chain(&self.db.begin_read())
     }
 
     /// Get the current transaction log for UI display
-    pub async fn tx_chain_ui(&self) -> Vec<TxInfo> {
-        let dbtx = self.db.begin_write();
-        let result = self.tx_chain(&dbtx.as_ref());
-        dbtx.commit();
-        result
+    pub fn tx_chain_ui(&self) -> Vec<TxInfo> {
+        self.tx_chain(&self.db.begin_read())
     }
 
     /// Export recovery keys for federation shutdown. Returns None if the
     /// federation wallet has not been initialized yet.
-    pub async fn recovery_keys_ui(&self) -> Option<(BTreeMap<PeerId, String>, String)> {
-        let wallet = self.federation_wallet_ui().await?;
+    pub fn recovery_keys_ui(&self) -> Option<(BTreeMap<PeerId, String>, String)> {
+        let wallet = self.federation_wallet_ui()?;
 
         let pks = self
             .cfg

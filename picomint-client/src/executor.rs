@@ -114,7 +114,7 @@ impl<S: StateMachine> ModuleExecutor<S> {
             task_group,
         });
 
-        for (id, state) in inner.get_active_states().await {
+        for (id, state) in inner.get_active_states() {
             inner.clone().spawn_drive(id, state);
         }
 
@@ -126,7 +126,7 @@ impl<S: StateMachine> ModuleExecutor<S> {
     /// the DB transaction commits.
     ///
     /// `dbtx` must be scoped to the module's DB namespace.
-    pub async fn add_state_machine_dbtx(&self, dbtx: &WriteTxRef<'_>, state: S) {
+    pub fn add_state_machine_dbtx(&self, dbtx: &WriteTxRef<'_>, state: S) {
         let id = SmId::random();
         assert!(
             dbtx.insert(&table::<S>(), &id, &state).is_none(),
@@ -140,15 +140,15 @@ impl<S: StateMachine> ModuleExecutor<S> {
         });
     }
 
-    pub async fn get_active_states(&self) -> Vec<(SmId, S)> {
-        self.inner.get_active_states().await
+    pub fn get_active_states(&self) -> Vec<(SmId, S)> {
+        self.inner.get_active_states()
     }
 
     /// Like [`Self::add_state_machine_dbtx`] but does not spawn the driver
     /// task — the state will be picked up by [`Self::new`] when the executor
     /// is constructed. Used by pre-init paths (e.g. recovery) that need to
     /// seed state before the executor exists.
-    pub async fn add_state_machine_unstarted(dbtx: &WriteTxRef<'_>, state: S) {
+    pub fn add_state_machine_unstarted(dbtx: &WriteTxRef<'_>, state: S) {
         let id = SmId::random();
         assert!(
             dbtx.insert(&table::<S>(), &id, &state).is_none(),
@@ -158,7 +158,7 @@ impl<S: StateMachine> ModuleExecutor<S> {
 }
 
 impl<S: StateMachine> Inner<S> {
-    async fn get_active_states(&self) -> Vec<(SmId, S)> {
+    fn get_active_states(&self) -> Vec<(SmId, S)> {
         self.db
             .begin_read()
             .iter(&table::<S>(), |r| r.collect())

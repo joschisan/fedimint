@@ -91,8 +91,7 @@ impl StateMachine for ReceiveStateMachine {
                 .collect(),
             Err(_) => {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, ReceiveFailureEvent)
-                    .await;
+                    .log_event(dbtx, self.operation_id, ReceiveFailureEvent);
 
                 return None;
             }
@@ -107,16 +106,14 @@ impl StateMachine for ReceiveStateMachine {
             warn!(target: LOG_CLIENT_MODULE_GW, "Failed to obtain decryption key. Client config's public keys are inconsistent");
 
             ctx.client_ctx
-                .log_event(dbtx, self.operation_id, ReceiveFailureEvent)
-                .await;
+                .log_event(dbtx, self.operation_id, ReceiveFailureEvent);
 
             return None;
         }
 
         if let Some(preimage) = self.contract.decrypt_preimage(&agg_decryption_key) {
             ctx.client_ctx
-                .log_event(dbtx, self.operation_id, ReceiveSuccessEvent { preimage })
-                .await;
+                .log_event(dbtx, self.operation_id, ReceiveSuccessEvent { preimage });
 
             return None;
         }
@@ -135,8 +132,7 @@ impl StateMachine for ReceiveStateMachine {
             .expect("Cannot claim input, additional funding needed");
 
         ctx.client_ctx
-            .log_event(dbtx, self.operation_id, ReceiveRefundEvent { txid })
-            .await;
+            .log_event(dbtx, self.operation_id, ReceiveRefundEvent { txid });
 
         None
     }

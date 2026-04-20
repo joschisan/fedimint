@@ -26,46 +26,28 @@ pub async fn federation_wallet(
 }
 
 pub async fn send_fee(wallet: &Wallet, _: ()) -> Result<Option<Amount>, ApiError> {
-    let dbtx = wallet.db.begin_write();
-    let v = wallet.send_fee(&dbtx.as_ref());
-    dbtx.commit();
-    Ok(v)
+    Ok(wallet.send_fee(&wallet.db.begin_read()))
 }
 
 pub async fn receive_fee(wallet: &Wallet, _: ()) -> Result<Option<Amount>, ApiError> {
-    let dbtx = wallet.db.begin_write();
-    let v = wallet.receive_fee(&dbtx.as_ref());
-    dbtx.commit();
-    Ok(v)
+    Ok(wallet.receive_fee(&wallet.db.begin_read()))
 }
 
 pub async fn tx_id(wallet: &Wallet, outpoint: OutPoint) -> Result<Option<Txid>, ApiError> {
-    let dbtx = wallet.db.begin_write();
-    let v = wallet.tx_id(&dbtx.as_ref(), outpoint);
-    dbtx.commit();
-    Ok(v)
+    Ok(wallet.tx_id(&wallet.db.begin_read(), outpoint))
 }
 
 pub async fn output_info_slice(
     wallet: &Wallet,
     (start, end): (u64, u64),
 ) -> Result<Vec<OutputInfo>, ApiError> {
-    let dbtx = wallet.db.begin_write();
-    let v = wallet.get_outputs(&dbtx.as_ref(), start, end);
-    dbtx.commit();
-    Ok(v)
+    Ok(wallet.get_outputs(&wallet.db.begin_read(), start, end))
 }
 
 pub async fn pending_tx_chain(wallet: &Wallet, _: ()) -> Result<Vec<TxInfo>, ApiError> {
-    let dbtx = wallet.db.begin_write();
-    let v = wallet.pending_tx_chain(&dbtx.as_ref());
-    dbtx.commit();
-    Ok(v)
+    Ok(wallet.pending_tx_chain(&wallet.db.begin_read()))
 }
 
 pub async fn tx_chain(wallet: &Wallet, _: ()) -> Result<Vec<TxInfo>, ApiError> {
-    let dbtx = wallet.db.begin_write();
-    let v = wallet.tx_chain(&dbtx.as_ref());
-    dbtx.commit();
-    Ok(v)
+    Ok(wallet.tx_chain(&wallet.db.begin_read()))
 }

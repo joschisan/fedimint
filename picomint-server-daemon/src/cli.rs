@@ -132,7 +132,6 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
                 .server
                 .wallet
                 .federation_wallet_ui()
-                .await
                 .map(|w| w.value.to_sat()),
         }))
     }
@@ -141,7 +140,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletBlockCountResponse>, CliError> {
         Ok(Json(WalletBlockCountResponse {
-            block_count: api.server.wallet.consensus_block_count_ui().await,
+            block_count: api.server.wallet.consensus_block_count_ui(),
         }))
     }
 
@@ -149,20 +148,20 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletFeerateResponse>, CliError> {
         Ok(Json(WalletFeerateResponse {
-            sats_per_vbyte: api.server.wallet.consensus_feerate_ui().await,
+            sats_per_vbyte: api.server.wallet.consensus_feerate_ui(),
         }))
     }
 
     async fn wallet_pending_tx_chain(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<Vec<picomint_core::wallet::TxInfo>>, CliError> {
-        Ok(Json(api.server.wallet.pending_tx_chain_ui().await))
+        Ok(Json(api.server.wallet.pending_tx_chain_ui()))
     }
 
     async fn wallet_tx_chain(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<Vec<picomint_core::wallet::TxInfo>>, CliError> {
-        Ok(Json(api.server.wallet.tx_chain_ui().await))
+        Ok(Json(api.server.wallet.tx_chain_ui()))
     }
 
     async fn ln_gateway_add(
@@ -190,7 +189,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     async fn ln_gateway_list(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<Vec<picomint_core::util::SafeUrl>>, CliError> {
-        Ok(Json(api.server.ln.gateways_ui().await))
+        Ok(Json(api.server.ln.gateways_ui()))
     }
 
     Router::new()

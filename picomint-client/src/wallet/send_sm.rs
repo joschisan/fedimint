@@ -59,13 +59,11 @@ impl StateMachine for SendStateMachine {
         match outcome {
             AwaitFundingResult::Success(txid) => {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, SendConfirmEvent { txid })
-                    .await;
+                    .log_event(dbtx, self.operation_id, SendConfirmEvent { txid });
             }
             AwaitFundingResult::Aborted(_) | AwaitFundingResult::Failure => {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, SendFailureEvent)
-                    .await;
+                    .log_event(dbtx, self.operation_id, SendFailureEvent);
             }
         }
 

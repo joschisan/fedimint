@@ -221,20 +221,18 @@ impl GatewayClientModule {
             return Ok(self.subscribe_send(operation_id).await);
         }
 
-        self.send_executor
-            .add_state_machine_dbtx(
-                &tx,
-                SendStateMachine {
-                    operation_id,
-                    outpoint: payload.outpoint,
-                    contract: payload.contract.clone(),
-                    max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM),
-                    min_contract_amount,
-                    invoice: payload.invoice.clone(),
-                    claim_keypair: self.keypair,
-                },
-            )
-            .await;
+        self.send_executor.add_state_machine_dbtx(
+            &tx,
+            SendStateMachine {
+                operation_id,
+                outpoint: payload.outpoint,
+                contract: payload.contract.clone(),
+                max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM),
+                min_contract_amount,
+                invoice: payload.invoice.clone(),
+                claim_keypair: self.keypair,
+            },
+        );
 
         self.client_ctx
             .log_event(
@@ -244,8 +242,7 @@ impl GatewayClientModule {
                     outpoint: payload.outpoint,
                     invoice: payload.invoice,
                 },
-            )
-            .await;
+            );
 
         dbtx.commit();
 
@@ -311,8 +308,7 @@ impl GatewayClientModule {
         };
 
         self.receive_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), receive_sm)
-            .await;
+            .add_state_machine_dbtx(&dbtx.as_ref(), receive_sm);
 
         let complete_sm = CompleteStateMachine {
             common: CompleteSMCommon {
@@ -325,8 +321,7 @@ impl GatewayClientModule {
         };
 
         self.complete_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), complete_sm)
-            .await;
+            .add_state_machine_dbtx(&dbtx.as_ref(), complete_sm);
 
         let event = ReceiveEvent {
             txid: outpoint.txid,
@@ -334,8 +329,7 @@ impl GatewayClientModule {
         };
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event)
-            .await;
+            .log_event(&dbtx.as_ref(), operation_id, event);
 
         dbtx.commit();
 
@@ -382,8 +376,7 @@ impl GatewayClientModule {
         };
 
         self.receive_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), sm)
-            .await;
+            .add_state_machine_dbtx(&dbtx.as_ref(), sm);
 
         let event = ReceiveEvent {
             txid: outpoint.txid,
@@ -391,8 +384,7 @@ impl GatewayClientModule {
         };
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event)
-            .await;
+            .log_event(&dbtx.as_ref(), operation_id, event);
 
         dbtx.commit();
 

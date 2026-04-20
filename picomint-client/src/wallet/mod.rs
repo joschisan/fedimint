@@ -192,8 +192,7 @@ impl WalletClientModule {
         };
 
         self.send_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), sm)
-            .await;
+            .add_state_machine_dbtx(&dbtx.as_ref(), sm);
 
         let event = SendEvent {
             txid,
@@ -203,8 +202,7 @@ impl WalletClientModule {
         };
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event)
-            .await;
+            .log_event(&dbtx.as_ref(), operation_id, event);
 
         dbtx.commit();
 
@@ -293,8 +291,7 @@ impl WalletClientModule {
         };
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event)
-            .await;
+            .log_event(&dbtx.as_ref(), operation_id, event);
 
         dbtx.commit();
 

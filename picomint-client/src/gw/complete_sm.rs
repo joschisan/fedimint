@@ -96,8 +96,7 @@ impl StateMachine for CompleteStateMachine {
             }
             CompleteOutcome::Completed => {
                 ctx.client_ctx
-                    .log_event(dbtx, self.common.operation_id, CompleteEvent)
-                    .await;
+                    .log_event(dbtx, self.common.operation_id, CompleteEvent);
                 None
             }
         }

@@ -269,8 +269,7 @@ impl Client {
     }
 
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {
-        let dbtx = self.db().begin_write();
-        Ok(self.mint.get_balance(&dbtx.as_ref()).await)
+        Ok(self.mint.get_balance(&self.db().begin_read()))
     }
 
     /// Returns a stream that yields the current client balance every time it
@@ -286,8 +285,7 @@ impl Client {
             let mut prev_balance = initial_balance;
             loop {
                 let notified = notify.notified();
-                let dbtx = db.begin_write();
-                let balance = mint.get_balance(&dbtx.as_ref()).await;
+                let balance = mint.get_balance(&db.begin_read());
 
                 // Deduplicate in case modules cannot always tell if the balance actually changed
                 if balance != prev_balance {
