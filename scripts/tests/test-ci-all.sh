@@ -537,7 +537,15 @@ parallel_args+=(
 
 # --memfree to make sure tests have enough memory to run
 # --nice to let you browse twitter without lag while the tests are running
-echo "$parsed_test_commands" | shuf | if parallel \
+shuffled_test_commands=$(echo "$parsed_test_commands" | shuf)
+if [ -n "${FM_BACKCOMPAT_TEST_SAMPLE_PERCENT:-}" ]; then
+  total=$(echo "$shuffled_test_commands" | wc -l)
+  count=$(( (total * FM_BACKCOMPAT_TEST_SAMPLE_PERCENT + 99) / 100 ))
+  >&2 echo "## Sampling $count out of $total tests (${FM_BACKCOMPAT_TEST_SAMPLE_PERCENT}%)"
+  shuffled_test_commands=$(echo "$shuffled_test_commands" | head -n "$count" || true)
+fi
+
+echo "$shuffled_test_commands" | if parallel \
   "${parallel_args[@]}" ; then
   >&2 echo "All tests successful"
 else
