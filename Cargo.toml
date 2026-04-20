@@ -121,10 +121,10 @@ js-sys = "0.3.69"
 jsonrpsee = "0.24.9"
 jsonrpsee-core = "0.24.9"
 jsonrpsee-types = "0.24.8"
-ldk-node = { version = "0.6.1", package = "fedimint-ldk-node" }
-lightning = "0.1.3"
-lightning-invoice = { version = "0.33.2", features = ["serde", "std"] }
-lightning-types = "0.2.0"
+ldk-node = "0.7.0"
+lightning = "0.2.0"
+lightning-invoice = { version = "0.34.0", features = ["serde", "std"] }
+lightning-types = "0.3.0"
 lockable = "0.1.1"
 macro_rules_attribute = "0.2.2"
 maud = "0.27.0"

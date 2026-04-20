@@ -30,8 +30,9 @@ use async_trait::async_trait;
 use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
 use client::GatewayClientFactory;
-use ldk_node::payment::{PaymentKind, PaymentStatus, SendingParameters};
+use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning::ln::channelmanager::PaymentId;
+use lightning::routing::router::RouteParametersConfig;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
@@ -540,11 +541,10 @@ impl IGatewayClient for AppState {
                     .bolt11_payment()
                     .send(
                         &invoice,
-                        Some(SendingParameters {
-                            max_total_routing_fee_msat: Some(Some(max_fee.msats)),
-                            max_total_cltv_expiry_delta: Some(max_delay as u32),
-                            max_path_count: None,
-                            max_channel_saturation_power_of_half: None,
+                        Some(RouteParametersConfig {
+                            max_total_routing_fee_msat: Some(max_fee.msats),
+                            max_total_cltv_expiry_delta: max_delay as u32,
+                            ..RouteParametersConfig::default()
                         }),
                     )
                     .map_err(|e| LightningRpcError::FailedPayment {

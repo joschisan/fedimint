@@ -405,6 +405,7 @@ fn build_ldk_node(
 ) -> anyhow::Result<Arc<ldk_node::Node>> {
     let mut builder = ldk_node::Builder::new();
 
+    builder.set_runtime(runtime.handle().clone());
     builder.set_network(Network::Regtest);
     builder.set_node_alias("test-ldk-node".to_string())?;
     builder.set_listening_addresses(vec![
@@ -424,7 +425,7 @@ fn build_ldk_node(
     );
 
     let node = Arc::new(builder.build()?);
-    node.start_with_runtime(runtime)?;
+    node.start()?;
 
     Ok(node)
 }

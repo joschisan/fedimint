@@ -137,6 +137,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut node_builder = ldk_node::Builder::new();
 
+    node_builder.set_runtime(runtime.handle().clone());
     node_builder.set_network(opts.network);
     node_builder.set_node_alias("picomint-gateway-daemon".to_string())?;
     node_builder.set_listening_addresses(vec![opts.ldk_addr.into()])?;
@@ -166,7 +167,7 @@ fn main() -> anyhow::Result<()> {
 
     let node = Arc::new(node_builder.build()?);
 
-    node.start_with_runtime(runtime.clone())?;
+    node.start()?;
 
     info!("Successfully started LDK Node");
 
