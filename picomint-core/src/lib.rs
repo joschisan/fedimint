@@ -105,7 +105,7 @@ pub use txid::TransactionId;
 
 impl redb::Value for TransactionId {
     type SelfType<'a>
-        = TransactionId
+        = Self
     where
         Self: 'a;
     type AsBytes<'a>

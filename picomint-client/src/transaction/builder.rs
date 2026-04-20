@@ -76,7 +76,8 @@ impl TransactionBuilder {
     /// outputs and fees consume. Zero when the builder is balanced or
     /// underfunded.
     pub fn excess_input(&self) -> Amount {
-        self.input_amount().saturating_sub(self.output_amount() + self.total_fee())
+        self.input_amount()
+            .saturating_sub(self.output_amount() + self.total_fee())
     }
 
     pub fn build(self) -> Transaction {

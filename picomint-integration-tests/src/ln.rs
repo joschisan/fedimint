@@ -298,11 +298,9 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
             if let ldk_node::Event::PaymentClaimable {
                 payment_hash: hash, ..
             } = event
-            {
-                if hash == payment_hash {
+                && hash == payment_hash {
                     break;
                 }
-            }
         }
         env.ldk_node.bolt11_payment().fail_for_hash(payment_hash)?;
 
@@ -473,9 +471,11 @@ async fn test_claim_outgoing_contract(
 
     let dbtx = client.db().begin_write();
 
-    client
-        .mint()
-        .finalize_and_submit_transaction(&dbtx.as_ref(), OperationId::new_random(), tx_builder)?;
+    client.mint().finalize_and_submit_transaction(
+        &dbtx.as_ref(),
+        OperationId::new_random(),
+        tx_builder,
+    )?;
 
     dbtx.commit();
 

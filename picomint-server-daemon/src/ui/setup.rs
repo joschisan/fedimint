@@ -51,8 +51,7 @@ fn peer_list_section(
 ) -> Markup {
     let total_guardians = connected_peers.len() + 1;
     let can_start_dkg = federation_size
-        .map(|expected| total_guardians == expected as usize)
-        .unwrap_or(false);
+        .is_some_and(|expected| total_guardians == expected as usize);
 
     html! {
         div id="peer-list-section" {
@@ -452,7 +451,7 @@ async fn post_add_setup_code(
             &connected_peers,
             federation_size,
             &cfg_federation_name,
-            error.as_ref().map(|e| e.to_string()).as_deref(),
+            error.as_ref().map(std::string::ToString::to_string).as_deref(),
         )
         .into_string(),
     )

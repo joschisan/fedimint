@@ -1,6 +1,5 @@
 use crate::executor::StateMachine;
 use crate::transaction::{Input, TransactionBuilder};
-use picomint_core::wire;
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
@@ -10,6 +9,7 @@ use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::OutgoingContract;
 use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::util::SafeUrl;
+use picomint_core::wire;
 use picomint_core::{OutPoint, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::LOG_CLIENT_MODULE_LN;

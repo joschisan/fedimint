@@ -9,23 +9,27 @@ use axum::{Json, Router};
 use bitcoin::secp256k1::{self, Keypair, PublicKey, ecdh};
 use clap::Parser;
 use lightning_invoice::Bolt11Invoice;
+use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
-use picomint_core::ln::endpoint_constants::{CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT};
+use picomint_core::ln::endpoint_constants::{
+    CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT,
+};
 use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, PaymentFee, RoutingInfo};
 use picomint_core::ln::lnurl::LnurlRequest;
-use picomint_core::ln::{Bolt11InvoiceDescription, IncomingContractPath, MINIMUM_INCOMING_CONTRACT_AMOUNT};
+use picomint_core::ln::{
+    Bolt11InvoiceDescription, IncomingContractPath, MINIMUM_INCOMING_CONTRACT_AMOUNT,
+};
 use picomint_core::secret::Secret;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::util::SafeUrl;
-use picomint_core::Amount;
 use picomint_encoding::Encodable;
 use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
 use picomint_logging::TracingSetup;
 use reqwest::Method;
+use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
 use tokio::net::TcpListener;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
@@ -70,7 +74,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn health_check(headers: HeaderMap) -> impl IntoResponse {
-    format!("recurring-daemon is up and running at {}", base_url(&headers))
+    format!(
+        "recurring-daemon is up and running at {}",
+        base_url(&headers)
+    )
 }
 
 fn base_url(headers: &HeaderMap) -> String {
@@ -165,7 +172,9 @@ async fn create_contract_and_fetch_invoice(
         .child(&IncomingContractPath::EncryptionSeed)
         .to_bytes();
 
-    let preimage = contract_secret.child(&IncomingContractPath::Preimage).to_bytes();
+    let preimage = contract_secret
+        .child(&IncomingContractPath::Preimage)
+        .to_bytes();
 
     let claim_tweak = contract_secret
         .child(&IncomingContractPath::ClaimKey)
@@ -236,9 +245,12 @@ async fn select_gateway(
     federation_id: FederationId,
 ) -> anyhow::Result<(RoutingInfo, SafeUrl)> {
     for gateway in gateways {
-        if let Ok(routing_info) =
-            gateway_request::<_, Option<RoutingInfo>>(&gateway, ROUTING_INFO_ENDPOINT, &federation_id)
-                .await
+        if let Ok(routing_info) = gateway_request::<_, Option<RoutingInfo>>(
+            &gateway,
+            ROUTING_INFO_ENDPOINT,
+            &federation_id,
+        )
+        .await
             && let Some(routing_info) = routing_info
         {
             return Ok((routing_info, gateway));
@@ -265,7 +277,10 @@ async fn gateway_request<P: Serialize, T: DeserializeOwned>(
         .map_err(|e| anyhow!("Could not connect to gateway: {e}"))?;
 
     if response.status() != reqwest::StatusCode::OK {
-        bail!("Gateway returned an unexpected status: {}", response.status());
+        bail!(
+            "Gateway returned an unexpected status: {}",
+            response.status()
+        );
     }
 
     response

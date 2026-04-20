@@ -9,7 +9,6 @@ use rand::SeedableRng;
 use rand::rngs::OsRng;
 use rand_chacha::ChaChaRng;
 
-
 use crate::{
     AggregatePublicKey, BlindedSignatureShare, BlindingKey, Message, PublicKeyShare,
     SecretKeyShare, aggregate_signature_shares, blind_message, derive_pk_share, sign_message,

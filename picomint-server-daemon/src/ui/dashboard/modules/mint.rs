@@ -17,7 +17,7 @@ pub async fn render(mint: &crate::consensus::mint::Mint) -> Markup {
                     canvas id="mint-chart" {}
                     script src="/assets/chart.umd.min.js" {}
                     (PreEscaped(format!(
-                        r#"<script>
+                        r"<script>
                         document.addEventListener('DOMContentLoaded', function() {{
                             new Chart(document.getElementById('mint-chart'), {{
                                 type: 'bar',
@@ -53,7 +53,7 @@ pub async fn render(mint: &crate::consensus::mint::Mint) -> Markup {
                                 }}
                             }});
                         }});
-                        </script>"#,
+                        </script>",
                         labels = serde_json::to_string(&labels)
                             .expect("Failed to serialize labels"),
                     )))

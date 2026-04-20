@@ -1,11 +1,11 @@
 use crate::executor::StateMachine;
 use crate::transaction::{Input, TransactionBuilder};
-use picomint_core::wire;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::OutgoingContract;
 use picomint_core::ln::{LightningInput, LightningInvoice, OutgoingWitness};
 use picomint_core::secp256k1::Keypair;
+use picomint_core::wire;
 use picomint_core::{Amount, OutPoint};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
@@ -126,8 +126,7 @@ impl StateMachine for SendStateMachine {
                     txid,
                 };
 
-                ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, event);
+                ctx.client_ctx.log_event(dbtx, self.operation_id, event);
             }
             Err(_) => {
                 let signature = ctx.keypair.sign_schnorr(self.contract.forfeit_message());

@@ -12,7 +12,6 @@ use std::sync::Arc;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::transaction::{Output, TransactionBuilder};
-use picomint_core::wire;
 use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
@@ -31,6 +30,7 @@ use picomint_core::ln::gateway_api::SendPaymentPayload;
 use picomint_core::ln::{LightningInvoice, LightningOutput};
 use picomint_core::secp256k1::Keypair;
 use picomint_core::task::TaskGroup;
+use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
 
@@ -62,7 +62,9 @@ impl GatewayClientModule {
         module_root_secret: &Secret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<GatewayClientModule> {
-        let keypair = module_root_secret.child(&RootSecretPath::Node).to_secp_keypair();
+        let keypair = module_root_secret
+            .child(&RootSecretPath::Node)
+            .to_secp_keypair();
 
         let sm_context = GwSmContext {
             client_ctx: context.clone(),
@@ -74,21 +76,12 @@ impl GatewayClientModule {
             gateway: gateway.clone(),
         };
 
-        let send_executor = ModuleExecutor::new(
-            context.db().clone(),
-            sm_context.clone(),
-            task_group.clone(),
-        )
-        .await;
-        let receive_executor = ModuleExecutor::new(
-            context.db().clone(),
-            sm_context.clone(),
-            task_group.clone(),
-        )
-        .await;
+        let send_executor =
+            ModuleExecutor::new(context.db().clone(), sm_context.clone(), task_group.clone()).await;
+        let receive_executor =
+            ModuleExecutor::new(context.db().clone(), sm_context.clone(), task_group.clone()).await;
         let complete_executor =
-            ModuleExecutor::new(context.db().clone(), sm_context, task_group.clone())
-                .await;
+            ModuleExecutor::new(context.db().clone(), sm_context, task_group.clone()).await;
 
         Ok(GatewayClientModule {
             federation_id,
@@ -234,15 +227,14 @@ impl GatewayClientModule {
             },
         );
 
-        self.client_ctx
-            .log_event(
-                &tx,
-                operation_id,
-                SendEvent {
-                    outpoint: payload.outpoint,
-                    invoice: payload.invoice,
-                },
-            );
+        self.client_ctx.log_event(
+            &tx,
+            operation_id,
+            SendEvent {
+                outpoint: payload.outpoint,
+                invoice: payload.invoice,
+            },
+        );
 
         dbtx.commit();
 
@@ -293,9 +285,9 @@ impl GatewayClientModule {
             return Ok(());
         }
 
-        let txid = self
-            .mint
-            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)?;
+        let txid =
+            self.mint
+                .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)?;
 
         let outpoint = OutPoint { txid, out_idx: 0 };
 
@@ -360,9 +352,9 @@ impl GatewayClientModule {
             return Ok(self.await_receive(operation_id).await);
         }
 
-        let txid = self
-            .mint
-            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)?;
+        let txid =
+            self.mint
+                .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)?;
 
         let outpoint = OutPoint { txid, out_idx: 0 };
 

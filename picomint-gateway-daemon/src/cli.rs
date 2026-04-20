@@ -579,7 +579,7 @@ async fn module_mint_send(
         .mint()
         .send(payload.amount)
         .await
-        .map_err(|e| CliError::internal(e))?;
+        .map_err(CliError::internal)?;
 
     let response = MintSendResponse {
         notes: picomint_base32::encode(&ecash),

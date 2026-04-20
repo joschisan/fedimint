@@ -152,7 +152,7 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                                 canvas id="wallet-custody-chart" {}
                                 script src="/assets/chart.umd.min.js" {}
                                 (PreEscaped(format!(
-                                    r#"<script>
+                                    r"<script>
                                     document.addEventListener('DOMContentLoaded', function() {{
                                         var heights = {heights:?};
                                         var values = {values:?};
@@ -196,7 +196,7 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                                             }}
                                         }});
                                     }});
-                                    </script>"#,
+                                    </script>",
                                 )))
                             }
                         }

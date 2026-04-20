@@ -61,7 +61,7 @@ pub async fn recovery_slice_hash(mint: &Mint, range: (u64, u64)) -> Result<sha25
     Ok(collect_recovery_slice(&tx, range).consensus_hash::<sha256::Hash>())
 }
 
-pub async fn recovery_count(mint: &Mint, _: ()) -> Result<u64, ApiError> {
+pub async fn recovery_count(mint: &Mint, (): ()) -> Result<u64, ApiError> {
     let tx = mint.db.begin_read();
     Ok(super::get_recovery_count(&tx))
 }

@@ -93,6 +93,7 @@ pub struct Lightning {
 }
 
 impl Lightning {
+    #[must_use] 
     pub fn new(
         cfg: LightningConfig,
         db: Database,
@@ -356,9 +357,7 @@ impl Lightning {
     pub(crate) fn consensus_unix_time(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
-        let mut times = dbtx.iter(&UNIX_TIME_VOTE, |r| {
-            r.map(|(_, v)| v).collect::<Vec<u64>>()
-        });
+        let mut times = dbtx.iter(&UNIX_TIME_VOTE, |r| r.map(|(_, v)| v).collect::<Vec<u64>>());
 
         times.sort_unstable();
 
@@ -369,10 +368,12 @@ impl Lightning {
         times.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
+    #[must_use] 
     pub fn consensus_block_count_ui(&self) -> u64 {
         self.consensus_block_count(&self.db.begin_read())
     }
 
+    #[must_use] 
     pub fn consensus_unix_time_ui(&self) -> u64 {
         self.consensus_unix_time(&self.db.begin_read())
     }
@@ -391,6 +392,7 @@ impl Lightning {
         entry_existed
     }
 
+    #[must_use] 
     pub fn gateways_ui(&self) -> Vec<SafeUrl> {
         self.db
             .begin_read()

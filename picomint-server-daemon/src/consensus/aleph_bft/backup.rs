@@ -37,9 +37,9 @@ pub struct BackupWriter {
 
 impl BackupWriter {
     pub async fn new(db: Database) -> Self {
-        let units_index = db.begin_read().iter(&ALEPH_UNITS, |r| {
-            r.next_back().map_or(0, |(k, _)| k + 1)
-        });
+        let units_index = db
+            .begin_read()
+            .iter(&ALEPH_UNITS, |r| r.next_back().map_or(0, |(k, _)| k + 1));
 
         Self { db, units_index }
     }

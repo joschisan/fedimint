@@ -110,7 +110,8 @@ impl WalletClientModule {
 
     /// Fetch the total value of bitcoin controlled by the federation.
     pub async fn total_value(&self) -> FederationResult<bitcoin::Amount> {
-        self.client_ctx.module_api()
+        self.client_ctx
+            .module_api()
             .wallet_federation_wallet()
             .await
             .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
@@ -118,17 +119,24 @@ impl WalletClientModule {
 
     /// Fetch the consensus block count of the federation.
     pub async fn block_count(&self) -> FederationResult<u64> {
-        self.client_ctx.module_api().wallet_consensus_block_count().await
+        self.client_ctx
+            .module_api()
+            .wallet_consensus_block_count()
+            .await
     }
 
     /// Fetch the current consensus feerate.
     pub async fn feerate(&self) -> FederationResult<Option<u64>> {
-        self.client_ctx.module_api().wallet_consensus_feerate().await
+        self.client_ctx
+            .module_api()
+            .wallet_consensus_feerate()
+            .await
     }
 
     /// Fetch the current fee required to send an onchain payment.
     pub async fn send_fee(&self) -> Result<bitcoin::Amount, SendError> {
-        self.client_ctx.module_api()
+        self.client_ctx
+            .module_api()
             .wallet_send_fee()
             .await
             .map_err(|e| SendError::FederationError(e.to_string()))?
@@ -379,7 +387,14 @@ impl WalletClientModule {
                 if !output.spent {
                     // In order to not overpay on fees we choose to wait,
                     // the congestion will clear up within a few blocks.
-                    if self.client_ctx.module_api().wallet_pending_tx_chain().await?.len() >= 3 {
+                    if self
+                        .client_ctx
+                        .module_api()
+                        .wallet_pending_tx_chain()
+                        .await?
+                        .len()
+                        >= 3
+                    {
                         return Ok(false);
                     }
 

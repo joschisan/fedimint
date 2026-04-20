@@ -25,8 +25,7 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
     let consensus_block_count = lightning.consensus_block_count_ui();
     let consensus_unix_time = lightning.consensus_unix_time_ui();
     let formatted_unix_time = chrono::DateTime::from_timestamp(consensus_unix_time as i64, 0)
-        .map(|dt| dt.to_rfc2822())
-        .unwrap_or("Invalid time".to_string());
+        .map_or("Invalid time".to_string(), |dt| dt.to_rfc2822());
 
     html! {
         div class="card h-100" {

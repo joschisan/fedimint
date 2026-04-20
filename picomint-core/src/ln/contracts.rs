@@ -68,7 +68,7 @@ impl IncomingContract {
             &commitment.consensus_hash(),
         );
 
-        IncomingContract {
+        Self {
             commitment,
             ciphertext,
         }

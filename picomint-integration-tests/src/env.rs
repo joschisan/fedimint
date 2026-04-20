@@ -214,11 +214,7 @@ impl TestEnv {
         })?)
     }
 
-    pub async fn pegin(
-        &self,
-        client: &Arc<Client>,
-        amount: bitcoin::Amount,
-    ) -> anyhow::Result<()> {
+    pub async fn pegin(&self, client: &Arc<Client>, amount: bitcoin::Amount) -> anyhow::Result<()> {
         let wallet = client.wallet();
         let addr = wallet.receive().await;
         info!(%addr, "Pegin address ready");

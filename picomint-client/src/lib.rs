@@ -55,8 +55,8 @@ use query::FilterMap;
 use tracing::debug;
 
 pub use client::Client;
-pub use secret::{Mnemonic, random as random_mnemonic};
 pub use picomint_core::core::{ModuleKind, OperationId};
+pub use secret::{Mnemonic, random as random_mnemonic};
 
 use picomint_core::TransactionId;
 use picomint_eventlog::{Event, EventKind};
@@ -89,10 +89,7 @@ pub struct GetInviteCodeRequest {
 
 /// Downloads the [`ConsensusConfig`] using the peers advertised in the invite
 /// code, then re-verifies it with the full peer set from the config itself.
-pub async fn download(
-    endpoint: &Endpoint,
-    invite: &InviteCode,
-) -> anyhow::Result<ConsensusConfig> {
+pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<ConsensusConfig> {
     debug!(
         target: LOG_CLIENT_NET,
         %invite,

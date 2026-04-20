@@ -96,21 +96,21 @@ impl PaymentFee {
     /// This is the maximum send fee of one and a half percent plus one hundred
     /// satoshis a correct gateway may recommend as a default. It accounts for
     /// the fee required to reliably route this payment over lightning.
-    pub const SEND_FEE_LIMIT: PaymentFee = PaymentFee {
+    pub const SEND_FEE_LIMIT: Self = Self {
         base: Amount::from_sats(100),
         parts_per_million: 15_000,
     };
 
     /// This is the fee the gateway uses to cover transaction fees with the
     /// federation.
-    pub const TRANSACTION_FEE_DEFAULT: PaymentFee = PaymentFee {
+    pub const TRANSACTION_FEE_DEFAULT: Self = Self {
         base: Amount::from_sats(2),
         parts_per_million: 3000,
     };
 
     /// This is the maximum receive fee of half of one percent plus fifty
     /// satoshis a correct gateway may recommend as a default.
-    pub const RECEIVE_FEE_LIMIT: PaymentFee = PaymentFee {
+    pub const RECEIVE_FEE_LIMIT: Self = Self {
         base: Amount::from_sats(50),
         parts_per_million: 5_000,
     };
@@ -137,9 +137,9 @@ impl PaymentFee {
 }
 
 impl Add for PaymentFee {
-    type Output = PaymentFee;
+    type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
-        PaymentFee {
+        Self {
             base: self.base + rhs.base,
             parts_per_million: self.parts_per_million + rhs.parts_per_million,
         }
@@ -148,7 +148,7 @@ impl Add for PaymentFee {
 
 impl From<RoutingFees> for PaymentFee {
     fn from(value: RoutingFees) -> Self {
-        PaymentFee {
+        Self {
             base: Amount::from_msats(u64::from(value.base_msat)),
             parts_per_million: u64::from(value.proportional_millionths),
         }
@@ -157,7 +157,7 @@ impl From<RoutingFees> for PaymentFee {
 
 impl From<PaymentFee> for RoutingFees {
     fn from(value: PaymentFee) -> Self {
-        RoutingFees {
+        Self {
             base_msat: u32::try_from(value.base.msats).expect("base msat was truncated from u64"),
             proportional_millionths: u32::try_from(value.parts_per_million)
                 .expect("ppm was truncated from u64"),
@@ -191,7 +191,7 @@ impl FromStr for PaymentFee {
         let base = Amount::from_str(base_str)?;
         let parts_per_million = ppm_str.parse::<u64>()?;
 
-        Ok(PaymentFee {
+        Ok(Self {
             base,
             parts_per_million,
         })

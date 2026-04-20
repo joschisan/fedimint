@@ -16,7 +16,7 @@ use super::db::{
     OUTGOING_CONTRACT, PREIMAGE,
 };
 
-pub async fn consensus_block_count(ln: &Lightning, _: ()) -> Result<u64, ApiError> {
+pub async fn consensus_block_count(ln: &Lightning, (): ()) -> Result<u64, ApiError> {
     let tx = ln.db.begin_read();
     Ok(ln.consensus_block_count(&tx))
 }
@@ -105,7 +105,7 @@ pub async fn await_incoming_contracts(
     Ok((results, next_index))
 }
 
-pub async fn gateways(ln: &Lightning, _: ()) -> Result<Vec<SafeUrl>, ApiError> {
+pub async fn gateways(ln: &Lightning, (): ()) -> Result<Vec<SafeUrl>, ApiError> {
     Ok(ln
         .db
         .begin_read()

@@ -99,9 +99,9 @@ impl Mint {
     }
 
     pub async fn note_distribution_ui(&self) -> BTreeMap<Denomination, u64> {
-        self.db
-            .begin_read()
-            .iter(&ISSUANCE_COUNTER, |r| r.filter(|(_, count)| *count > 0).collect())
+        self.db.begin_read().iter(&ISSUANCE_COUNTER, |r| {
+            r.filter(|(_, count)| *count > 0).collect()
+        })
     }
 }
 
@@ -251,7 +251,5 @@ impl Mint {
 }
 
 pub(crate) fn get_recovery_count(dbtx: &impl picomint_redb::DbRead) -> u64 {
-    dbtx.iter(&RECOVERY_ITEM, |r| {
-        r.next_back().map_or(0, |(k, _)| k + 1)
-    })
+    dbtx.iter(&RECOVERY_ITEM, |r| r.next_back().map_or(0, |(k, _)| k + 1))
 }

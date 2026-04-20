@@ -112,13 +112,13 @@ pub enum WalletConsensusItem {
 impl std::fmt::Display for WalletConsensusItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WalletConsensusItem::BlockCount(count) => {
+            Self::BlockCount(count) => {
                 write!(f, "Wallet Block Count {count}")
             }
-            WalletConsensusItem::Feerate(feerate) => {
+            Self::Feerate(feerate) => {
                 write!(f, "Wallet Feerate Vote {feerate:?}")
             }
-            WalletConsensusItem::Signatures(..) => {
+            Self::Signatures(..) => {
                 write!(f, "Wallet Signatures")
             }
         }
@@ -195,31 +195,31 @@ pub enum StandardScript {
 impl StandardScript {
     pub fn from_address(address: &Address) -> Option<Self> {
         if let Some(hash) = address.pubkey_hash() {
-            return Some(StandardScript::P2PKH(hash.to_raw_hash()));
+            return Some(Self::P2PKH(hash.to_raw_hash()));
         }
 
         if let Some(hash) = address.script_hash() {
-            return Some(StandardScript::P2SH(hash.to_raw_hash()));
+            return Some(Self::P2SH(hash.to_raw_hash()));
         }
 
         let program = address.witness_program()?;
 
         if program.is_p2wpkh() {
-            return Some(StandardScript::P2WPKH(
+            return Some(Self::P2WPKH(
                 hash160::Hash::from_slice(program.program().as_bytes())
                     .expect("Witness program is 20 bytes"),
             ));
         }
 
         if program.is_p2wsh() {
-            return Some(StandardScript::P2WSH(
+            return Some(Self::P2WSH(
                 sha256::Hash::from_slice(program.program().as_bytes())
                     .expect("Witness program is 32 bytes"),
             ));
         }
 
         if program.is_p2tr() {
-            return Some(StandardScript::P2TR(
+            return Some(Self::P2TR(
                 XOnlyPublicKey::from_slice(program.program().as_bytes())
                     .expect("Witness program is 32 bytes"),
             ));

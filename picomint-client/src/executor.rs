@@ -159,9 +159,7 @@ impl<S: StateMachine> ModuleExecutor<S> {
 
 impl<S: StateMachine> Inner<S> {
     fn get_active_states(&self) -> Vec<(SmId, S)> {
-        self.db
-            .begin_read()
-            .iter(&table::<S>(), |r| r.collect())
+        self.db.begin_read().iter(&table::<S>(), |r| r.collect())
     }
 
     fn spawn_drive(self: Arc<Self>, id: SmId, state: S) {

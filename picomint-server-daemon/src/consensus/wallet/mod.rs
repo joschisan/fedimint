@@ -90,8 +90,7 @@ pub struct SpentTxOut {
 }
 
 fn pending_txs_unordered(dbtx: &impl picomint_redb::DbRead) -> Vec<FederationTx> {
-    let unsigned: Vec<FederationTx> =
-        dbtx.iter(&UNSIGNED_TX, |r| r.map(|(_, v)| v).collect());
+    let unsigned: Vec<FederationTx> = dbtx.iter(&UNSIGNED_TX, |r| r.map(|(_, v)| v).collect());
 
     let unconfirmed: Vec<FederationTx> =
         dbtx.iter(&UNCONFIRMED_TX, |r| r.map(|(_, v)| v).collect());
@@ -136,8 +135,7 @@ pub fn validate_config(identity: &PeerId, cfg: &WalletConfig) -> anyhow::Result<
 
 impl Wallet {
     pub async fn consensus_proposal(&self, dbtx: &ReadTxRef<'_>) -> Vec<WalletConsensusItem> {
-        let unsigned_txs: Vec<(TxidKey, FederationTx)> =
-            dbtx.iter(&UNSIGNED_TX, |r| r.collect());
+        let unsigned_txs: Vec<(TxidKey, FederationTx)> = dbtx.iter(&UNSIGNED_TX, |r| r.collect());
 
         let mut items: Vec<WalletConsensusItem> = unsigned_txs
             .into_iter()
@@ -483,7 +481,7 @@ impl Wallet {
 
     pub async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
         let items = dbtx.iter(&FEDERATION_WALLET, |r| {
-            r.map(|(_, wallet)| {
+            r.map(|((), wallet)| {
                 (
                     "FederationWallet".to_string(),
                     1000 * wallet.value.to_sat() as i64,
@@ -531,7 +529,7 @@ impl Wallet {
     ) -> Wallet {
         Self::spawn_broadcast_unconfirmed_txs_task(btc_rpc.clone(), db.clone(), task_group);
 
-        Wallet { cfg, btc_rpc, db }
+        Wallet { cfg, db, btc_rpc }
     }
 
     fn spawn_broadcast_unconfirmed_txs_task(
@@ -623,9 +621,7 @@ impl Wallet {
                                 .expect("Bitcoin transaction has more than u32::MAX outputs"),
                         };
 
-                        let index = dbtx.iter(&OUTPUT, |r| {
-                            r.next_back().map_or(0, |(k, _)| k + 1)
-                        });
+                        let index = dbtx.iter(&OUTPUT, |r| r.next_back().map_or(0, |(k, _)| k + 1));
 
                         dbtx.insert(&OUTPUT, &index, &Output(outpoint, tx_out.clone()));
                     }
@@ -667,8 +663,7 @@ impl Wallet {
             bail!("Already received valid signatures from this peer")
         }
 
-        let range =
-            (TxidKey(txid), PeerId::from(u8::MIN))..=(TxidKey(txid), PeerId::from(u8::MAX));
+        let range = (TxidKey(txid), PeerId::from(u8::MIN))..=(TxidKey(txid), PeerId::from(u8::MAX));
 
         let signatures_by_peer: BTreeMap<PeerId, Vec<Signature>> =
             dbtx.range(&SIGNATURES, range, |r| {
@@ -711,8 +706,7 @@ impl Wallet {
     pub fn consensus_block_count(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
 
-        let mut counts: Vec<u64> =
-            dbtx.iter(&BLOCK_COUNT_VOTE, |r| r.map(|(_, v)| v).collect());
+        let mut counts: Vec<u64> = dbtx.iter(&BLOCK_COUNT_VOTE, |r| r.map(|(_, v)| v).collect());
 
         assert!(counts.len() <= num_peers.total());
 
@@ -732,8 +726,7 @@ impl Wallet {
     pub fn consensus_feerate(&self, dbtx: &impl picomint_redb::DbRead) -> Option<u64> {
         let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
 
-        let mut rates: Vec<u64> =
-            dbtx.iter(&FEE_RATE_VOTE, |r| r.filter_map(|(_, v)| v).collect());
+        let mut rates: Vec<u64> = dbtx.iter(&FEE_RATE_VOTE, |r| r.filter_map(|(_, v)| v).collect());
 
         assert!(rates.len() <= num_peers.total());
 
@@ -744,7 +737,11 @@ impl Wallet {
         rates.get(num_peers.threshold() - 1).copied()
     }
 
-    pub fn consensus_fee(&self, dbtx: &impl picomint_redb::DbRead, tx_vbytes: u64) -> Option<Amount> {
+    pub fn consensus_fee(
+        &self,
+        dbtx: &impl picomint_redb::DbRead,
+        tx_vbytes: u64,
+    ) -> Option<Amount> {
         // The minimum feerate is a protection against a catastrophic error in the
         // feerate estimation and limits the length of the pending transaction stack.
 
@@ -916,8 +913,7 @@ impl Wallet {
     fn pending_tx_chain(&self, dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
         let n_pending = pending_txs_unordered(dbtx).len();
 
-        let mut items: Vec<TxInfo> =
-            dbtx.iter(&TX_INFO, |r| r.map(|(_, v)| v).collect());
+        let mut items: Vec<TxInfo> = dbtx.iter(&TX_INFO, |r| r.map(|(_, v)| v).collect());
 
         items.reverse();
         items.truncate(n_pending);
@@ -929,9 +925,7 @@ impl Wallet {
     }
 
     fn total_txs(&self, dbtx: &WriteTxRef<'_>) -> u64 {
-        dbtx.iter(&TX_INFO, |r| {
-            r.next_back().map_or(0, |(k, _)| k + 1)
-        })
+        dbtx.iter(&TX_INFO, |r| r.next_back().map_or(0, |(k, _)| k + 1))
     }
 
     /// Get the network for UI display
@@ -951,7 +945,8 @@ impl Wallet {
 
     /// Get the current consensus feerate for UI display
     pub fn consensus_feerate_ui(&self) -> Option<u64> {
-        self.consensus_feerate(&self.db.begin_read()).map(|f| f / 1000)
+        self.consensus_feerate(&self.db.begin_read())
+            .map(|f| f / 1000)
     }
 
     /// Get the current send fee for UI display

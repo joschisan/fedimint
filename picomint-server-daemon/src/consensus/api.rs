@@ -81,7 +81,7 @@ impl ConsensusApi {
             .is_err()
         {
             warn!(target: LOG_NET_API, "Unable to submit the tx into consensus");
-        };
+        }
 
         loop {
             let commit = self.db.wait_commit();

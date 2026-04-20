@@ -10,9 +10,7 @@ use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::ln::endpoint_constants::{
     CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
 };
-use picomint_core::ln::gateway_api::{
-    CreateBolt11InvoicePayload, RoutingInfo, SendPaymentPayload,
-};
+use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, RoutingInfo, SendPaymentPayload};
 use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, OutPoint};
@@ -49,10 +47,7 @@ async fn request<P: Serialize, T: DeserializeOwned>(
         builder = builder.json(&payload);
     }
 
-    let response = builder
-        .send()
-        .await
-        .map_err(|_| GatewayError::Connection)?;
+    let response = builder.send().await.map_err(|_| GatewayError::Connection)?;
 
     if response.status() != reqwest::StatusCode::OK {
         return Err(GatewayError::UnexpectedStatus);

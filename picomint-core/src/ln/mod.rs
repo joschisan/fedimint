@@ -27,7 +27,6 @@ use crate::core::ModuleKind;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
 use crate::{Amount, OutPoint};
 
-
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Bolt11InvoiceDescription {
     Direct(String),
@@ -125,10 +124,10 @@ pub enum LightningConsensusItem {
 impl std::fmt::Display for LightningConsensusItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LightningConsensusItem::BlockCountVote(c) => {
+            Self::BlockCountVote(c) => {
                 write!(f, "Block Count {c}")
             }
-            LightningConsensusItem::UnixTimeVote(t) => {
+            Self::UnixTimeVote(t) => {
                 write!(f, "Unix Time {t}")
             }
         }

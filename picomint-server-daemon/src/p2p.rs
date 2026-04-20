@@ -116,7 +116,7 @@ impl P2PConnection {
             .peek()
             .iter()
             .find(|p| p.is_selected())
-            .and_then(|p| p.rtt())
+            .and_then(iroh::endpoint::PathInfo::rtt)
     }
 }
 

@@ -256,15 +256,12 @@ async fn process_ldk_events(state: AppState, handle: picomint_core::task::TaskHa
 }
 
 async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
-    match event {
-        ldk_node::Event::PaymentClaimable {
+    if let ldk_node::Event::PaymentClaimable {
             payment_hash,
             claimable_amount_msat,
             ..
-        } => {
-            handle_lightning_payment(state, payment_hash.0, claimable_amount_msat).await;
-        }
-        _ => {}
+        } = event {
+        handle_lightning_payment(state, payment_hash.0, claimable_amount_msat).await;
     }
 }
 

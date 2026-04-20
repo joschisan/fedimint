@@ -13,10 +13,10 @@ pub async fn submit_transaction(
     Ok(api.submit_transaction(tx).await)
 }
 
-pub async fn client_config(api: &ConsensusApi, _: ()) -> Result<ConsensusConfig, ApiError> {
+pub async fn client_config(api: &ConsensusApi, (): ()) -> Result<ConsensusConfig, ApiError> {
     Ok(api.client_cfg.clone())
 }
 
-pub async fn liveness(_: &ConsensusApi, _: ()) -> Result<(), ApiError> {
+pub async fn liveness(_: &ConsensusApi, (): ()) -> Result<(), ApiError> {
     Ok(())
 }

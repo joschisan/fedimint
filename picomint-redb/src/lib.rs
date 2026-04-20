@@ -259,11 +259,7 @@ impl Database {
     }
 
     pub fn begin_read(&self) -> ReadTransaction {
-        let tx = self
-            .inner
-            .env
-            .begin_read()
-            .expect("redb begin_read failed");
+        let tx = self.inner.env.begin_read().expect("redb begin_read failed");
 
         ReadTransaction {
             tx,
@@ -1135,9 +1131,7 @@ mod tests {
             tx.commit();
         });
 
-        let (value, _tx) = db
-            .wait_table_check(&USERS, |tx| tx.get(&USERS, &1))
-            .await;
+        let (value, _tx) = db.wait_table_check(&USERS, |tx| tx.get(&USERS, &1)).await;
         assert_eq!(value, "alice");
 
         writer.await.unwrap();
@@ -1160,9 +1154,7 @@ mod tests {
         });
 
         let (v, tx) = db
-            .wait_table_check(&BALANCES, |tx| {
-                tx.get(&BALANCES, &1).filter(|n| *n >= 100)
-            })
+            .wait_table_check(&BALANCES, |tx| tx.get(&BALANCES, &1).filter(|n| *n >= 100))
             .await;
 
         assert_eq!(v, 150);
