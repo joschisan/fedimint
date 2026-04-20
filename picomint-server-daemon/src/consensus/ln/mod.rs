@@ -1,6 +1,8 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::module_name_repetitions)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
 
 pub use picomint_core::ln as common;
 
@@ -35,7 +37,7 @@ use tracing::trace;
 
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g1;
-use crate::handler;
+use crate::{handler, handler_async};
 
 use self::db::{
     BLOCK_COUNT_VOTE, DECRYPTION_KEY_SHARE, GATEWAY, INCOMING_CONTRACT, INCOMING_CONTRACT_INDEX,
@@ -312,13 +314,13 @@ impl Lightning {
     ) -> Result<Vec<u8>, ApiError> {
         match method {
             CONSENSUS_BLOCK_COUNT_ENDPOINT => handler!(consensus_block_count, self, req).await,
-            AWAIT_PREIMAGE_ENDPOINT => handler!(await_preimage, self, req).await,
+            AWAIT_PREIMAGE_ENDPOINT => handler_async!(await_preimage, self, req).await,
             DECRYPTION_KEY_SHARE_ENDPOINT => handler!(decryption_key_share, self, req).await,
             OUTGOING_CONTRACT_EXPIRATION_ENDPOINT => {
                 handler!(outgoing_contract_expiration, self, req).await
             }
             AWAIT_INCOMING_CONTRACTS_ENDPOINT => {
-                handler!(await_incoming_contracts, self, req).await
+                handler_async!(await_incoming_contracts, self, req).await
             }
             GATEWAYS_ENDPOINT => handler!(gateways, self, req).await,
             other => Err(ApiError::not_found(other.to_string())),

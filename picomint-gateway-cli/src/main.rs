@@ -277,6 +277,7 @@ fn print_json(value: &Value) {
 }
 
 #[tokio::main(flavor = "current_thread")]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let d = &cli.data_dir;

@@ -16,7 +16,7 @@ use super::db::{
     OUTGOING_CONTRACT, PREIMAGE,
 };
 
-pub async fn consensus_block_count(ln: &Lightning, (): ()) -> Result<u64, ApiError> {
+pub fn consensus_block_count(ln: &Lightning, (): ()) -> Result<u64, ApiError> {
     let tx = ln.db.begin_read();
     Ok(ln.consensus_block_count(&tx))
 }
@@ -46,7 +46,7 @@ pub async fn await_preimage(
     }
 }
 
-pub async fn decryption_key_share(
+pub fn decryption_key_share(
     ln: &Lightning,
     outpoint: OutPoint,
 ) -> Result<DecryptionKeyShare, ApiError> {
@@ -56,7 +56,7 @@ pub async fn decryption_key_share(
         .ok_or_else(|| ApiError::bad_request("No decryption key share found".to_string()))
 }
 
-pub async fn outgoing_contract_expiration(
+pub fn outgoing_contract_expiration(
     ln: &Lightning,
     outpoint: OutPoint,
 ) -> Result<Option<(ContractId, u64)>, ApiError> {
@@ -105,7 +105,7 @@ pub async fn await_incoming_contracts(
     Ok((results, next_index))
 }
 
-pub async fn gateways(ln: &Lightning, (): ()) -> Result<Vec<SafeUrl>, ApiError> {
+pub fn gateways(ln: &Lightning, (): ()) -> Result<Vec<SafeUrl>, ApiError> {
     Ok(ln
         .db
         .begin_read()

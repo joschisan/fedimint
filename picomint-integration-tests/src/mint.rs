@@ -86,7 +86,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
             panic!("Expected Send event");
         };
 
-        let operation_id = client_receive.mint().receive(ecash).await?;
+        let operation_id = client_receive.mint().receive(&ecash)?;
 
         let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
             panic!("Expected Receive event");
@@ -109,7 +109,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     };
 
     // First receive succeeds (sender receives own ecash back)
-    let operation_id = client_send.mint().receive(ecash.clone()).await?;
+    let operation_id = client_send.mint().receive(&ecash)?;
 
     let Some((op, MintEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected Receive event");
@@ -121,7 +121,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
         .expect("first receive should be accepted");
 
     // Second receive with same ecash is rejected
-    let operation_id = client_receive.mint().receive(ecash).await?;
+    let operation_id = client_receive.mint().receive(&ecash)?;
 
     let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
         panic!("Expected Receive event");

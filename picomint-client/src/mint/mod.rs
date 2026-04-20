@@ -17,7 +17,6 @@ pub mod issuance;
 mod issuance_sm;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::convert::Infallible;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -337,7 +336,7 @@ impl MintClientModule {
         spendable_notes.sort_by_key(|note| note.denomination);
 
         for note in &spendable_notes {
-            self.remove_spendable_note(dbtx, note);
+            Self::remove_spendable_note(dbtx, note);
             builder.add_input(Input {
                 input: wire::Input::Mint(MintInput { note: note.note() }),
                 keypair: note.keypair,
@@ -349,7 +348,7 @@ impl MintClientModule {
         assert_eq!(builder.deficit(), Amount::ZERO);
 
         let mut denoms =
-            self.select_output_denominations(dbtx, self.cfg.output_fee, builder.excess_input());
+            Self::select_output_denominations(dbtx, self.cfg.output_fee, builder.excess_input());
 
         // Sort to minimize information leaked about the change shape.
         denoms.sort();
@@ -405,7 +404,7 @@ impl MintClientModule {
     }
 
     pub fn get_balance(&self, dbtx: &impl picomint_redb::DbRead) -> Amount {
-        self.get_count_by_denomination_dbtx(dbtx)
+        Self::get_count_by_denomination_dbtx(dbtx)
             .into_iter()
             .map(|(denomination, count)| denomination.amount().mul_u64(count))
             .sum()
@@ -475,12 +474,11 @@ impl MintClientModule {
     }
 
     fn select_output_denominations(
-        &self,
         dbtx: &WriteTxRef<'_>,
         output_fee: Amount,
         mut excess_input: Amount,
     ) -> Vec<Denomination> {
-        let n_denominations = self.get_count_by_denomination_dbtx(dbtx);
+        let n_denominations = Self::get_count_by_denomination_dbtx(dbtx);
 
         let mut output_denominations = Vec::new();
 
@@ -522,11 +520,10 @@ impl MintClientModule {
     pub fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
         let dbtx = self.client_ctx.db().begin_write();
 
-        self.get_count_by_denomination_dbtx(&dbtx.as_ref())
+        Self::get_count_by_denomination_dbtx(&dbtx.as_ref())
     }
 
     fn get_count_by_denomination_dbtx(
-        &self,
         dbtx: &impl picomint_redb::DbRead,
     ) -> BTreeMap<Denomination, u64> {
         dbtx.iter(&NOTE, |r| {
@@ -554,9 +551,7 @@ impl MintClientModule {
 
         let dbtx = self.client_ctx.db().begin_write();
 
-        let ecash = self
-            .send_ecash_dbtx(&dbtx.as_ref(), amount)
-            .expect("Infallible");
+        let ecash = self.send_ecash_dbtx(&dbtx.as_ref(), amount);
 
         dbtx.commit();
 
@@ -635,7 +630,7 @@ impl MintClientModule {
         &self,
         dbtx: &WriteTxRef<'_>,
         mut remaining_amount: Amount,
-    ) -> Result<Option<ECash>, Infallible> {
+    ) -> Option<ECash> {
         let mut sorted: Vec<SpendableNote> =
             dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
         sorted.sort_by(|a, b| b.denomination.cmp(&a.denomination));
@@ -652,11 +647,11 @@ impl MintClientModule {
         }
 
         if remaining_amount != Amount::ZERO {
-            return Ok(None);
+            return None;
         }
 
         for spendable_note in &notes {
-            self.remove_spendable_note(dbtx, spendable_note);
+            Self::remove_spendable_note(dbtx, spendable_note);
         }
 
         let ecash = ECash::new(self.federation_id, notes);
@@ -672,13 +667,13 @@ impl MintClientModule {
             },
         );
 
-        Ok(Some(ecash))
+        Some(ecash)
     }
 
     /// Receive the `ECash` by reissuing the notes. This method is idempotent
     /// via the deterministic [`OperationId`] derived from the ecash bytes.
-    pub async fn receive(&self, ecash: ECash) -> Result<OperationId, ReceiveECashError> {
-        let operation_id = OperationId::from_encodable(&ecash);
+    pub fn receive(&self, ecash: &ECash) -> Result<OperationId, ReceiveECashError> {
+        let operation_id = OperationId::from_encodable(ecash);
 
         if ecash.mint() != Some(self.federation_id) {
             return Err(ReceiveECashError::WrongFederation);
@@ -729,7 +724,7 @@ impl MintClientModule {
         Ok(operation_id)
     }
 
-    fn remove_spendable_note(&self, dbtx: &WriteTxRef<'_>, spendable_note: &SpendableNote) {
+    fn remove_spendable_note(dbtx: &WriteTxRef<'_>, spendable_note: &SpendableNote) {
         dbtx.remove(&NOTE, spendable_note)
             .expect("Must delete existing spendable note");
     }

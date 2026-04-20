@@ -87,7 +87,7 @@ impl InviteCode {
             .iter()
             .find_map(|data| match data {
                 InviteCodePart::Api { node_id, .. } => Some(*node_id),
-                _ => None,
+                InviteCodePart::FederationId(_) => None,
             })
             .expect("Ensured by constructor")
     }
@@ -99,7 +99,7 @@ impl InviteCode {
             .iter()
             .find_map(|data| match data {
                 InviteCodePart::Api { peer, .. } => Some(*peer),
-                _ => None,
+                InviteCodePart::FederationId(_) => None,
             })
             .expect("Ensured by constructor")
     }
@@ -110,7 +110,7 @@ impl InviteCode {
             .iter()
             .filter_map(|entry| match entry {
                 InviteCodePart::Api { node_id, peer } => Some((*peer, *node_id)),
-                _ => None,
+                InviteCodePart::FederationId(_) => None,
             })
             .collect()
     }
@@ -122,7 +122,7 @@ impl InviteCode {
             .iter()
             .find_map(|data| match data {
                 InviteCodePart::FederationId(federation_id) => Some(*federation_id),
-                _ => None,
+                InviteCodePart::Api { .. } => None,
             })
             .expect("Ensured by constructor")
     }

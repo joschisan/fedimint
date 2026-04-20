@@ -498,7 +498,7 @@ impl LightningClientModule {
     /// secret key, and if it's ours submit the claim input + log the
     /// `ReceiveEvent` in the caller's dbtx (which also advances the scanner's
     /// stream index atomically).
-    async fn receive_incoming_contract(
+    fn receive_incoming_contract(
         &self,
         dbtx: &WriteTxRef<'_>,
         sk: SecretKey,
@@ -643,8 +643,7 @@ impl LightningClientModule {
         let dbtx = self.client_ctx.db().begin_write();
 
         for (outpoint, contract) in &entries {
-            self.receive_incoming_contract(&dbtx.as_ref(), sk, *outpoint, contract)
-                .await;
+            self.receive_incoming_contract(&dbtx.as_ref(), sk, *outpoint, contract);
         }
 
         dbtx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &next_index);

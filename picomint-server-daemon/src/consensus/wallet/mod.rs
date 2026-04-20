@@ -293,7 +293,7 @@ impl Wallet {
                 },
             );
 
-            let tx_index = self.total_txs(dbtx);
+            let tx_index = Self::total_txs(dbtx);
 
             let created = self.consensus_block_count(dbtx);
 
@@ -433,7 +433,7 @@ impl Wallet {
             },
         );
 
-        let tx_index = self.total_txs(dbtx);
+        let tx_index = Self::total_txs(dbtx);
 
         let created = self.consensus_block_count(dbtx);
 
@@ -881,14 +881,13 @@ impl Wallet {
         }
     }
 
-    fn tx_id(&self, dbtx: &impl picomint_redb::DbRead, outpoint: OutPoint) -> Option<Txid> {
+    fn tx_id(dbtx: &impl picomint_redb::DbRead, outpoint: OutPoint) -> Option<Txid> {
         let index = dbtx.get(&TX_INFO_INDEX, &outpoint)?;
 
         dbtx.get(&TX_INFO, &index).map(|entry| entry.txid)
     }
 
     fn get_outputs(
-        &self,
         dbtx: &impl picomint_redb::DbRead,
         start_index: u64,
         end_index: u64,
@@ -910,7 +909,7 @@ impl Wallet {
         })
     }
 
-    fn pending_tx_chain(&self, dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
+    fn pending_tx_chain(dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
         let n_pending = pending_txs_unordered(dbtx).len();
 
         let mut items: Vec<TxInfo> = dbtx.iter(&TX_INFO, |r| r.map(|(_, v)| v).collect());
@@ -920,11 +919,11 @@ impl Wallet {
         items
     }
 
-    fn tx_chain(&self, dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
+    fn tx_chain(dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
         dbtx.iter(&TX_INFO, |r| r.map(|(_, v)| v).collect())
     }
 
-    fn total_txs(&self, dbtx: &WriteTxRef<'_>) -> u64 {
+    fn total_txs(dbtx: &WriteTxRef<'_>) -> u64 {
         dbtx.iter(&TX_INFO, |r| r.next_back().map_or(0, |(k, _)| k + 1))
     }
 
@@ -961,12 +960,12 @@ impl Wallet {
 
     /// Get the current pending transaction info for UI display
     pub fn pending_tx_chain_ui(&self) -> Vec<TxInfo> {
-        self.pending_tx_chain(&self.db.begin_read())
+        Self::pending_tx_chain(&self.db.begin_read())
     }
 
     /// Get the current transaction log for UI display
     pub fn tx_chain_ui(&self) -> Vec<TxInfo> {
-        self.tx_chain(&self.db.begin_read())
+        Self::tx_chain(&self.db.begin_read())
     }
 
     /// Export recovery keys for federation shutdown. Returns None if the

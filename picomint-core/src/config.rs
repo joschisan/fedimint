@@ -150,9 +150,11 @@ pub fn load_from_file<T: DeserializeOwned>(path: &Path) -> Result<T, anyhow::Err
     Ok(serde_json::from_reader(file)?)
 }
 
-/// Federation-wide config. Produced by DKG on the server side, served to
-/// clients via the [`CLIENT_CONFIG_ENDPOINT`], and stored in both the server
-/// and client databases. Byte-for-byte identical on every peer.
+/// Federation-wide config.
+///
+/// Produced by DKG on the server side, served to clients via the
+/// [`CLIENT_CONFIG_ENDPOINT`], and stored in both the server and client
+/// databases. Byte-for-byte identical on every peer.
 ///
 /// [`CLIENT_CONFIG_ENDPOINT`]: crate::endpoint_constants::CLIENT_CONFIG_ENDPOINT
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]

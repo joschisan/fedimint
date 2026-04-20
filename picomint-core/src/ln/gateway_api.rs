@@ -178,8 +178,10 @@ impl FromStr for PaymentFee {
         let mut parts = s.split(',');
         let base_str = parts
             .next()
-            .ok_or(anyhow::anyhow!("Failed to parse base fee"))?;
-        let ppm_str = parts.next().ok_or(anyhow::anyhow!("Failed to parse ppm"))?;
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse base fee"))?;
+        let ppm_str = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse ppm"))?;
 
         // Ensure no extra parts
         if parts.next().is_some() {

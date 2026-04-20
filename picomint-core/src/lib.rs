@@ -17,6 +17,7 @@
 #![allow(clippy::similar_names)]
 #![allow(clippy::transmute_ptr_to_ptr)]
 #![allow(clippy::unsafe_derive_deserialize)]
+#![allow(clippy::too_long_first_doc_paragraph)]
 
 //! Picomint Core library
 //!
@@ -86,8 +87,6 @@ pub mod util;
 pub mod wallet;
 /// Static wire enums over the fixed module set.
 pub mod wire;
-
-/// Atomic BFT unit containing consensus items
 
 // It's necessary to wrap `hash_newtype!` in a module because the generated code
 // references a module called "core", but we export a conflicting module in this

@@ -28,8 +28,8 @@ use tracing::info;
 ///   futures/objects; they do not spawn internally.
 /// - Two legitimate "wait for subset" cases use a local `TaskTracker`
 ///   + child token: the AlephBFT session scope and the `run_config_gen`
-///   setup phase. One acceptable leak below `main`: `run_iroh_api`'s
-///   per-connection fan-out needs a `TaskTracker` passed in.
+///     setup phase. One acceptable leak below `main`: `run_iroh_api`'s
+///     per-connection fan-out needs a `TaskTracker` passed in.
 /// - Client library holds `CancellationToken` + `Vec<JoinHandle<()>>`
 ///   in its `Client` struct. `impl Drop` cancels the token and aborts
 ///   the handles. No tracker on the client — OS-kill is the normal

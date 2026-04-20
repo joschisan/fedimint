@@ -3,6 +3,8 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::similar_names)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
 
 mod db;
 mod rpc;
@@ -32,7 +34,7 @@ use threshold_crypto::group::Curve;
 
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g2;
-use crate::handler;
+use crate::{handler, handler_async};
 
 use self::db::{
     BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER, NOTE_NONCE,
@@ -238,7 +240,7 @@ impl Mint {
         req: ApiRequestErased,
     ) -> Result<Vec<u8>, ApiError> {
         match method {
-            SIGNATURE_SHARES_ENDPOINT => handler!(signature_shares, self, req).await,
+            SIGNATURE_SHARES_ENDPOINT => handler_async!(signature_shares, self, req).await,
             SIGNATURE_SHARES_RECOVERY_ENDPOINT => {
                 handler!(signature_shares_recovery, self, req).await
             }

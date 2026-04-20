@@ -13,7 +13,7 @@ use picomint_core::module::{ApiError, ApiRequestErased};
 use picomint_core::transaction::{ConsensusItem, Transaction, TransactionError};
 
 use crate::consensus::rpc;
-use crate::handler;
+use crate::{handler, handler_async};
 use picomint_core::PeerId;
 use picomint_core::task::TaskGroup;
 use picomint_logging::LOG_NET_API;
@@ -127,7 +127,7 @@ impl ConsensusApi {
         req: ApiRequestErased,
     ) -> Result<Vec<u8>, ApiError> {
         match method {
-            SUBMIT_TRANSACTION_ENDPOINT => handler!(submit_transaction, self, req).await,
+            SUBMIT_TRANSACTION_ENDPOINT => handler_async!(submit_transaction, self, req).await,
             CLIENT_CONFIG_ENDPOINT => handler!(client_config, self, req).await,
             LIVENESS_ENDPOINT => handler!(liveness, self, req).await,
             other => Err(ApiError::not_found(other.to_string())),

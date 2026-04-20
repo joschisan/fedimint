@@ -224,7 +224,7 @@ impl WalletClientModule {
                 .client_ctx
                 .db()
                 .begin_read()
-                .iter(&VALID_ADDRESS_INDEX, |r| r.next_back().map(|(k, _)| k));
+                .iter(&VALID_ADDRESS_INDEX, |r| r.next_back().map(|(k, ())| k));
 
             if let Some(idx) = idx {
                 return self.derive_address(idx);
@@ -262,7 +262,7 @@ impl WalletClientModule {
     }
 
     /// Issue ecash for an unspent output with a given fee.
-    async fn receive_output(
+    fn receive_output(
         &self,
         output_index: u64,
         value: bitcoin::Amount,
@@ -406,9 +406,12 @@ impl WalletClientModule {
                         .ok_or(anyhow!("No consensus feerate is available"))?;
 
                     if output.value > receive_fee {
-                        let (operation_id, txid) = self
-                            .receive_output(output.index, output.value, address_index, receive_fee)
-                            .await;
+                        let (operation_id, txid) = self.receive_output(
+                            output.index,
+                            output.value,
+                            address_index,
+                            receive_fee,
+                        );
 
                         self.client_ctx
                             .await_tx_accepted(operation_id, txid)

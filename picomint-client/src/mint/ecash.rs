@@ -27,7 +27,7 @@ impl ECash {
             .iter()
             .filter_map(|field| match field {
                 ECashField::Note(note) => Some(note.amount()),
-                _ => None,
+                ECashField::Mint(_) => None,
             })
             .sum()
     }
@@ -35,7 +35,7 @@ impl ECash {
     pub fn mint(&self) -> Option<FederationId> {
         self.0.iter().find_map(|field| match field {
             ECashField::Mint(mint) => Some(*mint),
-            _ => None,
+            ECashField::Note(_) => None,
         })
     }
 
@@ -44,7 +44,7 @@ impl ECash {
             .iter()
             .filter_map(|field| match field {
                 ECashField::Note(note) => Some(note.clone()),
-                _ => None,
+                ECashField::Mint(_) => None,
             })
             .collect()
     }

@@ -69,7 +69,7 @@ impl FederationApi {
             ApiRequestErased::default(),
         )
         .await
-        .map_err(|e| anyhow::anyhow!("{}", e))
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     pub async fn recovery_slice_hash(&self, start: u64, end: u64) -> sha256::Hash {

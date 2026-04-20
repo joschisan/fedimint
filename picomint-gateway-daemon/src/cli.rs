@@ -609,8 +609,7 @@ async fn module_mint_receive(
 
     client
         .mint()
-        .receive(ecash)
-        .await
+        .receive(&ecash)
         .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
 
     let response = MintReceiveResponse { amount };
