@@ -71,12 +71,12 @@ pub trait StateMachine:
 
     /// Apply `outcome` atomically inside `dbtx`, producing the next state.
     /// `None` terminates the state machine.
-    fn transition<'a>(
-        &'a self,
-        ctx: &'a Self::Context,
-        dbtx: &'a WriteTxRef<'_>,
+    fn transition(
+        &self,
+        ctx: &Self::Context,
+        dbtx: &WriteTxRef<'_>,
         outcome: Self::Outcome,
-    ) -> impl Future<Output = Option<Self>> + Send + 'a;
+    ) -> Option<Self>;
 }
 
 fn table<S: StateMachine>() -> picomint_redb::NativeTableDef<SmId, S> {
@@ -178,7 +178,7 @@ impl<S: StateMachine> Inner<S> {
 
             let tx = self.db.begin_write();
 
-            match state.transition(&self.context, &tx.as_ref(), outcome).await {
+            match state.transition(&self.context, &tx.as_ref(), outcome) {
                 Some(new_state) => {
                     tx.insert(&table::<S>(), &id, &new_state);
                     tx.commit();

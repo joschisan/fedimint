@@ -102,7 +102,7 @@ impl StateMachine for SendStateMachine {
         }
     }
 
-    async fn transition(
+    fn transition(
         &self,
         ctx: &Self::Context,
         dbtx: &WriteTxRef<'_>,
@@ -112,11 +112,11 @@ impl StateMachine for SendStateMachine {
             SendOutcome::FundingResult(Ok(())) => Some(self.update(SendSMState::Funded)),
             SendOutcome::FundingResult(Err(_)) => None,
             SendOutcome::GatewayResponse(response) => {
-                transition_gateway_send_payment_sm(ctx, dbtx, self, response).await;
+                transition_gateway_send_payment_sm(ctx, dbtx, self, response);
                 None
             }
             SendOutcome::Preimage(preimage) => {
-                transition_preimage_sm(ctx, dbtx, self, preimage).await;
+                transition_preimage_sm(ctx, dbtx, self, preimage);
                 None
             }
         }
@@ -157,7 +157,7 @@ async fn gateway_send_payment_sm(
     .expect("networking_backoff retries forever")
 }
 
-async fn transition_gateway_send_payment_sm(
+fn transition_gateway_send_payment_sm(
     ctx: &LightningClientContext,
     dbtx: &WriteTxRef<'_>,
     old_state: &SendStateMachine,
@@ -185,7 +185,6 @@ async fn transition_gateway_send_payment_sm(
             let txid = ctx
                 .mint
                 .finalize_and_submit_transaction(dbtx, old_state.common.operation_id, tx_builder)
-                .await
                 .expect("Cannot claim input, additional funding needed");
 
             ctx.client_ctx.log_event(
@@ -218,7 +217,7 @@ async fn await_preimage_sm(
     pending().await
 }
 
-async fn transition_preimage_sm(
+fn transition_preimage_sm(
     ctx: &LightningClientContext,
     dbtx: &WriteTxRef<'_>,
     old_state: &SendStateMachine,
@@ -247,7 +246,6 @@ async fn transition_preimage_sm(
     let txid = ctx
         .mint
         .finalize_and_submit_transaction(dbtx, old_state.common.operation_id, tx_builder)
-        .await
         .expect("Cannot claim input, additional funding needed");
 
     ctx.client_ctx.log_event(

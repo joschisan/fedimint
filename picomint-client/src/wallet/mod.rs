@@ -181,7 +181,6 @@ impl WalletClientModule {
         let txid = self
             .mint
             .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
-            .await
             .map_err(|_| SendError::InsufficientFunds)?;
 
         let sm = SendStateMachine {
@@ -280,7 +279,6 @@ impl WalletClientModule {
         let txid = self
             .mint
             .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
-            .await
             .expect("Input amount is sufficient to finalize transaction");
 
         let event = ReceiveEvent {

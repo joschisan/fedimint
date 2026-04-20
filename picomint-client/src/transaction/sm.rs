@@ -41,7 +41,7 @@ impl StateMachine for TxSubmissionStateMachine {
             .map_err(|e| e.to_string())
     }
 
-    async fn transition(
+    fn transition(
         &self,
         _ctx: &Self::Context,
         dbtx: &WriteTxRef<'_>,

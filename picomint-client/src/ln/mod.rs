@@ -335,7 +335,6 @@ impl LightningClientModule {
         let txid = self
             .mint
             .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
-            .await
             .map_err(|e| SendPaymentError::FailedToFundPayment(e.to_string()))?;
 
         let sm = SendStateMachine {
@@ -522,7 +521,6 @@ impl LightningClientModule {
         let txid = self
             .mint
             .finalize_and_submit_transaction(dbtx, operation_id, tx_builder)
-            .await
             .expect("Cannot claim input, additional funding needed");
 
         let event = ReceiveEvent {

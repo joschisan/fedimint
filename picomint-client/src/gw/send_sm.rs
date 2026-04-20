@@ -98,7 +98,7 @@ impl StateMachine for SendStateMachine {
         }
     }
 
-    async fn transition(
+    fn transition(
         &self,
         ctx: &Self::Context,
         dbtx: &WriteTxRef<'_>,
@@ -119,7 +119,6 @@ impl StateMachine for SendStateMachine {
                 let txid = ctx
                     .mint
                     .finalize_and_submit_transaction(dbtx, self.operation_id, tx_builder)
-                    .await
                     .expect("Cannot claim input, additional funding needed");
 
                 let event = SendSuccessEvent {

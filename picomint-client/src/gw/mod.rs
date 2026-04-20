@@ -295,8 +295,7 @@ impl GatewayClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
-            .await?;
+            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)?;
 
         let outpoint = OutPoint { txid, out_idx: 0 };
 
@@ -363,8 +362,7 @@ impl GatewayClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
-            .await?;
+            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)?;
 
         let outpoint = OutPoint { txid, out_idx: 0 };
 

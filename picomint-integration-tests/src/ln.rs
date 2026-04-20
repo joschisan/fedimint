@@ -475,8 +475,7 @@ async fn test_claim_outgoing_contract(
 
     client
         .mint()
-        .finalize_and_submit_transaction(&dbtx.as_ref(), OperationId::new_random(), tx_builder)
-        .await?;
+        .finalize_and_submit_transaction(&dbtx.as_ref(), OperationId::new_random(), tx_builder)?;
 
     dbtx.commit();
 

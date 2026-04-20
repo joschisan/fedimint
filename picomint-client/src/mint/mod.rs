@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use crate::api::FederationApi;
 use crate::module::ClientContext;
+use crate::secret::Secret;
 use crate::transaction::{Input, Output, TransactionBuilder};
 use crate::transaction::{Transaction, TxSubmissionSmContext, TxSubmissionStateMachine};
 use anyhow::{Context as _, bail};
@@ -38,7 +39,6 @@ use picomint_core::secp256k1::rand::{Rng, thread_rng};
 use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, PeerId, TransactionId, wire};
-use crate::secret::Secret;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::Database;
 use picomint_redb::WriteTxRef;
@@ -296,13 +296,13 @@ impl MintClientModule {
     /// submit the resulting transaction, and spawn the
     /// `IssuanceStateMachine` that tracks the balance-side notes/requests
     /// (if any).
-    pub async fn finalize_and_submit_transaction(
+    pub fn finalize_and_submit_transaction(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         mut builder: TransactionBuilder,
     ) -> anyhow::Result<TransactionId> {
-        let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder).await?;
+        let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder)?;
 
         let txid = self.submit(dbtx, operation_id, builder)?;
 
@@ -323,7 +323,7 @@ impl MintClientModule {
     /// when the builder is underfunded, then absorbs any excess as change
     /// outputs. Sub-denomination dust below `smallest_denom + output_fee` is
     /// left as implicit federation revenue.
-    async fn balance(
+    fn balance(
         &self,
         dbtx: &WriteTxRef<'_>,
         builder: &mut TransactionBuilder,
@@ -354,11 +354,16 @@ impl MintClientModule {
         // Sort to minimize information leaked about the change shape.
         denoms.sort();
 
-        let issuance_requests: Vec<NoteIssuanceRequest> = futures::stream::iter(denoms)
-            .zip(self.tweak_receiver.clone())
-            .map(|(d, tweak)| NoteIssuanceRequest::new(d, tweak, &self.root_secret))
-            .collect()
-            .await;
+        let mut issuance_requests = Vec::new();
+
+        for d in denoms {
+            let tweak = self
+                .tweak_receiver
+                .recv_blocking()
+                .expect("Tweak generator task dropped its sender");
+
+            issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.root_secret));
+        }
 
         for request in &issuance_requests {
             builder.add_output(Output {
@@ -394,8 +399,7 @@ impl MintClientModule {
             transaction,
         };
 
-        self.tx_submission_executor
-            .add_state_machine_dbtx(dbtx, sm);
+        self.tx_submission_executor.add_state_machine_dbtx(dbtx, sm);
 
         Ok(txid)
     }
@@ -574,12 +578,14 @@ impl MintClientModule {
         // and appends change outputs. We extend `issuance_requests` with the
         // change requests after balance so the order matches the transaction's
         // outputs and a single `IssuanceStateMachine` can process both.
-        let mut issuance_requests: Vec<NoteIssuanceRequest> =
-            futures::stream::iter(target_denominations)
-                .zip(self.tweak_receiver.clone())
-                .map(|(d, tweak)| NoteIssuanceRequest::new(d, tweak, &self.root_secret))
-                .collect()
-                .await;
+        let mut issuance_requests: Vec<NoteIssuanceRequest> = Vec::new();
+        for d in target_denominations {
+            let tweak = self
+                .tweak_receiver
+                .recv_blocking()
+                .expect("Tweak generator task dropped its sender");
+            issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.root_secret));
+        }
 
         let mut builder = TransactionBuilder::new();
         for request in &issuance_requests {
@@ -595,7 +601,6 @@ impl MintClientModule {
 
         let (funding_notes, change_requests) = self
             .balance(&tx, &mut builder)
-            .await
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
         let txid = self
@@ -658,15 +663,14 @@ impl MintClientModule {
         let amount = ecash.amount();
         let operation_id = OperationId::new_random();
 
-        self.client_ctx
-            .log_event(
-                dbtx,
-                operation_id,
-                SendEvent {
-                    amount,
-                    ecash: picomint_base32::encode(&ecash),
-                },
-            );
+        self.client_ctx.log_event(
+            dbtx,
+            operation_id,
+            SendEvent {
+                amount,
+                ecash: picomint_base32::encode(&ecash),
+            },
+        );
 
         Ok(Some(ecash))
     }
@@ -710,7 +714,6 @@ impl MintClientModule {
 
         let txid = self
             .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
-            .await
             .map_err(|_| ReceiveECashError::InsufficientFunds)?;
 
         let event = ReceiveEvent {

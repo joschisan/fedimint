@@ -60,7 +60,7 @@ impl StateMachine for IssuanceStateMachine {
         }
     }
 
-    async fn transition(
+    fn transition(
         &self,
         ctx: &Self::Context,
         dbtx: &WriteTxRef<'_>,
