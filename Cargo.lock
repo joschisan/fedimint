@@ -3873,6 +3873,7 @@ dependencies = [
  "fedimint-core",
  "fedimint-logging",
  "fedimint-meta-common",
+ "futures",
  "serde",
  "serde_json",
  "strum 0.27.1",
