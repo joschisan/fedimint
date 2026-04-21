@@ -14,7 +14,8 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::envs::{FM_IN_DEVIMINT_ENV, is_env_var_set};
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::task::TaskGroup;
-use fedimint_core::util::{backoff_util, retry};
+use fedimint_core::time::now;
+use fedimint_core::util::{FmtCompactResult as _, backoff_util, retry};
 use fedimint_gateway_common::{
     ChannelInfo, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, GetInvoiceRequest,
     GetInvoiceResponse, LightningInfo, ListTransactionsResponse, OpenChannelRequest,
@@ -29,7 +30,7 @@ use futures::stream::BoxStream;
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 pub const MAX_LIGHTNING_RETRIES: u32 = 10;
 
@@ -459,29 +460,53 @@ impl LnRpcTracked {
     }
 }
 
+macro_rules! tracked_call {
+    ($self:ident, $method:expr, $call:expr) => {{
+        trace!(
+            target: LOG_LIGHTNING,
+            method = $method,
+            name = $self.name,
+            "starting lightning rpc"
+        );
+        let start = now();
+        let timer = metrics::LN_RPC_DURATION_SECONDS
+            .with_label_values(&[$method, $self.name])
+            .start_timer_ext();
+        let result = $call;
+        timer.observe_duration();
+        $self.record_call($method, &result);
+        let duration_ms = now()
+            .duration_since(start)
+            .unwrap_or_default()
+            .as_secs_f64()
+            * 1000.0;
+        trace!(
+            target: LOG_LIGHTNING,
+            method = $method,
+            name = $self.name,
+            duration_ms,
+            error = %result.fmt_compact_result(),
+            "completed lightning rpc"
+        );
+        result
+    }};
+}
+
 #[async_trait]
 impl ILnRpcClient for LnRpcTracked {
     async fn info(&self) -> Result<GetNodeInfoResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["info", self.name])
-            .start_timer_ext();
-        let result = self.inner.info().await;
-        timer.observe_duration();
-        self.record_call("info", &result);
-        result
+        tracked_call!(self, "info", self.inner.info().await)
     }
 
     async fn routehints(
         &self,
         num_route_hints: usize,
     ) -> Result<GetRouteHintsResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["routehints", self.name])
-            .start_timer_ext();
-        let result = self.inner.routehints(num_route_hints).await;
-        timer.observe_duration();
-        self.record_call("routehints", &result);
-        result
+        tracked_call!(
+            self,
+            "routehints",
+            self.inner.routehints(num_route_hints).await
+        )
     }
 
     async fn pay(
@@ -490,13 +515,11 @@ impl ILnRpcClient for LnRpcTracked {
         max_delay: u64,
         max_fee: Amount,
     ) -> Result<PayInvoiceResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["pay", self.name])
-            .start_timer_ext();
-        let result = self.inner.pay(invoice, max_delay, max_fee).await;
-        timer.observe_duration();
-        self.record_call("pay", &result);
-        result
+        tracked_call!(
+            self,
+            "pay",
+            self.inner.pay(invoice, max_delay, max_fee).await
+        )
     }
 
     async fn pay_private(
@@ -505,13 +528,11 @@ impl ILnRpcClient for LnRpcTracked {
         max_delay: u64,
         max_fee: Amount,
     ) -> Result<PayInvoiceResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["pay_private", self.name])
-            .start_timer_ext();
-        let result = self.inner.pay_private(invoice, max_delay, max_fee).await;
-        timer.observe_duration();
-        self.record_call("pay_private", &result);
-        result
+        tracked_call!(
+            self,
+            "pay_private",
+            self.inner.pay_private(invoice, max_delay, max_fee).await
+        )
     }
 
     fn supports_private_payments(&self) -> bool {
@@ -532,110 +553,72 @@ impl ILnRpcClient for LnRpcTracked {
     }
 
     async fn complete_htlc(&self, htlc: InterceptPaymentResponse) -> Result<(), LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["complete_htlc", self.name])
-            .start_timer_ext();
-        let result = self.inner.complete_htlc(htlc).await;
-        timer.observe_duration();
-        self.record_call("complete_htlc", &result);
-        result
+        tracked_call!(self, "complete_htlc", self.inner.complete_htlc(htlc).await)
     }
 
     async fn create_invoice(
         &self,
         create_invoice_request: CreateInvoiceRequest,
     ) -> Result<CreateInvoiceResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["create_invoice", self.name])
-            .start_timer_ext();
-        let result = self.inner.create_invoice(create_invoice_request).await;
-        timer.observe_duration();
-        self.record_call("create_invoice", &result);
-        result
+        tracked_call!(
+            self,
+            "create_invoice",
+            self.inner.create_invoice(create_invoice_request).await
+        )
     }
 
     async fn get_ln_onchain_address(
         &self,
     ) -> Result<GetLnOnchainAddressResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["get_ln_onchain_address", self.name])
-            .start_timer_ext();
-        let result = self.inner.get_ln_onchain_address().await;
-        timer.observe_duration();
-        self.record_call("get_ln_onchain_address", &result);
-        result
+        tracked_call!(
+            self,
+            "get_ln_onchain_address",
+            self.inner.get_ln_onchain_address().await
+        )
     }
 
     async fn send_onchain(
         &self,
         payload: SendOnchainRequest,
     ) -> Result<SendOnchainResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["send_onchain", self.name])
-            .start_timer_ext();
-        let result = self.inner.send_onchain(payload).await;
-        timer.observe_duration();
-        self.record_call("send_onchain", &result);
-        result
+        tracked_call!(self, "send_onchain", self.inner.send_onchain(payload).await)
     }
 
     async fn open_channel(
         &self,
         payload: OpenChannelRequest,
     ) -> Result<OpenChannelResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["open_channel", self.name])
-            .start_timer_ext();
-        let result = self.inner.open_channel(payload).await;
-        timer.observe_duration();
-        self.record_call("open_channel", &result);
-        result
+        tracked_call!(self, "open_channel", self.inner.open_channel(payload).await)
     }
 
     async fn close_channels_with_peer(
         &self,
         payload: CloseChannelsWithPeerRequest,
     ) -> Result<CloseChannelsWithPeerResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["close_channels_with_peer", self.name])
-            .start_timer_ext();
-        let result = self.inner.close_channels_with_peer(payload).await;
-        timer.observe_duration();
-        self.record_call("close_channels_with_peer", &result);
-        result
+        tracked_call!(
+            self,
+            "close_channels_with_peer",
+            self.inner.close_channels_with_peer(payload).await
+        )
     }
 
     async fn list_channels(&self) -> Result<ListChannelsResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["list_channels", self.name])
-            .start_timer_ext();
-        let result = self.inner.list_channels().await;
-        timer.observe_duration();
-        self.record_call("list_channels", &result);
-        result
+        tracked_call!(self, "list_channels", self.inner.list_channels().await)
     }
 
     async fn get_balances(&self) -> Result<GetBalancesResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["get_balances", self.name])
-            .start_timer_ext();
-        let result = self.inner.get_balances().await;
-        timer.observe_duration();
-        self.record_call("get_balances", &result);
-        result
+        tracked_call!(self, "get_balances", self.inner.get_balances().await)
     }
 
     async fn get_invoice(
         &self,
         get_invoice_request: GetInvoiceRequest,
     ) -> Result<Option<GetInvoiceResponse>, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["get_invoice", self.name])
-            .start_timer_ext();
-        let result = self.inner.get_invoice(get_invoice_request).await;
-        timer.observe_duration();
-        self.record_call("get_invoice", &result);
-        result
+        tracked_call!(
+            self,
+            "get_invoice",
+            self.inner.get_invoice(get_invoice_request).await
+        )
     }
 
     async fn list_transactions(
@@ -643,13 +626,11 @@ impl ILnRpcClient for LnRpcTracked {
         start_secs: u64,
         end_secs: u64,
     ) -> Result<ListTransactionsResponse, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["list_transactions", self.name])
-            .start_timer_ext();
-        let result = self.inner.list_transactions(start_secs, end_secs).await;
-        timer.observe_duration();
-        self.record_call("list_transactions", &result);
-        result
+        tracked_call!(
+            self,
+            "list_transactions",
+            self.inner.list_transactions(start_secs, end_secs).await
+        )
     }
 
     fn create_offer(
@@ -659,15 +640,12 @@ impl ILnRpcClient for LnRpcTracked {
         expiry_secs: Option<u32>,
         quantity: Option<u64>,
     ) -> Result<String, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["create_offer", self.name])
-            .start_timer_ext();
-        let result = self
-            .inner
-            .create_offer(amount, description, expiry_secs, quantity);
-        timer.observe_duration();
-        self.record_call("create_offer", &result);
-        result
+        tracked_call!(
+            self,
+            "create_offer",
+            self.inner
+                .create_offer(amount, description, expiry_secs, quantity)
+        )
     }
 
     async fn pay_offer(
@@ -677,25 +655,16 @@ impl ILnRpcClient for LnRpcTracked {
         amount: Option<Amount>,
         payer_note: Option<String>,
     ) -> Result<Preimage, LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["pay_offer", self.name])
-            .start_timer_ext();
-        let result = self
-            .inner
-            .pay_offer(offer, quantity, amount, payer_note)
-            .await;
-        timer.observe_duration();
-        self.record_call("pay_offer", &result);
-        result
+        tracked_call!(
+            self,
+            "pay_offer",
+            self.inner
+                .pay_offer(offer, quantity, amount, payer_note)
+                .await
+        )
     }
 
     fn sync_wallet(&self) -> Result<(), LightningRpcError> {
-        let timer = metrics::LN_RPC_DURATION_SECONDS
-            .with_label_values(&["sync_wallet", self.name])
-            .start_timer_ext();
-        let result = self.inner.sync_wallet();
-        timer.observe_duration();
-        self.record_call("sync_wallet", &result);
-        result
+        tracked_call!(self, "sync_wallet", self.inner.sync_wallet())
     }
 }
