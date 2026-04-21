@@ -57,6 +57,11 @@ jobs:
           else
             PERFIT_METRIC="aPuCAjrFT7uE5Oax_T4sMw"
             VERSIONS_TO_TEST="v0.10.0"
+            # PRs only test one version (vs three in merge queue), but the
+            # full test matrix is still ~37 combos and takes ~23 min.
+            # Since the merge queue will re-run these tests anyway, sample
+            # 25% here too to keep PR feedback fast.
+            export FM_BACKCOMPAT_TEST_SAMPLE_PERCENT=25
           fi
 
           # the default tmp dir is too long (/home/ubuntu/actions-runner/_work/_temp/)
