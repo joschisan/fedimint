@@ -492,9 +492,18 @@ async fn migrate_db_v2(mut ctx: ServerModuleDbMigrationFnContext<'_, Mint>) -> a
     }
 
     for (blind_nonce, out_point) in blind_nonce_outpoints {
-        ctx.dbtx()
+        if ctx
+            .dbtx()
             .insert_entry(&RecoveryBlindNonceOutpointKey(blind_nonce), &out_point)
-            .await;
+            .await
+            .is_some()
+        {
+            warn!(
+                target: LOG_MODULE_MINT,
+                bnonce = ?blind_nonce,
+                "Recovery blind nonce outpoint overwritten; duplicate blind nonce in outputs"
+            );
+        }
     }
 
     Ok(())
@@ -666,11 +675,20 @@ impl ServerModule for Mint {
         )
         .await;
 
-        dbtx.insert_entry(
-            &RecoveryBlindNonceOutpointKey(output.blind_nonce),
-            &out_point,
-        )
-        .await;
+        if dbtx
+            .insert_entry(
+                &RecoveryBlindNonceOutpointKey(output.blind_nonce),
+                &out_point,
+            )
+            .await
+            .is_some()
+        {
+            warn!(
+                target: LOG_MODULE_MINT,
+                bnonce = ?output.blind_nonce,
+                "Recovery blind nonce outpoint overwritten; duplicate blind nonce in outputs"
+            );
+        }
 
         let amount = output.amount;
         let fee = self.cfg.consensus.fee_consensus.fee(amount);
