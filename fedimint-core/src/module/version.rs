@@ -54,7 +54,7 @@
 //!
 //! [`ApiVersion`] and [`MultiApiVersion`] is used for API versioning.
 use std::collections::BTreeMap;
-use std::{cmp, result};
+use std::{cmp, fmt, result};
 
 use serde::{Deserialize, Serialize};
 
@@ -82,7 +82,14 @@ impl CoreConsensusVersion {
     }
 }
 
-/// Globally declared core consensus version
+impl fmt::Display for CoreConsensusVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
+    }
+}
+
+/// Globally declared core consensus version implemented/supported by this
+/// codebase
 pub const CORE_CONSENSUS_VERSION: CoreConsensusVersion = CoreConsensusVersion::new(2, 1);
 
 /// Consensus version of a specific module instance
@@ -134,6 +141,12 @@ impl ModuleConsensusVersion {
     }
 }
 
+impl fmt::Display for ModuleConsensusVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
+    }
+}
+
 /// Api version supported by a core server or a client/server module at a given
 /// [`ModuleConsensusVersion`].
 ///
@@ -173,6 +186,12 @@ pub struct ApiVersion {
 impl ApiVersion {
     pub const fn new(major: u32, minor: u32) -> Self {
         Self { major, minor }
+    }
+}
+
+impl fmt::Display for ApiVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
     }
 }
 
@@ -293,6 +312,19 @@ impl<'de> Deserialize<'de> for MultiApiVersion {
         }
 
         Ok(ret)
+    }
+}
+
+impl fmt::Display for MultiApiVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[")?;
+        for (i, v) in self.0.iter().enumerate() {
+            if 0 < i {
+                f.write_str(", ")?;
+            }
+            write!(f, "{v}")?;
+        }
+        f.write_str("]")
     }
 }
 
@@ -454,6 +486,16 @@ impl SupportedModuleApiVersions {
             debug_assert_eq!(v.major, major);
             v.minor
         })
+    }
+}
+
+impl fmt::Display for SupportedModuleApiVersions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "core={}, module={}, api={}",
+            self.core_consensus, self.module_consensus, self.api
+        )
     }
 }
 

@@ -617,6 +617,14 @@ impl ClientBuilder {
             version = %fedimint_build_code_version_env!(),
             "Building fedimint client",
         );
+        for (kind, module) in self.module_inits.iter() {
+            debug!(
+                target: LOG_CLIENT,
+                module = %kind,
+                supported_api = %module.supported_api_versions(),
+                "Supported module api versions",
+            );
+        }
         let (log_event_added_tx, log_event_added_rx) = watch::channel(());
         let (log_ordering_wakeup_tx, log_ordering_wakeup_rx) = watch::channel(());
 
@@ -697,7 +705,28 @@ impl ClientBuilder {
             modules: BTreeMap::new(),
         });
 
-        debug!(target: LOG_CLIENT, ?common_api_versions, "Completed api version negotiation");
+        debug!(
+            target: LOG_CLIENT,
+            core = %common_api_versions.core,
+            "Negotiated core API version",
+        );
+        for (module_id, api_version) in &common_api_versions.modules {
+            let kind = config.modules.get(module_id).map(|m| m.kind());
+            let kind_str = kind
+                .as_ref()
+                .map(|k| k.to_string())
+                .unwrap_or_else(|| format!("unknown({module_id})"));
+            let supported = kind
+                .and_then(|k| self.module_inits.get(k))
+                .map(|m| m.supported_api_versions().to_string());
+            debug!(
+                target: LOG_CLIENT,
+                module = %kind_str,
+                api = %api_version,
+                supported = %supported.as_deref().unwrap_or("unknown"),
+                "Negotiated module API version",
+            );
+        }
 
         // Asynchronously refetch client config and compare with existing
         Self::load_and_refresh_client_config_static(&config, &api, &db, &task_group);
