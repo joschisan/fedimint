@@ -751,6 +751,23 @@ impl Federation {
         let deposit_fees = deposit_fees_msat / 1000;
         info!(amount, deposit_fees, "Pegging-in gateway funds");
         let fed_id = self.calculate_federation_id();
+
+        // For walletv2, capture initial balances since deposits are auto-claimed
+        // and we need to check balance change rather than absolute balance
+        // (same approach as pegin_client).
+        let uses_walletv2 = crate::util::supports_wallet_v2();
+        let mut initial_balances = Vec::new();
+        if uses_walletv2 {
+            for gw in &gateways {
+                let balance = gw
+                    .client()
+                    .ecash_balance(fed_id.clone())
+                    .await
+                    .expect("failed to fetch initial gateway balance");
+                initial_balances.push(balance);
+            }
+        }
+
         for gw in gateways.clone() {
             let pegin_addr = gw.client().get_pegin_addr(&fed_id).await?;
             self.bitcoind
@@ -760,36 +777,60 @@ impl Federation {
 
         self.bitcoind.mine_blocks(21).await?;
         let bitcoind_block_height: u64 = self.bitcoind.get_block_count().await? - 1;
-        try_join_all(gateways.into_iter().map(|gw| {
-            poll("gateway pegin", || async {
-                let gw_info = gw
-                    .client()
-                    .get_info()
-                    .await
-                    .map_err(ControlFlow::Continue)?;
+        try_join_all(gateways.into_iter().enumerate().map(|(i, gw)| {
+            let initial_balance = if uses_walletv2 {
+                initial_balances[i]
+            } else {
+                0
+            };
+            let fed_id = fed_id.clone();
+            poll("gateway pegin", move || {
+                let fed_id = fed_id.clone();
+                async move {
+                    let gw_info = gw
+                        .client()
+                        .get_info()
+                        .await
+                        .map_err(ControlFlow::Continue)?;
 
-                let block_height: u64 = if gw.gatewayd_version < *VERSION_0_10_0_ALPHA {
-                    gw_info["block_height"]
-                        .as_u64()
-                        .expect("Could not parse block height")
-                } else {
-                    gw_info["lightning_info"]["connected"]["block_height"]
-                        .as_u64()
-                        .expect("Could not parse block height")
-                };
+                    let block_height: u64 = if gw.gatewayd_version < *VERSION_0_10_0_ALPHA {
+                        gw_info["block_height"]
+                            .as_u64()
+                            .expect("Could not parse block height")
+                    } else {
+                        gw_info["lightning_info"]["connected"]["block_height"]
+                            .as_u64()
+                            .expect("Could not parse block height")
+                    };
 
-                if bitcoind_block_height != block_height {
-                    return Err(std::ops::ControlFlow::Continue(anyhow::anyhow!(
-                        "gateway block height is not synced"
-                    )));
+                    if bitcoind_block_height != block_height {
+                        return Err(std::ops::ControlFlow::Continue(anyhow::anyhow!(
+                            "gateway block height is not synced"
+                        )));
+                    }
+
+                    let gateway_balance = gw
+                        .client()
+                        .ecash_balance(fed_id)
+                        .await
+                        .map_err(ControlFlow::Continue)?;
+
+                    if uses_walletv2 {
+                        // Walletv2: check balance increased by approximately
+                        // the expected amount. Use 90% threshold to account
+                        // for mintv2 fees (same as pegin_client).
+                        let expected = initial_balance + (amount * 1000 * 9 / 10);
+                        if gateway_balance >= expected {
+                            Ok(())
+                        } else {
+                            Err(ControlFlow::Continue(anyhow::anyhow!(
+                                "Gateway balance {gateway_balance} has not reached expected {expected} (initial: {initial_balance})"
+                            )))
+                        }
+                    } else {
+                        poll_almost_equal!(gateway_balance, amount * 1000)
+                    }
                 }
-
-                let gateway_balance = gw
-                    .client()
-                    .ecash_balance(fed_id.clone())
-                    .await
-                    .map_err(ControlFlow::Continue)?;
-                poll_almost_equal!(gateway_balance, amount * 1000)
             })
         }))
         .await?;
