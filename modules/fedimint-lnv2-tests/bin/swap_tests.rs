@@ -1,5 +1,4 @@
 use devimint::federation::Client;
-use devimint::version_constants::VERSION_0_9_0_ALPHA;
 use devimint::{cmd, util};
 use fedimint_core::core::OperationId;
 use fedimint_lnv2_client::FinalSendOperationState;
@@ -27,15 +26,6 @@ async fn main() -> anyhow::Result<()> {
             federation.pegin_client(10_000, &client).await?;
 
             let gw_lnd = dev_fed.gw_lnd().await?;
-
-            let gatewayd_version = util::Gatewayd::version_or_default().await;
-            let gateway_cli_version = util::GatewayCli::version_or_default().await;
-
-            if gatewayd_version < *VERSION_0_9_0_ALPHA || gateway_cli_version < *VERSION_0_9_0_ALPHA
-            {
-                info!("Gateway version too old for swap tests, skipping");
-                return Ok(());
-            }
 
             info!("Pegging-in gateway...");
             federation.pegin_gateways(1_000_000, vec![gw_lnd]).await?;

@@ -35,9 +35,9 @@ use crate::envs::{
 };
 use crate::external::{Bitcoind, LightningNode};
 use crate::federation::Federation;
-use crate::util::{Command, ProcessHandle, ProcessManager, poll, poll_with_timeout, supports_lnv2};
+use crate::util::{Command, ProcessHandle, ProcessManager, poll, poll_with_timeout};
 use crate::vars::utf8;
-use crate::version_constants::{VERSION_0_9_0_ALPHA, VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA};
+use crate::version_constants::{VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA};
 
 #[derive(Debug, Clone)]
 pub struct GatewayClient {
@@ -302,7 +302,7 @@ impl<'a> GatewayClient {
 
     pub async fn close_channel(&self, remote_pubkey: PublicKey, force: bool) -> Result<()> {
         let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
-        let mut close_channel = if force && gateway_cli_version >= *VERSION_0_9_0_ALPHA {
+        let mut close_channel = if force {
             cmd!(
                 self,
                 "lightning",
@@ -403,14 +403,7 @@ impl<'a> GatewayClient {
     }
 
     pub async fn list_channels(&self) -> Result<Vec<ChannelInfo>> {
-        let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
-        let channels = if gateway_cli_version >= *VERSION_0_9_0_ALPHA {
-            cmd!(self, "lightning", "list-channels").out_json().await?
-        } else {
-            cmd!(self, "lightning", "list-active-channels")
-                .out_json()
-                .await?
-        };
+        let channels = cmd!(self, "lightning", "list-channels").out_json().await?;
 
         let channels = channels
             .as_array()
@@ -791,30 +784,9 @@ impl Gatewayd {
         ]);
 
         let gatewayd_version = crate::util::Gatewayd::version_or_default().await;
-        if gatewayd_version < *VERSION_0_9_0_ALPHA {
-            let mode = if supports_lnv2() {
-                "All"
-            } else {
-                info!(target: LOG_DEVIMINT, "LNv2 is not supported, running gatewayd in LNv1 mode");
-                "LNv1"
-            };
-            gateway_env.insert(
-                "FM_GATEWAY_LIGHTNING_MODULE_MODE".to_owned(),
-                mode.to_string(),
-            );
-        }
 
         if ln_type == LightningNodeType::Ldk {
             gateway_env.insert("FM_LDK_ALIAS".to_owned(), gw_name.clone());
-
-            // Prior to `v0.9.0`, only LDK could connect to bitcoind
-            if gatewayd_version < *VERSION_0_9_0_ALPHA {
-                let btc_rpc_port = process_mgr.globals.FM_PORT_BTC_RPC;
-                gateway_env.insert(
-                    "FM_LDK_BITCOIND_RPC_URL".to_owned(),
-                    format!("http://bitcoin:bitcoin@127.0.0.1:{btc_rpc_port}"),
-                );
-            }
         }
 
         let process = process_mgr
@@ -938,12 +910,6 @@ impl Gatewayd {
         unsafe { std::env::set_var("FM_GATEWAY_CLI_BASE_EXECUTABLE", gateway_cli_path) };
 
         let gatewayd_version = crate::util::Gatewayd::version_or_default().await;
-        if gatewayd_version < *VERSION_0_9_0_ALPHA && supports_lnv2() {
-            info!(target: LOG_DEVIMINT, "LNv2 is now supported, running in All mode");
-            // TODO: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::set_var("FM_GATEWAY_LIGHTNING_MODULE_MODE", "All") };
-        }
-
         let new_ln = ln;
         let new_gw = Self::new(process_mgr, new_ln.clone(), self.gateway_index).await?;
         self.process = new_gw.process;

@@ -20,7 +20,6 @@ use fedimint_core::util::{retry, write_overwrite_async};
 use fedimint_core::{Amount, PeerId};
 use fedimint_ln_client::LightningPaymentOutcome;
 use fedimint_ln_client::cli::LnInvoiceResponse;
-use fedimint_ln_server::common::LightningGatewayAnnouncement;
 use fedimint_ln_server::common::lightning_invoice::Bolt11Invoice;
 use fedimint_lnv2_client::FinalSendOperationState;
 use fedimint_logging::LOG_DEVIMINT;
@@ -37,9 +36,7 @@ use crate::cli::{CommonArgs, cleanup_on_exit, exec_user_command, setup};
 use crate::envs::{FM_DATA_DIR_ENV, FM_DEVIMINT_RUN_DEPRECATED_TESTS_ENV, FM_PASSWORD_ENV};
 use crate::federation::Client;
 use crate::util::{LoadTestTool, ProcessManager, almost_equal, poll};
-use crate::version_constants::{
-    VERSION_0_8_2, VERSION_0_9_0_ALPHA, VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA,
-};
+use crate::version_constants::{VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA};
 use crate::{DevFed, Gatewayd, LightningNode, Lnd, cmd, dev_fed};
 
 pub struct Stats {
@@ -799,38 +796,6 @@ pub async fn cli_tests(dev_fed: DevFed) -> Result<()> {
 
     // LND gateway tests
     info!("Testing LND gateway");
-
-    let gatewayd_version = crate::util::Gatewayd::version_or_default().await;
-    // Gatewayd did not support default fees before v0.8.2
-    // In order for the amount tests to pass, we need to reliably set the fees to
-    // 0,0.
-    if gatewayd_version < *VERSION_0_8_2 {
-        gw_lnd
-            .set_federation_routing_fee(fed_id.clone(), 0, 0)
-            .await?;
-
-        // Poll until the client has heard about the updated fees
-        poll("Waiting for LND GW fees to update", || async {
-            let gateways_val = cmd!(client, "list-gateways")
-                .out_json()
-                .await
-                .map_err(ControlFlow::Break)?;
-            let gateways =
-                serde_json::from_value::<Vec<LightningGatewayAnnouncement>>(gateways_val)
-                    .expect("Could not deserialize");
-            let fees = gateways
-                .first()
-                .expect("No gateway was registered")
-                .info
-                .fees;
-            if fees.base_msat == 0 && fees.proportional_millionths == 0 {
-                Ok(())
-            } else {
-                Err(ControlFlow::Continue(anyhow!("Fees have not been updated")))
-            }
-        })
-        .await?;
-    }
 
     // OUTGOING: fedimint-cli pays LDK via LND gateway
     if let Some(iroh_gw_id) = &iroh_lnd_id
@@ -1609,22 +1574,13 @@ async fn ln_pay(client: &Client, invoice: String, gw_id: String) -> anyhow::Resu
     let value = cmd!(client, "ln-pay", invoice, "--gateway-id", gw_id,)
         .out_json()
         .await?;
-    let fedimint_cli_version = crate::util::FedimintCli::version_or_default().await;
-    if fedimint_cli_version >= *VERSION_0_9_0_ALPHA {
-        let outcome = serde_json::from_value::<LightningPaymentOutcome>(value)
-            .expect("Could not deserialize Lightning payment outcome");
-        match outcome {
-            LightningPaymentOutcome::Success { preimage } => Ok(preimage),
-            LightningPaymentOutcome::Failure { error_message } => {
-                Err(anyhow!("Failed to pay lightning invoice: {error_message}"))
-            }
+    let outcome = serde_json::from_value::<LightningPaymentOutcome>(value)
+        .expect("Could not deserialize Lightning payment outcome");
+    match outcome {
+        LightningPaymentOutcome::Success { preimage } => Ok(preimage),
+        LightningPaymentOutcome::Failure { error_message } => {
+            Err(anyhow!("Failed to pay lightning invoice: {error_message}"))
         }
-    } else {
-        let operation_id = value["operation_id"]
-            .as_str()
-            .ok_or(anyhow!("Failed to pay invoice"))?
-            .to_string();
-        Ok(operation_id)
     }
 }
 
@@ -2187,19 +2143,6 @@ pub async fn test_client_config_change_detection(
 ) -> Result<()> {
     log_binary_versions().await?;
 
-    let fedimint_cli_version = crate::util::FedimintCli::version_or_default().await;
-    let fedimintd_version = crate::util::FedimintdCmd::version_or_default().await;
-
-    if fedimint_cli_version < *VERSION_0_9_0_ALPHA {
-        info!(target: LOG_DEVIMINT, "Skipping the test - fedimint-cli too old");
-        return Ok(());
-    }
-
-    if fedimintd_version < *VERSION_0_9_0_ALPHA {
-        info!(target: LOG_DEVIMINT, "Skipping the test - fedimintd too old");
-        return Ok(());
-    }
-
     let DevFed { mut fed, .. } = dev_fed;
     let peer_ids: Vec<_> = fed.member_ids().collect();
 
@@ -2525,19 +2468,6 @@ pub async fn test_guardian_password_change(
     process_mgr: &ProcessManager,
 ) -> Result<()> {
     log_binary_versions().await?;
-
-    let fedimint_cli_version = crate::util::FedimintCli::version_or_default().await;
-    let fedimintd_version = crate::util::FedimintdCmd::version_or_default().await;
-
-    if fedimint_cli_version < *VERSION_0_9_0_ALPHA {
-        info!(target: LOG_DEVIMINT, "Skipping the test - fedimint-cli too old");
-        return Ok(());
-    }
-
-    if fedimintd_version < *VERSION_0_9_0_ALPHA {
-        info!(target: LOG_DEVIMINT, "Skipping the test - fedimintd too old");
-        return Ok(());
-    }
 
     let DevFed { mut fed, .. } = dev_fed;
     fed.await_all_peers().await?;
