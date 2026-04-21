@@ -4,9 +4,7 @@ use clap::{Parser, Subcommand};
 use devimint::devfed::DevJitFed;
 use devimint::federation::Client;
 use devimint::util::almost_equal;
-use devimint::version_constants::{
-    VERSION_0_9_0_ALPHA, VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA,
-};
+use devimint::version_constants::{VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA};
 use devimint::{Gatewayd, cmd, util};
 use fedimint_core::core::OperationId;
 use fedimint_core::encoding::Encodable;
@@ -370,15 +368,9 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
         .set_federation_transaction_fee(fed_id.clone(), 0, 0)
         .await?;
 
-    if util::FedimintdCmd::version_or_default().await >= *VERSION_0_9_0_ALPHA {
-        // Gateway pays: 1_000 msat LNv2 federation base fee. Gateway receives:
-        // 1_000_000 payment.
-        test_fees(fed_id, &client, gw_lnd, gw_ldk, 1_000_000 - 1_000).await?;
-    } else {
-        // Gateway pays: 1_000 msat LNv2 federation base fee, 100 msat LNv2 federation
-        // relative fee. Gateway receives: 1_000_000 payment.
-        test_fees(fed_id, &client, gw_lnd, gw_ldk, 1_000_000 - 1_000 - 100).await?;
-    }
+    // Gateway pays: 1_000 msat LNv2 federation base fee. Gateway receives:
+    // 1_000_000 payment.
+    test_fees(fed_id, &client, gw_lnd, gw_ldk, 1_000_000 - 1_000).await?;
 
     let online_peers: Vec<usize> = federation.members.keys().copied().collect();
 

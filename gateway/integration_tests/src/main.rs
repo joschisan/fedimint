@@ -14,7 +14,7 @@ use devimint::envs::FM_DATA_DIR_ENV;
 use devimint::external::{Bitcoind, Esplora};
 use devimint::federation::Federation;
 use devimint::util::{ProcessManager, almost_equal, poll, poll_with_timeout};
-use devimint::version_constants::{VERSION_0_8_2, VERSION_0_9_0_ALPHA, VERSION_0_10_0_ALPHA};
+use devimint::version_constants::VERSION_0_10_0_ALPHA;
 use devimint::{Gatewayd, LightningNode, cli, util};
 use fedimint_core::config::FederationId;
 use fedimint_core::time::now;
@@ -182,8 +182,6 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                 gw.client().connect_fed(invite_code).await.expect_err("Connecting to the same federation succeeded");
                 info!(target: LOG_TEST, "Verified that gateway couldn't connect to already connected federation");
 
-                let gatewayd_version = util::Gatewayd::version_or_default().await;
-
                 // Change the routing fees for a specific federation
                 let fed_id = dev_fed.fed().await?.calculate_federation_id();
                 gw.client().set_federation_routing_fee(fed_id.clone(), 20, 20000)
@@ -230,12 +228,8 @@ async fn config_test(gw_type: LightningNodeType) -> anyhow::Result<()> {
                 let new_invite_code = new_fed.invite_code()?;
                 gw.client().connect_fed(new_invite_code.clone()).await?;
 
-                let (default_base, default_ppm) = if gatewayd_version >= *VERSION_0_8_2 {
-                    (0, 0)
-                } else {
-                    // v0.8.0 and v0.8.1
-                    (2000, 3000)
-                };
+                let default_base = 0;
+                let default_ppm = 0;
 
                 let lightning_fee = gw.client().get_lightning_fee(new_fed_id.clone()).await?;
                 assert_eq!(
@@ -475,27 +469,20 @@ async fn liquidity_test() -> anyhow::Result<()> {
                 bitcoind.poll_get_transaction(txid).await?;
             }
 
-            // Skip channel closing for gateways older than 0.9.0-alpha, since
-            // cooperative close can hang due to LND fee estimation in regtest
-            // (fixed by adding sats_per_vbyte in 0.9.0-alpha).
-            if gw_lnd.gatewayd_version >= *VERSION_0_9_0_ALPHA {
-                info!(target: LOG_TEST, "Testing closing all channels...");
+            info!(target: LOG_TEST, "Testing closing all channels...");
 
-                // Gracefully close one of LND's channel's
-                let gw_ldk_pubkey = gw_ldk.client().lightning_pubkey().await?;
-                gw_lnd.client().close_channel(gw_ldk_pubkey, false).await?;
+            // Gracefully close one of LND's channel's
+            let gw_ldk_pubkey = gw_ldk.client().lightning_pubkey().await?;
+            gw_lnd.client().close_channel(gw_ldk_pubkey, false).await?;
 
-                // Force close LDK's channels
-                gw_ldk_second.client().close_all_channels(true).await?;
+            // Force close LDK's channels
+            gw_ldk_second.client().close_all_channels(true).await?;
 
-                // Verify none of the channels are active
-                for gw in gateways {
-                    let channels = gw.client().list_channels().await?;
-                    let active_channel = channels.into_iter().any(|chan| chan.is_active);
-                    assert!(!active_channel);
-                }
-            } else {
-                info!(target: LOG_TEST, "Skipping channel close test for gateway version < 0.9.0");
+            // Verify none of the channels are active
+            for gw in gateways {
+                let channels = gw.client().list_channels().await?;
+                let active_channel = channels.into_iter().any(|chan| chan.is_active);
+                assert!(!active_channel);
             }
 
             Ok(())
