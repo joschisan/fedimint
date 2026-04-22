@@ -615,7 +615,7 @@ impl ClientModule for LightningClientModule {
                     yield serde_json::to_value(output)?;
                 }
                 _ => {
-                    Err(anyhow::format_err!("Unknown method: {}", method))?;
+                    Err(anyhow::format_err!("Unknown method: {method}"))?;
                     unreachable!()
                 },
             }
@@ -806,9 +806,7 @@ impl LightningClientModule {
         let invoice_currency = invoice.currency();
         ensure!(
             federation_currency == invoice_currency,
-            "Invalid invoice currency: expected={:?}, got={:?}",
-            federation_currency,
-            invoice_currency
+            "Invalid invoice currency: expected={federation_currency:?}, got={invoice_currency:?}"
         );
 
         // Do not create the funding transaction if the gateway is not currently
@@ -1123,7 +1121,7 @@ impl LightningClientModule {
             {
                 return Ok(gw);
             }
-            return Err(anyhow::anyhow!("Specified gateway is offline: {}", gw_id));
+            return Err(anyhow::anyhow!("Specified gateway is offline: {gw_id}"));
         }
 
         let gateways: Vec<LightningGatewayAnnouncement> = self.list_gateways().await;

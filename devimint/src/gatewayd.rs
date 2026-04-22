@@ -504,10 +504,10 @@ impl<'a> GatewayClient {
 
         let lightning_fee = fed["config"]["lightning_fee"].clone();
         let base: Amount = serde_json::from_value(lightning_fee["base"].clone())
-            .map_err(|e| anyhow!("Couldnt parse base: {}", e))?;
+            .map_err(|e| anyhow!("Couldnt parse base: {e}"))?;
         let parts_per_million: u64 =
             serde_json::from_value(lightning_fee["parts_per_million"].clone())
-                .map_err(|e| anyhow!("Couldnt parse parts_per_million: {}", e))?;
+                .map_err(|e| anyhow!("Couldnt parse parts_per_million: {e}"))?;
 
         Ok(PaymentFee {
             base,

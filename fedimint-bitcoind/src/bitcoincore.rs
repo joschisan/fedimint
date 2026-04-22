@@ -143,7 +143,7 @@ impl IBitcoindRpc for BitcoindClient {
             &block_in_place(|| self.client.get_tx_out_proof(&[txid], None))?,
             &ModuleDecoderRegistry::default(),
         )
-        .map_err(|error| format_err!("Could not decode tx: {}", error))
+        .map_err(|error| format_err!("Could not decode tx: {error}"))
     }
 
     async fn get_info(&self) -> anyhow::Result<BlockchainInfo> {

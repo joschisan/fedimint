@@ -286,6 +286,12 @@ where
         core_api_version: ApiVersion,
         broadcast_public_keys: Option<&BTreeMap<PeerId, secp256k1::PublicKey>>,
     ) -> anyhow::Result<SessionStatus> {
+        enum NoCacheErr {
+            Initial,
+            Pending(Vec<AcceptedItem>),
+            Err(anyhow::Error),
+        }
+
         let mut lru_lock = self.get_session_status_lru.lock().await;
 
         let entry_arc = lru_lock
@@ -295,11 +301,6 @@ where
         // we drop the lru lock so requests for other `session_idx` can work in parallel
         drop(lru_lock);
 
-        enum NoCacheErr {
-            Initial,
-            Pending(Vec<AcceptedItem>),
-            Err(anyhow::Error),
-        }
         match entry_arc
             .get_or_try_init(|| async {
                 let session_status =

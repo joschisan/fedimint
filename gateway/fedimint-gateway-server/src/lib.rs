@@ -2329,7 +2329,7 @@ impl IAdminGateway for Gateway {
     ) -> AdminResult<ReceiveEcashResponse> {
         Self::handle_receive_ecash_msg(self, payload)
             .await
-            .map_err(|e| AdminGatewayError::Unexpected(anyhow::anyhow!("{}", e)))
+            .map_err(|e| AdminGatewayError::Unexpected(anyhow::anyhow!("{e}")))
     }
 
     /// Creates an invoice that is directly payable to the gateway's lightning

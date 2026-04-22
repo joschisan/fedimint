@@ -105,8 +105,7 @@ pub async fn build_iroh_endpoint(
         SocketAddr::V6(addr_v6) => builder.bind_addr_v6(addr_v6),
     };
 
-    let endpoint = builder
-        .bind()
+    let endpoint = Box::pin(builder.bind())
         .await
         .context("Failed to bind Iroh endpoint")?;
 

@@ -56,7 +56,7 @@ pub fn parse_map(s: &str) -> Result<BTreeMap<String, String>> {
         if parts.len() == 2 {
             map.insert(parts[0].to_string(), parts[1].to_string());
         } else {
-            return Err(format_err!("Invalid pair in map: {}", pair));
+            return Err(format_err!("Invalid pair in map: {pair}"));
         }
     }
     Ok(map)
@@ -400,7 +400,7 @@ impl Command {
             .wait()
             .await?;
         if !status.success() {
-            bail!("{}", status);
+            bail!("{status}");
         }
         Ok(())
     }

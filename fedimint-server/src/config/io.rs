@@ -153,7 +153,8 @@ pub fn create_backup_copy(original: &Path) -> anyhow::Result<()> {
     info!(target: LOG_CORE, ?original, ?backup_path, "Creating backup copy of file");
     ensure!(
         !backup_path.exists(),
-        "Already have a backup at {backup_path:?}, would be overwritten"
+        "Already have a backup at {}, would be overwritten",
+        backup_path.display()
     );
     fs::copy(original, backup_path)?;
     Ok(())
