@@ -235,8 +235,7 @@ impl IBitcoindRpc for EsploraClient {
 
             if transactions.len() >= MAX_TX_HISTORY {
                 return Err(format_err!(
-                    "Script history exceeds maximum limit of {}",
-                    MAX_TX_HISTORY
+                    "Script history exceeds maximum limit of {MAX_TX_HISTORY}"
                 ));
             }
 

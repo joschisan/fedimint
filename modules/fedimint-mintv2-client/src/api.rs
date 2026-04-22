@@ -98,7 +98,7 @@ impl MintV2ModuleApi for DynModuleApi {
             ApiRequestErased::default(),
         )
         .await
-        .map_err(|e| anyhow::anyhow!("{}", e))
+        .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     async fn fetch_recovery_slice_hash(&self, start: u64, end: u64) -> sha256::Hash {
