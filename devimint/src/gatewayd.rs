@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -336,7 +336,10 @@ impl<'a> GatewayClient {
         Ok(())
     }
 
-    pub async fn close_all_channels(&self, force: bool) -> Result<()> {
+    /// Send close requests for all channels without waiting for them to
+    /// become inactive. See [`Self::close_all_channels`] for a version
+    /// that polls until closure is confirmed.
+    pub async fn close_all_channels_no_wait(&self, force: bool) -> Result<()> {
         let channels = self.list_channels().await?;
 
         for chan in channels {
@@ -345,6 +348,33 @@ impl<'a> GatewayClient {
         }
 
         Ok(())
+    }
+
+    /// Close all channels and poll until none are active.
+    ///
+    /// Only waits for channels that existed at the time of the call, so
+    /// channels opened while polling are ignored.
+    pub async fn close_all_channels(&self, force: bool, timeout: Duration) -> Result<()> {
+        let channels = self.list_channels().await?;
+        let closing_peers: HashSet<_> = channels.iter().map(|chan| chan.remote_pubkey).collect();
+
+        for chan in channels {
+            self.close_channel(chan.remote_pubkey, force).await?;
+        }
+
+        poll_with_timeout("waiting for channels to close", timeout, || async {
+            let channels = self.list_channels().await.map_err(ControlFlow::Continue)?;
+            if channels
+                .iter()
+                .any(|chan| closing_peers.contains(&chan.remote_pubkey) && chan.is_active)
+            {
+                return Err(ControlFlow::Continue(anyhow::anyhow!(
+                    "Some channels are still active"
+                )));
+            }
+            Ok(())
+        })
+        .await
     }
 
     /// Open a channel with the gateway's lightning node, returning the funding
