@@ -431,13 +431,9 @@ async fn liquidity_test() -> anyhow::Result<()> {
             assert_eq!(lnd_transactions.len(), 0);
 
             info!(target: LOG_TEST, "Testing paying Bolt12 Offers...");
-            // TODO: investigate why the first BOLT12 payment attempt is expiring consistently
-            poll_with_timeout("First BOLT12 payment", Duration::from_secs(30), || async {
-                let offer_with_amount = gw_ldk_second.client().create_offer(Some(Amount::from_msats(10_000_000))).await.map_err(ControlFlow::Continue)?;
-                gw_ldk.client().pay_offer(offer_with_amount, None).await.map_err(ControlFlow::Continue)?;
-                assert!(get_transaction(gw_ldk_second, PaymentKind::Bolt12Offer, Amount::from_msats(10_000_000), PaymentStatus::Succeeded).await.is_some());
-                Ok(())
-            }).await?;
+            let offer_with_amount = gw_ldk_second.client().create_offer(Some(Amount::from_msats(10_000_000))).await?;
+            gw_ldk.client().pay_offer(offer_with_amount, None).await?;
+            assert!(get_transaction(gw_ldk_second, PaymentKind::Bolt12Offer, Amount::from_msats(10_000_000), PaymentStatus::Succeeded).await.is_some());
 
             let offer_without_amount = gw_ldk.client().create_offer(None).await?;
             gw_ldk_second.client().pay_offer(offer_without_amount.clone(), Some(Amount::from_msats(5_000_000))).await?;
