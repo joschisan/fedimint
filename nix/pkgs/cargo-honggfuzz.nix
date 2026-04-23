@@ -7,14 +7,14 @@
 rustPlatform.buildRustPackage rec {
   pname = "honggfuzz";
   # last tagged version is far behind master
-  version = "0.5.55";
+  version = "0.5.60";
 
   src = fetchCrate {
     inherit pname version;
-    sha256 = "sha256-ICBhvcv4SqeY9Y34EQmxTTxlo4LA4hsBLa2QK73pu38=";
+    sha256 = "sha256-btHYe+rN28bVeDWZB3AQCeF5mk30YNIINMXOOoTIjJk=";
   };
 
-  cargoHash = "sha256-k5cZhx9Q4yZILW9b3k9zOZNO5f2iqPTsrUsDu8mzLaE=";
+  cargoHash = "sha256-9jlu9PDqQRW3r+ZJrGxDXB533gTa8XexZuK5LXcNY3s=";
 
   buildInputs = lib.optionals stdenv.isDarwin [ ];
 }
