@@ -948,7 +948,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease 0.2.35",
  "proc-macro2",
@@ -5817,13 +5817,14 @@ dependencies = [
 
 [[package]]
 name = "honggfuzz"
-version = "0.5.55"
+version = "0.5.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "848e9c511092e0daa0a35a63e8e6e475a3e8f870741448b9f6028d69b142f18e"
+checksum = "4d6510a410acedd7a7683b3a45dafdc5ccf3c72d6addaa373497005964fc4e23"
 dependencies = [
  "lazy_static",
- "memmap2 0.5.10",
+ "memmap2",
  "rustc_version",
+ "semver",
 ]
 
 [[package]]
@@ -7085,7 +7086,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.53.2",
 ]
 
 [[package]]
@@ -7525,15 +7526,6 @@ name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
-
-[[package]]
-name = "memmap2"
-version = "0.5.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83faa42c0a078c393f6b29d5db232d8be22776a891f8f56e5284faee4a20b327"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "memmap2"
@@ -11764,7 +11756,7 @@ dependencies = [
  "humantime",
  "humantime-serde",
  "itertools 0.14.0",
- "memmap2 0.9.5",
+ "memmap2",
  "oneshot-fused-workaround",
  "paste",
  "postage",
@@ -13754,8 +13746,8 @@ dependencies = [
  "log",
  "serde",
  "thiserror 2.0.18",
- "windows 0.61.3",
- "windows-core 0.61.2",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
