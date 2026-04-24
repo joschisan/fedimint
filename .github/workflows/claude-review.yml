@@ -15,6 +15,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
   review:
     # Run on PR open/ready-for-review, or when someone comments "/review" on a PR

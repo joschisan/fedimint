@@ -25,6 +25,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   self-care:
@@ -461,6 +464,8 @@ jobs:
   pkgs:
     if: github.repository == 'fedimint/fedimint' && (startsWith(github.ref, 'refs/heads/releases') || github.ref_type == 'tag')
     name: "Release packages: ${{ matrix.build.flake-output }} on ${{ matrix.platform.name }}"
+    permissions:
+      contents: write # softprops/action-gh-release creates GitHub releases on tags
 
     strategy:
       matrix:

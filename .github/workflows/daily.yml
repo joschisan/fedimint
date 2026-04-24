@@ -6,6 +6,9 @@ on:
 
 name: Daily check
 
+permissions:
+  contents: read
+
 jobs:
   audit:
     runs-on: [self-hosted, linux, x64]

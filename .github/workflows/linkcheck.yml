@@ -2,6 +2,9 @@ on: [push, pull_request]
 
 name: Markdown Link Check
 
+permissions:
+  contents: read
+
 jobs:
   markdown-link-check:
     runs-on: [self-hosted, linux, x64]

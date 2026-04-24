@@ -4,6 +4,8 @@ on:
   pull_request:
     types: [opened, edited]
 
+permissions: {}
+
 jobs:
   check-description:
     runs-on: [self-hosted, linux, x64]

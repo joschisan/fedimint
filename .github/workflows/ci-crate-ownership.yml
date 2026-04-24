@@ -5,6 +5,9 @@ on:
 
 name: Crate ownership check
 
+permissions:
+  contents: read
+
 jobs:
   check-ownership:
     runs-on: [self-hosted, linux, x64]
