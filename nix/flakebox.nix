@@ -1041,6 +1041,111 @@ in
       pnameSuffix = "all-feats";
     };
 
+    # Quick honggfuzz-based fuzzing of `fedimint-fuzz` bins.
+    #
+    # Non-obvious requirements (all load-bearing — changing any of these
+    # tends to break the build in confusing ways):
+    #
+    # - `CARGO_TARGET_DIR=$PWD/target`. honggfuzz-rs ≥0.5.60's build.rs does
+    #   `fs::copy(out_dir/honggfuzz, $CRATE_ROOT/$CARGO_HONGGFUZZ_TARGET_DIR/honggfuzz)`
+    #   and cargo-hfuzz sets `CARGO_HONGGFUZZ_TARGET_DIR` from the env var
+    #   `CARGO_TARGET_DIR` (defaulting to `hfuzz_target`). Cargo's
+    #   `--target-dir` CLI flag is *not* picked up by cargo-hfuzz. Without
+    #   this export the copy target dir doesn't exist and build.rs panics
+    #   with an opaque ENOENT at line 134.
+    #
+    # - `-fuse-ld=mold`. iroh-relay declares `crate-type = ["lib", "cdylib"]`,
+    #   so cargo links a `.so` for it. Honggfuzz's sancov `RUSTFLAGS` cause
+    #   rustc to emit generic `std`/`alloc` instantiations (`Vec::reserve`,
+    #   `Write::write_all`, …) as hidden symbols in dep rlibs, and bfd ld
+    #   refuses to resolve those when linking the cdylib. mold accepts them.
+    #   `-C link-dead-code` does *not* help — it just shifts the failure to
+    #   different hidden symbols.
+    #
+    # - `cp noop.rs` + `--bin noop` in the deps phase. crane's
+    #   `buildDepsOnly` replaces `src/bin/*.rs` with `fn main() {}` dummies.
+    #   Cargo then doesn't pass `-lhfuzz` to a dummy that doesn't use the
+    #   honggfuzz crate, so the sancov runtime is unresolved. The real
+    #   `fuzz/src/bin/noop.rs` uses `honggfuzz::fuzz!` and we copy it back
+    #   over the dummy to get one bin whose link edge keeps `-lhfuzz` alive;
+    #   `--bin noop` restricts the deps build to it so we don't also hit
+    #   the same issue on the other stubs.
+    #
+    # - Both phases pass `--package=fedimint-fuzz`. Without it, cargo
+    #   resolves the build unit differently and invalidates the entire
+    #   external-dep fingerprint cache between the two phases (434 vs 14
+    #   recompilations on a warm cache, measured). This is why we build
+    #   explicitly in the run phase and drive honggfuzz by hand instead of
+    #   using `cargo hfuzz run`, which internally invokes `cargo build
+    #   --bin <target>` without `--package`.
+    #
+    # - `env -u RUSTC_WRAPPER CC=clang`. honggfuzz's C build wants clang
+    #   (sancov pass); the workspace's default `RUSTC_WRAPPER` (sccache-ish)
+    #   caches artifacts keyed by the ambient RUSTFLAGS, which collides
+    #   with the sancov flags cargo-hfuzz injects on top.
+    quickFuzz =
+      let
+        pname = "${commonArgs.pname}-cargo-hfuzz";
+        nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
+          pkgs.cargo-honggfuzz
+          pkgs.lldb
+          pkgs.clang
+        ];
+        buildInputs = commonArgs.buildInputs ++ [
+          pkgs.libbfd_2_38
+          pkgs.libunwind.dev
+          pkgs.libopcodes_2_38
+          pkgs.pkgsStatic.libblocksruntime
+        ];
+        # RUSTFLAGS shared by deps + run phases. `--cfg tokio_unstable` matches
+        # the rest of the workspace; the mold link-arg is explained above.
+        hfuzzRustflags = "--cfg tokio_unstable -C link-arg=-fuse-ld=${pkgs.mold}/bin/mold";
+        deps = craneLib.buildDepsOnly {
+          inherit pname nativeBuildInputs buildInputs;
+          buildPhaseCargoCommand = ''
+            export CARGO_TARGET_DIR=$PWD/target
+            cp ${../fuzz/src/bin/noop.rs} ./fuzz/src/bin/noop.rs
+            env -u RUSTC_WRAPPER CC=clang RUSTFLAGS="${hfuzzRustflags}" \
+              cargo hfuzz build --package=fedimint-fuzz --bin noop
+          '';
+          doCheck = false;
+        };
+      in
+      craneLib.mkCargoDerivation {
+        inherit pname nativeBuildInputs buildInputs;
+        cargoArtifacts = deps;
+        buildPhaseCargoCommand = ''
+          set -euo pipefail
+
+          export CARGO_TARGET_DIR=$PWD/target
+          # Build all fuzz bins in one cargo invocation with an explicit
+          # `--package`. Without `--package`, cargo resolves the build unit
+          # differently and invalidates the entire external-dep fingerprint
+          # cache (434 vs 14 recompilations on a warm deps cache) — which
+          # is exactly what `cargo hfuzz run <target>` does internally. So
+          # we build explicitly here and drive honggfuzz by hand below.
+          env -u RUSTC_WRAPPER CC=clang RUSTFLAGS="${hfuzzRustflags}" \
+            cargo hfuzz build --package=fedimint-fuzz
+          # Per-target honggfuzz budget; tune via HFUZZ_RUN_ARGS from the
+          # caller (the previous `{{ARGS}}` here was an unused template
+          # placeholder — honggfuzz parsed it as a bogus flag and aborted).
+          runArgs="''${HFUZZ_RUN_ARGS:---run_time 5 -N 1000}"
+          # noop is the deps-cache stub from fuzz/src/bin/noop.rs; nothing to fuzz there.
+          for target in $(ls fuzz/src/bin/ | sed -e 's/\.rs$//' | grep -v '^noop$') ; do
+            >&2 echo "Fuzzing ''${target}"
+            mkdir -p "hfuzz_workspace/''${target}/input"
+            target/honggfuzz \
+              -W "hfuzz_workspace/''${target}" \
+              -f "hfuzz_workspace/''${target}/input" \
+              -P \
+              $runArgs \
+              -- "target/x86_64-unknown-linux-gnu/release/''${target}"
+          done
+        '';
+        doInstallCargoArtifacts = false;
+        doCheck = false;
+      };
+
     vmTestFedimintd = lib.optionalAttrs pkgs.stdenv.isLinux (
       import ./tests/fedimintd.nix {
         inherit pkgs;

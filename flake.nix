@@ -392,7 +392,6 @@
                   with pkgs;
                   commonShellArgs.nativeBuildInputs
                   ++ [
-                    cargo-honggfuzz
                     lldb
                     clang
                   ];
@@ -405,6 +404,12 @@
                     libunwind.dev
                     libopcodes_2_38
                     pkgsStatic.libblocksruntime
+                  ];
+                packages =
+                  with pkgs;
+                  commonShellArgs.packages
+                  ++ [
+                    cargo-honggfuzz
                   ];
 
                 shellHook = ''
