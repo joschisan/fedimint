@@ -25,6 +25,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   self-care:
@@ -32,10 +35,10 @@ jobs:
     name: Flake self-check
     runs-on: [self-hosted, linux, x64]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Check Nix flake inputs
         if: github.event_name == 'pull_request' && github.base_ref == 'master'
-        uses: DeterminateSystems/flake-checker-action@v12
+        uses: DeterminateSystems/flake-checker-action@3164002371bc90729c68af0e24d5aacf20d7c9f6 # v12
         with:
           fail-mode: true
           nixpkgs-keys: nixpkgs
@@ -46,9 +49,9 @@ jobs:
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
-      - uses: cachix/cachix-action@v17
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dpc/nix-installer-action@c6e05d595d5ed6d6b7c46e42409ca2a126efe13d # dpc/jj-vqymqvyntouw
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         with:
           name: fedimint
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -93,11 +96,11 @@ jobs:
     timeout-minutes: ${{ matrix.timeout }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event_name != 'pull_request' || matrix.build-in-pr
 
-      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
-      - uses: cachix/cachix-action@v17
+      - uses: dpc/nix-installer-action@c6e05d595d5ed6d6b7c46e42409ca2a126efe13d # dpc/jj-vqymqvyntouw
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         if: github.event_name != 'pull_request' || matrix.build-in-pr
         with:
           name: fedimint
@@ -133,16 +136,16 @@ jobs:
     timeout-minutes: ${{ matrix.timeout }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event_name != 'pull_request' || matrix.build-in-pr
 
       - name: Prepare
         if: github.event_name != 'pull_request' || matrix.build-in-pr
         uses: ./.github/actions/prepare
 
-      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
+      - uses: dpc/nix-installer-action@c6e05d595d5ed6d6b7c46e42409ca2a126efe13d # dpc/jj-vqymqvyntouw
         if: github.event_name != 'pull_request' || matrix.build-in-pr
-      - uses: cachix/cachix-action@v17
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         if: github.event_name != 'pull_request' || matrix.build-in-pr
         with:
           name: fedimint
@@ -224,9 +227,9 @@ jobs:
     timeout-minutes: 60
     if: github.event_name == 'merge_group'
     steps:
-      - uses: actions/checkout@v6
-      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
-      - uses: cachix/cachix-action@v17
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dpc/nix-installer-action@c6e05d595d5ed6d6b7c46e42409ca2a126efe13d # dpc/jj-vqymqvyntouw
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         with:
           name: fedimint
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -247,9 +250,9 @@ jobs:
     # we don't want to stop the world because of it
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
-      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
-      - uses: cachix/cachix-action@v17
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dpc/nix-installer-action@c6e05d595d5ed6d6b7c46e42409ca2a126efe13d # dpc/jj-vqymqvyntouw
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         with:
           name: fedimint
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -295,13 +298,13 @@ jobs:
     timeout-minutes: ${{ matrix.timeout }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event_name != 'pull_request' || matrix.build-in-pr
 
-      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
+      - uses: dpc/nix-installer-action@c6e05d595d5ed6d6b7c46e42409ca2a126efe13d # dpc/jj-vqymqvyntouw
         if: github.event_name != 'pull_request' || matrix.build-in-pr
 
-      - uses: cachix/cachix-action@v17
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         if: github.event_name != 'pull_request' || matrix.build-in-pr
         with:
           name: fedimint
@@ -352,15 +355,15 @@ jobs:
     steps:
       - name: Checkout Code
         if: github.event_name != 'pull_request' || matrix.platform.run_in_pr
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Prepare
         if: github.event_name != 'pull_request' || matrix.platform.run_in_pr
         uses: ./.github/actions/prepare
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event_name != 'pull_request' || matrix.platform.run_in_pr
-      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
+      - uses: dpc/nix-installer-action@c6e05d595d5ed6d6b7c46e42409ca2a126efe13d # dpc/jj-vqymqvyntouw
         if: github.event_name != 'pull_request' || matrix.platform.run_in_pr
-      - uses: cachix/cachix-action@v17
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         if: github.event_name != 'pull_request' || matrix.platform.run_in_pr
         with:
           name: fedimint
@@ -379,7 +382,7 @@ jobs:
 
       - name: Login to Docker Hub
         if: (github.ref_type == 'tag' || startsWith(github.ref, 'refs/heads/releases/')) && (github.event_name != 'pull_request' || matrix.platform.run_in_pr)
-        uses: docker/login-action@v4
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           username: fedimint
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
@@ -409,11 +412,11 @@ jobs:
     runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Prepare
         uses: ./.github/actions/prepare
       - name: Login to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           username: fedimint
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
@@ -461,6 +464,8 @@ jobs:
   pkgs:
     if: github.repository == 'fedimint/fedimint' && (startsWith(github.ref, 'refs/heads/releases') || github.ref_type == 'tag')
     name: "Release packages: ${{ matrix.build.flake-output }} on ${{ matrix.platform.name }}"
+    permissions:
+      contents: write # softprops/action-gh-release creates GitHub releases on tags
 
     strategy:
       matrix:
@@ -511,9 +516,9 @@ jobs:
         Please report any issues you encounter.
 
     steps:
-      - uses: actions/checkout@v6
-      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
-      - uses: cachix/cachix-action@v17
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dpc/nix-installer-action@c6e05d595d5ed6d6b7c46e42409ca2a126efe13d # dpc/jj-vqymqvyntouw
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         with:
           name: fedimint
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -645,13 +650,13 @@ jobs:
           done
 
       - name: Upload Binaries
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: "${{ matrix.build.flake-output}}-${{ matrix.platform.name }}"
           path: "bins/**"
 
       - name: Release Binaries
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: "bins/**"
@@ -682,14 +687,14 @@ jobs:
 
       - name: Upload DEB packages
         if: matrix.platform.build-deb
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: "${{ matrix.build.flake-output }}-${{ matrix.platform.name }}-deb-bundle"
           path: "debs/**.deb"
 
       - name: Release DEB packages
         if: startsWith(github.ref, 'refs/tags/') && matrix.platform.build-deb
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           files: "debs/**.deb"
           prerelease: ${{ env.IS_PRERELEASE }}
@@ -697,14 +702,14 @@ jobs:
 
       - name: Upload RPM packages
         if: matrix.platform.build-rpm
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: "${{ matrix.build.flake-output }}-${{ matrix.platform.name }}-rpm-bundle"
           path: "rpms/**.rpm"
 
       - name: Release RPM packages
         if: startsWith(github.ref, 'refs/tags/') && matrix.platform.build-rpm
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           files: "rpms/**.rpm"
           prerelease: ${{ env.IS_PRERELEASE }}
@@ -765,7 +770,7 @@ jobs:
         }}
     steps:
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "20"
       - name: Install system dependencies
@@ -783,7 +788,7 @@ jobs:
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
       # md-packer's ICU dependencies require rustc 1.86+
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: "1.86.0"
       - name: Install cargo tools
@@ -792,17 +797,17 @@ jobs:
           cargo install --force --locked toml-cli "web-static-pack-packer@0.5.0"
           cargo install --git=https://github.com/Start9Labs/md-packer.git --branch=main
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - name: Checkout start-os SDK
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: Start9Labs/start-os
           ref: v0.3.5.1
           submodules: recursive
       - name: Cache start-sdk
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         id: cache
         with:
           path: |
@@ -824,7 +829,7 @@ jobs:
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
       - name: Checkout fedimint
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Stamp version from tag
         working-directory: fedimint-startos
         run: |
@@ -842,12 +847,12 @@ jobs:
           mv fedimintd.s9pk "fedimintd-v${VERSION}.s9pk"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
       - name: Upload s9pk
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fedimintd-v${{ steps.build.outputs.version }}.s9pk
           path: fedimint-startos/fedimintd-v*.s9pk
       - name: Attach to release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           tag_name: ${{ env.TAG_NAME }}
           files: fedimint-startos/fedimintd-v*.s9pk
@@ -867,7 +872,7 @@ jobs:
         }}
     steps:
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "20"
       - name: Install system dependencies
@@ -885,7 +890,7 @@ jobs:
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
       # md-packer's ICU dependencies require rustc 1.86+
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: "1.86.0"
       - name: Install cargo tools
@@ -894,17 +899,17 @@ jobs:
           cargo install --force --locked toml-cli "web-static-pack-packer@0.5.0"
           cargo install --git=https://github.com/Start9Labs/md-packer.git --branch=main
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - name: Checkout start-os SDK
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: Start9Labs/start-os
           ref: v0.3.5.1
           submodules: recursive
       - name: Cache start-sdk
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         id: cache
         with:
           path: |
@@ -926,7 +931,7 @@ jobs:
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
       - name: Checkout fedimint
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Stamp version from tag
         working-directory: gatewayd-startos
         run: |
@@ -943,12 +948,12 @@ jobs:
           mv fedimint-gatewayd.s9pk "fedimint-gatewayd-v${VERSION}.s9pk"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
       - name: Upload s9pk
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fedimint-gatewayd-v${{ steps.build.outputs.version }}.s9pk
           path: gatewayd-startos/fedimint-gatewayd-v*.s9pk
       - name: Attach to release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           tag_name: ${{ env.TAG_NAME }}
           files: gatewayd-startos/fedimint-gatewayd-v*.s9pk
@@ -1002,7 +1007,7 @@ jobs:
       # https://stackoverflow.com/a/74562058/134409
       if: ${{ always() && contains(needs.*.result, 'failure') }}
       # https://github.com/marketplace/actions/actions-status-discord
-      uses: sarisia/actions-status-discord@v1
+      uses: sarisia/actions-status-discord@eb045afee445dc055c18d3d90bd0f244fd062708 # v1.16.0
       with:
         webhook: ${{ secrets.DISCORD_WEBHOOK }}
         # current job is a success, but that's not what we're interested in
