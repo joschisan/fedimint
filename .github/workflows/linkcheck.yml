@@ -7,11 +7,11 @@ jobs:
     runs-on: [self-hosted, linux, x64]
     continue-on-error: true # can fail for external reasons, so don't be a blocker
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       # Persist lychee cache, so we don't bother with checking same links all the time
       # Should also minimize number of flakes.
-      - uses: actions/cache@v5
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: .lycheecache
           key: cache-lychee-${{ github.sha }}

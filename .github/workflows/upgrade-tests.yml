@@ -41,11 +41,11 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Prepare
         uses: ./.github/actions/prepare
-      - uses: dpc/nix-installer-action@dpc/jj-vqymqvyntouw
-      - uses: cachix/cachix-action@v17
+      - uses: dpc/nix-installer-action@c6e05d595d5ed6d6b7c46e42409ca2a126efe13d # dpc/jj-vqymqvyntouw
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         with:
           name: fedimint
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -104,7 +104,7 @@ jobs:
       # https://stackoverflow.com/a/74562058/134409
       if: ${{ always() && contains(needs.*.result, 'failure') }}
       # https://github.com/marketplace/actions/actions-status-discord
-      uses: sarisia/actions-status-discord@v1
+      uses: sarisia/actions-status-discord@eb045afee445dc055c18d3d90bd0f244fd062708 # v1.16.0
       with:
         webhook: ${{ secrets.DISCORD_WEBHOOK }}
         # current job is a success, but that's not what we're interested in
