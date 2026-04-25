@@ -599,6 +599,7 @@ async fn test_lnurl_recovery(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     let recurringd = dev_fed.recurringdv2().await?.api_url().to_string();
 
     const LNURL_AMOUNT_MSAT: u64 = 500_000;
+    const LNURL_BALANCE_TOLERANCE_MSAT: u64 = 100_000;
 
     // ── Phase 1: Pre-recovery LNURL receives ──────────────────────────
 
@@ -616,7 +617,13 @@ async fn test_lnurl_recovery(dev_fed: &DevJitFed) -> anyhow::Result<()> {
         gw_lnd.client().pay_invoice(invoice).await?;
     }
 
-    while client.balance().await? < 3 * LNURL_AMOUNT_MSAT - 100_000 {
+    while almost_equal(
+        client.balance().await?,
+        3 * LNURL_AMOUNT_MSAT,
+        LNURL_BALANCE_TOLERANCE_MSAT,
+    )
+    .is_err()
+    {
         info!("Waiting for pre-recovery LNURL payments to settle...");
         cmd!(client, "dev", "wait", "1").out_json().await?;
     }
@@ -665,8 +672,13 @@ async fn test_lnurl_recovery(dev_fed: &DevJitFed) -> anyhow::Result<()> {
         gw_lnd.client().pay_invoice(invoice).await?;
     }
 
-    let expected_min = post_recovery_balance + 2 * LNURL_AMOUNT_MSAT - 100_000;
-    while restored.balance().await? < expected_min {
+    while almost_equal(
+        restored.balance().await?,
+        post_recovery_balance + 2 * LNURL_AMOUNT_MSAT,
+        LNURL_BALANCE_TOLERANCE_MSAT,
+    )
+    .is_err()
+    {
         info!("Waiting for post-recovery LNURL payments to settle...");
         cmd!(restored, "dev", "wait", "1").out_json().await?;
     }
