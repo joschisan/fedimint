@@ -1441,11 +1441,14 @@ impl Wallet {
         old_count: u32,
         new_count: u32,
     ) {
+        let sync_start = fedimint_core::time::now();
         info!(
             target: LOG_MODULE_WALLET,
             old_count,
             new_count,
-            blocks_to_go = new_count - old_count,
+            blocks_to_go = new_count
+                .checked_sub(old_count)
+                .expect("new_count must be >= old_count"),
             "New block count consensus, initiating sync",
         );
 
@@ -1454,6 +1457,7 @@ impl Wallet {
         self.wait_for_finality_confs_or_shutdown(new_count).await;
 
         for height in old_count..new_count {
+            let block_start = fedimint_core::time::now();
             info!(
                 target: LOG_MODULE_WALLET,
                 height,
@@ -1570,9 +1574,21 @@ impl Wallet {
                 target: LOG_MODULE_WALLET,
                 height,
                 ?block_hash,
+                duration = ?block_start.elapsed().unwrap_or_default(),
                 "Successfully processed block of height {height}",
             );
         }
+
+        info!(
+            target: LOG_MODULE_WALLET,
+            old_count,
+            new_count,
+            blocks_processed = new_count
+                .checked_sub(old_count)
+                .expect("new_count must be >= old_count"),
+            duration = ?sync_start.elapsed().unwrap_or_default(),
+            "Block count consensus sync complete",
+        );
     }
 
     /// Add a change UTXO to our spendable UTXO database after it was included

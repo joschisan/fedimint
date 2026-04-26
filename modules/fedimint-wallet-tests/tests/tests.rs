@@ -677,6 +677,7 @@ async fn peg_outs_must_wait_for_available_utxos() -> anyhow::Result<()> {
 async fn peg_ins_that_are_unconfirmed_are_rejected() -> anyhow::Result<()> {
     let fixtures = fixtures();
     let bitcoin = fixtures.bitcoin();
+    let bitcoin = bitcoin.lock_exclusive().await;
     let dyn_bitcoin_rpc = fixtures.server_bitcoin_rpc();
     let bitcoin_rpc_connection = fixtures.server_bitcoin_rpc();
     let db = MemDatabase::new().into_database();
