@@ -216,10 +216,12 @@ impl RecurringInvoiceServer {
     }
 
     fn create_lnurl(&self, payment_code_id: PaymentCodeId) -> String {
-        encode_lnurl(&format!(
-            "{}lnv1/paycodes/{}",
-            self.base_url, payment_code_id
-        ))
+        encode_lnurl(
+            &self
+                .base_url
+                .join_path(&format!("lnv1/paycodes/{payment_code_id}"))
+                .to_string(),
+        )
     }
 
     pub async fn lnurl_pay(
@@ -230,7 +232,10 @@ impl RecurringInvoiceServer {
         let PaymentCodeVariant::Lnurl { meta } = payment_code.variant;
 
         Ok(PayResponse {
-            callback: format!("{}lnv1/paycodes/{}/invoice", self.base_url, payment_code_id),
+            callback: self
+                .base_url
+                .join_path(&format!("lnv1/paycodes/{payment_code_id}/invoice"))
+                .to_string(),
             max_sendable: 100000000000,
             min_sendable: 1,
             tag: pay_request_tag(),
@@ -247,12 +252,13 @@ impl RecurringInvoiceServer {
             self.create_bolt11_invoice(payment_code_id, amount).await?;
         Ok(LNURLPayInvoice {
             pr: invoice.to_string(),
-            verify: format!(
-                "{}lnv1/verify/{}/{}",
-                self.base_url,
-                federation_id,
-                operation_id.fmt_full()
-            ),
+            verify: self
+                .base_url
+                .join_path(&format!(
+                    "lnv1/verify/{federation_id}/{}",
+                    operation_id.fmt_full()
+                ))
+                .to_string(),
         })
     }
 
