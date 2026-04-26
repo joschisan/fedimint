@@ -15,8 +15,7 @@ impl RecurringdClient {
     pub fn new(base_url: &SafeUrl) -> Self {
         Self {
             client: reqwest::Client::new(),
-            base_url: SafeUrl::parse(&format!("{base_url}lnv1/"))
-                .expect("failed to parse extended base url"),
+            base_url: base_url.join_path("lnv1"),
         }
     }
 
@@ -38,7 +37,7 @@ impl RecurringdClient {
 
         let response = self
             .client
-            .put(format!("{}paycodes", self.base_url))
+            .put(self.base_url.join_path("paycodes").to_string())
             .json(&request)
             .send()
             .await
@@ -58,10 +57,13 @@ impl RecurringdClient {
     ) -> Result<Bolt11Invoice, RecurringdApiError> {
         let response = self
             .client
-            .get(format!(
-                "{}paycodes/recipient/{}/generated/{}",
-                self.base_url, payment_code_root_key, invoice_index
-            ))
+            .get(
+                self.base_url
+                    .join_path(&format!(
+                        "paycodes/recipient/{payment_code_root_key}/generated/{invoice_index}"
+                    ))
+                    .to_string(),
+            )
             .send()
             .await
             .map_err(RecurringdApiError::NetworkError)?;

@@ -147,6 +147,19 @@ impl SafeUrl {
         self.0.join(input).map(SafeUrl)
     }
 
+    /// Append a relative path, ensuring exactly one `/` between
+    /// the base and the path segment.
+    ///
+    /// Unlike `Url::join` (RFC 3986), this never drops path
+    /// segments from the base — it always appends.
+    pub fn join_path(&self, path: &str) -> Self {
+        let base = self.to_string();
+        let base = base.trim_end_matches('/');
+        let path = path.trim_start_matches('/');
+        Self::parse(&format!("{base}/{path}"))
+            .expect("appending a relative path to a valid URL should produce a valid URL")
+    }
+
     // It can be removed to use `is_onion_address()` implementation,
     // once https://gitlab.torproject.org/tpo/core/arti/-/merge_requests/2214 lands.
     #[allow(clippy::case_sensitive_file_extension_comparisons)]
