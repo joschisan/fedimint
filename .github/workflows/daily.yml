@@ -6,6 +6,9 @@ on:
 
 name: Daily check
 
+env:
+  PERFIT_SERVER: https://perfit.dev.fedimint.org
+
 permissions:
   contents: read
 
