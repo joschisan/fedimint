@@ -39,6 +39,10 @@ ignore = [
   "RUSTSEC-2026-0099",
   # rustls-webpki CRL parsing panic; fixed in 0.103.13 (updated). 0.101.x/0.102.x have no backport and remain pinned via fedimint-ldk-node/iroh 0.35.0
   "RUSTSEC-2026-0104",
+  # hickory-proto DNSSEC NSEC3 closest-encloser unbounded loop; only reachable with DNSSEC validation (dnssec-ring/dnssec-aws-lc-rs), which we do not enable. Fix is in 0.26.1; transitive via iroh, can't update yet.
+  "RUSTSEC-2026-0118",
+  # hickory-proto O(n²) name compression on message encoding; only affects encoding large DNS messages, which we do not do (we are a resolver consumer). Fix is in 0.26.1; transitive via iroh, can't update yet.
+  "RUSTSEC-2026-0119",
 ]
 
 [output]
