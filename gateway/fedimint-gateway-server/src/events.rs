@@ -13,6 +13,12 @@ use fedimint_gwv2_client::events::{
 use fedimint_mint_client::events::{OOBNotesReissued, OOBNotesSpent};
 use fedimint_wallet_client::events::{DepositConfirmed, WithdrawRequest};
 
+/// The set of gateway payment-related event kinds used as the default filter
+/// for the `payment_log` API when no explicit `event_kinds` are provided.
+///
+/// This does not include all events in the log (e.g. `tx-created`,
+/// `tx-accepted`, `NoteCreated`, `NoteSpent` are excluded), so paginated
+/// results filtered to these kinds will have non-contiguous event IDs.
 pub const ALL_GATEWAY_EVENTS: [EventKind; 11] = [
     OutgoingPaymentStarted::KIND,
     OutgoingPaymentSucceeded::KIND,

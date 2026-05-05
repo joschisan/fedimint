@@ -806,6 +806,12 @@ pub(crate) async fn stop(
     Ok(Json(json!(())))
 }
 
+/// `POST /payment_log` — returns a paginated list of gateway payment events.
+///
+/// If `event_kinds` is empty, only gateway payment-related events
+/// ([`ALL_GATEWAY_EVENTS`](crate::events::ALL_GATEWAY_EVENTS)) are returned.
+/// This means returned event IDs may be non-contiguous because other internal
+/// events share the same ID space but are excluded by default.
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn payment_log(
     Extension(gateway): Extension<Arc<Gateway>>,
