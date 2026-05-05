@@ -2651,6 +2651,16 @@ impl IAdminGateway for Gateway {
     }
 
     /// Queries the client log for payment events and returns to the user.
+    /// Returns a paginated list of gateway payment-related events, ordered from
+    /// newest to oldest.
+    ///
+    /// If `event_kinds` is empty, only events matching `ALL_GATEWAY_EVENTS`
+    /// are returned — this is **not** equivalent to "all events". Other
+    /// internal events (e.g. `tx-created`, `NoteCreated`) share the same event
+    /// log and consume IDs, so returned event IDs may be non-contiguous.
+    ///
+    /// Pagination works backwards from `end_position` (or the log tip if
+    /// `None`), returning at most `pagination_size` matching events.
     async fn handle_payment_log_msg(
         &self,
         PaymentLogPayload {
@@ -2669,6 +2679,9 @@ impl IAdminGateway for Gateway {
             })?
             .value();
 
+        // An empty `event_kinds` defaults to gateway payment-related events, not
+        // "all events". This means returned event IDs may be non-contiguous since
+        // other internal events share the same ID space.
         let event_kinds = if event_kinds.is_empty() {
             ALL_GATEWAY_EVENTS.to_vec()
         } else {

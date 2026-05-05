@@ -275,6 +275,14 @@ pub struct PaymentLogPayload {
     pub pagination_size: usize,
 
     pub federation_id: FederationId,
+
+    /// Filter to only return events of these kinds. If empty, defaults to
+    /// `ALL_GATEWAY_EVENTS` (gateway payment-related events only, not all
+    /// events in the log).
+    ///
+    /// Note: returned event IDs may be non-contiguous because other internal
+    /// events (e.g. `tx-created`, `NoteCreated`) share the same ID space but
+    /// are filtered out.
     pub event_kinds: Vec<EventKind>,
 }
 
