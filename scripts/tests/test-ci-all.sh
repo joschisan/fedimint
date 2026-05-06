@@ -165,6 +165,11 @@ function lnv2_module_lnurl_pay() {
 }
 export -f lnv2_module_lnurl_pay
 
+function lnv2_module_lnurl_recovery() {
+  fm-run-test "${FUNCNAME[0]}" env FM_OFFLINE_NODES=0 ./scripts/tests/lnv2-module-test.sh lnurl-recovery
+}
+export -f lnv2_module_lnurl_recovery
+
 function lnv1_lnv2_swap() {
   fm-run-test "${FUNCNAME[0]}" env FM_OFFLINE_NODES=0 ./scripts/tests/lnv1-lnv2-swap-test.sh
 }
@@ -456,6 +461,7 @@ tests_to_run_in_parallel+=(
   "lnv2_module_payments"
   "lnv2_mintv2_walletv2_lightning_payments"
   "lnv2_module_lnurl_pay"
+  "lnv2_module_lnurl_recovery"
   "lnv1_lnv2_swap"
   "walletv2_module"
   "mintv2_module_test"

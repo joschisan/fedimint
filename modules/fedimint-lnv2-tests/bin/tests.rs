@@ -56,6 +56,8 @@ enum Commands {
     Payments,
     /// Run LNURL pay tests
     LnurlPay,
+    /// Test LNURL receives after recovery from seed
+    LnurlRecovery,
 }
 
 #[tokio::main]
@@ -80,11 +82,16 @@ async fn main() -> anyhow::Result<()> {
                     pegin_gateways(&dev_fed).await?;
                     test_lnurl_pay(&dev_fed).await?;
                 }
+                Some(Commands::LnurlRecovery) => {
+                    pegin_gateways(&dev_fed).await?;
+                    test_lnurl_recovery(&dev_fed).await?;
+                }
                 None => {
                     // Run all tests if no subcommand is specified
                     test_gateway_registration(&dev_fed).await?;
                     test_payments(&dev_fed).await?;
                     test_lnurl_pay(&dev_fed).await?;
+                    test_lnurl_recovery(&dev_fed).await?;
                 }
             }
 
@@ -566,6 +573,130 @@ async fn test_lnurl_pay(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     }
 
     info!("Client B successfully received funds via LNURL!");
+
+    Ok(())
+}
+
+/// Tests LNURL receives after recovery from seed.
+///
+/// LNv2 uses `NoModuleBackup`, so recovery restores funds via the mint module
+/// but not the operation log or LNv2 state. Verifies:
+/// 1. Balance is fully recovered.
+/// 2. Payments to a pre-recovery LNURL are still claimed by the restored
+///    client.
+async fn test_lnurl_recovery(dev_fed: &DevJitFed) -> anyhow::Result<()> {
+    let federation = dev_fed.fed().await?;
+    let gw_lnd = dev_fed.gw_lnd().await?;
+    let gw_ldk = dev_fed.gw_ldk().await?;
+    let recurringd = dev_fed.recurringdv2().await?.api_url().to_string();
+
+    const LNURL_AMOUNT_MSAT: u64 = 500_000;
+    const LNURL_BALANCE_TOLERANCE_MSAT: u64 = 100_000;
+
+    // ── Phase 1: Pre-recovery LNURL receives ──────────────────────────
+
+    info!("Phase 1: Creating client and receiving via LNURL before recovery");
+
+    let client = federation
+        .new_joined_client("lnv2-lnurl-recovery-original")
+        .await?;
+
+    let lnurl = generate_lnurl(&client, &recurringd, &gw_ldk.addr).await?;
+
+    for i in 0..3 {
+        info!("Paying LNURL invoice {}/3", i + 1);
+        let (invoice, _verify_url) = fetch_invoice(lnurl.clone(), LNURL_AMOUNT_MSAT).await?;
+        gw_lnd.client().pay_invoice(invoice).await?;
+    }
+
+    while almost_equal(
+        client.balance().await?,
+        3 * LNURL_AMOUNT_MSAT,
+        LNURL_BALANCE_TOLERANCE_MSAT,
+    )
+    .is_err()
+    {
+        info!("Waiting for pre-recovery LNURL payments to settle...");
+        cmd!(client, "dev", "wait", "1").out_json().await?;
+    }
+
+    let pre_recovery_balance = client.balance().await?;
+    info!("Pre-recovery balance: {pre_recovery_balance} msats");
+
+    let mnemonic = cmd!(client, "print-secret").out_json().await?["secret"]
+        .as_str()
+        .expect("secret is a string")
+        .to_owned();
+
+    // ── Phase 2: Recovery ─────────────────────────────────────────────
+
+    info!("Phase 2: Recovering client from seed");
+
+    let restored = Client::create("lnv2-lnurl-recovery-restored").await?;
+    cmd!(
+        restored,
+        "restore",
+        "--invite-code",
+        federation.invite_code()?,
+        "--mnemonic",
+        &mnemonic
+    )
+    .run()
+    .await?;
+
+    while restored.balance().await? < pre_recovery_balance {
+        info!("Waiting for recovery to complete...");
+        cmd!(restored, "dev", "wait", "1").out_json().await?;
+    }
+
+    let post_recovery_balance = restored.balance().await?;
+    info!("Post-recovery balance: {post_recovery_balance} msats");
+
+    // ── Phase 3: Post-recovery LNURL receives ─────────────────────────
+
+    info!("Phase 3: Paying to the original LNURL; restored client must claim");
+
+    // Reuse the Phase 1 `lnurl` on purpose: this is what a third party would
+    // have saved pre-recovery, and it must still pay the restored client.
+    for i in 0..2 {
+        info!("Paying pre-recovery LNURL invoice {}/2", i + 1);
+        let (invoice, _verify_url) = fetch_invoice(lnurl.clone(), LNURL_AMOUNT_MSAT).await?;
+        gw_lnd.client().pay_invoice(invoice).await?;
+    }
+
+    while almost_equal(
+        restored.balance().await?,
+        post_recovery_balance + 2 * LNURL_AMOUNT_MSAT,
+        LNURL_BALANCE_TOLERANCE_MSAT,
+    )
+    .is_err()
+    {
+        info!("Waiting for post-recovery LNURL payments to settle...");
+        cmd!(restored, "dev", "wait", "1").out_json().await?;
+    }
+
+    let final_balance = restored.balance().await?;
+    info!("Final balance: {final_balance} msats");
+
+    let operations = cmd!(restored, "list-operations", "--limit", "100")
+        .out_json()
+        .await?;
+    let lnv2_ops: Vec<_> = operations["operations"]
+        .as_array()
+        .expect("operations is an array")
+        .iter()
+        .filter(|op| op["operation_kind"].as_str() == Some("lnv2"))
+        .collect();
+    assert!(
+        lnv2_ops.len() >= 2,
+        "Expected at least 2 LNv2 operations after post-recovery receives, found {}",
+        lnv2_ops.len()
+    );
+
+    info!(
+        "LNURL recovery test passed: {} new operations, balance {final_balance} msats",
+        lnv2_ops.len()
+    );
 
     Ok(())
 }
