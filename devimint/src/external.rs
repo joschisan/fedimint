@@ -311,14 +311,14 @@ impl Bitcoind {
             other => return other,
         }
 
-        let block_height = self.get_block_count().await? - 1;
+        let block_count = self.get_block_count().await?;
 
         // Check each block for the tx, starting at the chain tip.
         // Buffer the requests to avoid spamming bitcoind.
         // We're doing this after checking the mempool since the tx should
         // usually be in the mempool, and we don't want to needlessly hit
         // the bitcoind with block requests.
-        let mut buffered_tx_stream = futures::stream::iter((0..block_height).rev())
+        let mut buffered_tx_stream = futures::stream::iter((0..block_count).rev())
             .map(|height| async move {
                 let block_hash = self.get_block_hash(height).await?;
                 self.get_raw_transaction(txid, Some(block_hash)).await
