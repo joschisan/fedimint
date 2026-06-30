@@ -31,7 +31,6 @@ use fedimint_gateway_common::{
     SpendEcashPayload, V1_API_ENDPOINT, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT,
     WithdrawPayload, WithdrawToOnchainPayload,
 };
-use fedimint_gateway_ui::IAdminGateway;
 use fedimint_lnurl::LnurlResponse;
 use fedimint_lnv2_common::endpoint_constants::{
     CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
@@ -83,12 +82,10 @@ pub async fn run_webserver(
     let mut handlers = Handlers::new();
 
     let routes = routes(gateway.clone(), task_group.clone(), &mut handlers);
-    let ui_routes = fedimint_gateway_ui::router(gateway.clone());
     let api_v1 = Router::new()
         .nest(&format!("/{V1_API_ENDPOINT}"), routes.clone())
         // Backwards compatibility: Continue supporting gateway APIs without versioning
-        .merge(routes)
-        .merge(ui_routes);
+        .merge(routes);
 
     let handle = task_group.make_handle();
     let shutdown_rx = handle.make_shutdown_rx();
@@ -110,8 +107,7 @@ pub async fn run_webserver(
     });
     info!(target: LOG_GATEWAY, listen = %gateway.listen, "Successfully started webserver");
 
-    // Don't start the Iroh endpoint until the mnemonic has been set via HTTP or the
-    // UI
+    // Don't start the Iroh endpoint until the mnemonic has been set via HTTP.
     if let GatewayState::NotConfigured { .. } = gateway.get_state().await {
         info!(target: LOG_GATEWAY, "Waiting for the mnemonic to be set before starting iroh loop.");
         let _ = mnemonic_receiver.recv().await;
@@ -154,9 +150,7 @@ async fn not_configured_middleware(
             && (path == MNEMONIC_ENDPOINT
                 || path == format!("/{V1_API_ENDPOINT}/{MNEMONIC_ENDPOINT}"));
 
-        let is_setup_route = fedimint_gateway_ui::is_allowed_setup_route(path);
-
-        if !is_mnemonic_api && !is_setup_route {
+        if !is_mnemonic_api {
             return Err(StatusCode::NOT_FOUND);
         }
     }

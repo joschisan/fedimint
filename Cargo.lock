@@ -3791,7 +3791,6 @@ dependencies = [
  "fedimint-eventlog",
  "fedimint-gateway-common",
  "fedimint-gateway-server-db",
- "fedimint-gateway-ui",
  "fedimint-gwv2-client",
  "fedimint-lightning",
  "fedimint-ln-server",

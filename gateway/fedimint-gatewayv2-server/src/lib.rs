@@ -67,7 +67,7 @@ use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::backoff_util::fibonacci_max_one_hour;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned, retry};
 use fedimint_core::{
-    Amount, BitcoinAmountOrAll, PeerId, TieredCounts, crit, fedimint_build_code_version_env,
+    Amount, BitcoinAmountOrAll, PeerId, crit, fedimint_build_code_version_env,
     get_network_for_address,
 };
 use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId, StructuredPaymentEvents};
@@ -83,10 +83,9 @@ use fedimint_gateway_common::{
     PaymentSummaryResponse, PeginFromOnchainPayload, ReceiveEcashPayload, ReceiveEcashResponse,
     RegisteredProtocol, SendOnchainRequest, SetChannelFeesRequest, SetFeesPayload,
     SetMnemonicPayload, SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload,
-    WithdrawPreviewPayload, WithdrawPreviewResponse, WithdrawResponse, WithdrawToOnchainPayload,
+    WithdrawResponse, WithdrawToOnchainPayload,
 };
 use fedimint_gateway_server_db::{GatewayDbtxNcExt as _, get_gatewayd_database_migrations};
-pub use fedimint_gateway_ui::IAdminGateway;
 use fedimint_gwv2_client::events::compute_lnv2_stats;
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -355,13 +354,6 @@ impl std::fmt::Debug for Gateway {
     }
 }
 
-/// Internal helper for on-chain withdrawal calculations
-struct WithdrawDetails {
-    amount: Amount,
-    mint_fees: Option<Amount>,
-    peg_out_fees: PegOutFees,
-}
-
 /// Executes a withdrawal using the walletv2 module
 async fn withdraw_v2(
     client: &ClientHandleArc,
@@ -437,63 +429,6 @@ async fn withdraw_v2(
             })
         }
     }
-}
-
-/// Calculates an estimated max withdrawable amount on-chain
-async fn calculate_max_withdrawable(
-    client: &ClientHandleArc,
-    address: &Address,
-) -> AdminResult<WithdrawDetails> {
-    let balance = client.get_balance_for_btc().await.map_err(|err| {
-        AdminGatewayError::Unexpected(anyhow!(
-            "Balance not available: {}",
-            err.fmt_compact_anyhow()
-        ))
-    })?;
-
-    let peg_out_fees = if let Ok(wallet_module) = client.get_first_module::<WalletClientModule>() {
-        wallet_module
-            .get_withdraw_fees(
-                address,
-                bitcoin::Amount::from_sat(balance.sats_round_down()),
-            )
-            .await?
-    } else if let Ok(wallet_module) =
-        client.get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-    {
-        let fee = wallet_module
-            .send_fee()
-            .await
-            .map_err(|e| AdminGatewayError::WithdrawError {
-                failure_reason: e.to_string(),
-            })?;
-        PegOutFees::from_amount(fee)
-    } else {
-        return Err(AdminGatewayError::Unexpected(anyhow!(
-            "No wallet module found"
-        )));
-    };
-
-    let max_withdrawable_before_mint_fees = balance
-        .checked_sub(peg_out_fees.amount().into())
-        .ok_or_else(|| AdminGatewayError::WithdrawError {
-            failure_reason: "Insufficient balance to cover peg-out fees".to_string(),
-        })?;
-
-    // MintV2 doesn't have fee estimation - only compute fees for MintV1
-    let mint_fees = if let Ok(mint_module) = client.get_first_module::<MintClientModule>() {
-        mint_module.estimate_spend_all_fees().await
-    } else {
-        Amount::ZERO
-    };
-
-    let max_withdrawable = max_withdrawable_before_mint_fees.saturating_sub(mint_fees);
-
-    Ok(WithdrawDetails {
-        amount: max_withdrawable,
-        mint_fees: Some(mint_fees),
-        peg_out_fees,
-    })
 }
 
 impl Gateway {
@@ -1636,10 +1571,10 @@ impl Gateway {
     }
 }
 
-#[async_trait]
-impl IAdminGateway for Gateway {
-    type Error = AdminGatewayError;
-
+/// Admin/operator request handlers, called by the REST API and the Iroh
+/// endpoint. (`gatewaydv2` has no web UI, so these are plain inherent methods
+/// rather than an `IAdminGateway` trait impl.)
+impl Gateway {
     /// Returns information about the Gateway back to the client when requested
     /// via the webserver.
     async fn handle_get_info(&self) -> AdminResult<GatewayInfo> {
@@ -2091,22 +2026,6 @@ impl IAdminGateway for Gateway {
         })
     }
 
-    async fn handle_deposit_address_msg(
-        &self,
-        payload: DepositAddressPayload,
-    ) -> AdminResult<Address> {
-        self.handle_address_msg(payload).await
-    }
-
-    async fn handle_receive_ecash_msg(
-        &self,
-        payload: ReceiveEcashPayload,
-    ) -> AdminResult<ReceiveEcashResponse> {
-        Self::handle_receive_ecash_msg(self, payload)
-            .await
-            .map_err(|e| AdminGatewayError::Unexpected(anyhow::anyhow!("{e}")))
-    }
-
     /// Creates an invoice that is directly payable to the gateway's lightning
     /// node.
     async fn handle_create_invoice_for_operator_msg(
@@ -2239,10 +2158,6 @@ impl IAdminGateway for Gateway {
         Ok(())
     }
 
-    fn get_task_group(&self) -> TaskGroup {
-        self.task_group.clone()
-    }
-
     /// Returns a Bitcoin TXID from a peg-out transaction for a specific
     /// connected federation.
     async fn handle_withdraw_msg(&self, payload: WithdrawPayload) -> AdminResult<WithdrawResponse> {
@@ -2352,76 +2267,6 @@ impl IAdminGateway for Gateway {
 
         Err(AdminGatewayError::WithdrawError {
             failure_reason: "Ran out of state updates while withdrawing".to_string(),
-        })
-    }
-
-    /// Returns a preview of the withdrawal fees without executing the
-    /// withdrawal. Used by the UI for two-step withdrawal confirmation.
-    async fn handle_withdraw_preview_msg(
-        &self,
-        payload: WithdrawPreviewPayload,
-    ) -> AdminResult<WithdrawPreviewResponse> {
-        let gateway_network = self.network;
-        let address_checked = payload
-            .address
-            .clone()
-            .require_network(gateway_network)
-            .map_err(|_| AdminGatewayError::WithdrawError {
-                failure_reason: "Address network mismatch".to_string(),
-            })?;
-
-        let client = self.select_client(payload.federation_id).await?;
-
-        let WithdrawDetails {
-            amount,
-            mint_fees,
-            peg_out_fees,
-        } = match payload.amount {
-            BitcoinAmountOrAll::All => {
-                calculate_max_withdrawable(client.value(), &address_checked).await?
-            }
-            BitcoinAmountOrAll::Amount(btc_amount) => {
-                if let Ok(wallet_module) = client.value().get_first_module::<WalletClientModule>() {
-                    WithdrawDetails {
-                        amount: btc_amount.into(),
-                        mint_fees: None,
-                        peg_out_fees: wallet_module
-                            .get_withdraw_fees(&address_checked, btc_amount)
-                            .await?,
-                    }
-                } else if let Ok(wallet_module) = client
-                    .value()
-                    .get_first_module::<fedimint_walletv2_client::WalletClientModule>(
-                ) {
-                    let fee = wallet_module.send_fee().await.map_err(|e| {
-                        AdminGatewayError::WithdrawError {
-                            failure_reason: e.to_string(),
-                        }
-                    })?;
-                    WithdrawDetails {
-                        amount: btc_amount.into(),
-                        mint_fees: None,
-                        peg_out_fees: PegOutFees::from_amount(fee),
-                    }
-                } else {
-                    return Err(AdminGatewayError::Unexpected(anyhow!(
-                        "No wallet module found"
-                    )));
-                }
-            }
-        };
-
-        let total_cost = amount
-            .checked_add(peg_out_fees.amount().into())
-            .and_then(|a| a.checked_add(mint_fees.unwrap_or(Amount::ZERO)))
-            .ok_or_else(|| AdminGatewayError::Unexpected(anyhow!("Total cost overflow")))?;
-
-        Ok(WithdrawPreviewResponse {
-            withdraw_amount: amount,
-            address: payload.address.assume_checked().to_string(),
-            peg_out_fees,
-            total_cost,
-            mint_fees,
         })
     }
 
@@ -2573,37 +2418,6 @@ impl IAdminGateway for Gateway {
     ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>> {
         let fed_manager = self.federation_manager.read().await;
         fed_manager.all_invite_codes().await
-    }
-
-    /// Returns `TieredCounts` which describes the breakdown of notes in the
-    /// gateway's wallet for the given `FederationId`
-    async fn handle_get_note_summary_msg(
-        &self,
-        federation_id: &FederationId,
-    ) -> AdminResult<TieredCounts> {
-        let fed_manager = self.federation_manager.read().await;
-        fed_manager.get_note_summary(federation_id).await
-    }
-
-    fn get_password_hash(&self) -> String {
-        self.bcrypt_password_hash.clone()
-    }
-
-    fn gatewayd_version(&self) -> String {
-        let gatewayd_version = env!("CARGO_PKG_VERSION");
-        gatewayd_version.to_string()
-    }
-
-    async fn get_chain_source(&self) -> (ChainSource, Network) {
-        (self.chain_source.clone(), self.network)
-    }
-
-    fn lightning_mode(&self) -> LightningMode {
-        self.lightning_mode.clone()
-    }
-
-    async fn is_configured(&self) -> bool {
-        !matches!(self.get_state().await, GatewayState::NotConfigured { .. })
     }
 }
 
