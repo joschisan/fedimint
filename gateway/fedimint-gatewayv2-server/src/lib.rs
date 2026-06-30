@@ -37,7 +37,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
-use bitcoin::{Address, Network, Txid, secp256k1};
+use bitcoin::{Address, Network, Txid};
 use clap::Parser;
 use client::GatewayClientBuilder;
 pub use config::GatewayParameters;
@@ -47,7 +47,6 @@ use error::FederationNotConnected;
 use events::ALL_GATEWAY_EVENTS;
 use federation_manager::{FederationManager, transient_federation_config};
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
-use fedimint_bitcoind::bitcoincore::BitcoindClient;
 use fedimint_client::ClientHandleArc;
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
@@ -59,7 +58,6 @@ use fedimint_core::envs::is_env_var_set;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
-use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_core::task::{TaskGroup, TaskHandle, TaskShutdownToken, sleep};
 use fedimint_core::time::duration_since_epoch;
@@ -78,8 +76,8 @@ use fedimint_gateway_common::{
     ListTransactionsResponse, MnemonicResponse, OpenChannelRequest, PayInvoiceForOperatorPayload,
     PayOfferPayload, PayOfferResponse, PaymentLogPayload, PaymentLogResponse, PaymentStats,
     PaymentSummaryPayload, PaymentSummaryResponse, PeginFromOnchainPayload, ReceiveEcashPayload,
-    ReceiveEcashResponse, RegisteredProtocol, SendOnchainRequest, SetChannelFeesRequest,
-    SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload, WithdrawResponse,
+    ReceiveEcashResponse, SendOnchainRequest, SetChannelFeesRequest, SpendEcashPayload,
+    SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload, WithdrawResponse,
     WithdrawToOnchainPayload,
 };
 use fedimint_gwv2_client::events::compute_lnv2_stats;
@@ -158,21 +156,6 @@ impl Display for GatewayState {
             GatewayState::Running { .. } => write!(f, "Running"),
             GatewayState::ShuttingDown { .. } => write!(f, "ShuttingDown"),
         }
-    }
-}
-
-/// Helper struct for storing the gateway's advertised endpoint for each network
-/// protocol. The advertised public key is derived on demand from the gateway's
-/// mnemonic (see [`Gateway::gateway_id`]), so it is not stored here.
-#[derive(Debug, Clone)]
-struct Registration {
-    /// The url to advertise in the registration that clients can use to connect
-    endpoint_url: SafeUrl,
-}
-
-impl Registration {
-    pub fn new(endpoint_url: SafeUrl) -> Self {
-        Self { endpoint_url }
     }
 }
 
@@ -294,9 +277,10 @@ pub struct Gateway {
     /// The default transaction fees for new federations
     default_transaction_fees: PaymentFee,
 
-    /// A map of the network protocols the gateway supports to the data needed
-    /// for registering with a federation.
-    registrations: BTreeMap<RegisteredProtocol, Registration>,
+    /// The gateway's advertised HTTP API url (from `FM_GATEWAY_API_ADDR`).
+    // TODO(gatewayv2-cli): surfaced by the upcoming `info` command response.
+    #[allow(dead_code)]
+    api_url: Option<SafeUrl>,
 }
 
 impl std::fmt::Debug for Gateway {
@@ -307,7 +291,7 @@ impl std::fmt::Debug for Gateway {
             .field("client_builder", &self.client_builder)
             .field("gateway_db", &self.gateway_db)
             .field("listen", &self.listen)
-            .field("registrations", &self.registrations)
+            .field("api_url", &self.api_url)
             .finish_non_exhaustive()
     }
 }
@@ -390,31 +374,22 @@ async fn withdraw_v2(
 }
 
 impl Gateway {
-    /// Returns a bitcoind client using the credentials that were passed in from
-    /// the environment variables.
-    fn get_bitcoind_client(
-        opts: &GatewayOpts,
-        network: bitcoin::Network,
-        gateway_id: &PublicKey,
-    ) -> anyhow::Result<(BitcoindClient, ChainSource)> {
-        let bitcoind_username = opts
-            .bitcoind_username
-            .clone()
-            .expect("FM_BITCOIND_URL is set but FM_BITCOIND_USERNAME is not");
-        let url = opts.bitcoind_url.clone().expect("No bitcoind url set");
-        let password = opts
-            .bitcoind_password
-            .clone()
-            .expect("FM_BITCOIND_URL is set but FM_BITCOIND_PASSWORD is not");
-
-        let chain_source = ChainSource::Bitcoind {
-            username: bitcoind_username.clone(),
-            password: password.clone(),
-            server_url: url.clone(),
-        };
-        let wallet_name = format!("gatewayd-{gateway_id}");
-        let client = BitcoindClient::new(&url, bitcoind_username, password, &wallet_name, network)?;
-        Ok((client, chain_source))
+    /// Builds the bitcoind chain source for the LDK node from the configured
+    /// RPC credentials. LDK uses bitcoind purely as a chain-data source via
+    /// node-level RPCs, so -- unlike v1 gatewayd -- no watch-only wallet is
+    /// created.
+    fn bitcoind_chain_source(opts: &GatewayOpts) -> ChainSource {
+        ChainSource::Bitcoind {
+            username: opts
+                .bitcoind_username
+                .clone()
+                .expect("FM_BITCOIND_URL is set but FM_BITCOIND_USERNAME is not"),
+            password: opts
+                .bitcoind_password
+                .clone()
+                .expect("FM_BITCOIND_URL is set but FM_BITCOIND_PASSWORD is not"),
+            server_url: opts.bitcoind_url.clone().expect("No bitcoind url set"),
+        }
     }
 
     /// Default function for creating a gateway with the `Mint`, `Wallet`, and
@@ -455,19 +430,9 @@ impl Gateway {
         }
         let gateway_state = GatewayState::Disconnected;
 
-        // The gateway identity (derived from the mnemonic) doubles as the unique
-        // identifier of the bitcoind watch-only wallet.
-        let mnemonic = Self::load_mnemonic(&gateway_db)
-            .await
-            .expect("mnemonic was just established");
-        let http_id = Self::derive_gateway_keypair(&mnemonic).public_key();
         let chain_source = match (opts.bitcoind_url.as_ref(), opts.esplora_url.as_ref()) {
             // Use bitcoind by default if both are set
-            (Some(_), _) => {
-                let (_, chain_source) =
-                    Self::get_bitcoind_client(&opts, gateway_parameters.network, &http_id)?;
-                chain_source
-            }
+            (Some(_), _) => Self::bitcoind_chain_source(&opts),
             (None, Some(url)) => ChainSource::Esplora {
                 server_url: url.clone(),
             },
@@ -514,11 +479,6 @@ impl Gateway {
         let task_group = TaskGroup::new();
         task_group.install_kill_handler();
 
-        let mut registrations = BTreeMap::new();
-        if let Some(http_url) = gateway_parameters.versioned_api {
-            registrations.insert(RegisteredProtocol::Http, Registration::new(http_url));
-        }
-
         Self {
             federation_manager: Arc::new(RwLock::new(FederationManager::new())),
             lightning_mode,
@@ -536,34 +496,8 @@ impl Gateway {
             chain_source,
             default_routing_fees: gateway_parameters.default_routing_fees,
             default_transaction_fees: gateway_parameters.default_transaction_fees,
-            registrations,
+            api_url: gateway_parameters.versioned_api,
         }
-    }
-
-    /// Domain-separation tweak for deriving the gateway's identity keypair from
-    /// the root secret. Stable across restarts so the gateway id (and the
-    /// bitcoind watch-only wallet name) is reproducible from the mnemonic
-    /// alone.
-    const GATEWAY_IDENTITY_TWEAK: &'static [u8] = b"gatewayv2-identity";
-
-    /// Deterministically derives the gateway's identity keypair from its
-    /// mnemonic. The private half is never used for signing (LNv2 uses
-    /// per-federation module keys); only the public key is advertised.
-    fn derive_gateway_keypair(mnemonic: &Mnemonic) -> secp256k1::Keypair {
-        Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic)
-            .tweak(Self::GATEWAY_IDENTITY_TWEAK)
-            .to_secp_key(&secp256k1::Secp256k1::new())
-    }
-
-    /// Returns the gateway's advertised identity public key, or `None` if the
-    /// mnemonic has not been set yet.
-    async fn gateway_id(&self) -> Option<PublicKey> {
-        let mnemonic = Self::load_mnemonic(&self.gateway_db).await?;
-        Some(Self::derive_gateway_keypair(&mnemonic).public_key())
-    }
-
-    pub async fn http_gateway_id(&self) -> PublicKey {
-        self.gateway_id().await.expect("mnemonic should be set")
     }
 
     async fn get_state(&self) -> GatewayState {
@@ -1331,7 +1265,7 @@ impl Gateway {
                 gateway_state: self.state.read().await.to_string(),
                 lightning_info: LightningInfo::NotConnected,
                 lightning_mode: self.lightning_mode.clone(),
-                registrations: self.registrations_with_id().await,
+                registrations: BTreeMap::new(),
             });
         };
 
@@ -1347,26 +1281,8 @@ impl Gateway {
             gateway_state: self.state.read().await.to_string(),
             lightning_info,
             lightning_mode: self.lightning_mode.clone(),
-            registrations: self.registrations_with_id().await,
+            registrations: BTreeMap::new(),
         })
-    }
-
-    /// Builds the advertised registration map, pairing each protocol's endpoint
-    /// url with the gateway's mnemonic-derived identity public key. Empty if
-    /// the mnemonic has not been set yet.
-    async fn registrations_with_id(&self) -> BTreeMap<RegisteredProtocol, (SafeUrl, PublicKey)> {
-        let Some(gateway_id) = self.gateway_id().await else {
-            return BTreeMap::new();
-        };
-        self.registrations
-            .iter()
-            .map(|(protocol, registration)| {
-                (
-                    protocol.clone(),
-                    (registration.endpoint_url.clone(), gateway_id),
-                )
-            })
-            .collect()
     }
 
     /// Returns a list of Lightning network channels from the Gateway's

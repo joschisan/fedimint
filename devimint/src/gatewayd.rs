@@ -910,7 +910,12 @@ impl Gatewayd {
                 .out_json()
                 .await
                 .map_err(ControlFlow::Continue)?;
-                let (gateway_id, iroh_gateway_id) = if gatewayd_version < *VERSION_0_10_0_ALPHA {
+                let (gateway_id, iroh_gateway_id) = if v2 {
+                    // gatewaydv2 has no gateway identity key and registers no
+                    // pubkey, so the `info` RPC responding is sufficient
+                    // readiness. Nothing reads a gatewaydv2 gateway id.
+                    (String::new(), None)
+                } else if gatewayd_version < *VERSION_0_10_0_ALPHA {
                     let gateway_id = info["gateway_id"]
                         .as_str()
                         .context("gateway_id must be a string")
@@ -923,18 +928,13 @@ impl Gatewayd {
                         .context("gateway id must be a string")
                         .map_err(ControlFlow::Break)?
                         .to_owned();
-                    // gatewaydv2 does not register an iroh endpoint, only HTTP.
-                    let iroh_gateway_id = if v2 {
-                        None
-                    } else {
-                        Some(
-                            info["registrations"]["iroh"][1]
-                                .as_str()
-                                .context("gateway id must be a string")
-                                .map_err(ControlFlow::Break)?
-                                .to_owned(),
-                        )
-                    };
+                    let iroh_gateway_id = Some(
+                        info["registrations"]["iroh"][1]
+                            .as_str()
+                            .context("gateway id must be a string")
+                            .map_err(ControlFlow::Break)?
+                            .to_owned(),
+                    );
                     (gateway_id, iroh_gateway_id)
                 };
 
