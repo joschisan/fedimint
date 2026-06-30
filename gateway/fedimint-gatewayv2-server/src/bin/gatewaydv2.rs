@@ -2,10 +2,10 @@
 //! This crate provides `gatewaydv2`, a Fedimint gateway binary scoped to LDK
 //! and LNv2.
 //!
-//! It is currently a copy of the `gatewayd` binary and shares the same
-//! [`Gateway`] implementation. Over time, LND and LNv1 support will be stripped
-//! out so that `gatewaydv2` only supports the LDK lightning backend and the
-//! LNv2 module.
+//! It started as a copy of the `gatewayd` binary and its
+//! `fedimint-gateway-server` crate. LND and LNv1 support are being stripped out
+//! so that `gatewaydv2` only supports the LDK lightning backend and the LNv2
+//! module.
 //!
 //! Like `gatewayd`, it runs a webserver with a REST API that Fedimint clients
 //! use to request routing of payments through the Lightning Network, plus
@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use fedimint_core::fedimint_build_code_version_env;
 use fedimint_core::util::handle_version_hash_command;
-use fedimint_gateway_server::Gateway;
+use fedimint_gatewayv2_server::Gateway;
 use fedimint_logging::{LOG_GATEWAY, TracingSetup};
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
 use tikv_jemallocator::Jemalloc;

@@ -52,6 +52,7 @@ members = [
     "gateway/fedimint-gateway-server",
     "gateway/fedimint-gateway-server-db",
     "gateway/fedimint-gateway-ui",
+    "gateway/fedimint-gatewayv2-server",
     "gateway/fedimint-lightning",
     "gateway/integration_tests",
     "modules/fedimint-dummy-client",

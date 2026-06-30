@@ -1,9 +1,9 @@
 [package]
 authors = { workspace = true }
-description = "fedimint-gateway-server sends/receives Lightning Network payments on behalf of Fedimint clients"
+description = "fedimint-gatewayv2-server sends/receives Lightning Network payments on behalf of Fedimint clients (LDK + LNv2 only)"
 edition = { workspace = true }
 license = { workspace = true }
-name = "fedimint-gateway-server"
+name = "fedimint-gatewayv2-server"
 readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
@@ -16,16 +16,12 @@ tor = [
 ]
 
 [[bin]]
-name = "gatewayd"
-path = "src/bin/gatewayd.rs"
+name = "gatewaydv2"
+path = "src/bin/gatewaydv2.rs"
 
 [lib]
-name = "fedimint_gateway_server"
+name = "fedimint_gatewayv2_server"
 path = "src/lib.rs"
-
-[[test]]
-name = "gatewayd-tests"
-path = "tests/tests.rs"
 
 [dependencies]
 anyhow = { workspace = true }

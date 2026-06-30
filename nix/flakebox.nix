@@ -855,6 +855,7 @@ in
 
       packages = [
         "fedimint-gateway-server"
+        "fedimint-gatewayv2-server"
         "fedimint-gateway-client"
       ];
     };
