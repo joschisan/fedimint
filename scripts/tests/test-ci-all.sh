@@ -176,6 +176,26 @@ function lnv2_module_lnurl_recovery() {
 }
 export -f lnv2_module_lnurl_recovery
 
+function gatewayv2_gateway_registration() {
+  fm-run-test "${FUNCNAME[0]}" env FM_OFFLINE_NODES=0 ./scripts/tests/gatewayv2-test.sh gateway-registration
+}
+export -f gatewayv2_gateway_registration
+
+function gatewayv2_payments() {
+  fm-run-test "${FUNCNAME[0]}" env FM_OFFLINE_NODES=0 ./scripts/tests/gatewayv2-test.sh payments
+}
+export -f gatewayv2_payments
+
+function gatewayv2_lnurl_pay() {
+  fm-run-test "${FUNCNAME[0]}" env FM_OFFLINE_NODES=0 ./scripts/tests/gatewayv2-test.sh lnurl-pay
+}
+export -f gatewayv2_lnurl_pay
+
+function gatewayv2_lnurl_recovery() {
+  fm-run-test "${FUNCNAME[0]}" env FM_OFFLINE_NODES=0 ./scripts/tests/gatewayv2-test.sh lnurl-recovery
+}
+export -f gatewayv2_lnurl_recovery
+
 function lnv1_lnv2_swap() {
   fm-run-test "${FUNCNAME[0]}" env FM_OFFLINE_NODES=0 ./scripts/tests/lnv1-lnv2-swap-test.sh
 }
@@ -480,6 +500,10 @@ tests_to_run_in_parallel+=(
   "lnv2_mintv2_walletv2_lightning_payments"
   "lnv2_module_lnurl_pay"
   "lnv2_module_lnurl_recovery"
+  "gatewayv2_gateway_registration"
+  "gatewayv2_payments"
+  "gatewayv2_lnurl_pay"
+  "gatewayv2_lnurl_recovery"
   "lnv1_lnv2_swap"
   "walletv2_module"
   "mintv2_module_test"
