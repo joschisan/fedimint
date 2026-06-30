@@ -107,10 +107,10 @@ async fn pegin_gateways(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     let federation = dev_fed.fed().await?;
 
     let gw_lnd = dev_fed.gw_lnd().await?;
-    let gw_ldk = dev_fed.gw_ldk().await?;
+    let gw_v2 = dev_fed.gw_v2().await?;
 
     federation
-        .pegin_gateways(1_000_000, vec![gw_lnd, gw_ldk])
+        .pegin_gateways(1_000_000, vec![gw_lnd, gw_v2])
         .await?;
 
     Ok(())
@@ -126,9 +126,9 @@ async fn test_gateway_registration(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     assert_module_sanity(&client).await?;
 
     let gw_lnd = dev_fed.gw_lnd().await?;
-    let gw_ldk = dev_fed.gw_ldk_connected().await?;
+    let gw_v2 = dev_fed.gw_v2_connected().await?;
 
-    let gateways = [gw_lnd.addr.clone(), gw_ldk.addr.clone()];
+    let gateways = [gw_lnd.addr.clone(), gw_v2.addr.clone()];
 
     info!("Testing registration of gateways...");
 
@@ -241,18 +241,18 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     almost_equal(client.balance().await?, 10_000 * 1000, 500_000).unwrap();
 
     let gw_lnd = dev_fed.gw_lnd().await?;
-    let gw_ldk = dev_fed.gw_ldk().await?;
+    let gw_v2 = dev_fed.gw_v2().await?;
     let lnd = dev_fed.lnd().await?;
 
     let (hold_preimage, hold_invoice, hold_payment_hash) = lnd.create_hold_invoice(60000).await?;
 
-    let gateway_pairs = [(gw_lnd, gw_ldk), (gw_ldk, gw_lnd)];
+    let gateway_pairs = [(gw_lnd, gw_v2), (gw_v2, gw_lnd)];
 
     let gateway_matrix = [
         (gw_lnd, gw_lnd),
-        (gw_lnd, gw_ldk),
-        (gw_ldk, gw_lnd),
-        (gw_ldk, gw_ldk),
+        (gw_lnd, gw_v2),
+        (gw_v2, gw_lnd),
+        (gw_v2, gw_v2),
     ];
 
     info!("Testing refund of circular payments...");
@@ -333,10 +333,10 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     )
     .await?;
 
-    info!("Testing Client can pay LND HOLD invoice via LDK Gateway...");
+    info!("Testing Client can pay LND HOLD invoice via Gatewayv2...");
 
     let (state, _) = try_join!(
-        common::send(&client, &gw_ldk.addr, &hold_invoice),
+        common::send(&client, &gw_v2.addr, &hold_invoice),
         lnd.settle_hold_invoice(hold_preimage, hold_payment_hash),
     )?;
     assert!(matches!(state, FinalSendOperationState::Success(_)));
@@ -357,11 +357,11 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
 
     // Gateway pays: 1_000 msat LNv2 federation base fee. Gateway receives:
     // 1_000_000 payment.
-    test_fees(fed_id, &client, gw_lnd, gw_ldk, 1_000_000 - 1_000).await?;
+    test_fees(fed_id, &client, gw_lnd, gw_v2, 1_000_000 - 1_000).await?;
 
     let online_peers: Vec<usize> = federation.members.keys().copied().collect();
 
-    test_iroh_payment(&client, gw_lnd, gw_ldk, &online_peers).await?;
+    test_iroh_payment(&client, gw_lnd, gw_v2, &online_peers).await?;
 
     info!("Testing payment summary...");
 
@@ -377,17 +377,17 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     assert!(lnd_payment_summary.incoming.median_latency.is_some());
     assert!(lnd_payment_summary.incoming.average_latency.is_some());
 
-    let ldk_payment_summary = gw_ldk.client().payment_summary().await?;
+    let gw_v2_payment_summary = gw_v2.client().payment_summary().await?;
 
-    assert_eq!(ldk_payment_summary.outgoing.total_success, 4);
-    assert_eq!(ldk_payment_summary.outgoing.total_failure, 2);
-    assert_eq!(ldk_payment_summary.incoming.total_success, 4);
-    assert_eq!(ldk_payment_summary.incoming.total_failure, 0);
+    assert_eq!(gw_v2_payment_summary.outgoing.total_success, 4);
+    assert_eq!(gw_v2_payment_summary.outgoing.total_failure, 2);
+    assert_eq!(gw_v2_payment_summary.incoming.total_success, 4);
+    assert_eq!(gw_v2_payment_summary.incoming.total_failure, 0);
 
-    assert!(ldk_payment_summary.outgoing.median_latency.is_some());
-    assert!(ldk_payment_summary.outgoing.average_latency.is_some());
-    assert!(ldk_payment_summary.incoming.median_latency.is_some());
-    assert!(ldk_payment_summary.incoming.average_latency.is_some());
+    assert!(gw_v2_payment_summary.outgoing.median_latency.is_some());
+    assert!(gw_v2_payment_summary.outgoing.average_latency.is_some());
+    assert!(gw_v2_payment_summary.incoming.median_latency.is_some());
+    assert!(gw_v2_payment_summary.incoming.average_latency.is_some());
 
     Ok(())
 }
@@ -396,12 +396,12 @@ async fn test_fees(
     fed_id: String,
     client: &Client,
     gw_lnd: &Gatewayd,
-    gw_ldk: &Gatewayd,
+    gw_v2: &Gatewayd,
     expected_addition: u64,
 ) -> anyhow::Result<()> {
     let gw_lnd_ecash_prev = gw_lnd.client().ecash_balance(fed_id.clone()).await?;
 
-    let (invoice, receive_op) = common::receive(client, &gw_ldk.addr, 1_000_000).await?;
+    let (invoice, receive_op) = common::receive(client, &gw_v2.addr, 1_000_000).await?;
 
     let state = common::send(client, &gw_lnd.addr, &invoice.to_string()).await?;
     assert!(matches!(state, FinalSendOperationState::Success(_)));
@@ -531,9 +531,9 @@ async fn test_lnurl_pay(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     let federation = dev_fed.fed().await?;
 
     let gw_lnd = dev_fed.gw_lnd().await?;
-    let gw_ldk = dev_fed.gw_ldk().await?;
+    let gw_v2 = dev_fed.gw_v2().await?;
 
-    let gateway_pairs = [(gw_lnd, gw_ldk), (gw_ldk, gw_lnd)];
+    let gateway_pairs = [(gw_lnd, gw_v2), (gw_v2, gw_lnd)];
 
     let recurringd = dev_fed.recurringdv2().await?.api_url().to_string();
 
@@ -613,7 +613,7 @@ async fn test_lnurl_recovery(dev_fed: &DevJitFed) -> anyhow::Result<()> {
 
     let federation = dev_fed.fed().await?;
     let gw_lnd = dev_fed.gw_lnd().await?;
-    let gw_ldk = dev_fed.gw_ldk().await?;
+    let gw_v2 = dev_fed.gw_v2().await?;
     let recurringd = dev_fed.recurringdv2().await?.api_url().to_string();
 
     const LNURL_AMOUNT_MSAT: u64 = 500_000;
@@ -627,7 +627,7 @@ async fn test_lnurl_recovery(dev_fed: &DevJitFed) -> anyhow::Result<()> {
         .new_joined_client("lnv2-lnurl-recovery-original")
         .await?;
 
-    let lnurl = generate_lnurl(&client, &recurringd, &gw_ldk.addr).await?;
+    let lnurl = generate_lnurl(&client, &recurringd, &gw_v2.addr).await?;
 
     for i in 0..3 {
         info!("Paying LNURL invoice {}/3", i + 1);
@@ -730,7 +730,7 @@ async fn test_lnurl_recovery(dev_fed: &DevJitFed) -> anyhow::Result<()> {
 async fn generate_lnurl(
     client: &Client,
     recurringd_base_url: &str,
-    gw_ldk_addr: &str,
+    gw_addr: &str,
 ) -> anyhow::Result<String> {
     cmd!(
         client,
@@ -740,7 +740,7 @@ async fn generate_lnurl(
         "generate",
         recurringd_base_url,
         "--gateway",
-        gw_ldk_addr,
+        gw_addr,
     )
     .out_json()
     .await
@@ -807,7 +807,7 @@ async fn fetch_invoice(lnurl: String, amount_msat: u64) -> anyhow::Result<(Bolt1
 async fn test_iroh_payment(
     client: &Client,
     gw_lnd: &Gatewayd,
-    gw_ldk: &Gatewayd,
+    gw_v2: &Gatewayd,
     online_peers: &[usize],
 ) -> anyhow::Result<()> {
     info!("Testing iroh payment...");
@@ -825,7 +825,7 @@ async fn test_iroh_payment(
         }
     }
 
-    let invoice = gw_ldk.client().create_invoice(5_000_000).await?;
+    let invoice = gw_v2.client().create_invoice(5_000_000).await?;
 
     let send_op = serde_json::from_value::<OperationId>(
         cmd!(client, "module", "lnv2", "send", invoice,)
@@ -845,7 +845,7 @@ async fn test_iroh_payment(
             .await?,
     )?;
 
-    gw_ldk.client().pay_invoice(invoice).await?;
+    gw_v2.client().pay_invoice(invoice).await?;
     common::await_receive_claimed(client, receive_op).await?;
 
     if util::FedimintCli::version_or_default().await < *VERSION_0_10_0_ALPHA

@@ -788,6 +788,25 @@ impl Gatewayd {
         ln: LightningNode,
         gateway_index: usize,
     ) -> Result<Self> {
+        Self::new_inner(process_mgr, ln, gateway_index, false).await
+    }
+
+    /// Like [`Self::new`], but spawns the `gatewaydv2` binary (the LDK + LNv2
+    /// only gateway) instead of `gatewayd`.
+    pub async fn new_v2(
+        process_mgr: &ProcessManager,
+        ln: LightningNode,
+        gateway_index: usize,
+    ) -> Result<Self> {
+        Self::new_inner(process_mgr, ln, gateway_index, true).await
+    }
+
+    async fn new_inner(
+        process_mgr: &ProcessManager,
+        ln: LightningNode,
+        gateway_index: usize,
+        v2: bool,
+    ) -> Result<Self> {
         let ln_type = ln.ln_type();
         let (gw_name, port, lightning_node_port, metrics_port) = match &ln {
             LightningNode::Lnd(_) => (
@@ -854,12 +873,21 @@ impl Gatewayd {
         // any version read the one they understand without a per-version branch
         // here.
 
-        let process = process_mgr
-            .spawn_daemon(
-                &gw_name,
-                cmd!(crate::util::Gatewayd, ln_type).envs(gateway_env),
-            )
-            .await?;
+        let process = if v2 {
+            process_mgr
+                .spawn_daemon(
+                    &gw_name,
+                    cmd!(crate::util::GatewaydV2, ln_type).envs(gateway_env),
+                )
+                .await?
+        } else {
+            process_mgr
+                .spawn_daemon(
+                    &gw_name,
+                    cmd!(crate::util::Gatewayd, ln_type).envs(gateway_env),
+                )
+                .await?
+        };
 
         let timeout = if is_env_var_set(FM_PRE_DKG_ENV) {
             Duration::from_secs(300)

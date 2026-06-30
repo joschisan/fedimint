@@ -504,6 +504,7 @@
         packages = {
           inherit (craneMultiBuild)
             gatewayd
+            gatewaydv2
             fedimint-dbtool
             gateway-cli
             fedimint-cli

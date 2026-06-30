@@ -19,6 +19,10 @@ tor = [
 name = "gatewayd"
 path = "src/bin/gatewayd.rs"
 
+[[bin]]
+name = "gatewaydv2"
+path = "src/bin/gatewaydv2.rs"
+
 [lib]
 name = "fedimint_gateway_server"
 path = "src/lib.rs"

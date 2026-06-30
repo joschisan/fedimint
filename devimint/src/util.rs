@@ -34,8 +34,9 @@ use crate::envs::{
     FM_DEVIMINT_CMD_INHERIT_STDERR_ENV, FM_DEVIMINT_FAUCET_BASE_EXECUTABLE_ENV,
     FM_ESPLORA_BASE_EXECUTABLE_ENV, FM_FEDIMINT_CLI_BASE_EXECUTABLE_ENV,
     FM_FEDIMINT_DBTOOL_BASE_EXECUTABLE_ENV, FM_FEDIMINTD_BASE_EXECUTABLE_ENV,
-    FM_GATEWAY_CLI_BASE_EXECUTABLE_ENV, FM_GATEWAYD_BASE_EXECUTABLE_ENV, FM_GWCLI_LDK_ENV,
-    FM_GWCLI_LND_ENV, FM_LNCLI_BASE_EXECUTABLE_ENV, FM_LNCLI_ENV, FM_LND_BASE_EXECUTABLE_ENV,
+    FM_GATEWAY_CLI_BASE_EXECUTABLE_ENV, FM_GATEWAYD_BASE_EXECUTABLE_ENV,
+    FM_GATEWAYDV2_BASE_EXECUTABLE_ENV, FM_GWCLI_LDK_ENV, FM_GWCLI_LND_ENV,
+    FM_LNCLI_BASE_EXECUTABLE_ENV, FM_LNCLI_ENV, FM_LND_BASE_EXECUTABLE_ENV,
     FM_LOAD_TEST_TOOL_BASE_EXECUTABLE_ENV, FM_LOGS_DIR_ENV, FM_MINT_CLIENT_ENV,
     FM_RECOVERYTOOL_BASE_EXECUTABLE_ENV, FM_RECURRINGD_BASE_EXECUTABLE_ENV,
 };
@@ -565,6 +566,8 @@ impl JsonValueExt for serde_json::Value {
 
 const GATEWAYD_FALLBACK: &str = "gatewayd";
 
+const GATEWAYDV2_FALLBACK: &str = "gatewaydv2";
+
 const FEDIMINTD_FALLBACK: &str = "fedimintd";
 
 const FEDIMINT_CLI_FALLBACK: &str = "fedimint-cli";
@@ -650,6 +653,26 @@ impl FedimintdCmd {
                     version_hash_to_version(&v).unwrap_or(DEFAULT_VERSION)
                 }),
         }
+    }
+}
+
+/// Resolver for the `gatewaydv2` binary (LDK + LNv2 only gateway).
+///
+/// Falls back to the regular `gatewayd` override when no v2-specific override
+/// is set, so backwards-compatibility tests (which point
+/// `FM_GATEWAYD_BASE_EXECUTABLE` at an old `gatewayd` that has no `gatewaydv2`)
+/// keep working: the v2 gateway transparently runs the old `gatewayd` there,
+/// while normal runs pick up the freshly built `gatewaydv2` from `PATH`.
+pub struct GatewaydV2;
+impl GatewaydV2 {
+    pub fn cmd(self) -> Command {
+        to_command(get_command_str_for_alias(
+            &[
+                FM_GATEWAYDV2_BASE_EXECUTABLE_ENV,
+                FM_GATEWAYD_BASE_EXECUTABLE_ENV,
+            ],
+            &[GATEWAYDV2_FALLBACK],
+        ))
     }
 }
 

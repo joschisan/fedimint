@@ -83,6 +83,7 @@ pub struct DevJitFed {
     gw_lnd: JitArc<Gatewayd>,
     gw_ldk: JitArc<Gatewayd>,
     gw_ldk_second: JitArc<Gatewayd>,
+    gw_v2: JitArc<Gatewayd>,
     esplora: JitArc<Esplora>,
     recurringd: JitArc<Recurringd>,
     recurringdv2: JitArc<Recurringdv2>,
@@ -90,6 +91,7 @@ pub struct DevJitFed {
     gw_lnd_registered: JitArc<()>,
     gw_ldk_connected: JitArc<()>,
     gw_ldk_second_connected: JitArc<()>,
+    gw_v2_connected: JitArc<()>,
     fed_epoch_generated: JitArc<()>,
     channel_opened: JitArc<()>,
     recurringd_connected: JitArc<()>,
@@ -254,6 +256,28 @@ impl DevJitFed {
                 Ok(Arc::new(ldk_gw2))
             }
         });
+        let gw_v2 = JitTryAnyhow::new_try({
+            let process_mgr = process_mgr.to_owned();
+            let bitcoind = bitcoind.clone();
+            move || async move {
+                bitcoind.get_try().await?;
+                debug!(target: LOG_DEVIMINT, "Starting gatewayv2...");
+                let start_time = fedimint_core::time::now();
+                let gw_v2 = Gatewayd::new_v2(
+                    &process_mgr,
+                    LightningNode::Ldk {
+                        name: "gatewayd-v2-0".to_string(),
+                        gw_port: process_mgr.globals.FM_PORT_GW_V2,
+                        ldk_port: process_mgr.globals.FM_PORT_LDK3,
+                        metrics_port: process_mgr.globals.FM_PORT_GW_V2_METRICS,
+                    },
+                    3,
+                )
+                .await?;
+                info!(target: LOG_DEVIMINT, elapsed_ms = %start_time.elapsed()?.as_millis(), "Started gatewayv2");
+                Ok(Arc::new(gw_v2))
+            }
+        });
         let gw_ldk_connected = JitTryAnyhow::new_try({
             let gw_ldk = gw_ldk.clone();
             let fed = fed.clone();
@@ -292,6 +316,24 @@ impl DevJitFed {
                 Ok(Arc::new(()))
             }
         });
+        let gw_v2_connected = JitTryAnyhow::new_try({
+            let gw_v2 = gw_v2.clone();
+            let fed = fed.clone();
+            move || async move {
+                let gw_v2 = gw_v2.get_try().await?.deref();
+                if supports_lnv2() {
+                    let fed = fed.get_try().await?.deref();
+                    debug!(target: LOG_DEVIMINT, "Registering gatewayv2...");
+                    let start_time = fedimint_core::time::now();
+                    if !skip_setup && !pre_dkg {
+                        let invite = fed.invite_code()?;
+                        gw_v2.client().connect_fed(invite).await?;
+                    }
+                    info!(target: LOG_DEVIMINT, elapsed_ms = %start_time.elapsed()?.as_millis(), "Connected gatewayv2");
+                }
+                Ok(Arc::new(()))
+            }
+        });
 
         let fed_epoch_generated = JitTryAnyhow::new_try({
             let fed = fed.clone();
@@ -311,6 +353,7 @@ impl DevJitFed {
             let gw_lnd = gw_lnd.clone();
             let gw_ldk = gw_ldk.clone();
             let gw_ldk_second = gw_ldk_second.clone();
+            let gw_v2 = gw_v2.clone();
             let bitcoind = bitcoind.clone();
             let fed_epoch_generated = fed_epoch_generated.clone();
             move || async move {
@@ -326,8 +369,17 @@ impl DevJitFed {
                 let gw_ldk_second = gw_ldk_second.get_try().await?.deref();
                 let gw_ldk = gw_ldk.get_try().await?.deref();
                 let gw_lnd = gw_lnd.get_try().await?.deref();
-                let gateways: &[NamedGateway<'_>] =
-                    &[(gw_ldk_second, "LDK2"), (gw_lnd, "LND"), (gw_ldk, "LDK")];
+                let gw_v2 = gw_v2.get_try().await?.deref();
+                // Channels are opened in a ring: each entry gets a channel with
+                // its neighbours, wrapping around. Order so that LND sits between
+                // GWV2 and LDK, since the lnv2 tests route client -> lnd -> gwv2
+                // while the other suites route lnd <-> ldk and ldk <-> ldk2.
+                let gateways: &[NamedGateway<'_>] = &[
+                    (gw_v2, "GWV2"),
+                    (gw_lnd, "LND"),
+                    (gw_ldk, "LDK"),
+                    (gw_ldk_second, "LDK2"),
+                ];
                 if !skip_setup && !pre_dkg {
                     debug!(target: LOG_DEVIMINT, "Opening channels between gateways...");
                     let start_time = fedimint_core::time::now();
@@ -385,6 +437,7 @@ impl DevJitFed {
             gw_lnd,
             gw_ldk,
             gw_ldk_second,
+            gw_v2,
             esplora,
             recurringd,
             recurringdv2,
@@ -392,6 +445,7 @@ impl DevJitFed {
             gw_lnd_registered,
             gw_ldk_connected,
             gw_ldk_second_connected,
+            gw_v2_connected,
             fed_epoch_generated,
             channel_opened,
             recurringd_connected,
@@ -426,6 +480,13 @@ impl DevJitFed {
     pub async fn gw_ldk_second_connected(&self) -> anyhow::Result<&Gatewayd> {
         self.gw_ldk_second_connected.get_try().await?;
         Ok(self.gw_ldk_second.get_try().await?.deref())
+    }
+    pub async fn gw_v2(&self) -> anyhow::Result<&Gatewayd> {
+        Ok(self.gw_v2.get_try().await?.deref())
+    }
+    pub async fn gw_v2_connected(&self) -> anyhow::Result<&Gatewayd> {
+        self.gw_v2_connected.get_try().await?;
+        Ok(self.gw_v2.get_try().await?.deref())
     }
     pub async fn fed(&self) -> anyhow::Result<&Federation> {
         Ok(self.fed.get_try().await?.deref())
@@ -474,6 +535,7 @@ impl DevJitFed {
         let _ = self.gw_lnd_registered().await?;
         let _ = self.gw_ldk_connected().await?;
         let _ = self.gw_ldk_second_connected().await?;
+        let _ = self.gw_v2_connected().await?;
         let _ = self.lnd().await?;
         let _ = self.esplora().await?;
         let _ = self.recurringd_connected().await?;
@@ -514,6 +576,7 @@ impl DevJitFed {
             esplora,
             gw_ldk,
             gw_ldk_second,
+            gw_v2,
             recurringd,
             recurringdv2,
             ..
@@ -523,6 +586,7 @@ impl DevJitFed {
             spawn_drop(gw_lnd),
             spawn_drop(gw_ldk),
             spawn_drop(gw_ldk_second),
+            spawn_drop(gw_v2),
             spawn_drop(fed),
             spawn_drop(lnd),
             spawn_drop(esplora),

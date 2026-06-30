@@ -907,6 +907,10 @@ in
       pkg = gateway-pkgs;
       bin = "gatewayd";
     };
+    gatewaydv2 = pickBinary {
+      pkg = gateway-pkgs;
+      bin = "gatewaydv2";
+    };
     gateway-cli = pickBinary {
       pkg = gateway-pkgs;
       bin = "gateway-cli";

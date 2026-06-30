@@ -52,6 +52,9 @@ pub const FM_PRE_DKG_ENV: &str = "FM_PRE_DKG";
 // Env variable to override gatewayd binary set:
 pub const FM_GATEWAYD_BASE_EXECUTABLE_ENV: &str = "FM_GATEWAYD_BASE_EXECUTABLE";
 
+// Env variable to override gatewaydv2 binary set:
+pub const FM_GATEWAYDV2_BASE_EXECUTABLE_ENV: &str = "FM_GATEWAYDV2_BASE_EXECUTABLE";
+
 // Env variable to override override fedimintd binary set:
 pub const FM_FEDIMINTD_BASE_EXECUTABLE_ENV: &str = "FM_FEDIMINTD_BASE_EXECUTABLE";
 
