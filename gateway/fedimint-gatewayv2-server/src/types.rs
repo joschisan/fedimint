@@ -2,8 +2,9 @@
 
 use std::fmt::Display;
 
-use fedimint_lightning::InterceptPaymentRequest;
 use hex::ToHex;
+
+use crate::lightning::InterceptPaymentRequest;
 
 /// Utility struct for formatting an intercepted HTLC. Useful for debugging.
 pub struct PrettyInterceptPaymentRequest<'a>(pub &'a InterceptPaymentRequest);

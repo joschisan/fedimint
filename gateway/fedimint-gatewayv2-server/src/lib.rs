@@ -21,6 +21,7 @@ mod error;
 mod events;
 mod federation_manager;
 mod iroh_server;
+mod lightning;
 mod metrics;
 pub mod rpc_server;
 mod types;
@@ -90,11 +91,7 @@ use fedimint_gwv2_client::events::compute_lnv2_stats;
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
 };
-use fedimint_lightning::{
-    CreateInvoiceRequest, ILnRpcClient, InterceptPaymentRequest, InterceptPaymentResponse,
-    InvoiceDescription, LightningContext, LightningRpcError, LnRpcTracked, PaymentAction, Preimage,
-    RouteHtlcStream, ldk,
-};
+use fedimint_lightning::{InterceptPaymentResponse, LightningRpcError, PaymentAction, Preimage};
 use fedimint_lnurl::VerifyResponse;
 use fedimint_lnv2_common::Bolt11InvoiceDescription;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
@@ -116,6 +113,10 @@ use tracing::{debug, info, info_span, warn};
 use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
 use crate::error::{AdminGatewayError, LNv2Error, PublicGatewayError};
 use crate::events::get_events_for_duration;
+use crate::lightning::{
+    CreateInvoiceRequest, GatewayLdkClient, InterceptPaymentRequest, InvoiceDescription,
+    LightningContext, RouteHtlcStream,
+};
 use crate::rpc_server::run_webserver;
 use crate::types::PrettyInterceptPaymentRequest;
 
@@ -842,7 +843,7 @@ impl Gateway {
         &'a self,
         handle: &TaskHandle,
         mut stream: RouteHtlcStream<'a>,
-        ln_client: Arc<dyn ILnRpcClient>,
+        ln_client: Arc<GatewayLdkClient>,
     ) -> ReceivePaymentStreamAction {
         let LightningInfo::Connected {
             public_key: lightning_public_key,
@@ -874,7 +875,7 @@ impl Gateway {
         }
 
         let lightning_context = LightningContext {
-            lnrpc: LnRpcTracked::new(ln_client, "gateway"),
+            lnrpc: ln_client,
             lightning_public_key,
             lightning_alias,
             lightning_network,
@@ -1464,7 +1465,7 @@ impl Gateway {
     async fn create_lightning_client(
         &self,
         runtime: Arc<tokio::runtime::Runtime>,
-    ) -> Box<dyn ILnRpcClient> {
+    ) -> Box<GatewayLdkClient> {
         match self.lightning_mode.clone() {
             LightningMode::Lnd { .. } => {
                 panic!("gatewaydv2 only supports the LDK lightning backend, not LND")
@@ -1480,7 +1481,7 @@ impl Gateway {
                 // crashing the gateway, we wait a bit and just try
                 // to re-create the client. The gateway cannot proceed until this succeeds.
                 retry("create LDK Node", fibonacci_max_one_hour(), || async {
-                    ldk::GatewayLdkClient::new(
+                    GatewayLdkClient::new(
                         &self.client_builder.data_dir().join(LDK_NODE_DB_FOLDER),
                         self.chain_source.clone(),
                         self.network,

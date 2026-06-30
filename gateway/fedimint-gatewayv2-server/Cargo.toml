@@ -69,6 +69,8 @@ iroh-base = { workspace = true, default-features = false, features = [
     "ticket",
 ] }
 iroh-relay = { workspace = true, default-features = false }
+ldk-node = { workspace = true }
+lightning = { workspace = true }
 lightning-invoice = { workspace = true }
 lockable = { workspace = true }
 rand = { workspace = true }
