@@ -45,7 +45,6 @@ use tower_http::cors::CorsLayer;
 use tracing::{info, instrument, warn};
 
 use crate::error::{GatewayError, LnurlError};
-use crate::iroh_server::{Handlers, start_iroh_endpoint};
 use crate::{Gateway, GatewayState};
 
 // Routes that the liquidity manager is allowed to access. Any authenticated
@@ -74,14 +73,10 @@ const LIQUIDITY_MANAGER_ROUTES: [&str; 20] = [
 ];
 
 /// Creates the webserver's routes and spawns the webserver in a separate task.
-pub async fn run_webserver(
-    gateway: Arc<Gateway>,
-    mut mnemonic_receiver: tokio::sync::broadcast::Receiver<()>,
-) -> anyhow::Result<()> {
+pub async fn run_webserver(gateway: Arc<Gateway>) -> anyhow::Result<()> {
     let task_group = gateway.task_group.clone();
-    let mut handlers = Handlers::new();
 
-    let routes = routes(gateway.clone(), task_group.clone(), &mut handlers);
+    let routes = routes(gateway.clone(), task_group.clone());
     let api_v1 = Router::new()
         .nest(&format!("/{V1_API_ENDPOINT}"), routes.clone())
         // Backwards compatibility: Continue supporting gateway APIs without versioning
@@ -106,14 +101,6 @@ pub async fn run_webserver(
         }
     });
     info!(target: LOG_GATEWAY, listen = %gateway.listen, "Successfully started webserver");
-
-    // Don't start the Iroh endpoint until the mnemonic has been set via HTTP.
-    if let GatewayState::NotConfigured { .. } = gateway.get_state().await {
-        info!(target: LOG_GATEWAY, "Waiting for the mnemonic to be set before starting iroh loop.");
-        let _ = mnemonic_receiver.recv().await;
-    }
-
-    start_iroh_endpoint(&gateway, task_group, Arc::new(handlers)).await?;
 
     Ok(())
 }
@@ -190,30 +177,25 @@ async fn auth_middleware(
     Err(StatusCode::UNAUTHORIZED)
 }
 
-/// Registers a GET API handler for both the HTTP server and the Iroh
-/// `Endpoint`.
+/// Registers a GET API handler for the HTTP server.
 fn register_get_handler<F, Fut>(
-    handlers: &mut Handlers,
     route: &str,
     func: F,
-    is_authenticated: bool,
+    _is_authenticated: bool,
     router: Router,
 ) -> Router
 where
     F: Fn(Extension<Arc<Gateway>>) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<Json<serde_json::Value>, GatewayError>> + Send + 'static,
 {
-    handlers.add_handler(route, func.clone(), is_authenticated);
     router.route(route, get(func))
 }
 
-/// Registers a POST API handler for both the HTTP server and the Iroh
-/// `Endpoint`.
+/// Registers a POST API handler for the HTTP server.
 fn register_post_handler<P, F, Fut>(
-    handlers: &mut Handlers,
     route: &str,
     func: F,
-    is_authenticated: bool,
+    _is_authenticated: bool,
     router: Router,
 ) -> Router
 where
@@ -221,29 +203,15 @@ where
     F: Fn(Extension<Arc<Gateway>>, Json<P>) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<Json<serde_json::Value>, GatewayError>> + Send + 'static,
 {
-    handlers.add_handler_with_payload(route, func.clone(), is_authenticated);
     router.route(route, post(func))
 }
 
 /// Public routes that are used in the LNv2 protocol
-fn lnv2_routes(handlers: &mut Handlers) -> Router {
+fn lnv2_routes() -> Router {
     let router = Router::new();
+    let router = register_post_handler(ROUTING_INFO_ENDPOINT, routing_info_v2, false, router);
+    let router = register_post_handler(SEND_PAYMENT_ENDPOINT, pay_bolt11_invoice_v2, false, router);
     let router = register_post_handler(
-        handlers,
-        ROUTING_INFO_ENDPOINT,
-        routing_info_v2,
-        false,
-        router,
-    );
-    let router = register_post_handler(
-        handlers,
-        SEND_PAYMENT_ENDPOINT,
-        pay_bolt11_invoice_v2,
-        false,
-        router,
-    );
-    let router = register_post_handler(
-        handlers,
         CREATE_BOLT11_INVOICE_ENDPOINT,
         create_bolt11_invoice_v2,
         false,
@@ -258,183 +226,154 @@ fn lnv2_routes(handlers: &mut Handlers) -> Router {
 ///   gateway administrators.
 /// - Un-authenticated: anyone can request these routes. Used by fedimint
 ///   clients.
-fn routes(gateway: Arc<Gateway>, task_group: TaskGroup, handlers: &mut Handlers) -> Router {
+fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
     // Public routes on gateway webserver
-    let mut public_routes = register_post_handler(
-        handlers,
-        RECEIVE_ECASH_ENDPOINT,
-        receive_ecash,
-        false,
-        Router::new(),
-    );
-    public_routes = public_routes.merge(lnv2_routes(handlers));
+    let mut public_routes =
+        register_post_handler(RECEIVE_ECASH_ENDPOINT, receive_ecash, false, Router::new());
+    public_routes = public_routes.merge(lnv2_routes());
 
     // Authenticated routes used for gateway administration
     let is_authenticated = true;
     let authenticated_routes = Router::new();
     let authenticated_routes = register_post_handler(
-        handlers,
         ADDRESS_ENDPOINT,
         address,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         WITHDRAW_ENDPOINT,
         withdraw,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         WITHDRAW_TO_ONCHAIN_ENDPOINT,
         withdraw_to_onchain,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         PEGIN_FROM_ONCHAIN_ENDPOINT,
         pegin_from_onchain,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         CONNECT_FED_ENDPOINT,
         connect_fed,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         LEAVE_FED_ENDPOINT,
         leave_fed,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         BACKUP_ENDPOINT,
         backup,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         CREATE_BOLT11_INVOICE_FOR_OPERATOR_ENDPOINT,
         create_invoice_for_operator,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         CREATE_BOLT12_OFFER_FOR_OPERATOR_ENDPOINT,
         create_offer_for_operator,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         PAY_INVOICE_FOR_OPERATOR_ENDPOINT,
         pay_invoice_operator,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         PAY_OFFER_FOR_OPERATOR_ENDPOINT,
         pay_offer_operator,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         GET_INVOICE_ENDPOINT,
         get_invoice,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_get_handler(
-        handlers,
         GET_LN_ONCHAIN_ADDRESS_ENDPOINT,
         get_ln_onchain_address,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         OPEN_CHANNEL_ENDPOINT,
         open_channel,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         OPEN_CHANNEL_WITH_PUSH_ENDPOINT,
         open_channel_with_push,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         CLOSE_CHANNELS_WITH_PEER_ENDPOINT,
         close_channels_with_peer,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_get_handler(
-        handlers,
         LIST_CHANNELS_ENDPOINT,
         list_channels,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         SET_CHANNEL_FEES_ENDPOINT,
         set_channel_fees,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         LIST_TRANSACTIONS_ENDPOINT,
         list_transactions,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         SEND_ONCHAIN_ENDPOINT,
         send_onchain,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         ADDRESS_RECHECK_ENDPOINT,
         recheck_address,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_get_handler(
-        handlers,
         GET_BALANCES_ENDPOINT,
         get_balances,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         SPEND_ECASH_ENDPOINT,
         spend_ecash,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_get_handler(
-        handlers,
         MNEMONIC_ENDPOINT,
         mnemonic,
         is_authenticated,
@@ -443,49 +382,42 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup, handlers: &mut Handlers)
     // Stop does not have the same function signature, it is handled separately
     let authenticated_routes = authenticated_routes.route(STOP_ENDPOINT, get(stop));
     let authenticated_routes = register_post_handler(
-        handlers,
         PAYMENT_LOG_ENDPOINT,
         payment_log,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         PAYMENT_SUMMARY_ENDPOINT,
         payment_summary,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         SET_FEES_ENDPOINT,
         set_fees,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         CONFIGURATION_ENDPOINT,
         configuration,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_get_handler(
-        handlers,
         GATEWAY_INFO_ENDPOINT,
         info,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        handlers,
         MNEMONIC_ENDPOINT,
         set_mnemonic,
         is_authenticated,
         authenticated_routes,
     );
     let authenticated_routes = register_get_handler(
-        handlers,
         INVITE_CODES_ENDPOINT,
         invite_codes,
         is_authenticated,

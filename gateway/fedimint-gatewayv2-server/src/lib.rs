@@ -20,7 +20,6 @@ pub mod envs;
 mod error;
 mod events;
 mod federation_manager;
-mod iroh_server;
 mod lightning;
 mod metrics;
 pub mod rpc_server;
@@ -230,9 +229,6 @@ impl Gateway {
         #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] default_routing_fees: PaymentFee,
         #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)]
         default_transaction_fees: PaymentFee,
-        iroh_listen: Option<SocketAddr>,
-        iroh_dns: Option<SafeUrl>,
-        #[builder(default)] iroh_relays: Vec<SafeUrl>,
         metrics_listen: Option<SocketAddr>,
     ) -> anyhow::Result<Gateway> {
         let versioned_api = api_addr.map(|addr| {
@@ -257,9 +253,6 @@ impl Gateway {
                 network,
                 default_routing_fees,
                 default_transaction_fees,
-                iroh_listen,
-                iroh_dns,
-                iroh_relays,
                 skip_setup: true,
                 metrics_listen,
             },
@@ -323,19 +316,6 @@ pub struct Gateway {
 
     /// The default transaction fees for new federations
     default_transaction_fees: PaymentFee,
-
-    /// The secret key for the Iroh `Endpoint`
-    iroh_sk: iroh::SecretKey,
-
-    /// The socket that the gateway listens on for the Iroh `Endpoint`
-    iroh_listen: Option<SocketAddr>,
-
-    /// Optional DNS server used for discovery of the Iroh `Endpoint`
-    iroh_dns: Option<SafeUrl>,
-
-    /// List of additional relays that can be used to establish a connection to
-    /// the Iroh `Endpoint`
-    iroh_relays: Vec<SafeUrl>,
 
     /// A map of the network protocols the gateway supports to the data needed
     /// for registering with a federation.
@@ -609,15 +589,6 @@ impl Gateway {
             );
         }
 
-        let iroh_sk = Self::load_or_create_iroh_key(&gateway_db).await;
-        if gateway_parameters.iroh_listen.is_some() {
-            let endpoint_url = SafeUrl::parse(&format!("iroh://{}", iroh_sk.public()))?;
-            registrations.insert(
-                RegisteredProtocol::Iroh,
-                Registration::new(&gateway_db, endpoint_url, RegisteredProtocol::Iroh).await,
-            );
-        }
-
         Ok(Self {
             federation_manager: Arc::new(RwLock::new(FederationManager::new())),
             lightning_mode,
@@ -635,10 +606,6 @@ impl Gateway {
             chain_source,
             default_routing_fees: gateway_parameters.default_routing_fees,
             default_transaction_fees: gateway_parameters.default_transaction_fees,
-            iroh_sk,
-            iroh_dns: gateway_parameters.iroh_dns,
-            iroh_relays: gateway_parameters.iroh_relays,
-            iroh_listen: gateway_parameters.iroh_listen,
             registrations,
         })
     }
@@ -651,15 +618,6 @@ impl Gateway {
         let keypair = dbtx.load_or_create_gateway_keypair(protocol).await;
         dbtx.commit_tx().await;
         keypair
-    }
-
-    /// Returns `iroh::SecretKey` and saves it to the database if it does not
-    /// exist
-    async fn load_or_create_iroh_key(gateway_db: &Database) -> iroh::SecretKey {
-        let mut dbtx = gateway_db.begin_transaction().await;
-        let iroh_sk = dbtx.load_or_create_iroh_key().await;
-        dbtx.commit_tx().await;
-        iroh_sk
     }
 
     pub async fn http_gateway_id(&self) -> PublicKey {
@@ -698,7 +656,7 @@ impl Gateway {
         fedimint_metrics::spawn_api_server(self.metrics_listen, self.task_group.clone()).await?;
         // start webserver last to avoid handling requests before fully initialized
         let handle = self.task_group.make_handle();
-        run_webserver(Arc::new(self), mnemonic_receiver.resubscribe()).await?;
+        run_webserver(Arc::new(self)).await?;
         let shutdown_receiver = handle.make_shutdown_rx();
         Ok(shutdown_receiver)
     }
@@ -1499,9 +1457,9 @@ impl Gateway {
     }
 }
 
-/// Admin/operator request handlers, called by the REST API and the Iroh
-/// endpoint. (`gatewaydv2` has no web UI, so these are plain inherent methods
-/// rather than an `IAdminGateway` trait impl.)
+/// Admin/operator request handlers, called by the REST API. (`gatewaydv2` has
+/// no web UI, so these are plain inherent methods rather than an
+/// `IAdminGateway` trait impl.)
 impl Gateway {
     /// Returns information about the Gateway back to the client when requested
     /// via the webserver.

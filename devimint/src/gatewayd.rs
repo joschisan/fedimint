@@ -923,12 +923,19 @@ impl Gatewayd {
                         .context("gateway id must be a string")
                         .map_err(ControlFlow::Break)?
                         .to_owned();
-                    let iroh_gateway_id = info["registrations"]["iroh"][1]
-                        .as_str()
-                        .context("gateway id must be a string")
-                        .map_err(ControlFlow::Break)?
-                        .to_owned();
-                    (gateway_id, Some(iroh_gateway_id))
+                    // gatewaydv2 does not register an iroh endpoint, only HTTP.
+                    let iroh_gateway_id = if v2 {
+                        None
+                    } else {
+                        Some(
+                            info["registrations"]["iroh"][1]
+                                .as_str()
+                                .context("gateway id must be a string")
+                                .map_err(ControlFlow::Break)?
+                                .to_owned(),
+                        )
+                    };
+                    (gateway_id, iroh_gateway_id)
                 };
 
                 Ok((gateway_id, iroh_gateway_id))
