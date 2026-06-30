@@ -45,19 +45,18 @@ use config::{DatabaseBackend, GatewayOpts};
 use envs::FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV;
 use error::FederationNotConnected;
 use events::ALL_GATEWAY_EVENTS;
-use federation_manager::FederationManager;
+use federation_manager::{FederationManager, transient_federation_config};
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_bitcoind::bitcoincore::BitcoindClient;
 use fedimint_client::ClientHandleArc;
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
-use fedimint_core::config::FederationId;
-use fedimint_core::core::OperationId;
+use fedimint_core::config::{ClientConfig, FederationId};
+use fedimint_core::core::{ModuleKind, OperationId};
 use fedimint_core::db::Database;
 use fedimint_core::envs::is_env_var_set;
 use fedimint_core::invite_code::InviteCode;
-use fedimint_core::module::CommonModuleInit;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::secp256k1::PublicKey;
@@ -67,22 +66,20 @@ use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::backoff_util::fibonacci_max_one_hour;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned, retry};
 use fedimint_core::{
-    Amount, BitcoinAmountOrAll, PeerId, crit, fedimint_build_code_version_env,
-    get_network_for_address,
+    Amount, BitcoinAmountOrAll, crit, fedimint_build_code_version_env, get_network_for_address,
 };
 use fedimint_eventlog::{DBTransactionEventLogExt, EventLogId, StructuredPaymentEvents};
 use fedimint_gateway_common::{
     BackupPayload, ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
-    ConnectFedPayload, ConnectorType, CreateInvoiceForOperatorPayload, CreateOfferPayload,
-    CreateOfferResponse, DepositAddressPayload, DepositAddressRecheckPayload,
-    FederationBalanceInfo, FederationConfig, FederationInfo, GatewayBalances, GatewayFedConfig,
-    GatewayInfo, GetInvoiceRequest, GetInvoiceResponse, LeaveFedPayload, LightningInfo,
-    LightningMode, ListTransactionsPayload, ListTransactionsResponse, MnemonicResponse,
-    OpenChannelRequest, PayInvoiceForOperatorPayload, PayOfferPayload, PayOfferResponse,
-    PaymentLogPayload, PaymentLogResponse, PaymentStats, PaymentSummaryPayload,
-    PaymentSummaryResponse, PeginFromOnchainPayload, ReceiveEcashPayload, ReceiveEcashResponse,
-    RegisteredProtocol, SendOnchainRequest, SetChannelFeesRequest, SpendEcashPayload,
-    SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload, WithdrawResponse,
+    ConnectFedPayload, CreateInvoiceForOperatorPayload, CreateOfferPayload, CreateOfferResponse,
+    DepositAddressPayload, DepositAddressRecheckPayload, FederationBalanceInfo, FederationInfo,
+    GatewayBalances, GatewayFedConfig, GatewayInfo, GetInvoiceRequest, GetInvoiceResponse,
+    LeaveFedPayload, LightningInfo, LightningMode, ListTransactionsPayload,
+    ListTransactionsResponse, MnemonicResponse, OpenChannelRequest, PayInvoiceForOperatorPayload,
+    PayOfferPayload, PayOfferResponse, PaymentLogPayload, PaymentLogResponse, PaymentStats,
+    PaymentSummaryPayload, PaymentSummaryResponse, PeginFromOnchainPayload, ReceiveEcashPayload,
+    ReceiveEcashResponse, RegisteredProtocol, SendOnchainRequest, SetChannelFeesRequest,
+    SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload, WithdrawResponse,
     WithdrawToOnchainPayload,
 };
 use fedimint_gwv2_client::events::compute_lnv2_stats;
@@ -582,7 +579,8 @@ impl Gateway {
         runtime: Arc<tokio::runtime::Runtime>,
     ) -> anyhow::Result<TaskShutdownToken> {
         install_crypto_provider().await;
-        self.load_clients().await?;
+        // Federation clients are loaded lazily on first use; nothing is built
+        // at boot.
         self.start_gateway(runtime);
         // start metrics server
         fedimint_metrics::spawn_api_server(self.metrics_listen, self.task_group.clone()).await?;
@@ -920,6 +918,7 @@ impl Gateway {
         }
 
         let federations = if let Some(federation_id) = federation_id_or {
+            self.select_client(federation_id).await?;
             let mut federations = BTreeMap::new();
             federations.insert(
                 federation_id,
@@ -1116,21 +1115,73 @@ impl Gateway {
         Ok(txid)
     }
 
-    /// Retrieves a `ClientHandleArc` from the Gateway's in memory structures
-    /// that keep track of available clients, given a `federation_id`.
+    /// Retrieves the client for a federation, building it on demand if it is
+    /// not yet loaded. Clients are loaded lazily — nothing is built at boot;
+    /// each federation's client is constructed the first time it is needed and
+    /// cached thereafter (double-checked locking).
     pub async fn select_client(
         &self,
         federation_id: FederationId,
     ) -> std::result::Result<Spanned<fedimint_client::ClientHandleArc>, FederationNotConnected>
     {
-        self.federation_manager
+        let not_connected = || FederationNotConnected {
+            federation_id_prefix: federation_id.to_prefix(),
+        };
+
+        // Fast path: the client is already loaded.
+        if let Some(client) = self
+            .federation_manager
             .read()
             .await
             .client(&federation_id)
             .cloned()
-            .ok_or(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            })
+        {
+            return Ok(client);
+        }
+
+        // Slow path: build the client under the write lock.
+        let mut federation_manager = self.federation_manager.write().await;
+
+        // Re-check in case another task built it while we waited for the lock.
+        if let Some(client) = federation_manager.client(&federation_id).cloned() {
+            return Ok(client);
+        }
+
+        // Only federations whose config is persisted can be built. The stored
+        // `ClientConfig` is what lets the client be (lazily) joined without an
+        // invite code.
+        let Some(config) = self
+            .gateway_db
+            .begin_transaction_nc()
+            .await
+            .load_client_config(federation_id)
+            .await
+        else {
+            return Err(not_connected());
+        };
+
+        let mnemonic = Self::load_mnemonic(&self.gateway_db)
+            .await
+            .expect("mnemonic should be set");
+
+        let client = Box::pin(Spanned::try_new(
+            info_span!(target: LOG_GATEWAY, "client", federation_id = %federation_id),
+            self.client_builder
+                .build(federation_id, config, Arc::new(self.clone()), &mnemonic),
+        ))
+        .await
+        .map_err(|err| {
+            warn!(
+                target: LOG_GATEWAY,
+                federation_id = %federation_id,
+                err = %err,
+                "Failed to lazily load federation client"
+            );
+            not_connected()
+        })?;
+
+        federation_manager.add_client(client.clone());
+        Ok(client)
     }
 
     async fn load_mnemonic(gateway_db: &Database) -> Option<Mnemonic> {
@@ -1142,79 +1193,74 @@ impl Gateway {
         Mnemonic::from_entropy(&entropy).ok()
     }
 
-    /// Reads the connected federation client configs from the Gateway's
-    /// database and reconstructs the clients necessary for interacting with
-    /// connection federations.
-    async fn load_clients(&self) -> AdminResult<()> {
-        let mut federation_manager = self.federation_manager.write().await;
-
-        let federation_ids = {
-            let mut dbtx = self.gateway_db.begin_transaction_nc().await;
-            dbtx.load_client_configs()
-                .await
-                .into_keys()
-                .collect::<Vec<_>>()
-        };
-
-        let mnemonic = Self::load_mnemonic(&self.gateway_db)
-            .await
-            .expect("mnemonic should be set");
-
-        for federation_id in federation_ids {
-            match Box::pin(Spanned::try_new(
-                info_span!(target: LOG_GATEWAY, "client", federation_id  = %federation_id.clone()),
-                self.client_builder
-                    .build(federation_id, None, Arc::new(self.clone()), &mnemonic),
-            ))
-            .await
-            {
-                Ok(client) => {
-                    federation_manager.add_client(client);
-                }
-                _ => {
-                    warn!(target: LOG_GATEWAY, federation_id = %federation_id, "Failed to load client");
-                }
-            }
-        }
-
-        Ok(())
+    /// Reconstructs a single invite code from a stored `ClientConfig` (first
+    /// peer). The gateway does not persist invite codes; this is only used to
+    /// populate the transient config in `FederationInfo` responses.
+    fn invite_from_config(config: &ClientConfig) -> Option<InviteCode> {
+        let federation_id = config.calculate_federation_id();
+        config
+            .global
+            .api_endpoints
+            .iter()
+            .next()
+            .map(|(peer, url)| InviteCode::new(url.url.clone(), *peer, federation_id, None))
     }
 
-    /// Verifies that the federation has an LNv2 lightning module and that the
-    /// network matches the gateway's network.
-    async fn check_federation_network(
-        client: &ClientHandleArc,
-        network: Network,
-    ) -> AdminResult<()> {
-        let federation_id = client.federation_id();
-        let config = client.config().await;
+    /// Builds a [`FederationInfo`] purely from a stored `ClientConfig`, without
+    /// loading the client. The listing is balance-free (picomint-style):
+    /// `balance_msat` is always zero — read an actual balance with the
+    /// per-federation balance command, which lazily loads the client.
+    fn federation_info_from_config(
+        &self,
+        federation_id: FederationId,
+        config: &ClientConfig,
+    ) -> Option<FederationInfo> {
+        let invite_code = Self::invite_from_config(config)?;
+        Some(FederationInfo {
+            federation_id,
+            federation_name: config.global.federation_name().map(str::to_string),
+            balance_msat: Amount::ZERO,
+            config: transient_federation_config(
+                invite_code,
+                self.default_routing_fees,
+                self.default_transaction_fees,
+            ),
+            last_backup_time: None,
+        })
+    }
 
-        let lnv2_cfg = config
-            .modules
-            .values()
-            .find(|m| fedimint_lnv2_common::LightningCommonInit::KIND == m.kind);
-
-        // Ensure the federation has an LNv2 lightning module
-        let Some(cfg) = lnv2_cfg else {
-            return Err(AdminGatewayError::ClientCreationError(anyhow!(
-                "Federation {federation_id} does not have an LNv2 lightning module"
-            )));
+    /// Lists every joined federation by reading its `ClientConfig` from the
+    /// database. Never builds a client; balances are best-effort (see
+    /// [`Gateway::federation_info_from_config`]).
+    async fn list_federation_infos(&self) -> Vec<FederationInfo> {
+        let configs = {
+            let mut dbtx = self.gateway_db.begin_transaction_nc().await;
+            dbtx.load_client_configs().await
         };
+        let mut federation_infos = Vec::new();
+        for (federation_id, config) in configs {
+            if let Some(info) = self.federation_info_from_config(federation_id, &config) {
+                federation_infos.push(info);
+            }
+        }
+        federation_infos
+    }
 
-        // Verify the LNv2 network
-        let ln_cfg: &fedimint_lnv2_common::config::LightningClientConfig = cfg.cast()?;
-
-        if ln_cfg.network != network {
-            crit!(
-                target: LOG_GATEWAY,
-                federation_id = %federation_id,
-                network = %network,
-                "Incorrect LNv2 network for federation",
-            );
-            return Err(AdminGatewayError::ClientCreationError(anyhow!(format!(
-                "Unsupported LNv2 network {}",
-                ln_cfg.network
-            ))));
+    /// Ensures the federation exposes the three v2 modules the gateway needs.
+    ///
+    /// This checks module *kinds* only, which works on the raw, undecoded
+    /// config returned by `preview`, so it can run at connect time without
+    /// building a client. The network is intentionally not validated here; a
+    /// mismatch surfaces later when the client is built and operates.
+    fn ensure_v2_modules(config: &ClientConfig) -> AdminResult<()> {
+        for kind in ["lnv2", "mintv2", "walletv2"] {
+            let module_kind = ModuleKind::from_static_str(kind);
+            if !config.modules.values().any(|m| m.kind == module_kind) {
+                return Err(AdminGatewayError::ClientCreationError(anyhow!(
+                    "Federation {} is missing the required {kind} module",
+                    config.calculate_federation_id()
+                )));
+            }
         }
 
         Ok(())
@@ -1289,15 +1335,7 @@ impl Gateway {
             });
         };
 
-        let federations = self
-            .federation_manager
-            .read()
-            .await
-            .federation_info_all_federations(
-                self.default_routing_fees,
-                self.default_transaction_fees,
-            )
-            .await;
+        let federations = self.list_federation_infos().await;
 
         let lightning_info = lightning_context.lnrpc.parsed_node_info().await;
 
@@ -1383,26 +1421,31 @@ impl Gateway {
     /// will request the federation to remove the registration record and
     /// the gateway will remove the configuration needed to construct the
     /// federation client.
+    /// "Leaving" a federation only disables it: its public-facing endpoints are
+    /// gated off, but the client and its config are retained so in-flight
+    /// payments settle and it can be re-enabled by connecting again. Because
+    /// federation state is never discarded, the gateway never needs the
+    /// recovery protocol.
     async fn handle_leave_federation(
         &self,
         payload: LeaveFedPayload,
     ) -> AdminResult<FederationInfo> {
-        // Lock the federation manager before starting the db transaction to reduce the
-        // chance of db write conflicts.
-        let mut federation_manager = self.federation_manager.write().await;
-
-        let federation_info = federation_manager
-            .leave_federation(
-                payload.federation_id,
-                self.default_routing_fees,
-                self.default_transaction_fees,
-            )
-            .await?;
+        let federation_id = payload.federation_id;
+        let not_connected = || FederationNotConnected {
+            federation_id_prefix: federation_id.to_prefix(),
+        };
 
         let mut dbtx = self.gateway_db.begin_transaction().await;
-        dbtx.remove_client_config(payload.federation_id).await;
+        let config = dbtx
+            .load_client_config(federation_id)
+            .await
+            .ok_or_else(not_connected)?;
+        dbtx.save_disabled_federation(federation_id).await;
         dbtx.commit_tx().await;
-        Ok(federation_info)
+
+        self.federation_info_from_config(federation_id, &config)
+            .ok_or_else(not_connected)
+            .map_err(AdminGatewayError::from)
     }
 
     /// Handles a connection request to join a new federation. The gateway will
@@ -1426,81 +1469,47 @@ impl Gateway {
         })?;
 
         let federation_id = invite_code.federation_id();
-
-        let mut federation_manager = self.federation_manager.write().await;
-
-        // Check if this federation has already been registered
-        if federation_manager.has_federation(federation_id) {
-            return Err(AdminGatewayError::ClientCreationError(anyhow!(
-                "Federation has already been registered"
-            )));
-        }
-
-        let mnemonic = Self::load_mnemonic(&self.gateway_db)
-            .await
-            .expect("mnemonic should be set");
-        let recover = payload.recover.unwrap_or(false);
-        if recover {
-            self.client_builder
-                .recover(&invite_code, Arc::new(self.clone()), &mnemonic)
-                .await?;
-        }
-
-        let client = self
-            .client_builder
-            .build(
-                federation_id,
-                Some(&invite_code),
-                Arc::new(self.clone()),
-                &mnemonic,
-            )
-            .await?;
-
-        if recover {
-            client.wait_for_all_active_state_machines().await?;
-        }
-
-        let client_config = client.config().await;
-
-        // Instead of using `FederationManager::federation_info`, we build the
-        // federation info here from the freshly joined client.
-        let federation_info = FederationInfo {
-            federation_id,
-            federation_name: federation_manager.federation_name(&client).await,
-            balance_msat: client.get_balance_for_btc().await.unwrap_or_else(|err| {
-                warn!(
-                    target: LOG_GATEWAY,
-                    err = %err.fmt_compact_anyhow(),
-                    %federation_id,
-                    "Balance not immediately available after joining/recovering."
-                );
-                Amount::default()
-            }),
-            config: FederationConfig {
-                invite_code,
-                federation_index: 0,
-                lightning_fee: self.default_routing_fees,
-                transaction_fee: self.default_transaction_fees,
-                #[allow(deprecated)]
-                _connector: ConnectorType::Tcp,
-            },
-            last_backup_time: None,
+        let not_connected = || FederationNotConnected {
+            federation_id_prefix: federation_id.to_prefix(),
         };
 
-        Self::check_federation_network(&client, self.network).await?;
+        // Connecting (re-)enables a federation: clear any disabled flag. A
+        // federation is only ever disabled, never truly left, so reconnecting
+        // an existing one just re-enables it rather than rejoining — which is
+        // why the gateway never needs the recovery protocol.
+        {
+            let mut dbtx = self.gateway_db.begin_transaction().await;
+            dbtx.remove_disabled_federation(federation_id).await;
+            dbtx.commit_tx().await;
+        }
 
-        // no need to enter span earlier, because connect-fed has a span
-        federation_manager.add_client(
-            Spanned::new(
-                info_span!(target: LOG_GATEWAY, "client", federation_id=%federation_id.clone()),
-                async { client },
-            )
-            .await,
-        );
+        // If the config is already persisted, connecting simply re-enabled the
+        // federation; no need to re-download or build (the client loads lazily
+        // on first use).
+        if let Some(config) = self
+            .gateway_db
+            .begin_transaction_nc()
+            .await
+            .load_client_config(federation_id)
+            .await
+        {
+            return self
+                .federation_info_from_config(federation_id, &config)
+                .ok_or_else(not_connected)
+                .map_err(AdminGatewayError::from);
+        }
+
+        // Fresh connection: download and persist the config WITHOUT building a
+        // client. The client (and its first join) happens lazily on first use.
+        let config = self
+            .client_builder
+            .download_config(&invite_code, Arc::new(self.clone()))
+            .await?;
+
+        Self::ensure_v2_modules(&config)?;
 
         let mut dbtx = self.gateway_db.begin_transaction().await;
-        dbtx.save_client_config(&federation_id, &client_config)
-            .await;
+        dbtx.save_client_config(&federation_id, &config).await;
         dbtx.commit_tx().await;
         debug!(
             target: LOG_GATEWAY,
@@ -1508,7 +1517,9 @@ impl Gateway {
             "Federation connected"
         );
 
-        Ok(federation_info)
+        self.federation_info_from_config(federation_id, &config)
+            .ok_or_else(not_connected)
+            .map_err(AdminGatewayError::from)
     }
 
     /// Handles an authenticated request for the gateway's mnemonic. This also
@@ -1522,15 +1533,13 @@ impl Gateway {
             .words()
             .map(std::string::ToString::to_string)
             .collect::<Vec<_>>();
-        let all_federations = self
-            .federation_manager
-            .read()
-            .await
-            .get_all_federation_configs()
-            .await
-            .keys()
-            .copied()
-            .collect::<BTreeSet<_>>();
+        let all_federations = {
+            let mut dbtx = self.gateway_db.begin_transaction_nc().await;
+            dbtx.load_client_configs()
+                .await
+                .into_keys()
+                .collect::<BTreeSet<_>>()
+        };
         let legacy_federations = self.client_builder.legacy_federations(all_federations);
         let mnemonic_response = MnemonicResponse {
             mnemonic: words,
@@ -1587,25 +1596,32 @@ impl Gateway {
     /// Returns the ecash, lightning, and onchain balances for the gateway and
     /// the gateway's lightning node.
     async fn handle_get_balances_msg(&self) -> AdminResult<GatewayBalances> {
-        let federation_infos = self
-            .federation_manager
-            .read()
-            .await
-            .federation_info_all_federations(
-                self.default_routing_fees,
-                self.default_transaction_fees,
-            )
-            .await;
+        // Reading balances is a per-federation operation (picomint-style): the
+        // listing is balance-free, and here we lazily load each joined
+        // federation's client on demand to read its actual ecash balance.
+        let federation_ids = {
+            let mut dbtx = self.gateway_db.begin_transaction_nc().await;
+            dbtx.load_client_configs()
+                .await
+                .into_keys()
+                .collect::<Vec<_>>()
+        };
 
-        let ecash_balances: Vec<FederationBalanceInfo> = federation_infos
-            .iter()
-            .map(|federation_info| FederationBalanceInfo {
-                federation_id: federation_info.federation_id,
-                ecash_balance_msats: Amount {
-                    msats: federation_info.balance_msat.msats,
-                },
-            })
-            .collect();
+        let mut ecash_balances: Vec<FederationBalanceInfo> = Vec::new();
+        for federation_id in federation_ids {
+            let Ok(client) = self.select_client(federation_id).await else {
+                continue;
+            };
+            let ecash_balance_msats = client
+                .borrow()
+                .with(|client| client.get_balance_for_btc())
+                .await
+                .unwrap_or_default();
+            ecash_balances.push(FederationBalanceInfo {
+                federation_id,
+                ecash_balance_msats,
+            });
+        }
 
         let context = self.get_lightning_context().await?;
         let lightning_node_balances = context.lnrpc.get_balances().await?;
@@ -1910,79 +1926,61 @@ impl Gateway {
             preimage: preimage.to_string(),
         })
     }
-
-    /// Returns a `BTreeMap` that is keyed by the `FederationId` and contains
-    /// all the invite codes (with peer names) for the federation.
-    async fn handle_export_invite_codes(
-        &self,
-    ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>> {
-        let fed_manager = self.federation_manager.read().await;
-        fed_manager.all_invite_codes().await
-    }
 }
 
 // LNv2 Gateway implementation
 impl Gateway {
-    /// Retrieves the `PublicKey` of the Gateway module for a given federation
-    /// for LNv2. This is NOT the same as the `gateway_id`, it is different
-    /// per-connected federation.
-    async fn public_key_v2(&self, federation_id: &FederationId) -> Option<PublicKey> {
-        self.federation_manager
-            .read()
-            .await
-            .client(federation_id)
-            .map(|client| {
-                client
-                    .value()
-                    .get_first_module::<GatewayClientModuleV2>()
-                    .expect("Must have client module")
-                    .keypair
-                    .public_key()
-            })
-    }
-
     /// Returns payment information that LNv2 clients can use to instruct this
-    /// Gateway to pay an invoice or receive a payment.
+    /// Gateway to pay an invoice or receive a payment. Returns `None` if the
+    /// federation is disabled or not joined; the client is lazily built to read
+    /// its module public key.
     pub async fn routing_info_v2(
         &self,
         federation_id: &FederationId,
     ) -> Result<Option<RoutingInfo>> {
         let context = self.get_lightning_context().await?;
 
-        if !self
-            .federation_manager
-            .read()
+        // Disabled federations advertise no routing info.
+        if self
+            .gateway_db
+            .begin_transaction_nc()
             .await
-            .has_federation(*federation_id)
+            .is_federation_disabled(*federation_id)
+            .await
         {
-            return Err(PublicGatewayError::FederationNotConnected(
-                FederationNotConnected {
-                    federation_id_prefix: federation_id.to_prefix(),
-                },
-            ));
+            return Ok(None);
         }
+
+        // Lazily load the client to read its module public key. A federation
+        // that isn't joined (or fails to load) yields `None`.
+        let Ok(client) = self.select_client(*federation_id).await else {
+            return Ok(None);
+        };
+        let module_public_key = client
+            .value()
+            .get_first_module::<GatewayClientModuleV2>()
+            .expect("Must have client module")
+            .keypair
+            .public_key();
 
         let lightning_fee = self.default_routing_fees;
         let transaction_fee = self.default_transaction_fees;
 
-        Ok(self
-            .public_key_v2(federation_id)
-            .await
-            .map(|module_public_key| RoutingInfo {
-                lightning_public_key: context.lightning_public_key,
-                lightning_alias: Some(context.lightning_alias.clone()),
-                module_public_key,
-                send_fee_default: lightning_fee + transaction_fee,
-                // The base fee ensures that the gateway does not loose sats sending the payment due
-                // to fees paid on the transaction claiming the outgoing contract or
-                // subsequent transactions spending the newly issued ecash
-                send_fee_minimum: transaction_fee,
-                expiration_delta_default: 1440,
-                expiration_delta_minimum: EXPIRATION_DELTA_MINIMUM_V2,
-                // The base fee ensures that the gateway does not loose sats receiving the payment
-                // due to fees paid on the transaction funding the incoming contract
-                receive_fee: transaction_fee,
-            }))
+        Ok(Some(RoutingInfo {
+            lightning_public_key: context.lightning_public_key,
+            lightning_alias: Some(context.lightning_alias.clone()),
+            module_public_key,
+            send_fee_default: lightning_fee + transaction_fee,
+            // The base fee ensures that the gateway does not loose sats sending the payment due
+            // to fees paid on the transaction claiming the outgoing contract or
+            // subsequent transactions spending the newly issued ecash
+            send_fee_minimum: transaction_fee,
+            expiration_delta_default: 1440,
+            expiration_delta_minimum: EXPIRATION_DELTA_MINIMUM_V2,
+            // The base fee ensures that the gateway does not loose sats receiving the payment
+            // due to fees paid on the transaction funding the incoming contract
+            receive_fee: transaction_fee,
+        }))
     }
 
     /// Instructs this gateway to pay a Lightning network invoice via the LNv2

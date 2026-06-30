@@ -19,16 +19,16 @@ use fedimint_gateway_common::{
     CloseChannelsWithPeerRequest, ConfigPayload, ConnectFedPayload,
     CreateInvoiceForOperatorPayload, CreateOfferPayload, DepositAddressPayload,
     DepositAddressRecheckPayload, GATEWAY_INFO_ENDPOINT, GET_BALANCES_ENDPOINT,
-    GET_INVOICE_ENDPOINT, GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GetInvoiceRequest,
-    INVITE_CODES_ENDPOINT, LEAVE_FED_ENDPOINT, LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT,
-    LeaveFedPayload, ListTransactionsPayload, MNEMONIC_ENDPOINT, OPEN_CHANNEL_ENDPOINT,
-    OPEN_CHANNEL_WITH_PUSH_ENDPOINT, OpenChannelRequest, PAY_INVOICE_FOR_OPERATOR_ENDPOINT,
-    PAY_OFFER_FOR_OPERATOR_ENDPOINT, PAYMENT_LOG_ENDPOINT, PAYMENT_SUMMARY_ENDPOINT,
-    PEGIN_FROM_ONCHAIN_ENDPOINT, PayInvoiceForOperatorPayload, PayOfferPayload, PaymentLogPayload,
-    PaymentSummaryPayload, PeginFromOnchainPayload, RECEIVE_ECASH_ENDPOINT, ReceiveEcashPayload,
-    SEND_ONCHAIN_ENDPOINT, SET_CHANNEL_FEES_ENDPOINT, SPEND_ECASH_ENDPOINT, STOP_ENDPOINT,
-    SendOnchainRequest, SetChannelFeesRequest, SpendEcashPayload, V1_API_ENDPOINT,
-    WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT, WithdrawPayload, WithdrawToOnchainPayload,
+    GET_INVOICE_ENDPOINT, GET_LN_ONCHAIN_ADDRESS_ENDPOINT, GetInvoiceRequest, LEAVE_FED_ENDPOINT,
+    LIST_CHANNELS_ENDPOINT, LIST_TRANSACTIONS_ENDPOINT, LeaveFedPayload, ListTransactionsPayload,
+    MNEMONIC_ENDPOINT, OPEN_CHANNEL_ENDPOINT, OPEN_CHANNEL_WITH_PUSH_ENDPOINT, OpenChannelRequest,
+    PAY_INVOICE_FOR_OPERATOR_ENDPOINT, PAY_OFFER_FOR_OPERATOR_ENDPOINT, PAYMENT_LOG_ENDPOINT,
+    PAYMENT_SUMMARY_ENDPOINT, PEGIN_FROM_ONCHAIN_ENDPOINT, PayInvoiceForOperatorPayload,
+    PayOfferPayload, PaymentLogPayload, PaymentSummaryPayload, PeginFromOnchainPayload,
+    RECEIVE_ECASH_ENDPOINT, ReceiveEcashPayload, SEND_ONCHAIN_ENDPOINT, SET_CHANNEL_FEES_ENDPOINT,
+    SPEND_ECASH_ENDPOINT, STOP_ENDPOINT, SendOnchainRequest, SetChannelFeesRequest,
+    SpendEcashPayload, V1_API_ENDPOINT, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT,
+    WithdrawPayload, WithdrawToOnchainPayload,
 };
 use fedimint_lnurl::LnurlResponse;
 use fedimint_lnv2_common::endpoint_constants::{
@@ -48,7 +48,7 @@ use crate::error::{GatewayError, LnurlError};
 
 // Routes that the liquidity manager is allowed to access. Any authenticated
 // route NOT in this list requires the admin password.
-const LIQUIDITY_MANAGER_ROUTES: [&str; 19] = [
+const LIQUIDITY_MANAGER_ROUTES: [&str; 18] = [
     ADDRESS_ENDPOINT,
     ADDRESS_RECHECK_ENDPOINT,
     CLOSE_CHANNELS_WITH_PEER_ENDPOINT,
@@ -59,7 +59,6 @@ const LIQUIDITY_MANAGER_ROUTES: [&str; 19] = [
     GET_BALANCES_ENDPOINT,
     GET_INVOICE_ENDPOINT,
     GET_LN_ONCHAIN_ADDRESS_ENDPOINT,
-    INVITE_CODES_ENDPOINT,
     LIST_CHANNELS_ENDPOINT,
     LIST_TRANSACTIONS_ENDPOINT,
     OPEN_CHANNEL_ENDPOINT,
@@ -375,12 +374,6 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
     let authenticated_routes = register_get_handler(
         GATEWAY_INFO_ENDPOINT,
         info,
-        is_authenticated,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_get_handler(
-        INVITE_CODES_ENDPOINT,
-        invite_codes,
         is_authenticated,
         authenticated_routes,
     );
@@ -720,12 +713,4 @@ async fn pay_offer_operator(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let response = gateway.handle_pay_offer_for_operator_msg(payload).await?;
     Ok(Json(json!(response)))
-}
-
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn invite_codes(
-    Extension(gateway): Extension<Arc<Gateway>>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let invite_codes = gateway.handle_export_invite_codes().await;
-    Ok(Json(json!(invite_codes)))
 }

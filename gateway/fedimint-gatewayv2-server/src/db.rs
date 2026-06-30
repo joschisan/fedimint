@@ -28,6 +28,10 @@ enum DbKeyPrefix {
     ClientDatabase = 0x01,
     /// `FederationId -> ClientConfig` for every joined federation.
     ClientConfig = 0x02,
+    /// Set of `FederationId`s whose public-facing endpoints are gated off.
+    /// "Leaving" a federation only disables it; the config and client state
+    /// are retained so in-flight payments settle and it can be re-enabled.
+    DisabledFederation = 0x03,
     /// `PaymentImage -> RegisteredIncomingContract` for registered LNv2
     /// incoming contracts.
     RegisteredIncomingContract = 0x04,
@@ -68,6 +72,17 @@ impl_db_lookup!(
     query_prefix = GatewayClientConfigKeyPrefix
 );
 
+#[derive(Clone, Debug, Encodable, Decodable, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct DisabledFederationKey {
+    pub federation_id: FederationId,
+}
+
+impl_db_record!(
+    key = DisabledFederationKey,
+    value = (),
+    db_prefix = DbKeyPrefix::DisabledFederation,
+);
+
 #[derive(Debug, Encodable, Decodable)]
 pub struct RegisteredIncomingContractKey(pub PaymentImage);
 
@@ -101,9 +116,18 @@ pub trait GatewayDbtxNcExt {
         config: &ClientConfig,
     ) -> Option<ClientConfig>;
 
+    async fn load_client_config(&mut self, federation_id: FederationId) -> Option<ClientConfig>;
+
     async fn load_client_configs(&mut self) -> BTreeMap<FederationId, ClientConfig>;
 
-    async fn remove_client_config(&mut self, federation_id: FederationId);
+    /// Disables a federation, gating off its public-facing endpoints.
+    async fn save_disabled_federation(&mut self, federation_id: FederationId);
+
+    /// Re-enables a previously disabled federation.
+    async fn remove_disabled_federation(&mut self, federation_id: FederationId);
+
+    /// Returns whether a federation's public-facing endpoints are gated off.
+    async fn is_federation_disabled(&mut self, federation_id: FederationId) -> bool;
 
     /// Saves a registered incoming contract, returning the previous contract
     /// with the same payment image if it existed.
@@ -143,6 +167,11 @@ impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
         .await
     }
 
+    async fn load_client_config(&mut self, federation_id: FederationId) -> Option<ClientConfig> {
+        self.get_value(&GatewayClientConfigKey { federation_id })
+            .await
+    }
+
     async fn load_client_configs(&mut self) -> BTreeMap<FederationId, ClientConfig> {
         self.find_by_prefix(&GatewayClientConfigKeyPrefix)
             .await
@@ -153,9 +182,20 @@ impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
             .await
     }
 
-    async fn remove_client_config(&mut self, federation_id: FederationId) {
-        self.remove_entry(&GatewayClientConfigKey { federation_id })
+    async fn save_disabled_federation(&mut self, federation_id: FederationId) {
+        self.insert_entry(&DisabledFederationKey { federation_id }, &())
             .await;
+    }
+
+    async fn remove_disabled_federation(&mut self, federation_id: FederationId) {
+        self.remove_entry(&DisabledFederationKey { federation_id })
+            .await;
+    }
+
+    async fn is_federation_disabled(&mut self, federation_id: FederationId) -> bool {
+        self.get_value(&DisabledFederationKey { federation_id })
+            .await
+            .is_some()
     }
 
     async fn save_registered_incoming_contract(

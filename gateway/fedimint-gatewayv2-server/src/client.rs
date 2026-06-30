@@ -9,7 +9,7 @@ use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::{Client, ClientBuilder, RootSecret};
 use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy};
 use fedimint_connectors::ConnectorRegistry;
-use fedimint_core::config::FederationId;
+use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -73,44 +73,29 @@ impl GatewayClientBuilder {
         Ok(client_builder)
     }
 
-    /// Recovers a client with the provided mnemonic. This function will wait
-    /// for the recoveries to finish, but a new client must be created
-    /// afterwards and waited on until the state machines have finished
-    /// for a balance to be present.
-    pub async fn recover(
+    /// Downloads a federation's `ClientConfig` from its invite without building
+    /// or joining a client. Used at connect time to persist the config; the
+    /// client itself is built lazily on first use.
+    pub async fn download_config(
         &self,
         invite_code: &InviteCode,
         gateway: Arc<Gateway>,
-        mnemonic: &Mnemonic,
-    ) -> AdminResult<()> {
-        let federation_id = invite_code.federation_id();
-        let db = get_client_database(&gateway.gateway_db, &federation_id);
-        let client_builder = self.create_client_builder(gateway.clone()).await?;
-        let root_secret = RootSecret::StandardDoubleDerive(
-            Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic),
-        );
-        let client = client_builder
-            .preview(self.connectors.clone(), invite_code)
+    ) -> AdminResult<ClientConfig> {
+        let preview = self
+            .create_client_builder(gateway)
             .await?
-            .recover(db, root_secret, None)
-            .await
-            .map(Arc::new)
-            .map_err(AdminGatewayError::ClientCreationError)?;
-        client
-            .wait_for_all_recoveries()
-            .await
-            .map_err(AdminGatewayError::ClientCreationError)?;
-        Ok(())
+            .preview(self.connectors.clone(), invite_code)
+            .await?;
+        Ok(preview.config().clone())
     }
 
-    /// Opens an existing federation client, or joins it using `invite_code` if
-    /// its database has not been initialized yet. `invite_code` is required
-    /// only for the join path (a fresh connection); reloading an
-    /// already-joined federation on startup passes `None`.
+    /// Opens an existing federation client, or joins it from the stored
+    /// `ClientConfig` if its database has not been initialized yet. Clients are
+    /// built lazily on first use; connecting only persists the config.
     pub async fn build(
         &self,
         federation_id: FederationId,
-        invite_code: Option<&InviteCode>,
+        config: ClientConfig,
         gateway: Arc<Gateway>,
         mnemonic: &Mnemonic,
     ) -> AdminResult<fedimint_client::ClientHandleArc> {
@@ -152,13 +137,10 @@ impl GatewayClientBuilder {
                 .open(self.connectors.clone(), db, root_secret)
                 .await
         } else {
-            let invite_code = invite_code.ok_or_else(|| {
-                AdminGatewayError::ClientCreationError(anyhow::anyhow!(
-                    "Cannot join federation {federation_id} without an invite code"
-                ))
-            })?;
+            // The api secret is intentionally not stored or handled; lazy joins
+            // use `None`.
             client_builder
-                .preview(self.connectors.clone(), invite_code)
+                .preview_with_existing_config(self.connectors.clone(), config, None)
                 .await?
                 .join(db, root_secret)
                 .await
