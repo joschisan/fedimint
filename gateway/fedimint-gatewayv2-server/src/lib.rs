@@ -47,7 +47,6 @@ use events::ALL_GATEWAY_EVENTS;
 use federation_manager::FederationManager;
 use fedimint_bip39::{Bip39RootSecretStrategy, Language, Mnemonic};
 use fedimint_bitcoind::bitcoincore::BitcoindClient;
-use fedimint_bitcoind::{EsploraClient, IBitcoindRpc};
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
 use fedimint_client::{Client, ClientHandleArc};
@@ -98,11 +97,10 @@ use fedimint_lnv2_common::gateway_api::{
     CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
 use fedimint_logging::LOG_GATEWAY;
-use fedimint_mint_client::{MintClientInit, MintClientModule, OOBNotes};
 use fedimint_mintv2_client::{
     MintClientInit as MintV2ClientInit, MintClientModule as MintV2ClientModule,
 };
-use fedimint_wallet_client::{PegOutFees, WalletClientInit, WalletClientModule, WithdrawState};
+use fedimint_wallet_common::PegOutFees;
 use futures::stream::StreamExt;
 use lightning_invoice::Bolt11Invoice;
 use rand::rngs::OsRng;
@@ -484,37 +482,23 @@ impl Gateway {
         let http_id = Self::load_or_create_gateway_keypair(&gateway_db, RegisteredProtocol::Http)
             .await
             .public_key();
-        let (dyn_bitcoin_rpc, chain_source) =
-            match (opts.bitcoind_url.as_ref(), opts.esplora_url.as_ref()) {
-                (Some(_), None) => {
-                    let (client, chain_source) =
-                        Self::get_bitcoind_client(&opts, gateway_parameters.network, &http_id)?;
-                    (client.into_dyn(), chain_source)
-                }
-                (None, Some(url)) => {
-                    let client = EsploraClient::new(url)
-                        .expect("Could not create EsploraClient")
-                        .into_dyn();
-                    let chain_source = ChainSource::Esplora {
-                        server_url: url.clone(),
-                    };
-                    (client, chain_source)
-                }
-                (Some(_), Some(_)) => {
-                    // Use bitcoind by default if both are set
-                    let (client, chain_source) =
-                        Self::get_bitcoind_client(&opts, gateway_parameters.network, &http_id)?;
-                    (client.into_dyn(), chain_source)
-                }
-                _ => unreachable!("ArgGroup already enforced XOR relation"),
-            };
+        let chain_source = match (opts.bitcoind_url.as_ref(), opts.esplora_url.as_ref()) {
+            // Use bitcoind by default if both are set
+            (Some(_), _) => {
+                let (_, chain_source) =
+                    Self::get_bitcoind_client(&opts, gateway_parameters.network, &http_id)?;
+                chain_source
+            }
+            (None, Some(url)) => ChainSource::Esplora {
+                server_url: url.clone(),
+            },
+            _ => unreachable!("ArgGroup already enforced XOR relation"),
+        };
 
         // Gateway module will be attached when the federation clients are created
         // because the LN RPC will be injected with `GatewayClientGen`.
         let mut registry = ClientModuleInitRegistry::new();
-        registry.attach(MintClientInit);
         registry.attach(MintV2ClientInit);
-        registry.attach(WalletClientInit::new(dyn_bitcoin_rpc));
         registry.attach(fedimint_walletv2_client::WalletClientInit);
 
         let client_builder =
@@ -1082,13 +1066,7 @@ impl Gateway {
     pub async fn handle_address_msg(&self, payload: DepositAddressPayload) -> AdminResult<Address> {
         let client = self.select_client(payload.federation_id).await?;
 
-        if let Ok(wallet_module) = client.value().get_first_module::<WalletClientModule>() {
-            let address = wallet_module
-                .allocate_deposit_address_expert_only(())
-                .await?
-                .address;
-            Ok(address)
-        } else if let Ok(wallet_module) = client
+        if let Ok(wallet_module) = client
             .value()
             .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
         {
@@ -1130,12 +1108,7 @@ impl Gateway {
     ) -> AdminResult<()> {
         let client = self.select_client(payload.federation_id).await?;
 
-        if let Ok(wallet_module) = client.value().get_first_module::<WalletClientModule>() {
-            wallet_module
-                .recheck_pegin_address_by_address(payload.address)
-                .await?;
-            Ok(())
-        } else if client
+        if client
             .value()
             .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
             .is_ok()
@@ -1154,7 +1127,6 @@ impl Gateway {
         &self,
         payload: ReceiveEcashPayload,
     ) -> Result<ReceiveEcashResponse> {
-        // Extract federation_id_prefix from either format
         let federation_id_prefix = base32::decode_prefixed::<fedimint_mintv2_client::ECash>(
             FEDIMINT_PREFIX,
             &payload.notes,
@@ -1162,14 +1134,8 @@ impl Gateway {
         .ok()
         .and_then(|e| e.mint())
         .map(|id| id.to_prefix())
-        .or_else(|| {
-            OOBNotes::from_str(&payload.notes)
-                .ok()
-                .map(|n| n.federation_id_prefix())
-        })
         .ok_or_else(|| PublicGatewayError::ReceiveEcashError {
-            failure_reason: "Invalid ecash format: could not parse as ECash or OOBNotes"
-                .to_string(),
+            failure_reason: "Invalid ecash format: could not parse as ECash".to_string(),
         })?;
 
         let client = self
@@ -1182,37 +1148,7 @@ impl Gateway {
             })?;
 
         // Check which module is present and parse accordingly
-        if let Ok(mint) = client.value().get_first_module::<MintClientModule>() {
-            let notes = OOBNotes::from_str(&payload.notes).map_err(|e| {
-                PublicGatewayError::ReceiveEcashError {
-                    failure_reason: format!("Expected OOBNotes for MintV1 federation: {e}"),
-                }
-            })?;
-            let amount = notes.total_amount();
-
-            let operation_id = mint.reissue_external_notes(notes, ()).await.map_err(|e| {
-                PublicGatewayError::ReceiveEcashError {
-                    failure_reason: e.to_string(),
-                }
-            })?;
-            if payload.wait {
-                let mut updates = mint
-                    .subscribe_reissue_external_notes(operation_id)
-                    .await
-                    .unwrap()
-                    .into_stream();
-
-                while let Some(update) = updates.next().await {
-                    if let fedimint_mint_client::ReissueExternalNotesState::Failed(e) = update {
-                        return Err(PublicGatewayError::ReceiveEcashError {
-                            failure_reason: e.clone(),
-                        });
-                    }
-                }
-            }
-
-            Ok(ReceiveEcashResponse { amount })
-        } else if let Ok(mint) = client.value().get_first_module::<MintV2ClientModule>() {
+        if let Ok(mint) = client.value().get_first_module::<MintV2ClientModule>() {
             let ecash: fedimint_mintv2_client::ECash =
                 base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes).map_err(|e| {
                     PublicGatewayError::ReceiveEcashError {
@@ -1997,13 +1933,7 @@ impl Gateway {
             .await?
             .into_value();
 
-        if let Ok(mint_module) = client.get_first_module::<MintClientModule>() {
-            let notes = mint_module.send_oob_notes(payload.amount, ()).await?;
-            debug!(target: LOG_GATEWAY, ?notes, "Spend ecash notes");
-            Ok(SpendEcashResponse {
-                notes: notes.to_string(),
-            })
-        } else if let Ok(mint_module) = client.get_first_module::<MintV2ClientModule>() {
+        if let Ok(mint_module) = client.get_first_module::<MintV2ClientModule>() {
             let (_, ecash) = mint_module
                 .send(payload.amount, serde_json::Value::Null, true)
                 .await
@@ -2050,7 +1980,7 @@ impl Gateway {
             amount,
             address,
             federation_id,
-            quoted_fees,
+            quoted_fees: _,
         } = payload;
 
         let address_network = get_network_for_address(&address);
@@ -2065,94 +1995,11 @@ impl Gateway {
 
         let client = self.select_client(federation_id).await?;
 
-        if let Ok(wallet_module) = client
+        let wallet_module = client
             .value()
-            .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        {
-            return withdraw_v2(client.value(), &wallet_module, &address, amount).await;
-        }
+            .get_first_module::<fedimint_walletv2_client::WalletClientModule>()?;
 
-        let wallet_module = client.value().get_first_module::<WalletClientModule>()?;
-
-        // If fees are provided (from UI preview flow), use them directly
-        // Otherwise fetch fees (CLI backwards compatibility)
-        let (withdraw_amount, fees) = match quoted_fees {
-            // UI flow: user confirmed these exact values, just use them
-            Some(fees) => {
-                let amt = match amount {
-                    BitcoinAmountOrAll::Amount(a) => a,
-                    BitcoinAmountOrAll::All => {
-                        // UI always resolves "all" to specific amount in preview - reject if not
-                        return Err(AdminGatewayError::WithdrawError {
-                            failure_reason:
-                                "Cannot use 'all' with quoted fees - amount must be resolved first"
-                                    .to_string(),
-                        });
-                    }
-                };
-                (amt, fees)
-            }
-            // CLI flow: fetch fees (existing behavior for backwards compatibility)
-            None => match amount {
-                // If the amount is "all", then we need to subtract the fees from
-                // the amount we are withdrawing
-                BitcoinAmountOrAll::All => {
-                    let balance = bitcoin::Amount::from_sat(
-                        client
-                            .value()
-                            .get_balance_for_btc()
-                            .await
-                            .map_err(|err| {
-                                AdminGatewayError::Unexpected(anyhow!(
-                                    "Balance not available: {}",
-                                    err.fmt_compact_anyhow()
-                                ))
-                            })?
-                            .msats
-                            / 1000,
-                    );
-                    let fees = wallet_module.get_withdraw_fees(&address, balance).await?;
-                    let withdraw_amount = balance.checked_sub(fees.amount());
-                    if withdraw_amount.is_none() {
-                        return Err(AdminGatewayError::WithdrawError {
-                            failure_reason: format!(
-                                "Insufficient funds. Balance: {balance} Fees: {fees:?}"
-                            ),
-                        });
-                    }
-                    (withdraw_amount.expect("checked above"), fees)
-                }
-                BitcoinAmountOrAll::Amount(amount) => (
-                    amount,
-                    wallet_module.get_withdraw_fees(&address, amount).await?,
-                ),
-            },
-        };
-
-        let operation_id = wallet_module
-            .withdraw(&address, withdraw_amount, fees, ())
-            .await?;
-        let mut updates = wallet_module
-            .subscribe_withdraw_updates(operation_id)
-            .await?
-            .into_stream();
-
-        while let Some(update) = updates.next().await {
-            match update {
-                WithdrawState::Succeeded(txid) => {
-                    info!(target: LOG_GATEWAY, amount = %withdraw_amount, address = %address, "Sent funds");
-                    return Ok(WithdrawResponse { txid, fees });
-                }
-                WithdrawState::Failed(e) => {
-                    return Err(AdminGatewayError::WithdrawError { failure_reason: e });
-                }
-                WithdrawState::Created => {}
-            }
-        }
-
-        Err(AdminGatewayError::WithdrawError {
-            failure_reason: "Ran out of state updates while withdrawing".to_string(),
-        })
+        withdraw_v2(client.value(), &wallet_module, &address, amount).await
     }
 
     /// Queries the client log for payment events and returns to the user.
