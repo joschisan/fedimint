@@ -1,0 +1,25 @@
+[package]
+authors = { workspace = true }
+description = "fedimint-gatewayv2-cli-core defines the route + payload contract shared by gatewaydv2 and its admin CLI"
+edition = { workspace = true }
+license = { workspace = true }
+name = "fedimint-gatewayv2-cli-core"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "fedimint_gatewayv2_cli_core"
+path = "src/lib.rs"
+
+[dependencies]
+bitcoin = { workspace = true }
+clap = { workspace = true }
+fedimint-core = { workspace = true }
+fedimint-mintv2-common = { workspace = true }
+lightning-invoice = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

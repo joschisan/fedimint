@@ -3760,6 +3760,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "fedimint-gatewayv2-cli"
+version = "0.12.0-alpha"
+dependencies = [
+ "anyhow",
+ "clap",
+ "fedimint-gatewayv2-cli-core",
+ "http-body-util",
+ "hyper 1.9.0",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-service",
+]
+
+[[package]]
+name = "fedimint-gatewayv2-cli-core"
+version = "0.12.0-alpha"
+dependencies = [
+ "bitcoin",
+ "clap",
+ "fedimint-core",
+ "fedimint-mintv2-common",
+ "lightning-invoice",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fedimint-gatewayv2-server"
 version = "0.12.0-alpha"
 dependencies = [

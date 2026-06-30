@@ -1,0 +1,28 @@
+[package]
+authors = { workspace = true }
+description = "gatewaydv2-cli is the admin CLI for the gatewaydv2 Lightning gateway"
+edition = { workspace = true }
+license = { workspace = true }
+name = "fedimint-gatewayv2-cli"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[[bin]]
+name = "gatewaydv2-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+fedimint-gatewayv2-cli-core = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tower-service = { workspace = true }
+
+[lints]
+workspace = true
