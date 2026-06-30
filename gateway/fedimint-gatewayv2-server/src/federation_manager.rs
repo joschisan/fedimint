@@ -1,45 +1,31 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::SystemTime;
 
 use fedimint_client::ClientHandleArc;
 use fedimint_core::PeerId;
 use fedimint_core::config::{FederationId, FederationIdPrefix, JsonClientConfig};
-use fedimint_core::db::{Committable, DatabaseTransaction, NonCommittable};
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::{FmtCompactAnyhow as _, Spanned};
-use fedimint_gateway_common::FederationInfo;
-use fedimint_gateway_server_db::GatewayDbtxNcExt as _;
+use fedimint_gateway_common::{ConnectorType, FederationConfig, FederationInfo};
 use fedimint_gwv2_client::GatewayClientModuleV2;
+use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_logging::LOG_GATEWAY;
 use tracing::{info, warn};
 
 use crate::AdminResult;
 use crate::error::{AdminGatewayError, FederationNotConnected};
 
-/// The first index that the gateway will assign to a federation.
-/// Note: This starts at 1 because LNv1 uses the `federation_index` as an SCID.
-/// An SCID of 0 is considered invalid by LND's HTLC interceptor.
-const INITIAL_INDEX: u64 = 1;
-
 #[derive(Debug)]
 pub struct FederationManager {
     /// Map of `FederationId` -> `Client`. Used for efficient retrieval of the
     /// client while handling incoming HTLCs.
     clients: BTreeMap<FederationId, Spanned<fedimint_client::ClientHandleArc>>,
-
-    /// Tracker for federation index assignments. When connecting a new
-    /// federation, this value is incremented and assigned to the federation
-    /// as the `federation_index`
-    next_index: AtomicU64,
 }
 
 impl FederationManager {
     pub fn new() -> Self {
         Self {
             clients: BTreeMap::new(),
-            next_index: AtomicU64::new(INITIAL_INDEX),
         }
     }
 
@@ -51,13 +37,29 @@ impl FederationManager {
     pub async fn leave_federation(
         &mut self,
         federation_id: FederationId,
-        dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
+        lightning_fee: PaymentFee,
+        transaction_fee: PaymentFee,
     ) -> AdminResult<FederationInfo> {
-        let federation_info = self.federation_info(federation_id, dbtx).await?;
+        let federation_info = self
+            .federation_info(federation_id, lightning_fee, transaction_fee)
+            .await?;
 
         self.remove_client(federation_id).await?;
 
         Ok(federation_info)
+    }
+
+    /// Reconstructs an invite code for a connected federation from the live
+    /// client (the gateway no longer persists invite codes). Returns the first
+    /// peer's invite code, or `None` if none can be derived.
+    async fn client_invite_code(client: &ClientHandleArc) -> Option<InviteCode> {
+        let config = client.config().await;
+        for peer_id in config.global.api_endpoints.keys() {
+            if let Some(code) = client.invite_code(*peer_id).await {
+                return Some(code);
+            }
+        }
+        None
     }
 
     async fn remove_client(&mut self, federation_id: FederationId) -> AdminResult<()> {
@@ -124,7 +126,8 @@ impl FederationManager {
     pub async fn federation_info(
         &self,
         federation_id: FederationId,
-        dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
+        lightning_fee: PaymentFee,
+        transaction_fee: PaymentFee,
     ) -> std::result::Result<FederationInfo, FederationNotConnected> {
         self.clients
             .get(&federation_id)
@@ -141,13 +144,8 @@ impl FederationManager {
                         federation_id_prefix: federation_id.to_prefix(),
                     })?;
 
-                let config = dbtx.load_federation_config(federation_id).await.ok_or(
-                    FederationNotConnected {
-                        federation_id_prefix: federation_id.to_prefix(),
-                    },
-                )?;
-                let last_backup_time =
-                    dbtx.load_backup_record(federation_id)
+                let invite_code =
+                    Self::client_invite_code(client)
                         .await
                         .ok_or(FederationNotConnected {
                             federation_id_prefix: federation_id.to_prefix(),
@@ -157,8 +155,12 @@ impl FederationManager {
                     federation_id,
                     federation_name: self.federation_name(client).await,
                     balance_msat,
-                    config,
-                    last_backup_time,
+                    config: transient_federation_config(
+                        invite_code,
+                        lightning_fee,
+                        transaction_fee,
+                    ),
+                    last_backup_time: None,
                 })
             })
             .await
@@ -172,7 +174,8 @@ impl FederationManager {
 
     pub async fn federation_info_all_federations(
         &self,
-        mut dbtx: DatabaseTransaction<'_, NonCommittable>,
+        lightning_fee: PaymentFee,
+        transaction_fee: PaymentFee,
     ) -> Vec<FederationInfo> {
         let mut federation_infos = Vec::new();
         for (federation_id, client) in &self.clients {
@@ -192,20 +195,22 @@ impl FederationManager {
                 }
             };
 
-            let config = dbtx.load_federation_config(*federation_id).await;
-            let last_backup_time = dbtx
-                .load_backup_record(*federation_id)
-                .await
-                .unwrap_or_default();
-            if let Some(config) = config {
-                federation_infos.push(FederationInfo {
-                    federation_id: *federation_id,
-                    federation_name: self.federation_name(client.value()).await,
-                    balance_msat,
-                    config,
-                    last_backup_time,
-                });
-            }
+            let Some(invite_code) = Self::client_invite_code(client.value()).await else {
+                warn!(
+                    target: LOG_GATEWAY,
+                    federation_id = %federation_id,
+                    "Skipped Federation; could not derive an invite code"
+                );
+                continue;
+            };
+
+            federation_infos.push(FederationInfo {
+                federation_id: *federation_id,
+                federation_name: self.federation_name(client.value()).await,
+                balance_msat,
+                config: transient_federation_config(invite_code, lightning_fee, transaction_fee),
+                last_backup_time: None,
+            });
         }
         federation_infos
     }
@@ -240,30 +245,6 @@ impl FederationManager {
         federations
     }
 
-    pub async fn backup_federation(
-        &self,
-        federation_id: &FederationId,
-        dbtx: &mut DatabaseTransaction<'_, Committable>,
-        now: SystemTime,
-    ) {
-        if let Some(client) = self.client(federation_id) {
-            let metadata: BTreeMap<String, String> = BTreeMap::new();
-            #[allow(deprecated)]
-            if client
-                .value()
-                .backup_to_federation(fedimint_client::backup::Metadata::from_json_serialized(
-                    metadata,
-                ))
-                .await
-                .is_ok()
-            {
-                dbtx.save_federation_backup_record(*federation_id, Some(now))
-                    .await;
-                info!(federation_id = %federation_id, "Successfully backed up federation");
-            }
-        }
-    }
-
     pub async fn all_invite_codes(
         &self,
     ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>> {
@@ -285,22 +266,23 @@ impl FederationManager {
 
         invite_codes
     }
+}
 
-    // TODO(tvolk131): Set this value in the constructor.
-    pub fn set_next_index(&self, next_index: u64) {
-        self.next_index.store(next_index, Ordering::SeqCst);
-    }
-
-    pub fn pop_next_index(&self) -> AdminResult<u64> {
-        let next_index = self.next_index.fetch_add(1, Ordering::Relaxed);
-
-        // Check for overflow.
-        if next_index == INITIAL_INDEX.wrapping_sub(1) {
-            return Err(AdminGatewayError::GatewayConfigurationError(
-                "Federation Index overflow".to_string(),
-            ));
-        }
-
-        Ok(next_index)
+/// Builds the transient [`FederationConfig`] used only to populate
+/// [`FederationInfo`] responses. The gateway no longer persists a
+/// per-federation config: fees are global and the `federation_index`/connector
+/// fields are vestigial LNv1 concepts, so they are filled with defaults.
+fn transient_federation_config(
+    invite_code: InviteCode,
+    lightning_fee: PaymentFee,
+    transaction_fee: PaymentFee,
+) -> FederationConfig {
+    FederationConfig {
+        invite_code,
+        federation_index: 0,
+        lightning_fee,
+        transaction_fee,
+        #[allow(deprecated)]
+        _connector: ConnectorType::Tcp,
     }
 }

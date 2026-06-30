@@ -26,10 +26,9 @@ use fedimint_gateway_common::{
     PAY_OFFER_FOR_OPERATOR_ENDPOINT, PAYMENT_LOG_ENDPOINT, PAYMENT_SUMMARY_ENDPOINT,
     PEGIN_FROM_ONCHAIN_ENDPOINT, PayInvoiceForOperatorPayload, PayOfferPayload, PaymentLogPayload,
     PaymentSummaryPayload, PeginFromOnchainPayload, RECEIVE_ECASH_ENDPOINT, ReceiveEcashPayload,
-    SEND_ONCHAIN_ENDPOINT, SET_CHANNEL_FEES_ENDPOINT, SET_FEES_ENDPOINT, SPEND_ECASH_ENDPOINT,
-    STOP_ENDPOINT, SendOnchainRequest, SetChannelFeesRequest, SetFeesPayload, SetMnemonicPayload,
-    SpendEcashPayload, V1_API_ENDPOINT, WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT,
-    WithdrawPayload, WithdrawToOnchainPayload,
+    SEND_ONCHAIN_ENDPOINT, SET_CHANNEL_FEES_ENDPOINT, SPEND_ECASH_ENDPOINT, STOP_ENDPOINT,
+    SendOnchainRequest, SetChannelFeesRequest, SpendEcashPayload, V1_API_ENDPOINT,
+    WITHDRAW_ENDPOINT, WITHDRAW_TO_ONCHAIN_ENDPOINT, WithdrawPayload, WithdrawToOnchainPayload,
 };
 use fedimint_lnurl::LnurlResponse;
 use fedimint_lnv2_common::endpoint_constants::{
@@ -44,12 +43,12 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing::{info, instrument, warn};
 
+use crate::Gateway;
 use crate::error::{GatewayError, LnurlError};
-use crate::{Gateway, GatewayState};
 
 // Routes that the liquidity manager is allowed to access. Any authenticated
 // route NOT in this list requires the admin password.
-const LIQUIDITY_MANAGER_ROUTES: [&str; 20] = [
+const LIQUIDITY_MANAGER_ROUTES: [&str; 19] = [
     ADDRESS_ENDPOINT,
     ADDRESS_RECHECK_ENDPOINT,
     CLOSE_CHANNELS_WITH_PEER_ENDPOINT,
@@ -68,7 +67,6 @@ const LIQUIDITY_MANAGER_ROUTES: [&str; 20] = [
     PAYMENT_SUMMARY_ENDPOINT,
     PEGIN_FROM_ONCHAIN_ENDPOINT,
     SET_CHANNEL_FEES_ENDPOINT,
-    SET_FEES_ENDPOINT,
     WITHDRAW_TO_ONCHAIN_ENDPOINT,
 ];
 
@@ -118,31 +116,6 @@ fn extract_bearer_token(request: &Request) -> Result<String, StatusCode> {
     }
 
     Err(StatusCode::UNAUTHORIZED)
-}
-
-async fn not_configured_middleware(
-    Extension(gateway): Extension<Arc<Gateway>>,
-    request: Request,
-    next: Next,
-) -> Result<impl IntoResponse, StatusCode> {
-    if matches!(
-        gateway.get_state().await,
-        GatewayState::NotConfigured { .. }
-    ) {
-        let method = request.method().clone();
-        let path = request.uri().path();
-
-        // Allow the API mnemonic endpoint (for CLI usage)
-        let is_mnemonic_api = method == axum::http::Method::POST
-            && (path == MNEMONIC_ENDPOINT
-                || path == format!("/{V1_API_ENDPOINT}/{MNEMONIC_ENDPOINT}"));
-
-        if !is_mnemonic_api {
-            return Err(StatusCode::NOT_FOUND);
-        }
-    }
-
-    Ok(next.run(request).await)
 }
 
 /// Middleware to authenticate an incoming request. Routes that are
@@ -394,12 +367,6 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
         authenticated_routes,
     );
     let authenticated_routes = register_post_handler(
-        SET_FEES_ENDPOINT,
-        set_fees,
-        is_authenticated,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_post_handler(
         CONFIGURATION_ENDPOINT,
         configuration,
         is_authenticated,
@@ -408,12 +375,6 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
     let authenticated_routes = register_get_handler(
         GATEWAY_INFO_ENDPOINT,
         info,
-        is_authenticated,
-        authenticated_routes,
-    );
-    let authenticated_routes = register_post_handler(
-        MNEMONIC_ENDPOINT,
-        set_mnemonic,
         is_authenticated,
         authenticated_routes,
     );
@@ -428,7 +389,6 @@ fn routes(gateway: Arc<Gateway>, task_group: TaskGroup) -> Router {
     Router::new()
         .merge(public_routes)
         .merge(authenticated_routes)
-        .layer(middleware::from_fn(not_configured_middleware))
         .layer(Extension(gateway))
         .layer(Extension(task_group))
         .layer(CorsLayer::permissive())
@@ -542,15 +502,6 @@ async fn backup(
     Json(payload): Json<BackupPayload>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     gateway.handle_backup_msg(payload).await?;
-    Ok(Json(json!(())))
-}
-
-#[instrument(target = LOG_GATEWAY, skip_all, err, fields(?payload))]
-async fn set_fees(
-    Extension(gateway): Extension<Arc<Gateway>>,
-    Json(payload): Json<SetFeesPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    gateway.handle_set_fees_msg(payload).await?;
     Ok(Json(json!(())))
 }
 
@@ -700,14 +651,6 @@ async fn mnemonic(
 }
 
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn set_mnemonic(
-    Extension(gateway): Extension<Arc<Gateway>>,
-    Json(payload): Json<SetMnemonicPayload>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    gateway.handle_set_mnemonic_msg(payload).await?;
-    Ok(Json(json!(())))
-}
-
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 pub(crate) async fn stop(
     Extension(task_group): Extension<TaskGroup>,

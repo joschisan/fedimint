@@ -16,6 +16,7 @@
 
 pub mod client;
 pub mod config;
+mod db;
 pub mod envs;
 mod error;
 mod events;
@@ -45,15 +46,15 @@ use envs::FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV;
 use error::FederationNotConnected;
 use events::ALL_GATEWAY_EVENTS;
 use federation_manager::FederationManager;
-use fedimint_bip39::{Bip39RootSecretStrategy, Language, Mnemonic};
+use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_bitcoind::bitcoincore::BitcoindClient;
+use fedimint_client::ClientHandleArc;
 use fedimint_client::module_init::ClientModuleInitRegistry;
 use fedimint_client::secret::RootSecretStrategy;
-use fedimint_client::{Client, ClientHandleArc};
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
-use fedimint_core::db::{Committable, Database, DatabaseTransaction, apply_migrations};
+use fedimint_core::db::Database;
 use fedimint_core::envs::is_env_var_set;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::CommonModuleInit;
@@ -80,11 +81,10 @@ use fedimint_gateway_common::{
     OpenChannelRequest, PayInvoiceForOperatorPayload, PayOfferPayload, PayOfferResponse,
     PaymentLogPayload, PaymentLogResponse, PaymentStats, PaymentSummaryPayload,
     PaymentSummaryResponse, PeginFromOnchainPayload, ReceiveEcashPayload, ReceiveEcashResponse,
-    RegisteredProtocol, SendOnchainRequest, SetChannelFeesRequest, SetFeesPayload,
-    SetMnemonicPayload, SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload,
-    WithdrawResponse, WithdrawToOnchainPayload,
+    RegisteredProtocol, SendOnchainRequest, SetChannelFeesRequest, SpendEcashPayload,
+    SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload, WithdrawResponse,
+    WithdrawToOnchainPayload,
 };
-use fedimint_gateway_server_db::{GatewayDbtxNcExt as _, get_gatewayd_database_migrations};
 use fedimint_gwv2_client::events::compute_lnv2_stats;
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -107,7 +107,7 @@ use rand::rngs::OsRng;
 use tokio::sync::RwLock;
 use tracing::{debug, info, info_span, warn};
 
-use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
+use crate::db::GatewayDbtxNcExt as _;
 use crate::error::{AdminGatewayError, LNv2Error, PublicGatewayError};
 use crate::events::get_events_for_duration;
 use crate::lightning::{
@@ -136,7 +136,6 @@ const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 /// graph LR
 /// classDef virtual fill:#fff,stroke-dasharray: 5 5
 ///
-///    NotConfigured -- create or recover wallet --> Disconnected
 ///    Disconnected -- establish lightning connection --> Connected
 ///    Connected -- load federation clients --> Running
 ///    Connected -- not synced to chain --> Syncing
@@ -146,26 +145,16 @@ const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 /// ```
 #[derive(Clone, Debug)]
 pub enum GatewayState {
-    NotConfigured {
-        // Broadcast channel to alert gateway background threads that the mnemonic has been
-        // created/set.
-        mnemonic_sender: tokio::sync::broadcast::Sender<()>,
-    },
     Disconnected,
     Syncing,
     Connected,
-    Running {
-        lightning_context: LightningContext,
-    },
-    ShuttingDown {
-        lightning_context: LightningContext,
-    },
+    Running { lightning_context: LightningContext },
+    ShuttingDown { lightning_context: LightningContext },
 }
 
 impl Display for GatewayState {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            GatewayState::NotConfigured { .. } => write!(f, "NotConfigured"),
             GatewayState::Disconnected => write!(f, "Disconnected"),
             GatewayState::Syncing => write!(f, "Syncing"),
             GatewayState::Connected => write!(f, "Connected"),
@@ -175,24 +164,18 @@ impl Display for GatewayState {
     }
 }
 
-/// Helper struct for storing the gateway's advertised endpoint and signing
-/// keypair for each network protocol.
+/// Helper struct for storing the gateway's advertised endpoint for each network
+/// protocol. The advertised public key is derived on demand from the gateway's
+/// mnemonic (see [`Gateway::gateway_id`]), so it is not stored here.
 #[derive(Debug, Clone)]
 struct Registration {
     /// The url to advertise in the registration that clients can use to connect
     endpoint_url: SafeUrl,
-
-    /// Keypair that was used to register the gateway registration
-    keypair: secp256k1::Keypair,
 }
 
 impl Registration {
-    pub async fn new(db: &Database, endpoint_url: SafeUrl, protocol: RegisteredProtocol) -> Self {
-        let keypair = Gateway::load_or_create_gateway_keypair(db, protocol).await;
-        Self {
-            endpoint_url,
-            keypair,
-        }
+    pub fn new(endpoint_url: SafeUrl) -> Self {
+        Self { endpoint_url }
     }
 }
 
@@ -213,7 +196,7 @@ impl Gateway {
     ///     .await?;
     /// ```
     #[builder(start_fn = builder, finish_fn = build)]
-    pub async fn new_with_builder(
+    pub fn new_with_builder(
         #[builder(start_fn)] lightning_mode: LightningMode,
         #[builder(start_fn)] client_builder: GatewayClientBuilder,
         #[builder(start_fn)] gateway_db: Database,
@@ -241,7 +224,7 @@ impl Gateway {
             )
         });
 
-        Gateway::new(
+        Ok(Gateway::new(
             lightning_mode,
             GatewayParameters {
                 listen,
@@ -258,8 +241,7 @@ impl Gateway {
             client_builder,
             gateway_state,
             chain_source,
-        )
-        .await
+        ))
     }
 }
 
@@ -440,9 +422,7 @@ impl Gateway {
 
     /// Default function for creating a gateway with the `Mint`, `Wallet`, and
     /// `Gateway` modules.
-    pub async fn new_with_default_modules(
-        mnemonic_sender: tokio::sync::broadcast::Sender<()>,
-    ) -> anyhow::Result<Gateway> {
+    pub async fn new_with_default_modules() -> anyhow::Result<Gateway> {
         let opts = GatewayOpts::parse();
         let gateway_parameters = opts.to_gateway_parameters()?;
         let decoders = ModuleDecoderRegistry::default();
@@ -465,23 +445,25 @@ impl Gateway {
             }
         };
 
-        // Apply database migrations before using the database to ensure old database
-        // structures are readable.
-        apply_migrations(
-            &gateway_db,
-            (),
-            "gatewayd".to_string(),
-            get_gatewayd_database_migrations(),
-            None,
-            None,
-        )
-        .await?;
+        // `gatewaydv2` has no setup UI and never imports a seed: it always boots
+        // with a freshly generated mnemonic, persisted once as the root entropy.
+        // The gateway's identity keypair and all per-federation client secrets
+        // derive from this single root entropy.
+        if Self::load_mnemonic(&gateway_db).await.is_none() {
+            debug!(target: LOG_GATEWAY, "Generating mnemonic and writing root entropy to storage");
+            let mnemonic = Bip39RootSecretStrategy::<12>::random(&mut OsRng);
+            let mut dbtx = gateway_db.begin_transaction().await;
+            dbtx.save_root_entropy(&mnemonic.to_entropy()).await;
+            dbtx.commit_tx().await;
+        }
+        let gateway_state = GatewayState::Disconnected;
 
-        // For legacy reasons, we use the http id for the unique identifier of the
-        // bitcoind watch-only wallet
-        let http_id = Self::load_or_create_gateway_keypair(&gateway_db, RegisteredProtocol::Http)
+        // The gateway identity (derived from the mnemonic) doubles as the unique
+        // identifier of the bitcoind watch-only wallet.
+        let mnemonic = Self::load_mnemonic(&gateway_db)
             .await
-            .public_key();
+            .expect("mnemonic was just established");
+        let http_id = Self::derive_gateway_keypair(&mnemonic).public_key();
         let chain_source = match (opts.bitcoind_url.as_ref(), opts.esplora_url.as_ref()) {
             // Use bitcoind by default if both are set
             (Some(_), _) => {
@@ -504,62 +486,32 @@ impl Gateway {
         let client_builder =
             GatewayClientBuilder::new(opts.data_dir.clone(), registry, opts.db_backend).await?;
 
-        let gateway_state = if Self::load_mnemonic(&gateway_db).await.is_some() {
-            GatewayState::Disconnected
-        } else {
-            // Generate a mnemonic or use one from an environment variable if `skip_setup`
-            // is true
-            if gateway_parameters.skip_setup {
-                let mnemonic = if let Ok(words) = std::env::var(FM_GATEWAY_MNEMONIC_ENV) {
-                    info!(target: LOG_GATEWAY, "Using provided mnemonic from environment variable");
-                    Mnemonic::parse_in_normalized(Language::English, words.as_str()).map_err(
-                        |e| {
-                            AdminGatewayError::MnemonicError(anyhow!(format!(
-                                "Seed phrase provided in environment was invalid {e:?}"
-                            )))
-                        },
-                    )?
-                } else {
-                    debug!(target: LOG_GATEWAY, "Generating mnemonic and writing entropy to client storage");
-                    Bip39RootSecretStrategy::<12>::random(&mut OsRng)
-                };
-
-                Client::store_encodable_client_secret(&gateway_db, mnemonic.to_entropy())
-                    .await
-                    .map_err(AdminGatewayError::MnemonicError)?;
-                GatewayState::Disconnected
-            } else {
-                GatewayState::NotConfigured { mnemonic_sender }
-            }
-        };
-
         info!(
             target: LOG_GATEWAY,
             version = %fedimint_build_code_version_env!(),
             "Starting gatewayd",
         );
 
-        Gateway::new(
+        Ok(Gateway::new(
             opts.mode,
             gateway_parameters,
             gateway_db,
             client_builder,
             gateway_state,
             chain_source,
-        )
-        .await
+        ))
     }
 
     /// Helper function for creating a gateway from either
     /// `new_with_default_modules` or `Gateway::builder`.
-    async fn new(
+    fn new(
         lightning_mode: LightningMode,
         gateway_parameters: GatewayParameters,
         gateway_db: Database,
         client_builder: GatewayClientBuilder,
         gateway_state: GatewayState,
         chain_source: ChainSource,
-    ) -> anyhow::Result<Gateway> {
+    ) -> Gateway {
         let network = gateway_parameters.network;
 
         let task_group = TaskGroup::new();
@@ -567,18 +519,15 @@ impl Gateway {
 
         let mut registrations = BTreeMap::new();
         if let Some(http_url) = gateway_parameters.versioned_api {
-            registrations.insert(
-                RegisteredProtocol::Http,
-                Registration::new(&gateway_db, http_url, RegisteredProtocol::Http).await,
-            );
+            registrations.insert(RegisteredProtocol::Http, Registration::new(http_url));
         }
 
-        Ok(Self {
+        Self {
             federation_manager: Arc::new(RwLock::new(FederationManager::new())),
             lightning_mode,
             state: Arc::new(RwLock::new(gateway_state)),
             client_builder,
-            gateway_db: gateway_db.clone(),
+            gateway_db,
             listen: gateway_parameters.listen,
             metrics_listen: gateway_parameters.metrics_listen,
             task_group,
@@ -591,36 +540,37 @@ impl Gateway {
             default_routing_fees: gateway_parameters.default_routing_fees,
             default_transaction_fees: gateway_parameters.default_transaction_fees,
             registrations,
-        })
+        }
     }
 
-    async fn load_or_create_gateway_keypair(
-        gateway_db: &Database,
-        protocol: RegisteredProtocol,
-    ) -> secp256k1::Keypair {
-        let mut dbtx = gateway_db.begin_transaction().await;
-        let keypair = dbtx.load_or_create_gateway_keypair(protocol).await;
-        dbtx.commit_tx().await;
-        keypair
+    /// Domain-separation tweak for deriving the gateway's identity keypair from
+    /// the root secret. Stable across restarts so the gateway id (and the
+    /// bitcoind watch-only wallet name) is reproducible from the mnemonic
+    /// alone.
+    const GATEWAY_IDENTITY_TWEAK: &'static [u8] = b"gatewayv2-identity";
+
+    /// Deterministically derives the gateway's identity keypair from its
+    /// mnemonic. The private half is never used for signing (LNv2 uses
+    /// per-federation module keys); only the public key is advertised.
+    fn derive_gateway_keypair(mnemonic: &Mnemonic) -> secp256k1::Keypair {
+        Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic)
+            .tweak(Self::GATEWAY_IDENTITY_TWEAK)
+            .to_secp_key(&secp256k1::Secp256k1::new())
+    }
+
+    /// Returns the gateway's advertised identity public key, or `None` if the
+    /// mnemonic has not been set yet.
+    async fn gateway_id(&self) -> Option<PublicKey> {
+        let mnemonic = Self::load_mnemonic(&self.gateway_db).await?;
+        Some(Self::derive_gateway_keypair(&mnemonic).public_key())
     }
 
     pub async fn http_gateway_id(&self) -> PublicKey {
-        Self::load_or_create_gateway_keypair(&self.gateway_db, RegisteredProtocol::Http)
-            .await
-            .public_key()
+        self.gateway_id().await.expect("mnemonic should be set")
     }
 
     async fn get_state(&self) -> GatewayState {
         self.state.read().await.clone()
-    }
-
-    /// Reads and serializes structures from the Gateway's database for the
-    /// purpose for serializing to JSON for inspection.
-    pub async fn dump_database(
-        dbtx: &mut DatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> {
-        dbtx.dump_database(prefix_names).await
     }
 
     /// Main entrypoint into the gateway that starts the client registration
@@ -630,12 +580,10 @@ impl Gateway {
     pub async fn run(
         self,
         runtime: Arc<tokio::runtime::Runtime>,
-        mnemonic_receiver: tokio::sync::broadcast::Receiver<()>,
     ) -> anyhow::Result<TaskShutdownToken> {
         install_crypto_provider().await;
         self.load_clients().await?;
-        self.start_gateway(runtime, mnemonic_receiver.resubscribe());
-        self.spawn_backup_task();
+        self.start_gateway(runtime);
         // start metrics server
         fedimint_metrics::spawn_api_server(self.metrics_listen, self.task_group.clone()).await?;
         // start webserver last to avoid handling requests before fully initialized
@@ -645,60 +593,9 @@ impl Gateway {
         Ok(shutdown_receiver)
     }
 
-    /// Spawns a background task that checks every `BACKUP_UPDATE_INTERVAL` to
-    /// see if any federations need to be backed up.
-    fn spawn_backup_task(&self) {
-        let self_copy = self.clone();
-        self.task_group
-            .spawn_cancellable_silent("backup ecash", async move {
-                const BACKUP_UPDATE_INTERVAL: Duration = Duration::from_hours(1);
-                let mut interval = tokio::time::interval(BACKUP_UPDATE_INTERVAL);
-                interval.tick().await;
-                loop {
-                    {
-                        let mut dbtx = self_copy.gateway_db.begin_transaction().await;
-                        self_copy.backup_all_federations(&mut dbtx).await;
-                        dbtx.commit_tx().await;
-                        interval.tick().await;
-                    }
-                }
-            });
-    }
-
-    /// Loops through all federations and checks their last save backup time. If
-    /// the last saved backup time is past the threshold time, backup the
-    /// federation.
-    pub async fn backup_all_federations(&self, dbtx: &mut DatabaseTransaction<'_, Committable>) {
-        /// How long the federation manager should wait to backup the ecash for
-        /// each federation
-        const BACKUP_THRESHOLD_DURATION: Duration = Duration::from_hours(24);
-
-        let now = fedimint_core::time::now();
-        let threshold = now
-            .checked_sub(BACKUP_THRESHOLD_DURATION)
-            .expect("Cannot be negative");
-        for (id, last_backup) in dbtx.load_backup_records().await {
-            match last_backup {
-                Some(backup_time) if backup_time < threshold => {
-                    let fed_manager = self.federation_manager.read().await;
-                    fed_manager.backup_federation(&id, dbtx, now).await;
-                }
-                None => {
-                    let fed_manager = self.federation_manager.read().await;
-                    fed_manager.backup_federation(&id, dbtx, now).await;
-                }
-                _ => {}
-            }
-        }
-    }
-
     /// Begins the task for listening for intercepted payments from the
     /// lightning node.
-    fn start_gateway(
-        &self,
-        runtime: Arc<tokio::runtime::Runtime>,
-        mut mnemonic_receiver: tokio::sync::broadcast::Receiver<()>,
-    ) {
+    fn start_gateway(&self, runtime: Arc<tokio::runtime::Runtime>) {
         const PAYMENT_STREAM_RETRY_SECONDS: u64 = 60;
 
         let self_copy = self.clone();
@@ -711,23 +608,6 @@ impl Gateway {
                     if handle.is_shutting_down() {
                         info!(target: LOG_GATEWAY, "Gateway lightning payment stream handler loop is shutting down");
                         break;
-                    }
-
-                    if let GatewayState::NotConfigured{ .. } = self_copy.get_state().await {
-                        info!(
-                            target: LOG_GATEWAY,
-                            "Waiting for the mnemonic to be set before starting lightning receive loop."
-                        );
-                        info!(
-                            target: LOG_GATEWAY,
-                            "You might need to provide it from the UI or refer to documentation w.r.t how to initialize it."
-                        );
-
-                        let _ = mnemonic_receiver.recv().await;
-                        info!(
-                            target: LOG_GATEWAY,
-                            "Received mnemonic, attempting to start lightning receive loop"
-                        );
                     }
 
                     let payment_stream_task_group = tg.make_subgroup();
@@ -1254,40 +1134,37 @@ impl Gateway {
     }
 
     async fn load_mnemonic(gateway_db: &Database) -> Option<Mnemonic> {
-        let secret = Client::load_decodable_client_secret::<Vec<u8>>(gateway_db)
+        let entropy = gateway_db
+            .begin_transaction_nc()
             .await
-            .ok()?;
-        Mnemonic::from_entropy(&secret).ok()
+            .load_root_entropy()
+            .await?;
+        Mnemonic::from_entropy(&entropy).ok()
     }
 
     /// Reads the connected federation client configs from the Gateway's
     /// database and reconstructs the clients necessary for interacting with
     /// connection federations.
     async fn load_clients(&self) -> AdminResult<()> {
-        if let GatewayState::NotConfigured { .. } = self.get_state().await {
-            return Ok(());
-        }
-
         let mut federation_manager = self.federation_manager.write().await;
 
-        let configs = {
+        let federation_ids = {
             let mut dbtx = self.gateway_db.begin_transaction_nc().await;
-            dbtx.load_federation_configs().await
+            dbtx.load_client_configs()
+                .await
+                .into_keys()
+                .collect::<Vec<_>>()
         };
-
-        if let Some(max_federation_index) = configs.values().map(|cfg| cfg.federation_index).max() {
-            federation_manager.set_next_index(max_federation_index + 1);
-        }
 
         let mnemonic = Self::load_mnemonic(&self.gateway_db)
             .await
             .expect("mnemonic should be set");
 
-        for (federation_id, config) in configs {
+        for federation_id in federation_ids {
             match Box::pin(Spanned::try_new(
                 info_span!(target: LOG_GATEWAY, "client", federation_id  = %federation_id.clone()),
                 self.client_builder
-                    .build(config, Arc::new(self.clone()), &mnemonic),
+                    .build(federation_id, None, Arc::new(self.clone()), &mnemonic),
             ))
             .await
             {
@@ -1408,47 +1285,50 @@ impl Gateway {
                 gateway_state: self.state.read().await.to_string(),
                 lightning_info: LightningInfo::NotConnected,
                 lightning_mode: self.lightning_mode.clone(),
-                registrations: self
-                    .registrations
-                    .iter()
-                    .map(|(k, v)| (k.clone(), (v.endpoint_url.clone(), v.keypair.public_key())))
-                    .collect(),
+                registrations: self.registrations_with_id().await,
             });
         };
 
-        let dbtx = self.gateway_db.begin_transaction_nc().await;
         let federations = self
             .federation_manager
             .read()
             .await
-            .federation_info_all_federations(dbtx)
+            .federation_info_all_federations(
+                self.default_routing_fees,
+                self.default_transaction_fees,
+            )
             .await;
-
-        let channels: BTreeMap<u64, FederationId> = federations
-            .iter()
-            .map(|federation_info| {
-                (
-                    federation_info.config.federation_index,
-                    federation_info.federation_id,
-                )
-            })
-            .collect();
 
         let lightning_info = lightning_context.lnrpc.parsed_node_info().await;
 
         Ok(GatewayInfo {
             federations,
-            federation_fake_scids: Some(channels),
+            // `federation_fake_scids` is a vestigial LNv1/LND-interceptor concept.
+            federation_fake_scids: None,
             version_hash: fedimint_build_code_version_env!().to_string(),
             gateway_state: self.state.read().await.to_string(),
             lightning_info,
             lightning_mode: self.lightning_mode.clone(),
-            registrations: self
-                .registrations
-                .iter()
-                .map(|(k, v)| (k.clone(), (v.endpoint_url.clone(), v.keypair.public_key())))
-                .collect(),
+            registrations: self.registrations_with_id().await,
         })
+    }
+
+    /// Builds the advertised registration map, pairing each protocol's endpoint
+    /// url with the gateway's mnemonic-derived identity public key. Empty if
+    /// the mnemonic has not been set yet.
+    async fn registrations_with_id(&self) -> BTreeMap<RegisteredProtocol, (SafeUrl, PublicKey)> {
+        let Some(gateway_id) = self.gateway_id().await else {
+            return BTreeMap::new();
+        };
+        self.registrations
+            .iter()
+            .map(|(protocol, registration)| {
+                (
+                    protocol.clone(),
+                    (registration.endpoint_url.clone(), gateway_id),
+                )
+            })
+            .collect()
     }
 
     /// Returns a list of Lightning network channels from the Gateway's
@@ -1510,13 +1390,17 @@ impl Gateway {
         // Lock the federation manager before starting the db transaction to reduce the
         // chance of db write conflicts.
         let mut federation_manager = self.federation_manager.write().await;
-        let mut dbtx = self.gateway_db.begin_transaction().await;
 
         let federation_info = federation_manager
-            .leave_federation(payload.federation_id, &mut dbtx.to_ref_nc())
+            .leave_federation(
+                payload.federation_id,
+                self.default_routing_fees,
+                self.default_transaction_fees,
+            )
             .await?;
 
-        dbtx.remove_federation_config(payload.federation_id).await;
+        let mut dbtx = self.gateway_db.begin_transaction().await;
+        dbtx.remove_client_config(payload.federation_id).await;
         dbtx.commit_tx().await;
         Ok(federation_info)
     }
@@ -1552,40 +1436,34 @@ impl Gateway {
             )));
         }
 
-        // The gateway deterministically assigns a unique identifier (u64) to each
-        // federation connected.
-        let federation_index = federation_manager.pop_next_index()?;
-
-        let federation_config = FederationConfig {
-            invite_code,
-            federation_index,
-            lightning_fee: self.default_routing_fees,
-            transaction_fee: self.default_transaction_fees,
-            // Note: deprecated, unused
-            _connector: ConnectorType::Tcp,
-        };
-
         let mnemonic = Self::load_mnemonic(&self.gateway_db)
             .await
             .expect("mnemonic should be set");
         let recover = payload.recover.unwrap_or(false);
         if recover {
             self.client_builder
-                .recover(federation_config.clone(), Arc::new(self.clone()), &mnemonic)
+                .recover(&invite_code, Arc::new(self.clone()), &mnemonic)
                 .await?;
         }
 
         let client = self
             .client_builder
-            .build(federation_config.clone(), Arc::new(self.clone()), &mnemonic)
+            .build(
+                federation_id,
+                Some(&invite_code),
+                Arc::new(self.clone()),
+                &mnemonic,
+            )
             .await?;
 
         if recover {
             client.wait_for_all_active_state_machines().await?;
         }
 
-        // Instead of using `FederationManager::federation_info`, we manually create
-        // federation info here because short channel id is not yet persisted.
+        let client_config = client.config().await;
+
+        // Instead of using `FederationManager::federation_info`, we build the
+        // federation info here from the freshly joined client.
         let federation_info = FederationInfo {
             federation_id,
             federation_name: federation_manager.federation_name(&client).await,
@@ -1598,7 +1476,14 @@ impl Gateway {
                 );
                 Amount::default()
             }),
-            config: federation_config.clone(),
+            config: FederationConfig {
+                invite_code,
+                federation_index: 0,
+                lightning_fee: self.default_routing_fees,
+                transaction_fee: self.default_transaction_fees,
+                #[allow(deprecated)]
+                _connector: ConnectorType::Tcp,
+            },
             last_backup_time: None,
         };
 
@@ -1614,101 +1499,16 @@ impl Gateway {
         );
 
         let mut dbtx = self.gateway_db.begin_transaction().await;
-        dbtx.save_federation_config(&federation_config).await;
-        dbtx.save_federation_backup_record(federation_id, None)
+        dbtx.save_client_config(&federation_id, &client_config)
             .await;
         dbtx.commit_tx().await;
         debug!(
             target: LOG_GATEWAY,
             federation_id = %federation_id,
-            federation_index = %federation_index,
             "Federation connected"
         );
 
         Ok(federation_info)
-    }
-
-    /// Handles a request to change the lightning or transaction fees for all
-    /// federations or a federation specified by the `FederationId`.
-    async fn handle_set_fees_msg(
-        &self,
-        SetFeesPayload {
-            federation_id,
-            lightning_base,
-            lightning_parts_per_million,
-            transaction_base,
-            transaction_parts_per_million,
-        }: SetFeesPayload,
-    ) -> AdminResult<()> {
-        let mut dbtx = self.gateway_db.begin_transaction().await;
-        let mut fed_configs = if let Some(fed_id) = federation_id {
-            dbtx.load_federation_configs()
-                .await
-                .into_iter()
-                .filter(|(id, _)| *id == fed_id)
-                .collect::<BTreeMap<_, _>>()
-        } else {
-            dbtx.load_federation_configs().await
-        };
-
-        let federation_manager = self.federation_manager.read().await;
-
-        for (federation_id, config) in &mut fed_configs {
-            let mut lightning_fee = config.lightning_fee;
-            if let Some(lightning_base) = lightning_base {
-                lightning_fee.base = lightning_base;
-            }
-
-            if let Some(lightning_ppm) = lightning_parts_per_million {
-                lightning_fee.parts_per_million = lightning_ppm;
-            }
-
-            let mut transaction_fee = config.transaction_fee;
-            if let Some(transaction_base) = transaction_base {
-                transaction_fee.base = transaction_base;
-            }
-
-            if let Some(transaction_ppm) = transaction_parts_per_million {
-                transaction_fee.parts_per_million = transaction_ppm;
-            }
-
-            let client =
-                federation_manager
-                    .client(federation_id)
-                    .ok_or(FederationNotConnected {
-                        federation_id_prefix: federation_id.to_prefix(),
-                    })?;
-            let client_config = client.value().config().await;
-            let contains_lnv2 = client_config
-                .modules
-                .values()
-                .any(|m| fedimint_lnv2_common::LightningCommonInit::KIND == m.kind);
-
-            // Check if the lightning fee + transaction fee is higher than the send limit
-            let send_fees = lightning_fee + transaction_fee;
-            if contains_lnv2 && send_fees.gt(&PaymentFee::SEND_FEE_LIMIT) {
-                return Err(AdminGatewayError::GatewayConfigurationError(format!(
-                    "Total Send fees exceeded {}",
-                    PaymentFee::SEND_FEE_LIMIT
-                )));
-            }
-
-            // Check if the transaction fee is higher than the receive limit
-            if contains_lnv2 && transaction_fee.gt(&PaymentFee::RECEIVE_FEE_LIMIT) {
-                return Err(AdminGatewayError::GatewayConfigurationError(format!(
-                    "Transaction fees exceeded RECEIVE LIMIT {}",
-                    PaymentFee::RECEIVE_FEE_LIMIT
-                )));
-            }
-
-            config.lightning_fee = lightning_fee;
-            config.transaction_fee = transaction_fee;
-            dbtx.save_federation_config(config).await;
-        }
-
-        dbtx.commit_tx().await;
-
-        Ok(())
     }
 
     /// Handles an authenticated request for the gateway's mnemonic. This also
@@ -1787,12 +1587,14 @@ impl Gateway {
     /// Returns the ecash, lightning, and onchain balances for the gateway and
     /// the gateway's lightning node.
     async fn handle_get_balances_msg(&self) -> AdminResult<GatewayBalances> {
-        let dbtx = self.gateway_db.begin_transaction_nc().await;
         let federation_infos = self
             .federation_manager
             .read()
             .await
-            .federation_info_all_federations(dbtx)
+            .federation_info_all_federations(
+                self.default_routing_fees,
+                self.default_transaction_fees,
+            )
             .await;
 
         let ecash_balances: Vec<FederationBalanceInfo> = federation_infos
@@ -2074,40 +1876,6 @@ impl Gateway {
         Ok(PaymentLogResponse(payment_log))
     }
 
-    /// Set the gateway's root mnemonic by generating a new one or using the
-    /// words provided in `SetMnemonicPayload`.
-    async fn handle_set_mnemonic_msg(&self, payload: SetMnemonicPayload) -> AdminResult<()> {
-        // Verify the state is NotConfigured
-        let GatewayState::NotConfigured { mnemonic_sender } = self.get_state().await else {
-            return Err(AdminGatewayError::MnemonicError(anyhow!(
-                "Gateway is not is NotConfigured state"
-            )));
-        };
-
-        let mnemonic = if let Some(words) = payload.words {
-            info!(target: LOG_GATEWAY, "Using user provided mnemonic");
-            Mnemonic::parse_in_normalized(Language::English, words.as_str()).map_err(|e| {
-                AdminGatewayError::MnemonicError(anyhow!(format!(
-                    "Seed phrase provided in environment was invalid {e:?}"
-                )))
-            })?
-        } else {
-            debug!(target: LOG_GATEWAY, "Generating mnemonic and writing entropy to client storage");
-            Bip39RootSecretStrategy::<12>::random(&mut OsRng)
-        };
-
-        Client::store_encodable_client_secret(&self.gateway_db, mnemonic.to_entropy())
-            .await
-            .map_err(AdminGatewayError::MnemonicError)?;
-
-        self.set_gateway_state(GatewayState::Disconnected).await;
-
-        // Alert the gateway background threads that the mnemonic has been set
-        let _ = mnemonic_sender.send(());
-
-        Ok(())
-    }
-
     /// Creates a BOLT12 offer using the gateway's lightning node
     async fn handle_create_offer_for_operator_msg(
         &self,
@@ -2181,15 +1949,21 @@ impl Gateway {
     ) -> Result<Option<RoutingInfo>> {
         let context = self.get_lightning_context().await?;
 
-        let mut dbtx = self.gateway_db.begin_transaction_nc().await;
-        let fed_config = dbtx.load_federation_config(*federation_id).await.ok_or(
-            PublicGatewayError::FederationNotConnected(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            }),
-        )?;
+        if !self
+            .federation_manager
+            .read()
+            .await
+            .has_federation(*federation_id)
+        {
+            return Err(PublicGatewayError::FederationNotConnected(
+                FederationNotConnected {
+                    federation_id_prefix: federation_id.to_prefix(),
+                },
+            ));
+        }
 
-        let lightning_fee = fed_config.lightning_fee;
-        let transaction_fee = fed_config.transaction_fee;
+        let lightning_fee = self.default_routing_fees;
+        let transaction_fee = self.default_transaction_fees;
 
         Ok(self
             .public_key_v2(federation_id)

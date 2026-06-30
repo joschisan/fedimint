@@ -11,13 +11,13 @@ use fedimint_client_module::secret::{PlainRootSecretStrategy, RootSecretStrategy
 use fedimint_connectors::ConnectorRegistry;
 use fedimint_core::config::FederationId;
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped};
+use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_derive_secret::DerivableSecret;
-use fedimint_gateway_common::FederationConfig;
-use fedimint_gateway_server_db::GatewayDbExt as _;
 use fedimint_gwv2_client::GatewayClientInitV2;
 
 use crate::config::DatabaseBackend;
+use crate::db::get_client_database;
 use crate::error::AdminGatewayError;
 use crate::{AdminResult, Gateway};
 
@@ -58,11 +58,7 @@ impl GatewayClientBuilder {
 
     /// Constructs the client builder with the modules, database, and connector
     /// used to create clients for connected federations.
-    async fn create_client_builder(
-        &self,
-        _federation_config: &FederationConfig,
-        gateway: Arc<Gateway>,
-    ) -> AdminResult<ClientBuilder> {
+    async fn create_client_builder(&self, gateway: Arc<Gateway>) -> AdminResult<ClientBuilder> {
         let mut registry = self.registry.clone();
 
         registry.attach(GatewayClientInitV2 {
@@ -83,18 +79,18 @@ impl GatewayClientBuilder {
     /// for a balance to be present.
     pub async fn recover(
         &self,
-        config: FederationConfig,
+        invite_code: &InviteCode,
         gateway: Arc<Gateway>,
         mnemonic: &Mnemonic,
     ) -> AdminResult<()> {
-        let federation_id = config.invite_code.federation_id();
-        let db = gateway.gateway_db.get_client_database(&federation_id);
-        let client_builder = self.create_client_builder(&config, gateway.clone()).await?;
+        let federation_id = invite_code.federation_id();
+        let db = get_client_database(&gateway.gateway_db, &federation_id);
+        let client_builder = self.create_client_builder(gateway.clone()).await?;
         let root_secret = RootSecret::StandardDoubleDerive(
             Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic),
         );
         let client = client_builder
-            .preview(self.connectors.clone(), &config.invite_code)
+            .preview(self.connectors.clone(), invite_code)
             .await?
             .recover(db, root_secret, None)
             .await
@@ -107,16 +103,17 @@ impl GatewayClientBuilder {
         Ok(())
     }
 
-    /// Builds a new client with the provided `FederationConfig` and `Mnemonic`.
-    /// Only used for newly joined federations.
+    /// Opens an existing federation client, or joins it using `invite_code` if
+    /// its database has not been initialized yet. `invite_code` is required
+    /// only for the join path (a fresh connection); reloading an
+    /// already-joined federation on startup passes `None`.
     pub async fn build(
         &self,
-        config: FederationConfig,
+        federation_id: FederationId,
+        invite_code: Option<&InviteCode>,
         gateway: Arc<Gateway>,
         mnemonic: &Mnemonic,
     ) -> AdminResult<fedimint_client::ClientHandleArc> {
-        let invite_code = config.invite_code.clone();
-        let federation_id = invite_code.federation_id();
         let db_path = self.work_dir.join(format!("{federation_id}.db"));
 
         let (db, root_secret) = if db_path.exists() {
@@ -138,7 +135,7 @@ impl GatewayClientBuilder {
             let root_secret = RootSecret::Custom(self.client_plainrootsecret(&db).await?);
             (db, root_secret)
         } else {
-            let db = gateway.gateway_db.get_client_database(&federation_id);
+            let db = get_client_database(&gateway.gateway_db, &federation_id);
 
             let root_secret = RootSecret::StandardDoubleDerive(
                 Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic),
@@ -148,15 +145,20 @@ impl GatewayClientBuilder {
 
         Self::verify_client_config(&db, federation_id).await?;
 
-        let client_builder = self.create_client_builder(&config, gateway).await?;
+        let client_builder = self.create_client_builder(gateway).await?;
 
         if Client::is_initialized(&db).await {
             client_builder
                 .open(self.connectors.clone(), db, root_secret)
                 .await
         } else {
+            let invite_code = invite_code.ok_or_else(|| {
+                AdminGatewayError::ClientCreationError(anyhow::anyhow!(
+                    "Cannot join federation {federation_id} without an invite code"
+                ))
+            })?;
             client_builder
-                .preview(self.connectors.clone(), &invite_code)
+                .preview(self.connectors.clone(), invite_code)
                 .await?
                 .join(db, root_secret)
                 .await
