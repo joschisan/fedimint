@@ -77,14 +77,6 @@ pub struct GatewayOpts {
     #[arg(long = "network", env = envs::FM_GATEWAY_NETWORK_ENV)]
     network: Network,
 
-    /// Number of route hints to return in invoices
-    #[arg(
-        long = "num-route-hints",
-        env = envs::FM_NUMBER_OF_ROUTE_HINTS_ENV,
-        default_value_t = super::DEFAULT_NUM_ROUTE_HINTS
-    )]
-    num_route_hints: u32,
-
     /// Database backend to use.
     #[arg(long, env = envs::FM_DB_BACKEND_ENV, value_enum, default_value = "rocksdb")]
     pub db_backend: DatabaseBackend,
@@ -167,7 +159,6 @@ impl GatewayOpts {
             bcrypt_password_hash,
             bcrypt_liquidity_manager_password_hash,
             network: self.network,
-            num_route_hints: self.num_route_hints,
             default_routing_fees: self.default_routing_fees,
             default_transaction_fees: self.default_transaction_fees,
             iroh_listen: self.iroh_listen,
@@ -192,7 +183,6 @@ pub struct GatewayParameters {
     pub bcrypt_password_hash: bcrypt::HashParts,
     pub bcrypt_liquidity_manager_password_hash: Option<bcrypt::HashParts>,
     pub network: Network,
-    pub num_route_hints: u32,
     pub default_routing_fees: PaymentFee,
     pub default_transaction_fees: PaymentFee,
     pub iroh_listen: Option<SocketAddr>,

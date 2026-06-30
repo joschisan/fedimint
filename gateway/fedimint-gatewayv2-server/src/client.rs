@@ -15,7 +15,6 @@ use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_derive_secret::DerivableSecret;
 use fedimint_gateway_common::FederationConfig;
 use fedimint_gateway_server_db::GatewayDbExt as _;
-use fedimint_gw_client::GatewayClientInit;
 use fedimint_gwv2_client::GatewayClientInitV2;
 
 use crate::config::DatabaseBackend;
@@ -61,19 +60,10 @@ impl GatewayClientBuilder {
     /// used to create clients for connected federations.
     async fn create_client_builder(
         &self,
-        federation_config: &FederationConfig,
+        _federation_config: &FederationConfig,
         gateway: Arc<Gateway>,
     ) -> AdminResult<ClientBuilder> {
-        let FederationConfig {
-            federation_index, ..
-        } = federation_config.to_owned();
-
         let mut registry = self.registry.clone();
-
-        registry.attach(GatewayClientInit {
-            federation_index,
-            lightning_manager: gateway.clone(),
-        });
 
         registry.attach(GatewayClientInitV2 {
             gateway: gateway.clone(),

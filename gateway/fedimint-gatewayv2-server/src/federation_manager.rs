@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
-use bitcoin::secp256k1::Keypair;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::config::{FederationId, FederationIdPrefix, JsonClientConfig};
 use fedimint_core::db::{Committable, DatabaseTransaction, NonCommittable};
@@ -12,14 +11,13 @@ use fedimint_core::util::{FmtCompactAnyhow as _, Spanned};
 use fedimint_core::{PeerId, TieredCounts};
 use fedimint_gateway_common::FederationInfo;
 use fedimint_gateway_server_db::GatewayDbtxNcExt as _;
-use fedimint_gw_client::GatewayClientModule;
 use fedimint_gwv2_client::GatewayClientModuleV2;
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mint_client::MintClientModule;
 use tracing::{info, warn};
 
+use crate::AdminResult;
 use crate::error::{AdminGatewayError, FederationNotConnected};
-use crate::{AdminResult, Registration};
 
 /// The first index that the gateway will assign to a federation.
 /// Note: This starts at 1 because LNv1 uses the `federation_index` as an SCID.
@@ -63,14 +61,8 @@ impl FederationManager {
         &mut self,
         federation_id: FederationId,
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
-        registrations: Vec<&Registration>,
     ) -> AdminResult<FederationInfo> {
         let federation_info = self.federation_info(federation_id, dbtx).await?;
-
-        for registration in registrations {
-            self.unannounce_from_federation(federation_id, registration.keypair)
-                .await;
-        }
 
         self.remove_client(federation_id).await?;
 
@@ -100,70 +92,24 @@ impl FederationManager {
         }
     }
 
-    /// Waits for ongoing incoming LNv1 and LNv2 payments to complete before
-    /// returning.
+    /// Waits for ongoing incoming LNv2 payments to complete before returning.
     pub async fn wait_for_incoming_payments(&self) -> AdminResult<()> {
         for client in self.clients.values() {
             let active_operations = client.value().get_active_operations().await;
             let operation_log = client.value().operation_log();
             for op_id in active_operations {
                 let log_entry = operation_log.get_operation(op_id).await;
-                if let Some(entry) = log_entry {
-                    match entry.operation_module_kind() {
-                        "lnv2" => {
-                            let lnv2 =
-                                client.value().get_first_module::<GatewayClientModuleV2>()?;
-                            lnv2.await_completion(op_id).await;
-                        }
-                        "ln" => {
-                            let lnv1 = client.value().get_first_module::<GatewayClientModule>()?;
-                            lnv1.await_completion(op_id).await;
-                        }
-                        _ => {}
-                    }
+                if let Some(entry) = log_entry
+                    && entry.operation_module_kind() == "lnv2"
+                {
+                    let lnv2 = client.value().get_first_module::<GatewayClientModuleV2>()?;
+                    lnv2.await_completion(op_id).await;
                 }
             }
         }
 
         info!(target: LOG_GATEWAY, "Finished waiting for incoming payments");
         Ok(())
-    }
-
-    async fn unannounce_from_federation(
-        &self,
-        federation_id: FederationId,
-        gateway_keypair: Keypair,
-    ) {
-        if let Ok(client) = self
-            .clients
-            .get(&federation_id)
-            .ok_or(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            })
-            && let Ok(ln) = client.value().get_first_module::<GatewayClientModule>()
-        {
-            ln.remove_from_federation(gateway_keypair).await;
-        }
-    }
-
-    /// Iterates through all of the federations the gateway is registered with
-    /// and requests to remove the registration record.
-    pub async fn unannounce_from_all_federations(&self, gateway_keypair: Keypair) {
-        let removal_futures = self
-            .clients
-            .values()
-            .filter_map(|client| {
-                client
-                    .value()
-                    .get_first_module::<GatewayClientModule>()
-                    .ok()
-                    .map(|lnv1| async move {
-                        lnv1.remove_from_federation(gateway_keypair).await;
-                    })
-            })
-            .collect::<Vec<_>>();
-
-        futures::future::join_all(removal_futures).await;
     }
 
     pub fn get_client_for_index(&self, short_channel_id: u64) -> Option<Spanned<ClientHandleArc>> {

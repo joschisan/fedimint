@@ -33,7 +33,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
-use anyhow::{Context, anyhow, ensure};
+use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
 use bitcoin::{Address, Network, Txid, secp256k1};
@@ -87,12 +87,6 @@ use fedimint_gateway_common::{
 };
 use fedimint_gateway_server_db::{GatewayDbtxNcExt as _, get_gatewayd_database_migrations};
 pub use fedimint_gateway_ui::IAdminGateway;
-use fedimint_gw_client::events::compute_lnv1_stats;
-use fedimint_gw_client::pay::{OutgoingPaymentError, OutgoingPaymentErrorType};
-use fedimint_gw_client::{
-    GatewayClientModule, GatewayExtPayStates, GatewayExtReceiveStates, IGatewayClientV1,
-    SwapParameters,
-};
 use fedimint_gwv2_client::events::compute_lnv2_stats;
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -101,13 +95,8 @@ use fedimint_lightning::lnd::GatewayLndClient;
 use fedimint_lightning::{
     CreateInvoiceRequest, ILnRpcClient, InterceptPaymentRequest, InterceptPaymentResponse,
     InvoiceDescription, LightningContext, LightningRpcError, LnRpcTracked, Lnv2HoldInvoiceFilter,
-    PayInvoiceResponse, PaymentAction, RouteHtlcStream, ldk,
+    PaymentAction, Preimage, RouteHtlcStream, ldk,
 };
-use fedimint_ln_client::pay::PaymentData;
-use fedimint_ln_common::LightningCommonInit;
-use fedimint_ln_common::config::LightningClientConfig;
-use fedimint_ln_common::contracts::outgoing::OutgoingContractAccount;
-use fedimint_ln_common::contracts::{IdentifiableContract, Preimage};
 use fedimint_lnurl::VerifyResponse;
 use fedimint_lnv2_common::Bolt11InvoiceDescription;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
@@ -121,23 +110,16 @@ use fedimint_mintv2_client::{
 };
 use fedimint_wallet_client::{PegOutFees, WalletClientInit, WalletClientModule, WithdrawState};
 use futures::stream::StreamExt;
-use lightning_invoice::{Bolt11Invoice, RoutingFees};
+use lightning_invoice::Bolt11Invoice;
 use rand::rngs::OsRng;
 use tokio::sync::RwLock;
 use tracing::{debug, info, info_span, warn};
 
 use crate::envs::FM_GATEWAY_MNEMONIC_ENV;
-use crate::error::{AdminGatewayError, LNv1Error, LNv2Error, PublicGatewayError};
+use crate::error::{AdminGatewayError, LNv2Error, PublicGatewayError};
 use crate::events::get_events_for_duration;
 use crate::rpc_server::run_webserver;
 use crate::types::PrettyInterceptPaymentRequest;
-
-/// How long a gateway announcement stays valid
-const GW_ANNOUNCEMENT_TTL: Duration = Duration::from_mins(10);
-
-/// The default number of route hints that the legacy gateway provides for
-/// invoice creation.
-const DEFAULT_NUM_ROUTE_HINTS: u32 = 1;
 
 /// Default Bitcoin network for testing purposes.
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
@@ -197,8 +179,8 @@ impl Display for GatewayState {
     }
 }
 
-/// Helper struct for storing the registration parameters for LNv1 for each
-/// network protocol.
+/// Helper struct for storing the gateway's advertised endpoint and signing
+/// keypair for each network protocol.
 #[derive(Debug, Clone)]
 struct Registration {
     /// The url to advertise in the registration that clients can use to connect
@@ -246,7 +228,6 @@ impl Gateway {
         #[builder(default = ([127, 0, 0, 1], 80).into())] listen: SocketAddr,
         api_addr: Option<SafeUrl>,
         #[builder(default = DEFAULT_NETWORK)] network: Network,
-        #[builder(default = DEFAULT_NUM_ROUTE_HINTS)] num_route_hints: u32,
         #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] default_routing_fees: PaymentFee,
         #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)]
         default_transaction_fees: PaymentFee,
@@ -275,7 +256,6 @@ impl Gateway {
                 bcrypt_password_hash,
                 bcrypt_liquidity_manager_password_hash,
                 network,
-                num_route_hints,
                 default_routing_fees,
                 default_transaction_fees,
                 iroh_listen,
@@ -332,9 +312,6 @@ pub struct Gateway {
     /// The bcrypt password hash used to authenticate the gateway liquidity
     /// manager.
     bcrypt_liquidity_manager_password_hash: Option<String>,
-
-    /// The number of route hints to include in LNv1 invoices.
-    num_route_hints: u32,
 
     /// The Bitcoin network that the Lightning network is configured to.
     network: Network,
@@ -684,7 +661,6 @@ impl Gateway {
         gateway_state: GatewayState,
         chain_source: ChainSource,
     ) -> anyhow::Result<Gateway> {
-        let num_route_hints = gateway_parameters.num_route_hints;
         let network = gateway_parameters.network;
 
         let task_group = TaskGroup::new();
@@ -720,7 +696,6 @@ impl Gateway {
             bcrypt_liquidity_manager_password_hash: gateway_parameters
                 .bcrypt_liquidity_manager_password_hash
                 .map(|h| h.to_string()),
-            num_route_hints,
             network,
             chain_source,
             default_routing_fees: gateway_parameters.default_routing_fees,
@@ -781,7 +756,6 @@ impl Gateway {
         mnemonic_receiver: tokio::sync::broadcast::Receiver<()>,
     ) -> anyhow::Result<TaskShutdownToken> {
         install_crypto_provider().await;
-        self.register_clients_timer();
         self.load_clients().await?;
         self.start_gateway(runtime, mnemonic_receiver.resubscribe());
         self.spawn_backup_task();
@@ -915,7 +889,7 @@ impl Gateway {
                         crit!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Lightning payment stream task group shutdown");
                     }
 
-                    self_copy.unannounce_from_all_federations().await;
+                    self_copy.unannounce_from_all_federations();
 
                     match route_payments_response {
                         ReceivePaymentStreamAction::RetryAfterDelay => {
@@ -976,16 +950,6 @@ impl Gateway {
         self.set_gateway_state(GatewayState::Running { lightning_context })
             .await;
         info!(target: LOG_GATEWAY, "Gateway is running");
-
-        if matches!(self.lightning_mode, LightningMode::Lnd { .. }) {
-            // Re-register the gateway with all federations after connecting to the
-            // lightning node
-            let mut dbtx = self.gateway_db.begin_transaction_nc().await;
-            let all_federations_configs =
-                dbtx.load_federation_configs().await.into_iter().collect();
-            self.register_federations(&all_federations_configs, &self.task_group)
-                .await;
-        }
 
         // Runs until the connection to the lightning node breaks or we receive the
         // shutdown signal.
@@ -1068,10 +1032,10 @@ impl Gateway {
     /// Handles an intercepted lightning payment. If the payment is part of an
     /// incoming payment to a federation, spawns a state machine and hands the
     /// payment off to it. If the payment's last-hop short channel id maps to
-    /// a known federation but no LNv1 or LNv2 offer matched, cancels (fails
-    /// back) the HTLC so the sender can retry rather than treating the
-    /// gateway as a dead route. Otherwise (real-channel forwards), resumes
-    /// the HTLC so LND can route it as a normal forward.
+    /// a known federation but no LNv2 offer matched, cancels (fails back) the
+    /// HTLC so the sender can retry rather than treating the gateway as a dead
+    /// route. Otherwise (real-channel forwards), resumes the HTLC so the
+    /// lightning node can route it as a normal forward.
     ///
     /// Returns the outcome label for metrics tracking.
     async fn handle_lightning_payment(
@@ -1106,31 +1070,10 @@ impl Gateway {
             return "lnv2";
         }
 
-        let lnv1_start = fedimint_core::time::now();
-        let lnv1_result = self
-            .try_handle_lightning_payment_ln_legacy(&payment_request)
-            .await;
-        let lnv1_outcome = if lnv1_result.is_ok() {
-            "success"
-        } else {
-            "error"
-        };
-        metrics::HTLC_LNV1_ATTEMPT_DURATION_SECONDS
-            .with_label_values(&[lnv1_outcome])
-            .observe(
-                fedimint_core::time::now()
-                    .duration_since(lnv1_start)
-                    .unwrap_or_default()
-                    .as_secs_f64(),
-            );
-        if lnv1_result.is_ok() {
-            return "lnv1";
-        }
-
-        // Neither LNv1 nor LNv2 matched. If the last-hop scid is one of our
+        // The LNv2 attempt did not match. If the last-hop scid is one of our
         // federation virtual scids, cancel so the sender gets a non-permanent
         // failure (avoiding `UNKNOWN_NEXT_PEER` blacklisting). If the scid is
-        // for a real channel, resume so LND forwards normally.
+        // for a real channel, resume so the lightning node forwards normally.
         let is_federation_scid = match payment_request.short_channel_id {
             Some(scid) => self
                 .federation_manager
@@ -1143,11 +1086,10 @@ impl Gateway {
 
         if is_federation_scid {
             // The HTLC targeted a federation we serve but we couldn't claim
-            // it (no LNv1 offer / no LNv2 contract / underfunded gateway /
-            // federation timeout / etc.). Surface the underlying error
-            // variants so operators can diagnose the cause; otherwise both
-            // `Err` values are dropped on the floor and the only visible
-            // signal is the metric label `"error"`.
+            // it (no LNv2 contract / underfunded gateway / federation timeout /
+            // etc.). Surface the underlying error so operators can diagnose the
+            // cause; otherwise the `Err` value is dropped on the floor and the
+            // only visible signal is the metric label `"error"`.
             warn!(
                 target: LOG_GATEWAY,
                 payment_hash = %payment_request.payment_hash,
@@ -1156,16 +1098,15 @@ impl Gateway {
                 incoming_chan_id = payment_request.incoming_chan_id,
                 htlc_id = payment_request.htlc_id,
                 lnv2_err = ?lnv2_result.as_ref().err(),
-                lnv1_err = ?lnv1_result.as_ref().err(),
                 "Unmatched lightning payment for federation scid: cancelling HTLC",
             );
             Self::cancel_unmatched_lightning_payment(payment_request, lightning_context).await;
             "cancel"
         } else {
-            // Normal route-through traffic: the gateway's LND interceptor
-            // sees every HTLC, but only federation-scid HTLCs are ours to
-            // handle. Resume so LND forwards the rest as a regular routing
-            // node — no warning needed since this is the expected path.
+            // Normal route-through traffic: the gateway's interceptor sees every
+            // HTLC, but only federation-scid HTLCs are ours to handle. Resume so
+            // the lightning node forwards the rest as a regular routing node —
+            // no warning needed since this is the expected path.
             Self::forward_lightning_payment(payment_request, lightning_context).await;
             "forward"
         }
@@ -1219,59 +1160,8 @@ impl Gateway {
         Ok(())
     }
 
-    /// Tries to handle a lightning payment using the legacy lightning protocol.
-    /// Returns `Ok` if the payment was handled, `Err` otherwise.
-    async fn try_handle_lightning_payment_ln_legacy(
-        &self,
-        htlc_request: &InterceptPaymentRequest,
-    ) -> Result<()> {
-        // Check if the payment corresponds to a federation supporting legacy Lightning.
-        let Some(federation_index) = htlc_request.short_channel_id else {
-            return Err(PublicGatewayError::LNv1(LNv1Error::IncomingPayment(
-                "Incoming payment has not last hop short channel id".to_string(),
-            )));
-        };
-
-        let Some(client) = self
-            .federation_manager
-            .read()
-            .await
-            .get_client_for_index(federation_index)
-        else {
-            return Err(PublicGatewayError::LNv1(LNv1Error::IncomingPayment("Incoming payment has a last hop short channel id that does not map to a known federation".to_string())));
-        };
-
-        client
-            .borrow()
-            .with(|client| async {
-                let htlc = htlc_request.clone().try_into();
-                match htlc {
-                    Ok(htlc) => {
-                        let lnv1 =
-                            client
-                                .get_first_module::<GatewayClientModule>()
-                                .map_err(|_| {
-                                    PublicGatewayError::LNv1(LNv1Error::IncomingPayment(
-                                        "Federation does not have LNv1 module".to_string(),
-                                    ))
-                                })?;
-                        match lnv1.gateway_handle_intercepted_htlc(htlc).await {
-                            Ok(_) => Ok(()),
-                            Err(e) => Err(PublicGatewayError::LNv1(LNv1Error::IncomingPayment(
-                                format!("Error intercepting lightning payment {e:?}"),
-                            ))),
-                        }
-                    }
-                    _ => Err(PublicGatewayError::LNv1(LNv1Error::IncomingPayment(
-                        "Could not convert InterceptHtlcResult into an HTLC".to_string(),
-                    ))),
-                }
-            })
-            .await
-    }
-
     /// Cancels (fails back) a lightning payment whose last-hop scid maps to a
-    /// known federation but matched no LNv1 or LNv2 offer.
+    /// known federation but matched no LNv2 offer.
     ///
     /// Returning `PaymentAction::Forward` here would tell LND to resume the
     /// HTLC as a normal forward, but the last-hop short channel id is a
@@ -1380,76 +1270,6 @@ impl Gateway {
                 "No wallet module found"
             )))
         }
-    }
-
-    /// Requests the gateway to pay an outgoing LN invoice on behalf of a
-    /// Fedimint client. Returns the payment hash's preimage on success.
-    async fn handle_pay_invoice_msg(
-        &self,
-        payload: fedimint_ln_client::pay::PayInvoicePayload,
-    ) -> Result<Preimage> {
-        let GatewayState::Running { .. } = self.get_state().await else {
-            return Err(PublicGatewayError::Lightning(
-                LightningRpcError::FailedToConnect,
-            ));
-        };
-
-        debug!(target: LOG_GATEWAY, "Handling pay invoice message");
-        let client = self.select_client(payload.federation_id).await?;
-        let contract_id = payload.contract_id;
-        let gateway_module = &client
-            .value()
-            .get_first_module::<GatewayClientModule>()
-            .map_err(LNv1Error::OutgoingPayment)
-            .map_err(PublicGatewayError::LNv1)?;
-        let operation_id = gateway_module
-            .gateway_pay_bolt11_invoice(payload)
-            .await
-            .map_err(LNv1Error::OutgoingPayment)
-            .map_err(PublicGatewayError::LNv1)?;
-        let mut updates = gateway_module
-            .gateway_subscribe_ln_pay(operation_id)
-            .await
-            .map_err(LNv1Error::OutgoingPayment)
-            .map_err(PublicGatewayError::LNv1)?
-            .into_stream();
-        while let Some(update) = updates.next().await {
-            match update {
-                GatewayExtPayStates::Success { preimage, .. } => {
-                    debug!(target: LOG_GATEWAY, contract_id = %contract_id, "Successfully paid invoice");
-                    return Ok(preimage);
-                }
-                GatewayExtPayStates::Fail {
-                    error,
-                    error_message,
-                } => {
-                    return Err(PublicGatewayError::LNv1(LNv1Error::OutgoingContract {
-                        error: Box::new(error),
-                        message: format!(
-                            "{error_message} while paying invoice with contract id {contract_id}"
-                        ),
-                    }));
-                }
-                GatewayExtPayStates::Canceled { error } => {
-                    return Err(PublicGatewayError::LNv1(LNv1Error::OutgoingContract {
-                        error: Box::new(error.clone()),
-                        message: format!(
-                            "Cancelled with {error} while paying invoice with contract id {contract_id}"
-                        ),
-                    }));
-                }
-                GatewayExtPayStates::Created => {
-                    debug!(target: LOG_GATEWAY, contract_id = %contract_id, "Start pay invoice state machine");
-                }
-                other => {
-                    debug!(target: LOG_GATEWAY, state = ?other, contract_id = %contract_id, "Got state while paying invoice");
-                }
-            }
-        }
-
-        Err(PublicGatewayError::LNv1(LNv1Error::OutgoingPayment(
-            anyhow!("Ran out of state updates while paying invoice"),
-        )))
     }
 
     /// Handles a request for the gateway to backup a connected federation's
@@ -1652,59 +1472,6 @@ impl Gateway {
         Ok(txid)
     }
 
-    /// Registers the gateway with each specified federation.
-    async fn register_federations(
-        &self,
-        federations: &BTreeMap<FederationId, FederationConfig>,
-        register_task_group: &TaskGroup,
-    ) {
-        if let Ok(lightning_context) = self.get_lightning_context().await {
-            let route_hints = lightning_context
-                .lnrpc
-                .parsed_route_hints(self.num_route_hints)
-                .await;
-            if route_hints.is_empty() {
-                warn!(target: LOG_GATEWAY, "Gateway did not retrieve any route hints, may reduce receive success rate.");
-            }
-
-            for (federation_id, federation_config) in federations {
-                let fed_manager = self.federation_manager.read().await;
-                if let Some(client) = fed_manager.client(federation_id) {
-                    let client_arc = client.clone().into_value();
-                    let route_hints = route_hints.clone();
-                    let lightning_context = lightning_context.clone();
-                    let federation_config = federation_config.clone();
-                    let registrations =
-                        self.registrations.clone().into_values().collect::<Vec<_>>();
-
-                    register_task_group.spawn_cancellable_silent(
-                        "register federation",
-                        async move {
-                            let Ok(gateway_client) =
-                                client_arc.get_first_module::<GatewayClientModule>()
-                            else {
-                                return;
-                            };
-
-                            for registration in registrations {
-                                gateway_client
-                                    .try_register_with_federation(
-                                        route_hints.clone(),
-                                        GW_ANNOUNCEMENT_TTL,
-                                        federation_config.lightning_fee.into(),
-                                        lightning_context.clone(),
-                                        registration.endpoint_url,
-                                        registration.keypair.public_key(),
-                                    )
-                                    .await;
-                            }
-                        },
-                    );
-                }
-            }
-        }
-    }
-
     /// Retrieves a `ClientHandleArc` from the Gateway's in memory structures
     /// that keep track of available clients, given a `federation_id`.
     pub async fn select_client(
@@ -1773,42 +1540,8 @@ impl Gateway {
         Ok(())
     }
 
-    /// Legacy mechanism for registering the Gateway with connected federations.
-    /// This will spawn a task that will re-register the Gateway with
-    /// connected federations every 8.5 mins. Only registers the Gateway if it
-    /// has successfully connected to the Lightning node, so that it can
-    /// include route hints in the registration.
-    fn register_clients_timer(&self) {
-        // Only spawn background registration thread if gateway is LND
-        if matches!(self.lightning_mode, LightningMode::Lnd { .. }) {
-            info!(target: LOG_GATEWAY, "Spawning register task...");
-            let gateway = self.clone();
-            let register_task_group = self.task_group.make_subgroup();
-            self.task_group.spawn_cancellable("register clients", async move {
-                loop {
-                    let gateway_state = gateway.get_state().await;
-                    if let GatewayState::Running { .. } = &gateway_state {
-                        let mut dbtx = gateway.gateway_db.begin_transaction_nc().await;
-                        let all_federations_configs = dbtx.load_federation_configs().await.into_iter().collect();
-                        gateway.register_federations(&all_federations_configs, &register_task_group).await;
-                    } else {
-                        // We need to retry more often if the gateway is not in the Running state
-                        const NOT_RUNNING_RETRY: Duration = Duration::from_secs(10);
-                        warn!(target: LOG_GATEWAY, gateway_state = %gateway_state, retry_interval = ?NOT_RUNNING_RETRY, "Will not register federation yet because gateway still not in Running state");
-                        sleep(NOT_RUNNING_RETRY).await;
-                        continue;
-                    }
-
-                    // Allow a 15% buffer of the TTL before the re-registering gateway
-                    // with the federations.
-                    sleep(GW_ANNOUNCEMENT_TTL.mul_f32(0.85)).await;
-                }
-            });
-        }
-    }
-
-    /// Verifies that the federation has at least one lightning module (LNv1 or
-    /// LNv2) and that the network matches the gateway's network.
+    /// Verifies that the federation has an LNv2 lightning module and that the
+    /// network matches the gateway's network.
     async fn check_federation_network(
         client: &ClientHandleArc,
         network: Network,
@@ -1816,57 +1549,32 @@ impl Gateway {
         let federation_id = client.federation_id();
         let config = client.config().await;
 
-        let lnv1_cfg = config
-            .modules
-            .values()
-            .find(|m| LightningCommonInit::KIND == m.kind);
-
         let lnv2_cfg = config
             .modules
             .values()
             .find(|m| fedimint_lnv2_common::LightningCommonInit::KIND == m.kind);
 
-        // Ensure the federation has at least one lightning module
-        if lnv1_cfg.is_none() && lnv2_cfg.is_none() {
+        // Ensure the federation has an LNv2 lightning module
+        let Some(cfg) = lnv2_cfg else {
             return Err(AdminGatewayError::ClientCreationError(anyhow!(
-                "Federation {federation_id} does not have any lightning module (LNv1 or LNv2)"
+                "Federation {federation_id} does not have an LNv2 lightning module"
             )));
-        }
+        };
 
-        // Verify the LNv1 network if present
-        if let Some(cfg) = lnv1_cfg {
-            let ln_cfg: &LightningClientConfig = cfg.cast()?;
+        // Verify the LNv2 network
+        let ln_cfg: &fedimint_lnv2_common::config::LightningClientConfig = cfg.cast()?;
 
-            if ln_cfg.network.0 != network {
-                crit!(
-                    target: LOG_GATEWAY,
-                    federation_id = %federation_id,
-                    network = %network,
-                    "Incorrect LNv1 network for federation",
-                );
-                return Err(AdminGatewayError::ClientCreationError(anyhow!(format!(
-                    "Unsupported LNv1 network {}",
-                    ln_cfg.network
-                ))));
-            }
-        }
-
-        // Verify the LNv2 network if present
-        if let Some(cfg) = lnv2_cfg {
-            let ln_cfg: &fedimint_lnv2_common::config::LightningClientConfig = cfg.cast()?;
-
-            if ln_cfg.network != network {
-                crit!(
-                    target: LOG_GATEWAY,
-                    federation_id = %federation_id,
-                    network = %network,
-                    "Incorrect LNv2 network for federation",
-                );
-                return Err(AdminGatewayError::ClientCreationError(anyhow!(format!(
-                    "Unsupported LNv2 network {}",
-                    ln_cfg.network
-                ))));
-            }
+        if ln_cfg.network != network {
+            crit!(
+                target: LOG_GATEWAY,
+                federation_id = %federation_id,
+                network = %network,
+                "Incorrect LNv2 network for federation",
+            );
+            return Err(AdminGatewayError::ClientCreationError(anyhow!(format!(
+                "Unsupported LNv2 network {}",
+                ln_cfg.network
+            ))));
         }
 
         Ok(())
@@ -1885,19 +1593,12 @@ impl Gateway {
         }
     }
 
-    /// Iterates through all of the federations the gateway is registered with
-    /// and requests to remove the registration record.
-    pub async fn unannounce_from_all_federations(&self) {
-        if matches!(self.lightning_mode, LightningMode::Lnd { .. }) {
-            for registration in self.registrations.values() {
-                self.federation_manager
-                    .read()
-                    .await
-                    .unannounce_from_all_federations(registration.keypair)
-                    .await;
-            }
-        }
-    }
+    /// Unannounces the gateway from all connected federations.
+    ///
+    /// LNv2 gateways are not announced through a federation module (clients
+    /// discover them out of band), so there is nothing to unannounce. Kept as a
+    /// no-op so the shutdown path does not need a per-protocol branch.
+    pub fn unannounce_from_all_federations(&self) {}
 
     async fn create_lightning_client(
         &self,
@@ -2034,7 +1735,6 @@ impl IAdminGateway for Gateway {
     }
 
     /// Computes the 24 hour payment summary statistics for this gateway.
-    /// Combines the LNv1 and LNv2 stats together.
     async fn handle_payment_summary_msg(
         &self,
         PaymentSummaryPayload {
@@ -2061,10 +1761,7 @@ impl IAdminGateway for Gateway {
                 .value();
             let all_events = &get_events_for_duration(client, start, end).await;
 
-            let (mut lnv1_outgoing, mut lnv1_incoming) = compute_lnv1_stats(all_events);
             let (mut lnv2_outgoing, mut lnv2_incoming) = compute_lnv2_stats(all_events);
-            outgoing.combine(&mut lnv1_outgoing);
-            incoming.combine(&mut lnv1_incoming);
             outgoing.combine(&mut lnv2_outgoing);
             incoming.combine(&mut lnv2_incoming);
         }
@@ -2089,11 +1786,7 @@ impl IAdminGateway for Gateway {
         let mut dbtx = self.gateway_db.begin_transaction().await;
 
         let federation_info = federation_manager
-            .leave_federation(
-                payload.federation_id,
-                &mut dbtx.to_ref_nc(),
-                self.registrations.values().collect(),
-            )
+            .leave_federation(payload.federation_id, &mut dbtx.to_ref_nc())
             .await?;
 
         dbtx.remove_federation_config(payload.federation_id).await;
@@ -2109,7 +1802,7 @@ impl IAdminGateway for Gateway {
         &self,
         payload: ConnectFedPayload,
     ) -> AdminResult<FederationInfo> {
-        let GatewayState::Running { lightning_context } = self.get_state().await else {
+        let GatewayState::Running { .. } = self.get_state().await else {
             return Err(AdminGatewayError::Lightning(
                 LightningRpcError::FailedToConnect,
             ));
@@ -2183,22 +1876,6 @@ impl IAdminGateway for Gateway {
         };
 
         Self::check_federation_network(&client, self.network).await?;
-        if matches!(self.lightning_mode, LightningMode::Lnd { .. })
-            && let Ok(lnv1) = client.get_first_module::<GatewayClientModule>()
-        {
-            for registration in self.registrations.values() {
-                lnv1.try_register_with_federation(
-                    // Route hints will be updated in the background
-                    Vec::new(),
-                    GW_ANNOUNCEMENT_TTL,
-                    federation_config.lightning_fee.into(),
-                    lightning_context.clone(),
-                    registration.endpoint_url.clone(),
-                    registration.keypair.public_key(),
-                )
-                .await;
-            }
-        }
 
         // no need to enter span earlier, because connect-fed has a span
         federation_manager.add_client(
@@ -2304,13 +1981,6 @@ impl IAdminGateway for Gateway {
         }
 
         dbtx.commit_tx().await;
-
-        if matches!(self.lightning_mode, LightningMode::Lnd { .. }) {
-            let register_task_group = TaskGroup::new();
-
-            self.register_federations(&fed_configs, &register_task_group)
-                .await;
-        }
 
         Ok(())
     }
@@ -3327,221 +2997,20 @@ impl IGatewayClientV2 for Gateway {
             .add_to(amount))
     }
 
-    async fn is_lnv1_invoice(&self, invoice: &Bolt11Invoice) -> Option<Spanned<ClientHandleArc>> {
-        let rhints = invoice.route_hints();
-        match rhints.first().and_then(|rh| rh.0.last()) {
-            None => None,
-            Some(hop) => match self.get_lightning_context().await {
-                Ok(lightning_context) => {
-                    if hop.src_node_id != lightning_context.lightning_public_key {
-                        return None;
-                    }
-
-                    self.federation_manager
-                        .read()
-                        .await
-                        .get_client_for_index(hop.short_channel_id)
-                }
-                Err(_) => None,
-            },
-        }
+    /// `gatewaydv2` does not support LNv1, so no invoice is ever treated as an
+    /// LNv1 invoice and the LNv2 -> LNv1 swap path below is never taken.
+    async fn is_lnv1_invoice(&self, _invoice: &Bolt11Invoice) -> Option<Spanned<ClientHandleArc>> {
+        None
     }
 
+    /// Unreachable: [`Self::is_lnv1_invoice`] always returns `None`, so the
+    /// caller never reaches the LNv1 swap. `gatewaydv2` has no LNv1 module to
+    /// perform the swap with.
     async fn relay_lnv1_swap(
         &self,
-        client: &ClientHandleArc,
-        invoice: &Bolt11Invoice,
+        _client: &ClientHandleArc,
+        _invoice: &Bolt11Invoice,
     ) -> anyhow::Result<FinalReceiveState> {
-        let swap_params = SwapParameters {
-            payment_hash: *invoice.payment_hash(),
-            amount_msat: Amount::from_msats(
-                invoice
-                    .amount_milli_satoshis()
-                    .ok_or(anyhow!("Amountless invoice not supported"))?,
-            ),
-        };
-        let lnv1 = client
-            .get_first_module::<GatewayClientModule>()
-            .expect("No LNv1 module");
-        let operation_id = lnv1.gateway_handle_direct_swap(swap_params).await?;
-        let mut stream = lnv1
-            .gateway_subscribe_ln_receive(operation_id)
-            .await?
-            .into_stream();
-        let mut final_state = FinalReceiveState::Failure;
-        while let Some(update) = stream.next().await {
-            match update {
-                GatewayExtReceiveStates::Funding => {}
-                GatewayExtReceiveStates::FundingFailed { error: _ } => {
-                    final_state = FinalReceiveState::Rejected;
-                }
-                GatewayExtReceiveStates::Preimage(preimage) => {
-                    final_state = FinalReceiveState::Success(preimage.0);
-                }
-                GatewayExtReceiveStates::RefundError {
-                    error_message: _,
-                    error: _,
-                } => {
-                    final_state = FinalReceiveState::Failure;
-                }
-                GatewayExtReceiveStates::RefundSuccess {
-                    out_points: _,
-                    error: _,
-                } => {
-                    final_state = FinalReceiveState::Refunded;
-                }
-            }
-        }
-
-        Ok(final_state)
-    }
-}
-
-#[async_trait]
-impl IGatewayClientV1 for Gateway {
-    async fn verify_preimage_authentication(
-        &self,
-        payment_hash: sha256::Hash,
-        preimage_auth: sha256::Hash,
-        contract: OutgoingContractAccount,
-    ) -> std::result::Result<(), OutgoingPaymentError> {
-        let mut dbtx = self.gateway_db.begin_transaction().await;
-        if let Some(secret_hash) = dbtx.load_preimage_authentication(payment_hash).await {
-            if secret_hash != preimage_auth {
-                return Err(OutgoingPaymentError {
-                    error_type: OutgoingPaymentErrorType::InvalidInvoicePreimage,
-                    contract_id: contract.contract.contract_id(),
-                    contract: Some(contract),
-                });
-            }
-        } else {
-            // Committing the `preimage_auth` to the database can fail if two users try to
-            // pay the same invoice at the same time.
-            dbtx.save_new_preimage_authentication(payment_hash, preimage_auth)
-                .await;
-            return dbtx
-                .commit_tx_result()
-                .await
-                .map_err(|_| OutgoingPaymentError {
-                    error_type: OutgoingPaymentErrorType::InvoiceAlreadyPaid,
-                    contract_id: contract.contract.contract_id(),
-                    contract: Some(contract),
-                });
-        }
-
-        Ok(())
-    }
-
-    async fn verify_pruned_invoice(&self, payment_data: PaymentData) -> anyhow::Result<()> {
-        let lightning_context = self.get_lightning_context().await?;
-
-        if matches!(payment_data, PaymentData::PrunedInvoice { .. }) {
-            ensure!(
-                lightning_context.lnrpc.supports_private_payments(),
-                "Private payments are not supported by the lightning node"
-            );
-        }
-
-        Ok(())
-    }
-
-    async fn get_routing_fees(&self, federation_id: FederationId) -> Option<RoutingFees> {
-        let mut gateway_dbtx = self.gateway_db.begin_transaction_nc().await;
-        gateway_dbtx
-            .load_federation_config(federation_id)
-            .await
-            .map(|c| c.lightning_fee.into())
-    }
-
-    async fn get_client(&self, federation_id: &FederationId) -> Option<Spanned<ClientHandleArc>> {
-        self.federation_manager
-            .read()
-            .await
-            .client(federation_id)
-            .cloned()
-    }
-
-    async fn get_client_for_invoice(
-        &self,
-        payment_data: PaymentData,
-    ) -> Option<Spanned<ClientHandleArc>> {
-        let rhints = payment_data.route_hints();
-        match rhints.first().and_then(|rh| rh.0.last()) {
-            None => None,
-            Some(hop) => match self.get_lightning_context().await {
-                Ok(lightning_context) => {
-                    if hop.src_node_id != lightning_context.lightning_public_key {
-                        return None;
-                    }
-
-                    self.federation_manager
-                        .read()
-                        .await
-                        .get_client_for_index(hop.short_channel_id)
-                }
-                Err(_) => None,
-            },
-        }
-    }
-
-    async fn pay(
-        &self,
-        payment_data: PaymentData,
-        max_delay: u64,
-        max_fee: Amount,
-    ) -> std::result::Result<PayInvoiceResponse, LightningRpcError> {
-        let lightning_context = self.get_lightning_context().await?;
-
-        match payment_data {
-            PaymentData::Invoice(invoice) => {
-                lightning_context
-                    .lnrpc
-                    .pay(invoice, max_delay, max_fee)
-                    .await
-            }
-            PaymentData::PrunedInvoice(invoice) => {
-                lightning_context
-                    .lnrpc
-                    .pay_private(invoice, max_delay, max_fee)
-                    .await
-            }
-        }
-    }
-
-    async fn complete_htlc(
-        &self,
-        htlc: InterceptPaymentResponse,
-    ) -> std::result::Result<(), LightningRpcError> {
-        // Wait until the lightning node is online to complete the HTLC.
-        let lightning_context = loop {
-            match self.get_lightning_context().await {
-                Ok(lightning_context) => break lightning_context,
-                Err(err) => {
-                    warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failure trying to complete payment");
-                    sleep(Duration::from_secs(5)).await;
-                }
-            }
-        };
-
-        lightning_context.lnrpc.complete_htlc(htlc).await
-    }
-
-    async fn is_lnv2_direct_swap(
-        &self,
-        payment_hash: sha256::Hash,
-        amount: Amount,
-    ) -> anyhow::Result<
-        Option<(
-            fedimint_lnv2_common::contracts::IncomingContract,
-            ClientHandleArc,
-        )>,
-    > {
-        let (contract, client) = self
-            .get_registered_incoming_contract_and_client_v2(
-                PaymentImage::Hash(payment_hash),
-                amount.msats,
-            )
-            .await?;
-        Ok(Some((contract, client)))
+        bail!("LNv1 swaps are not supported by gatewaydv2")
     }
 }

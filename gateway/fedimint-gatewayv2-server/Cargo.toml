@@ -48,11 +48,8 @@ fedimint-eventlog = { workspace = true }
 fedimint-gateway-common = { workspace = true }
 fedimint-gateway-server-db = { workspace = true }
 fedimint-gateway-ui = { workspace = true }
-fedimint-gw-client = { workspace = true }
 fedimint-gwv2-client = { workspace = true }
 fedimint-lightning = { workspace = true }
-fedimint-ln-client = { workspace = true }
-fedimint-ln-common = { workspace = true }
 fedimint-lnurl = { workspace = true }
 fedimint-lnv2-client = { workspace = true }
 fedimint-lnv2-common = { workspace = true }

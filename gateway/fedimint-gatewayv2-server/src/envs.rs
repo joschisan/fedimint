@@ -21,10 +21,6 @@ pub const FM_GATEWAY_LIQUIDITY_MANAGER_BCRYPT_PASSWORD_HASH_ENV: &str =
 /// should use. Must match the network of the Lightning node.
 pub const FM_GATEWAY_NETWORK_ENV: &str = "FM_GATEWAY_NETWORK";
 
-/// Environment variable that instructs the gateway how many route hints to
-/// include in LNv1 invoices.
-pub const FM_NUMBER_OF_ROUTE_HINTS_ENV: &str = "FM_NUMBER_OF_ROUTE_HINTS";
-
 /// Environment variable that specifies the mnemonic that the gateway should use
 /// for ecash and the LDK Node should use for onchain funds. If not set, a
 /// mnemonic will be generated. This environment variable can be used for
