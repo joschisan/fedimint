@@ -38,7 +38,6 @@ fn main() -> Result<(), anyhow::Error> {
             .run(runtime.clone(), mnemonic_receiver)
             .await?;
         shutdown_receiver.await;
-        gatewayd.unannounce_from_all_federations();
         info!(target: LOG_GATEWAY, "Gatewaydv2 exiting...");
         Ok(())
     })

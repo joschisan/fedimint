@@ -23,17 +23,11 @@ use crate::error::{AdminGatewayError, FederationNotConnected};
 /// An SCID of 0 is considered invalid by LND's HTLC interceptor.
 const INITIAL_INDEX: u64 = 1;
 
-// TODO: Add support for client lookup by payment hash (for LNv2).
 #[derive(Debug)]
 pub struct FederationManager {
     /// Map of `FederationId` -> `Client`. Used for efficient retrieval of the
     /// client while handling incoming HTLCs.
     clients: BTreeMap<FederationId, Spanned<fedimint_client::ClientHandleArc>>,
-
-    /// Map of federation indices to `FederationId`. Use for efficient retrieval
-    /// of the client while handling incoming HTLCs.
-    /// Can be removed after LNv1 removal.
-    index_to_federation: BTreeMap<u64, FederationId>,
 
     /// Tracker for federation index assignments. When connecting a new
     /// federation, this value is incremented and assigned to the federation
@@ -45,15 +39,13 @@ impl FederationManager {
     pub fn new() -> Self {
         Self {
             clients: BTreeMap::new(),
-            index_to_federation: BTreeMap::new(),
             next_index: AtomicU64::new(INITIAL_INDEX),
         }
     }
 
-    pub fn add_client(&mut self, index: u64, client: Spanned<fedimint_client::ClientHandleArc>) {
+    pub fn add_client(&mut self, client: Spanned<fedimint_client::ClientHandleArc>) {
         let federation_id = client.borrow().with_sync(|c| c.federation_id());
         self.clients.insert(federation_id, client);
-        self.index_to_federation.insert(index, federation_id);
     }
 
     pub async fn leave_federation(
@@ -76,9 +68,6 @@ impl FederationManager {
                 federation_id_prefix: federation_id.to_prefix(),
             })?
             .into_value();
-
-        self.index_to_federation
-            .retain(|_, fid| *fid != federation_id);
 
         match Arc::into_inner(client) {
             Some(client) => {
@@ -109,21 +98,6 @@ impl FederationManager {
 
         info!(target: LOG_GATEWAY, "Finished waiting for incoming payments");
         Ok(())
-    }
-
-    pub fn get_client_for_index(&self, short_channel_id: u64) -> Option<Spanned<ClientHandleArc>> {
-        let federation_id = self.index_to_federation.get(&short_channel_id)?;
-        // TODO(tvolk131): Cloning the client here could cause issues with client
-        // shutdown (see `remove_client` above). Perhaps this function should take a
-        // lambda and pass it into `client.with_sync`.
-        match self.clients.get(federation_id).cloned() {
-            Some(client) => Some(client),
-            _ => {
-                panic!(
-                    "`FederationManager.index_to_federation` is out of sync with `FederationManager.clients`! This is a bug."
-                );
-            }
-        }
     }
 
     pub fn get_client_for_federation_id_prefix(

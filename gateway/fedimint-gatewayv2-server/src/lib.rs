@@ -823,8 +823,6 @@ impl Gateway {
                         crit!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Lightning payment stream task group shutdown");
                     }
 
-                    self_copy.unannounce_from_all_federations();
-
                     match route_payments_response {
                         ReceivePaymentStreamAction::RetryAfterDelay => {
                             warn!(target: LOG_GATEWAY, retry_interval = %PAYMENT_STREAM_RETRY_SECONDS, "Disconnected from lightning node");
@@ -1004,46 +1002,12 @@ impl Gateway {
             return "lnv2";
         }
 
-        // The LNv2 attempt did not match. If the last-hop scid is one of our
-        // federation virtual scids, cancel so the sender gets a non-permanent
-        // failure (avoiding `UNKNOWN_NEXT_PEER` blacklisting). If the scid is
-        // for a real channel, resume so the lightning node forwards normally.
-        let is_federation_scid = match payment_request.short_channel_id {
-            Some(scid) => self
-                .federation_manager
-                .read()
-                .await
-                .get_client_for_index(scid)
-                .is_some(),
-            None => false,
-        };
-
-        if is_federation_scid {
-            // The HTLC targeted a federation we serve but we couldn't claim
-            // it (no LNv2 contract / underfunded gateway / federation timeout /
-            // etc.). Surface the underlying error so operators can diagnose the
-            // cause; otherwise the `Err` value is dropped on the floor and the
-            // only visible signal is the metric label `"error"`.
-            warn!(
-                target: LOG_GATEWAY,
-                payment_hash = %payment_request.payment_hash,
-                short_channel_id = ?payment_request.short_channel_id,
-                amount_msat = payment_request.amount_msat,
-                incoming_chan_id = payment_request.incoming_chan_id,
-                htlc_id = payment_request.htlc_id,
-                lnv2_err = ?lnv2_result.as_ref().err(),
-                "Unmatched lightning payment for federation scid: cancelling HTLC",
-            );
-            Self::cancel_unmatched_lightning_payment(payment_request, lightning_context).await;
-            "cancel"
-        } else {
-            // Normal route-through traffic: the gateway's interceptor sees every
-            // HTLC, but only federation-scid HTLCs are ours to handle. Resume so
-            // the lightning node forwards the rest as a regular routing node —
-            // no warning needed since this is the expected path.
-            Self::forward_lightning_payment(payment_request, lightning_context).await;
-            "forward"
-        }
+        // The LNv2 attempt did not match, so this HTLC is not an incoming
+        // payment for one of our federations. The gateway's interceptor sees
+        // every HTLC; resume so the lightning node forwards it as a regular
+        // routing node.
+        Self::forward_lightning_payment(payment_request, lightning_context).await;
+        "forward"
     }
 
     /// Tries to handle a lightning payment using the LNv2 protocol.
@@ -1092,35 +1056,6 @@ impl Gateway {
         }
 
         Ok(())
-    }
-
-    /// Cancels (fails back) a lightning payment whose last-hop scid maps to a
-    /// known federation but matched no LNv2 offer.
-    ///
-    /// Returning `PaymentAction::Forward` here would tell LND to resume the
-    /// HTLC as a normal forward, but the last-hop short channel id is a
-    /// virtual scid (no real channel exists), so LND would fail it back with
-    /// the permanent error `UNKNOWN_NEXT_PEER`. Senders' mission control
-    /// treats that as a permanent blacklist signal against the gateway,
-    /// breaking future payments across all federations.
-    ///
-    /// `PaymentAction::Cancel` maps to `ResolveHoldForwardAction::Fail`, which
-    /// fails the HTLC back with a non-permanent reason so the sender can
-    /// retry instead of blacklisting the gateway.
-    async fn cancel_unmatched_lightning_payment(
-        htlc_request: InterceptPaymentRequest,
-        lightning_context: &LightningContext,
-    ) {
-        let outcome = InterceptPaymentResponse {
-            action: PaymentAction::Cancel,
-            payment_hash: htlc_request.payment_hash,
-            incoming_chan_id: htlc_request.incoming_chan_id,
-            htlc_id: htlc_request.htlc_id,
-        };
-
-        if let Err(err) = lightning_context.lnrpc.complete_htlc(outcome).await {
-            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error sending lightning payment response to lightning node");
-        }
     }
 
     /// Forwards a lightning payment to the next hop like a normal lightning
@@ -1454,7 +1389,6 @@ impl Gateway {
             .expect("mnemonic should be set");
 
         for (federation_id, config) in configs {
-            let federation_index = config.federation_index;
             match Box::pin(Spanned::try_new(
                 info_span!(target: LOG_GATEWAY, "client", federation_id  = %federation_id.clone()),
                 self.client_builder
@@ -1463,7 +1397,7 @@ impl Gateway {
             .await
             {
                 Ok(client) => {
-                    federation_manager.add_client(federation_index, client);
+                    federation_manager.add_client(client);
                 }
                 _ => {
                     warn!(target: LOG_GATEWAY, federation_id = %federation_id, "Failed to load client");
@@ -1526,13 +1460,6 @@ impl Gateway {
             _ => Err(LightningRpcError::FailedToConnect),
         }
     }
-
-    /// Unannounces the gateway from all connected federations.
-    ///
-    /// LNv2 gateways are not announced through a federation module (clients
-    /// discover them out of band), so there is nothing to unannounce. Kept as a
-    /// no-op so the shutdown path does not need a per-protocol branch.
-    pub fn unannounce_from_all_federations(&self) {}
 
     async fn create_lightning_client(
         &self,
@@ -1784,7 +1711,6 @@ impl Gateway {
 
         // no need to enter span earlier, because connect-fed has a span
         federation_manager.add_client(
-            federation_index,
             Spanned::new(
                 info_span!(target: LOG_GATEWAY, "client", federation_id=%federation_id.clone()),
                 async { client },
