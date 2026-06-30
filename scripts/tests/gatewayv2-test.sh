@@ -16,4 +16,11 @@ elif [[ "${FM_GATEWAYD_BASE_IMAGE_VERSION:-}" == "v0.10"* ]] || \
     export FM_ENABLE_MODULE_LNV1=0
 fi
 
+# gatewaydv2 only supports the v2 mint and wallet modules, so run the test
+# federation with v2 modules instead of v1.
+export FM_ENABLE_MODULE_MINTV2=true
+export FM_ENABLE_MODULE_MINT=false
+export FM_ENABLE_MODULE_WALLETV2=true
+export FM_ENABLE_MODULE_WALLET=false
+
 gatewayv2-module-tests "$@"
