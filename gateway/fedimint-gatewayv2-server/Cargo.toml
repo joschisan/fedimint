@@ -72,7 +72,6 @@ iroh-base = { workspace = true, default-features = false, features = [
 iroh-relay = { workspace = true, default-features = false }
 lightning-invoice = { workspace = true }
 lockable = { workspace = true }
-prost = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -82,8 +81,6 @@ strum_macros = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
-tonic = { workspace = true, features = ["transport", "tls-ring"] }
-tonic_lnd = { workspace = true }
 tower-http = { workspace = true, features = ["cors", "auth"] }
 tracing = { workspace = true, features = ["log"] }
 url = { workspace = true, features = ["serde"] }

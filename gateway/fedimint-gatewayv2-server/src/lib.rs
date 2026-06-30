@@ -91,11 +91,10 @@ use fedimint_gwv2_client::events::compute_lnv2_stats;
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
 };
-use fedimint_lightning::lnd::GatewayLndClient;
 use fedimint_lightning::{
     CreateInvoiceRequest, ILnRpcClient, InterceptPaymentRequest, InterceptPaymentResponse,
-    InvoiceDescription, LightningContext, LightningRpcError, LnRpcTracked, Lnv2HoldInvoiceFilter,
-    PaymentAction, Preimage, RouteHtlcStream, ldk,
+    InvoiceDescription, LightningContext, LightningRpcError, LnRpcTracked, PaymentAction, Preimage,
+    RouteHtlcStream, ldk,
 };
 use fedimint_lnurl::VerifyResponse;
 use fedimint_lnv2_common::Bolt11InvoiceDescription;
@@ -1605,37 +1604,8 @@ impl Gateway {
         runtime: Arc<tokio::runtime::Runtime>,
     ) -> Box<dyn ILnRpcClient> {
         match self.lightning_mode.clone() {
-            LightningMode::Lnd {
-                lnd_rpc_addr,
-                lnd_tls_cert,
-                lnd_macaroon,
-                lnd_time_pref,
-            } => {
-                // The LND backend uses this to ignore HOLD invoices on the
-                // shared LND node that aren't federation-bound. Returns true
-                // iff there is a registered LNv2 incoming contract for the
-                // given payment hash.
-                let gateway_db = self.gateway_db.clone();
-                let lnv2_filter: Lnv2HoldInvoiceFilter = Arc::new(move |hash| {
-                    let gateway_db = gateway_db.clone();
-                    Box::pin(async move {
-                        gateway_db
-                            .begin_transaction_nc()
-                            .await
-                            .load_registered_incoming_contract(PaymentImage::Hash(hash))
-                            .await
-                            .is_some()
-                    })
-                });
-
-                Box::new(GatewayLndClient::new(
-                    lnd_rpc_addr,
-                    lnd_tls_cert,
-                    lnd_macaroon,
-                    lnd_time_pref,
-                    None,
-                    lnv2_filter,
-                ))
+            LightningMode::Lnd { .. } => {
+                panic!("gatewaydv2 only supports the LDK lightning backend, not LND")
             }
             LightningMode::Ldk {
                 lightning_port,
