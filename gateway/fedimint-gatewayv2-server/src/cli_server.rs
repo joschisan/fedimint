@@ -29,7 +29,7 @@ use tokio::net::UnixListener;
 use tracing::{info, warn};
 
 use crate::db::GatewayDbtxNcExt as _;
-use crate::error::{AdminGatewayError, GatewayError};
+use crate::error::GatewayError;
 use crate::{AdminResult, Gateway};
 
 /// Binds the admin Unix socket and spawns the server task. Mirrors
@@ -105,11 +105,7 @@ fn router(gateway: Arc<Gateway>) -> Router {
 // --- top-level ---
 
 async fn info(Extension(gateway): Extension<Arc<Gateway>>) -> Result<Json<Value>, GatewayError> {
-    let node = gateway
-        .ldk()
-        .info()
-        .await
-        .map_err(AdminGatewayError::Lightning)?;
+    let node = gateway.ldk().info().await?;
     Ok(Json(json!(cli::InfoResponse {
         lightning_pk: node.pub_key,
         api_url: gateway.api_url.clone(),
@@ -133,16 +129,8 @@ async fn mnemonic(
 async fn ldk_balances(
     Extension(gateway): Extension<Arc<Gateway>>,
 ) -> Result<Json<Value>, GatewayError> {
-    let balances = gateway
-        .ldk()
-        .get_balances()
-        .await
-        .map_err(AdminGatewayError::Lightning)?;
-    let channels = gateway
-        .ldk()
-        .list_channels()
-        .await
-        .map_err(AdminGatewayError::Lightning)?;
+    let balances = gateway.ldk().get_balances().await?;
+    let channels = gateway.ldk().list_channels().await?;
     let total_outbound_capacity_msat = channels
         .channels
         .iter()
@@ -271,11 +259,7 @@ async fn ldk_peer_connect(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkPeerConnectRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    gateway
-        .ldk()
-        .connect_peer(req.pubkey, req.host)
-        .await
-        .map_err(AdminGatewayError::Lightning)?;
+    gateway.ldk().connect_peer(req.pubkey, req.host).await?;
     Ok(Json(json!(())))
 }
 
@@ -283,11 +267,7 @@ async fn ldk_peer_disconnect(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkPeerDisconnectRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    gateway
-        .ldk()
-        .disconnect_peer(req.pubkey)
-        .await
-        .map_err(AdminGatewayError::Lightning)?;
+    gateway.ldk().disconnect_peer(req.pubkey).await?;
     Ok(Json(json!(())))
 }
 
@@ -465,10 +445,7 @@ async fn wallet_receive(
 
 async fn balance_for(gateway: &Gateway, federation_id: FederationId) -> AdminResult<Amount> {
     let client = gateway.select_client(federation_id).await?.into_value();
-    client
-        .get_balance_for_btc()
-        .await
-        .map_err(AdminGatewayError::Unexpected)
+    client.get_balance_for_btc().await
 }
 
 async fn mint_counts(
@@ -476,9 +453,7 @@ async fn mint_counts(
     federation_id: FederationId,
 ) -> AdminResult<BTreeMap<Denomination, u64>> {
     let client = gateway.select_client(federation_id).await?.into_value();
-    let mint = client
-        .get_first_module::<MintV2ClientModule>()
-        .map_err(AdminGatewayError::Unexpected)?;
+    let mint = client.get_first_module::<MintV2ClientModule>()?;
     Ok(mint.get_count_by_denomination().await)
 }
 
@@ -487,11 +462,9 @@ async fn wallet_send_fee_for(
     federation_id: FederationId,
 ) -> AdminResult<bitcoin::Amount> {
     let client = gateway.select_client(federation_id).await?.into_value();
-    let wallet = client
-        .get_first_module::<fedimint_walletv2_client::WalletClientModule>()
-        .map_err(AdminGatewayError::Unexpected)?;
+    let wallet = client.get_first_module::<fedimint_walletv2_client::WalletClientModule>()?;
     wallet
         .send_fee()
         .await
-        .map_err(|err| AdminGatewayError::Unexpected(anyhow::anyhow!("{err:?}")))
+        .map_err(|err| anyhow::anyhow!("{err:?}"))
 }

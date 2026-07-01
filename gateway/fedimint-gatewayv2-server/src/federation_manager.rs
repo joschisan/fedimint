@@ -8,7 +8,6 @@ use fedimint_gateway_common::{ConnectorType, FederationConfig};
 use fedimint_lnv2_common::gateway_api::PaymentFee;
 
 use crate::AdminResult;
-use crate::error::FederationNotConnected;
 
 #[derive(Debug)]
 pub struct FederationManager {
@@ -50,12 +49,12 @@ impl FederationManager {
         &self,
         federation_id: FederationId,
     ) -> AdminResult<JsonClientConfig> {
-        let client = self
-            .clients
-            .get(&federation_id)
-            .ok_or(FederationNotConnected {
-                federation_id_prefix: federation_id.to_prefix(),
-            })?;
+        let client = self.clients.get(&federation_id).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No federation available for prefix {}",
+                federation_id.to_prefix()
+            )
+        })?;
         Ok(client
             .borrow()
             .with(|client| client.get_config_json())

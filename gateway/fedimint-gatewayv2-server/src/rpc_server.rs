@@ -129,7 +129,7 @@ pub(crate) async fn verify_bolt11_preimage_v2_get(
     Extension(gateway): Extension<Arc<Gateway>>,
     Path(payment_hash): Path<sha256::Hash>,
     Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<serde_json::Value>, LnurlError> {
     let response = gateway
         .verify_bolt11_preimage_v2(payment_hash, query.contains_key("wait"))
         .await

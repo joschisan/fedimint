@@ -40,7 +40,6 @@ use client::GatewayClientBuilder;
 pub use config::GatewayParameters;
 use config::{DatabaseBackend, GatewayOpts};
 use envs::FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV;
-use error::FederationNotConnected;
 use federation_manager::{FederationManager, transient_federation_config};
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::ClientHandleArc;
@@ -90,15 +89,14 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, info_span, warn};
 
 use crate::db::GatewayDbtxNcExt as _;
-use crate::error::{AdminGatewayError, LNv2Error, PublicGatewayError};
 use crate::lightning::{CreateInvoiceRequest, GatewayLdkClient, InvoiceDescription};
 use crate::rpc_server::run_webserver;
 
 /// Default Bitcoin network for testing purposes.
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
 
-pub type Result<T> = std::result::Result<T, PublicGatewayError>;
-pub type AdminResult<T> = std::result::Result<T, AdminGatewayError>;
+pub type Result<T> = anyhow::Result<T>;
+pub type AdminResult<T> = anyhow::Result<T>;
 
 /// Name of the gateway's database that is used for metadata and configuration
 /// storage.
@@ -236,9 +234,7 @@ async fn withdraw_v2(
     let fee = wallet_module
         .send_fee()
         .await
-        .map_err(|e| AdminGatewayError::WithdrawError {
-            failure_reason: e.to_string(),
-        })?;
+        .map_err(|e| anyhow!("Error withdrawing funds onchain: {e}"))?;
 
     let withdraw_amount = match amount {
         BitcoinAmountOrAll::All => {
@@ -246,20 +242,13 @@ async fn withdraw_v2(
                 client
                     .get_balance_for_btc()
                     .await
-                    .map_err(|err| {
-                        AdminGatewayError::Unexpected(anyhow!(
-                            "Balance not available: {}",
-                            err.fmt_compact_anyhow()
-                        ))
-                    })?
+                    .map_err(|err| anyhow!("Balance not available: {}", err.fmt_compact_anyhow()))?
                     .msats
                     / 1000,
             );
             balance
                 .checked_sub(fee)
-                .ok_or_else(|| AdminGatewayError::WithdrawError {
-                    failure_reason: format!("Insufficient funds. Balance: {balance} Fee: {fee}"),
-                })?
+                .ok_or_else(|| anyhow!("Insufficient funds. Balance: {balance} Fee: {fee}"))?
         }
         BitcoinAmountOrAll::Amount(a) => a,
     };
@@ -272,16 +261,12 @@ async fn withdraw_v2(
             serde_json::Value::Null,
         )
         .await
-        .map_err(|e| AdminGatewayError::WithdrawError {
-            failure_reason: e.to_string(),
-        })?;
+        .map_err(|e| anyhow!("Error withdrawing funds onchain: {e}"))?;
 
     let result = wallet_module
         .await_final_send_operation_state(operation_id)
         .await
-        .map_err(|e| AdminGatewayError::WithdrawError {
-            failure_reason: e.to_string(),
-        })?;
+        .map_err(|e| anyhow!("Error withdrawing funds onchain: {e}"))?;
 
     let fees = PegOutFees::from_amount(fee);
 
@@ -291,14 +276,10 @@ async fn withdraw_v2(
             Ok(WithdrawResponse { txid, fees })
         }
         fedimint_walletv2_client::FinalSendOperationState::Aborted => {
-            Err(AdminGatewayError::WithdrawError {
-                failure_reason: "Withdrawal transaction was aborted".to_string(),
-            })
+            Err(anyhow!("Withdrawal transaction was aborted"))
         }
         fedimint_walletv2_client::FinalSendOperationState::Failure => {
-            Err(AdminGatewayError::WithdrawError {
-                failure_reason: "Withdrawal failed".to_string(),
-            })
+            Err(anyhow!("Withdrawal failed"))
         }
     }
 }
@@ -594,9 +575,7 @@ impl Gateway {
         {
             Ok(wallet_module.receive().await)
         } else {
-            Err(AdminGatewayError::Unexpected(anyhow!(
-                "No wallet module found"
-            )))
+            Err(anyhow!("No wallet module found"))
         }
     }
 
@@ -612,58 +591,43 @@ impl Gateway {
         .ok()
         .and_then(|e| e.mint())
         .map(|id| id.to_prefix())
-        .ok_or_else(|| PublicGatewayError::ReceiveEcashError {
-            failure_reason: "Invalid ecash format: could not parse as ECash".to_string(),
-        })?;
+        .ok_or_else(|| anyhow!("Invalid ecash format: could not parse as ECash"))?;
 
         let client = self
             .federation_manager
             .read()
             .await
             .get_client_for_federation_id_prefix(federation_id_prefix)
-            .ok_or(FederationNotConnected {
-                federation_id_prefix,
-            })?;
+            .ok_or_else(|| anyhow!("No federation available for prefix {federation_id_prefix}"))?;
 
         // Check which module is present and parse accordingly
         if let Ok(mint) = client.value().get_first_module::<MintV2ClientModule>() {
             let ecash: fedimint_mintv2_client::ECash =
-                base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes).map_err(|e| {
-                    PublicGatewayError::ReceiveEcashError {
-                        failure_reason: format!("Expected ECash for MintV2 federation: {e}"),
-                    }
-                })?;
+                base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes)
+                    .map_err(|e| anyhow!("Expected ECash for MintV2 federation: {e}"))?;
             let amount = ecash.amount();
 
             let operation_id = mint
                 .receive(ecash, serde_json::Value::Null)
                 .await
-                .map_err(|e| PublicGatewayError::ReceiveEcashError {
-                    failure_reason: e.to_string(),
-                })?;
+                .map_err(|e| anyhow!("{e}"))?;
 
             if payload.wait {
                 let final_state = mint
                     .await_final_receive_operation_state(operation_id)
                     .await
-                    .map_err(|e| PublicGatewayError::ReceiveEcashError {
-                        failure_reason: e.to_string(),
-                    })?;
+                    .map_err(|e| anyhow!("{e}"))?;
                 match final_state {
                     fedimint_mintv2_client::FinalReceiveOperationState::Success => {}
                     fedimint_mintv2_client::FinalReceiveOperationState::Rejected => {
-                        return Err(PublicGatewayError::ReceiveEcashError {
-                            failure_reason: "ECash receive was rejected".to_string(),
-                        });
+                        bail!("ECash receive was rejected");
                     }
                 }
             }
 
             Ok(ReceiveEcashResponse { amount })
         } else {
-            Err(PublicGatewayError::ReceiveEcashError {
-                failure_reason: "No mint module found".to_string(),
-            })
+            Err(anyhow!("No mint module found"))
         }
     }
 
@@ -674,10 +638,12 @@ impl Gateway {
     pub async fn select_client(
         &self,
         federation_id: FederationId,
-    ) -> std::result::Result<Spanned<fedimint_client::ClientHandleArc>, FederationNotConnected>
-    {
-        let not_connected = || FederationNotConnected {
-            federation_id_prefix: federation_id.to_prefix(),
+    ) -> AdminResult<Spanned<fedimint_client::ClientHandleArc>> {
+        let not_connected = || {
+            anyhow!(
+                "No federation available for prefix {}",
+                federation_id.to_prefix()
+            )
         };
 
         // Fast path: the client is already loaded.
@@ -808,10 +774,10 @@ impl Gateway {
         for kind in ["lnv2", "mintv2", "walletv2"] {
             let module_kind = ModuleKind::from_static_str(kind);
             if !config.modules.values().any(|m| m.kind == module_kind) {
-                return Err(AdminGatewayError::ClientCreationError(anyhow!(
+                return Err(anyhow!(
                     "Federation {} is missing the required {kind} module",
                     config.calculate_federation_id()
-                )));
+                ));
             }
         }
 
@@ -883,8 +849,11 @@ impl Gateway {
         payload: LeaveFedPayload,
     ) -> AdminResult<FederationInfo> {
         let federation_id = payload.federation_id;
-        let not_connected = || FederationNotConnected {
-            federation_id_prefix: federation_id.to_prefix(),
+        let not_connected = || {
+            anyhow!(
+                "No federation available for prefix {}",
+                federation_id.to_prefix()
+            )
         };
 
         let mut dbtx = self.gateway_db.begin_transaction().await;
@@ -897,7 +866,6 @@ impl Gateway {
 
         self.federation_info_from_config(federation_id, &config)
             .ok_or_else(not_connected)
-            .map_err(AdminGatewayError::from)
     }
 
     /// Handles a connection request to join a new federation. The gateway will
@@ -908,15 +876,15 @@ impl Gateway {
         &self,
         payload: ConnectFedPayload,
     ) -> AdminResult<FederationInfo> {
-        let invite_code = InviteCode::from_str(&payload.invite_code).map_err(|e| {
-            AdminGatewayError::ClientCreationError(anyhow!(format!(
-                "Invalid federation member string {e:?}"
-            )))
-        })?;
+        let invite_code = InviteCode::from_str(&payload.invite_code)
+            .map_err(|e| anyhow!("Invalid federation member string {e:?}"))?;
 
         let federation_id = invite_code.federation_id();
-        let not_connected = || FederationNotConnected {
-            federation_id_prefix: federation_id.to_prefix(),
+        let not_connected = || {
+            anyhow!(
+                "No federation available for prefix {}",
+                federation_id.to_prefix()
+            )
         };
 
         // Connecting (re-)enables a federation: clear any disabled flag. A
@@ -941,8 +909,7 @@ impl Gateway {
         {
             return self
                 .federation_info_from_config(federation_id, &config)
-                .ok_or_else(not_connected)
-                .map_err(AdminGatewayError::from);
+                .ok_or_else(not_connected);
         }
 
         // Fresh connection: download and persist the config WITHOUT building a
@@ -965,7 +932,6 @@ impl Gateway {
 
         self.federation_info_from_config(federation_id, &config)
             .ok_or_else(not_connected)
-            .map_err(AdminGatewayError::from)
     }
 
     /// Handles an authenticated request for the gateway's mnemonic. This also
@@ -1001,11 +967,8 @@ impl Gateway {
         let context = self.ldk();
         let res = context.open_channel(payload).await?;
         info!(target: LOG_GATEWAY, txid = %res.funding_txid, "Initiated channel open");
-        Txid::from_str(&res.funding_txid).map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::InvalidMetadata {
-                failure_reason: format!("Received invalid channel funding txid string {e}"),
-            })
-        })
+        Txid::from_str(&res.funding_txid)
+            .map_err(|e| anyhow!("Received invalid channel funding txid string {e}"))
     }
 
     /// Instructs the Gateway's Lightning node to close all channels with a peer
@@ -1024,10 +987,8 @@ impl Gateway {
     async fn handle_send_onchain_msg(&self, payload: SendOnchainRequest) -> AdminResult<Txid> {
         let context = self.ldk();
         let response = context.send_onchain(payload.clone()).await?;
-        let txid =
-            Txid::from_str(&response.txid).map_err(|e| AdminGatewayError::WithdrawError {
-                failure_reason: format!("Failed to parse withdrawal TXID: {e}"),
-            })?;
+        let txid = Txid::from_str(&response.txid)
+            .map_err(|e| anyhow!("Failed to parse withdrawal TXID: {e}"))?;
         info!(onchain_request = %payload, txid = %txid, "Sent onchain transaction");
         Ok(txid)
     }
@@ -1037,17 +998,11 @@ impl Gateway {
         let context = self.ldk();
         let response = context.get_ln_onchain_address().await?;
 
-        let address = Address::from_str(&response.address).map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::InvalidMetadata {
-                failure_reason: e.to_string(),
-            })
-        })?;
+        let address = Address::from_str(&response.address).map_err(|e| anyhow!("{e}"))?;
 
-        address.require_network(self.network).map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::InvalidMetadata {
-                failure_reason: e.to_string(),
-            })
-        })
+        address
+            .require_network(self.network)
+            .map_err(|e| anyhow!("{e}"))
     }
 
     /// Creates an invoice that is directly payable to the gateway's lightning
@@ -1069,11 +1024,7 @@ impl Gateway {
                 .await?
                 .invoice,
         )
-        .map_err(|e| {
-            AdminGatewayError::Lightning(LightningRpcError::InvalidMetadata {
-                failure_reason: e.to_string(),
-            })
-        })
+        .map_err(|e| anyhow!("{e}"))
     }
 
     /// Requests the gateway to pay an outgoing LN invoice using its own funds.
@@ -1114,16 +1065,13 @@ impl Gateway {
         if let Ok(mint_module) = client.get_first_module::<MintV2ClientModule>() {
             let (_, ecash) = mint_module
                 .send(payload.amount, serde_json::Value::Null, true)
-                .await
-                .map_err(|e| AdminGatewayError::Unexpected(e.into()))?;
+                .await?;
 
             Ok(SpendEcashResponse {
                 notes: base32::encode_prefixed(FEDIMINT_PREFIX, &ecash),
             })
         } else {
-            Err(AdminGatewayError::Unexpected(anyhow::anyhow!(
-                "No mint module available"
-            )))
+            Err(anyhow::anyhow!("No mint module available"))
         }
     }
 
@@ -1140,11 +1088,9 @@ impl Gateway {
         let address_network = get_network_for_address(&address);
         let gateway_network = self.network;
         let Ok(address) = address.require_network(gateway_network) else {
-            return Err(AdminGatewayError::WithdrawError {
-                failure_reason: format!(
-                    "Gateway is running on network {gateway_network}, but provided withdraw address is for network {address_network}"
-                ),
-            });
+            return Err(anyhow!(
+                "Gateway is running on network {gateway_network}, but provided withdraw address is for network {address_network}"
+            ));
         };
 
         let client = self.select_client(federation_id).await?;
@@ -1223,8 +1169,6 @@ impl Gateway {
             .expect("Must have client module")
             .send_payment(payload)
             .await
-            .map_err(LNv2Error::OutgoingPayment)
-            .map_err(PublicGatewayError::LNv2)
     }
 
     /// For the LNv2 protocol, this will create an invoice by fetching it from
@@ -1236,50 +1180,36 @@ impl Gateway {
         payload: CreateBolt11InvoicePayload,
     ) -> Result<Bolt11Invoice> {
         if !payload.contract.verify() {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
-                "The contract is invalid".to_string(),
-            )));
+            bail!("The contract is invalid");
         }
 
-        let payment_info = self.routing_info_v2(&payload.federation_id).await?.ok_or(
-            LNv2Error::IncomingPayment(format!(
-                "Federation {} does not exist",
-                payload.federation_id
-            )),
-        )?;
+        let payment_info = self
+            .routing_info_v2(&payload.federation_id)
+            .await?
+            .with_context(|| format!("Federation {} does not exist", payload.federation_id))?;
 
         if payload.contract.commitment.refund_pk != payment_info.module_public_key {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
-                "The incoming contract is keyed to another gateway".to_string(),
-            )));
+            bail!("The incoming contract is keyed to another gateway");
         }
 
         let contract_amount = payment_info.receive_fee.subtract_from(payload.amount.msats);
 
         if contract_amount == Amount::ZERO {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
-                "Zero amount incoming contracts are not supported".to_string(),
-            )));
+            bail!("Zero amount incoming contracts are not supported");
         }
 
         if contract_amount != payload.contract.commitment.amount {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
-                "The contract amount does not pay the correct amount of fees".to_string(),
-            )));
+            bail!("The contract amount does not pay the correct amount of fees");
         }
 
         if payload.contract.commitment.expiration_or_fee <= duration_since_epoch().as_secs() {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
-                "The contract has already expired".to_string(),
-            )));
+            bail!("The contract has already expired");
         }
 
         let payment_hash = match payload.contract.commitment.payment_image {
             PaymentImage::Hash(payment_hash) => payment_hash,
             PaymentImage::Point(..) => {
-                return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
-                    "PaymentImage is not a payment hash".to_string(),
-                )));
+                bail!("PaymentImage is not a payment hash");
             }
         };
 
@@ -1303,16 +1233,12 @@ impl Gateway {
             .await
             .is_some()
         {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
-                "PaymentHash is already registered".to_string(),
-            )));
+            bail!("PaymentHash is already registered");
         }
 
-        dbtx.commit_tx_result().await.map_err(|_| {
-            PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
-                "Payment hash is already registered".to_string(),
-            ))
-        })?;
+        dbtx.commit_tx_result()
+            .await
+            .map_err(|_| anyhow!("Payment hash is already registered"))?;
 
         Ok(invoice)
     }
@@ -1419,15 +1345,12 @@ impl Gateway {
             .await
             .load_registered_incoming_contract(payment_image)
             .await
-            .ok_or(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
-                "No corresponding decryption contract available".to_string(),
-            )))?;
+            .ok_or(anyhow!("No corresponding decryption contract available"))?;
 
         if registered_incoming_contract.incoming_amount_msats != amount_msats {
-            return Err(PublicGatewayError::LNv2(LNv2Error::IncomingPayment(
+            bail!(
                 "The available decryption contract's amount is not equal to the requested amount"
-                    .to_string(),
-            )));
+            );
         }
 
         let client = self
@@ -1471,7 +1394,7 @@ impl Gateway {
             Err(err) => {
                 // The federation client could not be loaded; leave the payment
                 // pending so the next boot reconciliation retries it.
-                warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Cannot settle incoming payment: client unavailable");
+                warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Cannot settle incoming payment: client unavailable");
                 return;
             }
         };

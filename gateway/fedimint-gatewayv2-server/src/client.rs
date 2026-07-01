@@ -18,7 +18,6 @@ use fedimint_gwv2_client::GatewayClientInitV2;
 
 use crate::config::DatabaseBackend;
 use crate::db::get_client_database;
-use crate::error::AdminGatewayError;
 use crate::{AdminResult, Gateway};
 
 #[derive(Debug, Clone)]
@@ -52,7 +51,7 @@ impl GatewayClientBuilder {
     async fn client_plainrootsecret(&self, db: &Database) -> AdminResult<DerivableSecret> {
         let client_secret = Client::load_decodable_client_secret::<[u8; 64]>(db)
             .await
-            .map_err(AdminGatewayError::ClientCreationError)?;
+            .map_err(|e| anyhow::anyhow!("Failed to create a federation client: {e}"))?;
         Ok(PlainRootSecretStrategy::to_root_secret(&client_secret))
     }
 
@@ -67,7 +66,7 @@ impl GatewayClientBuilder {
 
         let mut client_builder = Client::builder()
             .await
-            .map_err(AdminGatewayError::ClientCreationError)?
+            .map_err(|e| anyhow::anyhow!("Failed to create a federation client: {e}"))?
             .with_iroh_enable_dht(true);
         client_builder.with_module_inits(registry);
         Ok(client_builder)
@@ -107,13 +106,17 @@ impl GatewayClientBuilder {
                     let rocksdb = fedimint_rocksdb::RocksDb::build(db_path.clone())
                         .open()
                         .await
-                        .map_err(AdminGatewayError::ClientCreationError)?;
+                        .map_err(|e| {
+                            anyhow::anyhow!("Failed to create a federation client: {e}")
+                        })?;
                     Database::new(rocksdb, ModuleDecoderRegistry::default())
                 }
                 DatabaseBackend::CursedRedb => {
                     let cursed_redb = fedimint_cursed_redb::MemAndRedb::new(db_path.clone())
                         .await
-                        .map_err(AdminGatewayError::ClientCreationError)?;
+                        .map_err(|e| {
+                            anyhow::anyhow!("Failed to create a federation client: {e}")
+                        })?;
                     Database::new(cursed_redb, ModuleDecoderRegistry::default())
                 }
             };
@@ -146,7 +149,7 @@ impl GatewayClientBuilder {
                 .await
         }
         .map(Arc::new)
-        .map_err(AdminGatewayError::ClientCreationError)
+        .map_err(|e| anyhow::anyhow!("Failed to create a federation client: {e}"))
     }
 
     /// Verifies that the saved `ClientConfig` contains the expected
@@ -156,9 +159,9 @@ impl GatewayClientBuilder {
         if let Some(config) = dbtx.get_value(&ClientConfigKey).await
             && config.calculate_federation_id() != federation_id
         {
-            return Err(AdminGatewayError::ClientCreationError(anyhow::anyhow!(
-                "Federation Id did not match saved federation ID".to_string()
-            )));
+            return Err(anyhow::anyhow!(
+                "Federation Id did not match saved federation ID"
+            ));
         }
         Ok(())
     }
