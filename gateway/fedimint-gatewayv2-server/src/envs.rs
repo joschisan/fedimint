@@ -16,10 +16,6 @@ pub const FM_LDK_ALIAS_ENV: &str = "FM_LDK_ALIAS";
 /// should use. Must match the network of the Lightning node.
 pub const FM_NETWORK_ENV: &str = "FM_NETWORK";
 
-/// Environment variable that instructs the gateway to skip waiting for the
-/// bitcoin node to sync to the chain.
-pub const FM_SKIP_WAIT_FOR_SYNC_ENV: &str = "FM_SKIP_WAIT_FOR_SYNC";
-
 /// The URL to use when connecting to a bitcoin node over RPC, with credentials
 /// embedded in the URL (e.g. `http://user:pass@127.0.0.1:8332`).
 pub const FM_BITCOIND_URL_ENV: &str = "FM_BITCOIND_URL";

@@ -7,10 +7,9 @@ use std::time::Duration;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::{FeeRate, Network, OutPoint};
 use fedimint_bip39::Mnemonic;
-use fedimint_core::envs::{FM_IN_DEVIMINT_ENV, is_env_var_set, is_running_in_test_env};
+use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::secp256k1::PublicKey;
-use fedimint_core::task::block_in_place;
-use fedimint_core::util::{FmtCompact, SafeUrl, backoff_util, retry};
+use fedimint_core::util::{FmtCompact, SafeUrl};
 use fedimint_core::{Amount, BitcoinAmountOrAll, crit};
 use fedimint_gateway_common::{
     ChainSource, ChannelInfo, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
@@ -677,45 +676,6 @@ impl Gateway {
             lightning_balance_msats: balances.total_lightning_balance_sats * 1000,
             inbound_lightning_liquidity_msats: total_inbound_liquidity_balance_msat,
         }
-    }
-
-    pub fn sync_wallet(&self) {
-        block_in_place(|| {
-            let _ = self.node.sync_wallets();
-        });
-    }
-
-    /// Waits for the lightning node to be synced to the Bitcoin blockchain.
-    pub async fn wait_for_chain_sync(&self) -> Result<(), LightningRpcError> {
-        // In devimint, we explicitly sync the onchain wallet to start the sync quicker
-        // than background sync would. In production, background sync is
-        // sufficient
-        if is_env_var_set(FM_IN_DEVIMINT_ENV) {
-            self.sync_wallet();
-        }
-
-        // Wait for the Lightning node to sync
-        retry(
-            "Wait for chain sync",
-            backoff_util::background_backoff(),
-            || async {
-                let info = self.info();
-                let block_height = info.block_height;
-                if info.synced_to_chain {
-                    Ok(())
-                } else {
-                    warn!(target: LOG_LIGHTNING, block_height = %block_height, "Lightning node is not synced yet");
-                    Err(anyhow::anyhow!("Not synced yet"))
-                }
-            },
-        )
-        .await
-        .map_err(|e| LightningRpcError::FailedToSyncToChain {
-            failure_reason: format!("Failed to sync to chain: {e:?}"),
-        })?;
-
-        info!(target: LOG_LIGHTNING, "Gateway successfully synced with the chain");
-        Ok(())
     }
 }
 
