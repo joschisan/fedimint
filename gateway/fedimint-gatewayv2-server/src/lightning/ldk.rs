@@ -19,6 +19,7 @@ use bitcoin::hashes::{Hash, sha256};
 use bitcoin::{FeeRate, Network, OutPoint};
 use fedimint_bip39::Mnemonic;
 use fedimint_core::envs::{FM_IN_DEVIMINT_ENV, is_env_var_set, is_running_in_test_env};
+use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::task::{TaskGroup, TaskHandle, block_in_place};
 use fedimint_core::util::{FmtCompact, SafeUrl, backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, crit};
@@ -831,6 +832,43 @@ impl GatewayLdkClient {
         }
 
         Ok(ListChannelsResponse { channels })
+    }
+
+    /// Connects to a lightning peer, persisting the connection so the node
+    /// reconnects on restart.
+    pub async fn connect_peer(
+        &self,
+        node_id: PublicKey,
+        host: String,
+    ) -> Result<(), LightningRpcError> {
+        let address = SocketAddress::from_str(&host).map_err(|e| {
+            LightningRpcError::FailedToConnectToPeer {
+                failure_reason: e.to_string(),
+            }
+        })?;
+        self.node.connect(node_id, address, true).map_err(|e| {
+            LightningRpcError::FailedToConnectToPeer {
+                failure_reason: e.to_string(),
+            }
+        })
+    }
+
+    /// Disconnects from a lightning peer.
+    pub async fn disconnect_peer(&self, node_id: PublicKey) -> Result<(), LightningRpcError> {
+        self.node
+            .disconnect(node_id)
+            .map_err(|e| LightningRpcError::FailedToConnectToPeer {
+                failure_reason: e.to_string(),
+            })
+    }
+
+    /// Lists the node's lightning peers as `(node_id, address, is_connected)`.
+    pub async fn list_peers(&self) -> Vec<(PublicKey, String, bool)> {
+        self.node
+            .list_peers()
+            .into_iter()
+            .map(|peer| (peer.node_id, peer.address.to_string(), peer.is_connected))
+            .collect()
     }
 
     /// Updates the local-side routing fee policy advertised on a single channel

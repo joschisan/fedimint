@@ -14,6 +14,7 @@
 #![allow(clippy::large_futures)]
 #![allow(clippy::struct_field_names)]
 
+pub mod cli_server;
 pub mod client;
 pub mod config;
 mod db;
@@ -277,9 +278,8 @@ pub struct Gateway {
     /// The default transaction fees for new federations
     default_transaction_fees: PaymentFee,
 
-    /// The gateway's advertised HTTP API url (from `FM_GATEWAY_API_ADDR`).
-    // TODO(gatewayv2-cli): surfaced by the upcoming `info` command response.
-    #[allow(dead_code)]
+    /// The gateway's advertised HTTP API url (from `FM_GATEWAY_API_ADDR`),
+    /// surfaced by the `info` admin command.
     api_url: Option<SafeUrl>,
 }
 
@@ -520,7 +520,9 @@ impl Gateway {
         fedimint_metrics::spawn_api_server(self.metrics_listen, self.task_group.clone()).await?;
         // start webserver last to avoid handling requests before fully initialized
         let handle = self.task_group.make_handle();
-        run_webserver(Arc::new(self)).await?;
+        let gateway = Arc::new(self);
+        crate::cli_server::run_cli_server(gateway.clone())?;
+        run_webserver(gateway).await?;
         let shutdown_receiver = handle.make_shutdown_rx();
         Ok(shutdown_receiver)
     }
