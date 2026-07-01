@@ -13,7 +13,9 @@ use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::Message;
-use events::{IncomingPaymentStarted, OutgoingPaymentStarted};
+use events::{
+    IncomingPaymentStarted, OutgoingPaymentFailed, OutgoingPaymentStarted, OutgoingPaymentSucceeded,
+};
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client::ClientHandleArc;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
@@ -21,7 +23,8 @@ use fedimint_client_module::module::recovery::NoModuleBackup;
 use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule, OutPointRange};
 use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
 use fedimint_client_module::transaction::{
-    ClientOutput, ClientOutputBundle, ClientOutputSM, TransactionBuilder,
+    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, ClientOutputSM,
+    TransactionBuilder,
 };
 use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::config::FederationId;
@@ -34,13 +37,14 @@ use fedimint_core::module::{
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::time::now;
 use fedimint_core::util::Spanned;
-use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send, secp256k1};
+use fedimint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send, secp256k1};
 use fedimint_lightning::{InterceptPaymentResponse, LightningRpcError};
 use fedimint_lnv2_common::config::LightningClientConfig;
-use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
+use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::SendPaymentPayload;
 use fedimint_lnv2_common::{
-    LightningCommonInit, LightningInvoice, LightningModuleTypes, LightningOutput, LightningOutputV0,
+    LightningCommonInit, LightningInput, LightningInputV0, LightningInvoice, LightningModuleTypes,
+    LightningOutput, LightningOutputV0, OutgoingWitness,
 };
 use futures::StreamExt;
 use lightning_invoice::Bolt11Invoice;
@@ -54,7 +58,7 @@ use tracing::{info, warn};
 use crate::api::GatewayFederationApi;
 use crate::complete_sm::{CompleteSMCommon, CompleteSMState, CompleteStateMachine};
 use crate::receive_sm::ReceiveSMCommon;
-use crate::send_sm::SendSMCommon;
+use crate::send_sm::{Cancelled, SendSMCommon};
 
 /// LNv2 CLTV Delta in blocks
 pub const EXPIRATION_DELTA_MINIMUM_V2: u64 = 144;
@@ -473,17 +477,26 @@ impl GatewayClientModuleV2 {
         Ok(())
     }
 
-    pub async fn relay_direct_swap(
+    /// Funds the incoming contract and spawns **only** the
+    /// [`ReceiveStateMachine`] (no [`CompleteStateMachine`]), fire-and-forget.
+    /// Returns the operation id immediately without awaiting the terminal
+    /// state; the upstream Lightning HTLC (for external receives) is settled
+    /// out-of-band by the daemon-side receive trailer, which tails this
+    /// federation's event log for [`IncomingPaymentSucceeded`].
+    ///
+    /// Idempotent on `operation`: a retry with the same contract is a no-op and
+    /// just returns the existing operation id.
+    pub async fn start_receive(
         &self,
         contract: IncomingContract,
         amount_msat: u64,
-    ) -> anyhow::Result<FinalReceiveState> {
+    ) -> anyhow::Result<OperationId> {
         let operation_start = now();
 
         let operation_id = OperationId::from_encodable(&contract);
 
         if self.client_ctx.operation_exists(operation_id).await {
-            return Ok(self.await_receive(operation_id).await);
+            return Ok(operation_id);
         }
 
         let refund_keypair = self.keypair;
@@ -527,8 +540,9 @@ impl GatewayClientModuleV2 {
 
         let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
         self.client_ctx
-            .log_event(
+            .log_event_for_operation(
                 &mut dbtx,
+                operation_id,
                 IncomingPaymentStarted {
                     operation_start,
                     incoming_contract_commitment: commitment,
@@ -537,6 +551,16 @@ impl GatewayClientModuleV2 {
             )
             .await;
         dbtx.commit_tx().await;
+
+        Ok(operation_id)
+    }
+
+    pub async fn relay_direct_swap(
+        &self,
+        contract: IncomingContract,
+        amount_msat: u64,
+    ) -> anyhow::Result<FinalReceiveState> {
+        let operation_id = self.start_receive(contract, amount_msat).await?;
 
         Ok(self.await_receive(operation_id).await)
     }
@@ -594,6 +618,115 @@ impl GatewayClientModuleV2 {
                     return;
                 }
                 None => return,
+            }
+        }
+    }
+
+    /// Logs the [`OutgoingPaymentStarted`] event for a daemon-driven send,
+    /// operation-tagged so the send can be observed via
+    /// `subscribe_operation_events`. Unlike [`Self::send_payment`] this spawns
+    /// no [`SendStateMachine`]: the daemon owns the outgoing payment and calls
+    /// [`Self::finalize_send`] once it learns the outcome.
+    pub async fn log_send_started(
+        &self,
+        operation_id: OperationId,
+        contract: OutgoingContract,
+        min_contract_amount: Amount,
+        invoice_amount: Amount,
+        max_delay: u64,
+    ) {
+        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+        self.client_ctx
+            .log_event_for_operation(
+                &mut dbtx,
+                operation_id,
+                OutgoingPaymentStarted {
+                    operation_start: now(),
+                    outgoing_contract: contract,
+                    min_contract_amount,
+                    invoice_amount,
+                    max_delay,
+                },
+            )
+            .await;
+        dbtx.commit_tx().await;
+    }
+
+    /// Terminal work for a daemon-driven outgoing contract, replacing the
+    /// [`SendStateMachine`]'s claim/forfeit transition:
+    ///
+    /// - `Some(preimage)` claims the outgoing contract (submits an
+    ///   [`OutgoingWitness::Claim`] input) and logs
+    ///   [`OutgoingPaymentSucceeded`].
+    /// - `None` signs the forfeit message, logs [`OutgoingPaymentFailed`], and
+    ///   returns the forfeit [`Signature`] so the caller can return it to the
+    ///   sending client.
+    ///
+    /// Operation-tagged so the terminal is observable via
+    /// `subscribe_operation_events`.
+    pub async fn finalize_send(
+        &self,
+        operation_id: OperationId,
+        contract: OutgoingContract,
+        outpoint: OutPoint,
+        preimage: Option<[u8; 32]>,
+    ) -> anyhow::Result<Option<Signature>> {
+        match preimage {
+            Some(preimage) => {
+                let client_input = ClientInput::<LightningInput> {
+                    input: LightningInput::V0(LightningInputV0::Outgoing(
+                        outpoint,
+                        OutgoingWitness::Claim(preimage),
+                    )),
+                    amounts: Amounts::new_bitcoin(contract.amount),
+                    keys: vec![self.keypair],
+                };
+
+                let inputs = self
+                    .client_ctx
+                    .make_client_inputs(ClientInputBundle::new_no_sm(vec![client_input]));
+
+                self.client_ctx
+                    .finalize_and_submit_transaction(
+                        operation_id,
+                        LightningCommonInit::KIND.as_str(),
+                        |_| GatewayOperationMetaV2,
+                        TransactionBuilder::new().with_inputs(inputs),
+                    )
+                    .await?;
+
+                let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+                self.client_ctx
+                    .log_event_for_operation(
+                        &mut dbtx,
+                        operation_id,
+                        OutgoingPaymentSucceeded {
+                            payment_image: contract.payment_image.clone(),
+                            target_federation: None,
+                        },
+                    )
+                    .await;
+                dbtx.commit_tx().await;
+
+                Ok(None)
+            }
+            None => {
+                let signature = self.keypair.sign_schnorr(contract.forfeit_message());
+
+                let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
+                self.client_ctx
+                    .log_event_for_operation(
+                        &mut dbtx,
+                        operation_id,
+                        OutgoingPaymentFailed {
+                            payment_image: contract.payment_image.clone(),
+                            error: Cancelled::Failure,
+                        },
+                    )
+                    .await;
+                dbtx.commit_tx().await;
+
+                Ok(Some(signature))
             }
         }
     }

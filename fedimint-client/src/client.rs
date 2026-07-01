@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, anyhow, bail, format_err};
-use async_stream::try_stream;
+use async_stream::{stream, try_stream};
 use bitcoin::key::Secp256k1;
 use bitcoin::key::rand::thread_rng;
 use bitcoin::secp256k1::{self, PublicKey};
@@ -2313,6 +2313,7 @@ impl Client {
         dbtx: &mut DatabaseTransaction<'_, Cap>,
         kind: EventKind,
         module: Option<(ModuleKind, ModuleInstanceId)>,
+        operation: Option<OperationId>,
         payload: Vec<u8>,
         persist: EventPersistence,
     ) where
@@ -2325,6 +2326,7 @@ impl Client {
             kind,
             module_kind,
             module_id,
+            operation,
             payload,
             persist,
         )
@@ -2447,6 +2449,51 @@ impl Client {
             .await
             .get_next_event_log_id()
             .await
+    }
+
+    /// One-shot snapshot of every event currently logged for `operation`, in
+    /// event-log order, read from the per-operation secondary index.
+    pub async fn read_operation_events(&self, operation: OperationId) -> Vec<PersistedLogEntry> {
+        self.db
+            .begin_transaction_nc()
+            .await
+            .get_operation_event_log(operation)
+            .await
+    }
+
+    /// Stream every event logged for `operation`, in event-log order: history
+    /// is replayed first, then new events are yielded as the ordering task
+    /// commits them. The stream ends only when the client's event-log ordering
+    /// task stops (i.e. on client shutdown).
+    pub fn subscribe_operation_events(
+        &self,
+        operation: OperationId,
+    ) -> BoxStream<'static, PersistedLogEntry> {
+        let db = self.db.clone();
+        let mut log_event_added = self.log_event_added_rx.clone();
+
+        Box::pin(stream! {
+            let mut next = EventLogId::LOG_START;
+
+            loop {
+                let entries = db
+                    .begin_transaction_nc()
+                    .await
+                    .get_operation_event_log(operation)
+                    .await;
+
+                for entry in entries {
+                    if next <= entry.id() {
+                        next = entry.id().next();
+                        yield entry;
+                    }
+                }
+
+                if log_event_added.changed().await.is_err() {
+                    break;
+                }
+            }
+        })
     }
 
     pub async fn get_event_log_trimable(
@@ -2663,6 +2710,7 @@ impl ClientContextIface for Client {
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
         module_kind: Option<ModuleKind>,
         module_id: ModuleInstanceId,
+        operation: Option<OperationId>,
         kind: EventKind,
         payload: serde_json::Value,
         persist: EventPersistence,
@@ -2673,6 +2721,7 @@ impl ClientContextIface for Client {
             dbtx,
             kind,
             module_kind.map(|kind| (kind, module_id)),
+            operation,
             serde_json::to_vec(&payload).expect("Serialization can't fail"),
             persist,
         )

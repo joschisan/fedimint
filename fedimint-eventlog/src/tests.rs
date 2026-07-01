@@ -109,6 +109,7 @@ async fn sanity_handle_events() {
                     EventKind::from(format!("{i}")),
                     None,
                     None,
+                    None,
                     vec![],
                     crate::EventPersistence::Persistent,
                 )
@@ -120,6 +121,92 @@ async fn sanity_handle_events() {
             Ok(())
         }
     );
+}
+
+#[test_log::test(tokio::test)]
+async fn test_operation_event_index() {
+    use std::time::Duration;
+
+    use fedimint_core::core::OperationId;
+
+    let db = MemDatabase::new().into_database();
+    let tg = TaskGroup::new();
+
+    let (log_event_added_tx, _log_event_added_rx) = watch::channel(());
+    let (log_ordering_wakeup_tx, log_ordering_wakeup_rx) = watch::channel(());
+    let (log_event_added_transient_tx, _transient_rx) = broadcast::channel(1024);
+
+    tg.spawn_cancellable(
+        "event log ordering task",
+        run_event_log_ordering_task(
+            db.clone(),
+            log_ordering_wakeup_rx,
+            log_event_added_tx,
+            log_event_added_transient_tx,
+        ),
+    );
+
+    let op_a = OperationId::from_encodable(&1u64);
+    let op_b = OperationId::from_encodable(&2u64);
+
+    // Interleave two operations plus an untagged event to prove isolation.
+    let events = [
+        ("a0", Some(op_a)),
+        ("x", None),
+        ("b0", Some(op_b)),
+        ("a1", Some(op_a)),
+    ];
+    for (kind, operation) in events {
+        let mut dbtx = db.begin_transaction().await;
+        dbtx.log_event_raw(
+            log_ordering_wakeup_tx.clone(),
+            EventKind::from(kind.to_string()),
+            None,
+            None,
+            operation,
+            vec![],
+            crate::EventPersistence::Persistent,
+        )
+        .await;
+        dbtx.commit_tx().await;
+    }
+
+    // The ordering task builds the index asynchronously; poll until op_a has
+    // both of its events (bounded so a regression fails instead of hanging).
+    let mut entries_a = Vec::new();
+    for _ in 0..100 {
+        entries_a = db
+            .begin_transaction_nc()
+            .await
+            .get_operation_event_log(op_a)
+            .await;
+        if entries_a.len() == 2 {
+            break;
+        }
+        fedimint_core::task::sleep_in_test("await ordering", Duration::from_millis(20)).await;
+    }
+
+    // op_a sees exactly its two events, in event-log order, with increasing ids.
+    assert_eq!(entries_a.len(), 2);
+    assert_eq!(entries_a[0].kind, EventKind::from("a0".to_string()));
+    assert_eq!(entries_a[1].kind, EventKind::from("a1".to_string()));
+    assert!(entries_a[0].id() < entries_a[1].id());
+
+    // op_b sees only its own event; the untagged event indexes to neither.
+    let entries_b = db
+        .begin_transaction_nc()
+        .await
+        .get_operation_event_log(op_b)
+        .await;
+    assert_eq!(entries_b.len(), 1);
+    assert_eq!(entries_b[0].kind, EventKind::from("b0".to_string()));
+
+    let entries_none = db
+        .begin_transaction_nc()
+        .await
+        .get_operation_event_log(OperationId::from_encodable(&99u64))
+        .await;
+    assert!(entries_none.is_empty());
 }
 
 #[test_log::test(tokio::test)]

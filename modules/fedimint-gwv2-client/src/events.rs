@@ -101,6 +101,15 @@ impl Event for IncomingPaymentStarted {
 pub struct IncomingPaymentSucceeded {
     /// The payment image of the invoice that was paid.
     pub payment_image: PaymentImage,
+
+    /// The preimage revealed by the successful receive. The daemon-side receive
+    /// trailer reads it from here to claim the upstream Lightning HTLC.
+    ///
+    /// `Option` only for backward-compatibility with events serialized before
+    /// this field existed; there are no gatewayv2 deployments, so it is always
+    /// populated (`Some`) now and consumers may unwrap it.
+    #[serde(default)]
+    pub preimage: Option<[u8; 32]>,
 }
 
 impl Event for IncomingPaymentSucceeded {

@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::{fmt, ops};
 
-use fedimint_core::core::{ModuleInstanceId, ModuleKind};
+use fedimint_core::core::{ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{
     Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped, NonCommittable,
 };
@@ -41,6 +41,16 @@ use tracing::{debug, trace};
 pub const DB_KEY_PREFIX_UNORDERED_EVENT_LOG: u8 = 0x3a;
 pub const DB_KEY_PREFIX_EVENT_LOG: u8 = 0x39;
 pub const DB_KEY_PREFIX_EVENT_LOG_TRIMABLE: u8 = 0x41;
+/// Transient bridge, written in the same dbtx as an operation-tagged unordered
+/// event: maps the (write-time) [`UnordedEventLogId`] to its `OperationId`.
+/// The ordering task consumes it to build
+/// [`DB_KEY_PREFIX_EVENT_LOG_BY_OPERATION`] once the final [`EventLogId`] is
+/// known, then deletes it.
+pub const DB_KEY_PREFIX_UNORDERED_EVENT_OPERATION: u8 = 0x3d;
+/// Secondary index for operation-scoped tailing: `(OperationId, EventLogId)` ->
+/// the full [`EventLogEntry`], so `subscribe_operation_events` is a cheap range
+/// scan without dereferencing back into the main ordered log.
+pub const DB_KEY_PREFIX_EVENT_LOG_BY_OPERATION: u8 = 0x3e;
 
 /// Minimum age in ID count for trimable events to be deleted
 const TRIMABLE_EVENTLOG_MIN_ID_AGE: u64 = 10_000;
@@ -99,7 +109,7 @@ static UNORDEREDED_EVENT_LOG_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// conflicts due the ID allocation. Instead they are picked based on
 /// a time and a counter, so they are mostly but not strictly ordered and
 /// monotonic, and even more importantly: not contiguous.
-#[derive(Debug, Encodable, Decodable)]
+#[derive(Debug, Clone, Copy, Encodable, Decodable)]
 pub struct UnordedEventLogId {
     ts_usecs: u64,
     counter: u64,
@@ -421,6 +431,40 @@ impl_db_lookup!(
     query_prefix = UnorderedEventLogIdPrefixAll
 );
 
+/// Bridge key: the write-time [`UnordedEventLogId`] of an operation-tagged
+/// event -> its [`OperationId`]. Written by the operation-aware `log_event`,
+/// consumed and deleted by the ordering task.
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct UnorderedEventOperationKey(pub UnordedEventLogId);
+
+impl_db_record!(
+    key = UnorderedEventOperationKey,
+    value = OperationId,
+    db_prefix = DB_KEY_PREFIX_UNORDERED_EVENT_OPERATION,
+);
+
+/// Secondary per-operation index key. Ordered by `(operation, event_id)`, so a
+/// range scan over one operation yields its events in event-log order.
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct EventLogByOperationKey {
+    pub operation: OperationId,
+    pub event_id: EventLogId,
+}
+
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct EventLogByOperationKeyPrefix(pub OperationId);
+
+impl_db_record!(
+    key = EventLogByOperationKey,
+    value = EventLogEntry,
+    db_prefix = DB_KEY_PREFIX_EVENT_LOG_BY_OPERATION,
+);
+
+impl_db_lookup!(
+    key = EventLogByOperationKey,
+    query_prefix = EventLogByOperationKeyPrefix
+);
+
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub struct EventLogIdPrefixAll;
 
@@ -500,6 +544,7 @@ pub trait DBTransactionEventLogExt {
         kind: EventKind,
         module_kind: Option<ModuleKind>,
         module_id: Option<ModuleInstanceId>,
+        operation: Option<OperationId>,
         payload: Vec<u8>,
         persist: EventPersistence,
     );
@@ -521,11 +566,17 @@ pub trait DBTransactionEventLogExt {
             E::KIND,
             E::MODULE,
             module_id,
+            None,
             serde_json::to_vec(&event).expect("Serialization can't fail"),
             <E as Event>::PERSISTENCE,
         )
         .await;
     }
+
+    /// All events logged for `operation`, in event-log order, read from the
+    /// per-operation secondary index. Each returned [`PersistedLogEntry`] is
+    /// keyed by the entry's ordered [`EventLogId`].
+    async fn get_operation_event_log(&mut self, operation: OperationId) -> Vec<PersistedLogEntry>;
 
     /// Next [`EventLogId`] to use for new ordered events.
     ///
@@ -561,6 +612,7 @@ where
         kind: EventKind,
         module_kind: Option<ModuleKind>,
         module_id: Option<ModuleInstanceId>,
+        operation: Option<OperationId>,
         payload: Vec<u8>,
         persist: EventPersistence,
     ) {
@@ -595,9 +647,28 @@ where
         {
             panic!("Trying to overwrite event in the client event log");
         }
+
+        // Record the operation association so the ordering task can build the
+        // per-operation secondary index once it assigns the final `EventLogId`.
+        if let Some(operation) = operation {
+            self.insert_entry(&UnorderedEventOperationKey(unordered_id), &operation)
+                .await;
+        }
+
         self.on_commit(move || {
             log_ordering_wakeup_tx.send_replace(());
         });
+    }
+
+    async fn get_operation_event_log(&mut self, operation: OperationId) -> Vec<PersistedLogEntry> {
+        self.find_by_prefix(&EventLogByOperationKeyPrefix(operation))
+            .await
+            .map(|(k, v)| PersistedLogEntry {
+                id: k.event_id,
+                inner: v,
+            })
+            .collect()
+            .await
     }
 
     async fn get_next_event_log_id(&mut self) -> EventLogId {
@@ -719,6 +790,14 @@ pub async fn run_event_log_ordering_task(
                 dbtx.remove_entry(unordered_id).await.is_some(),
                 "Must never fail to remove entry"
             );
+
+            // Consume the operation bridge (if any) written alongside this event.
+            // The per-operation index is keyed by the default log's `EventLogId`,
+            // so it is only built for non-trimable persisted events below.
+            let operation = dbtx
+                .remove_entry(&UnorderedEventOperationKey(*unordered_id))
+                .await;
+
             if entry.persist() {
                 // Non-trimable events get persisted in both the default event log
                 // and trimable event log
@@ -729,6 +808,20 @@ pub async fn run_event_log_ordering_task(
                             .is_none(),
                         "Must never overwrite existing event"
                     );
+                    if let Some(operation) = operation {
+                        assert!(
+                            dbtx.insert_entry(
+                                &EventLogByOperationKey {
+                                    operation,
+                                    event_id: next_entry_id,
+                                },
+                                &entry.inner,
+                            )
+                            .await
+                            .is_none(),
+                            "Must never overwrite existing per-operation event"
+                        );
+                    }
                     trace!(target: LOG_CLIENT_EVENT_LOG, ?unordered_id, id=?next_entry_id, "Ordered event log event");
                     next_entry_id = next_entry_id.next();
                 }

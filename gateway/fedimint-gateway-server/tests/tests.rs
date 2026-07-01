@@ -1274,6 +1274,7 @@ async fn gateway_read_payment_log() -> anyhow::Result<()> {
                 &mut fed2_module_dbtx,
                 IncomingPaymentSucceeded {
                     payment_image: PaymentImage::Hash([0_u8; 32].consensus_hash()),
+                    preimage: None,
                 },
             )
             .await;

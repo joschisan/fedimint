@@ -109,6 +109,7 @@ impl IGlobalClientContext for ModuleGlobalClientContext {
                 dbtx.global_tx(),
                 kind,
                 module,
+                None,
                 serde_json::to_vec(&payload).expect("Serialization can't fail"),
                 persist,
             )

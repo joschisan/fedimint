@@ -126,6 +126,7 @@ pub trait ClientContextIface: MaybeSend + MaybeSync {
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
         module_kind: Option<ModuleKind>,
         module_id: ModuleInstanceId,
+        operation: Option<OperationId>,
         kind: EventKind,
         payload: serde_json::Value,
         persist: EventPersistence,
@@ -812,6 +813,34 @@ where
         E: Event + Send,
         Cap: Send,
     {
+        self.log_event_inner(dbtx, None, event).await;
+    }
+
+    /// Like [`Self::log_event`], but additionally tags the event with
+    /// `operation`, indexing it into the per-operation secondary log so it can
+    /// be read/streamed via [`crate::ClientContextIface`]-backed
+    /// `read_operation_events` / `subscribe_operation_events`.
+    pub async fn log_event_for_operation<E, Cap>(
+        &self,
+        dbtx: &mut DatabaseTransaction<'_, Cap>,
+        operation: OperationId,
+        event: E,
+    ) where
+        E: Event + Send,
+        Cap: Send,
+    {
+        self.log_event_inner(dbtx, Some(operation), event).await;
+    }
+
+    async fn log_event_inner<E, Cap>(
+        &self,
+        dbtx: &mut DatabaseTransaction<'_, Cap>,
+        operation: Option<OperationId>,
+        event: E,
+    ) where
+        E: Event + Send,
+        Cap: Send,
+    {
         if <E as Event>::MODULE != Some(<M as ClientModule>::kind()) {
             warn!(
                 target: LOG_CLIENT,
@@ -826,6 +855,7 @@ where
                 &mut dbtx.global_dbtx(self.global_dbtx_access_token).to_ref_nc(),
                 <E as Event>::MODULE,
                 self.module_instance_id,
+                operation,
                 <E as Event>::KIND,
                 serde_json::to_value(event).expect("Can't fail"),
                 <E as Event>::PERSISTENCE,
