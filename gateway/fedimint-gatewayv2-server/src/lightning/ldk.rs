@@ -13,9 +13,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
-use bitcoin::hashes::{Hash, sha256};
+use bitcoin::hashes::Hash;
 use bitcoin::{FeeRate, Network, OutPoint};
 use fedimint_bip39::Mnemonic;
 use fedimint_core::envs::{FM_IN_DEVIMINT_ENV, is_env_var_set, is_running_in_test_env};
@@ -25,8 +25,7 @@ use fedimint_core::util::{FmtCompact, SafeUrl, backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, crit};
 use fedimint_gateway_common::{
     ChainSource, ChannelInfo, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
-    GetInvoiceRequest, GetInvoiceResponse, LightningInfo, ListTransactionsResponse,
-    OpenChannelRequest, SendOnchainRequest, SetChannelFeesRequest,
+    LightningInfo, OpenChannelRequest, SendOnchainRequest,
 };
 use fedimint_lightning::{InterceptPaymentResponse, LightningRpcError, PaymentAction, Preimage};
 use fedimint_logging::{LOG_LIGHTNING, LOG_LIGHTNING_LDK};
@@ -34,9 +33,8 @@ use ldk_node::config::ChannelConfig;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::{NodeAlias, NodeId};
 use ldk_node::logger::{LogLevel, LogRecord, LogWriter};
-use ldk_node::payment::{PaymentDirection, PaymentKind, PaymentStatus, SendingParameters};
+use ldk_node::payment::{PaymentKind, PaymentStatus, SendingParameters};
 use lightning::ln::channelmanager::PaymentId;
-use lightning::offers::offer::{Offer, OfferId};
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description};
 use tokio::sync::mpsc::Sender;
@@ -129,11 +127,6 @@ pub struct GatewayLdkClient {
     /// to execute in parallel. This helps ensure that the function is
     /// idempotent.
     outbound_lightning_payment_lock_pool: lockable::LockPool<PaymentId>,
-
-    /// Lock pool used to ensure that our implementation of [`Self::pay_offer`]
-    /// doesn't allow for multiple simultaneous calls with the same offer to
-    /// execute in parallel. This helps ensure that the function is idempotent.
-    outbound_offer_lock_pool: lockable::LockPool<LdkOfferId>,
 
     /// A map keyed by the `UserChannelId` of a channel that is currently
     /// opening. The `Sender` is used to communicate the `OutPoint` back to
@@ -251,7 +244,6 @@ impl GatewayLdkClient {
             task_group,
             htlc_stream_receiver_or: Some(htlc_stream_receiver),
             outbound_lightning_payment_lock_pool: lockable::LockPool::new(),
-            outbound_offer_lock_pool: lockable::LockPool::new(),
             pending_channels,
         })
     }
@@ -871,64 +863,6 @@ impl GatewayLdkClient {
             .collect()
     }
 
-    /// Updates the local-side routing fee policy advertised on a single channel
-    /// identified by its funding outpoint.
-    pub async fn set_channel_fees(
-        &self,
-        payload: SetChannelFeesRequest,
-    ) -> Result<(), LightningRpcError> {
-        // ldk-node's `update_channel_config` is keyed by `UserChannelId` +
-        // counterparty pubkey, so resolve the funding outpoint to those by
-        // scanning the live channel list.
-        let channel = self
-            .node
-            .list_channels()
-            .into_iter()
-            .find(|c| c.funding_txo == Some(payload.funding_outpoint))
-            .ok_or_else(|| LightningRpcError::FailedToSetChannelFees {
-                failure_reason: format!(
-                    "No channel found with funding outpoint {}",
-                    payload.funding_outpoint,
-                ),
-            })?;
-
-        let forwarding_fee_base_msat = u32::try_from(payload.base_fee_msat).map_err(|_| {
-            LightningRpcError::FailedToSetChannelFees {
-                failure_reason: format!(
-                    "base_fee_msat {} does not fit in u32 (LDK limit)",
-                    payload.base_fee_msat,
-                ),
-            }
-        })?;
-        let forwarding_fee_proportional_millionths = u32::try_from(payload.parts_per_million)
-            .map_err(|_| LightningRpcError::FailedToSetChannelFees {
-                failure_reason: format!(
-                    "parts_per_million {} does not fit in u32 (LDK limit)",
-                    payload.parts_per_million,
-                ),
-            })?;
-
-        // Copy the channel's current config so we only change the two fee
-        // fields and preserve cltv_expiry_delta, dust limits, etc.
-        let new_config = ChannelConfig {
-            forwarding_fee_base_msat,
-            forwarding_fee_proportional_millionths,
-            ..channel.config
-        };
-
-        self.node
-            .update_channel_config(
-                &channel.user_channel_id,
-                channel.counterparty_node_id,
-                new_config,
-            )
-            .map_err(|e| LightningRpcError::FailedToSetChannelFees {
-                failure_reason: e.to_string(),
-            })?;
-
-        Ok(())
-    }
-
     /// Returns a summary of the lightning node's balance, including the onchain
     /// wallet, outbound liquidity, and inbound liquidity.
     pub async fn get_balances(&self) -> Result<GetBalancesResponse, LightningRpcError> {
@@ -950,174 +884,6 @@ impl GatewayLdkClient {
             lightning_balance_msats: balances.total_lightning_balance_sats * 1000,
             inbound_lightning_liquidity_msats: total_inbound_liquidity_balance_msat,
         })
-    }
-
-    pub async fn get_invoice(
-        &self,
-        get_invoice_request: GetInvoiceRequest,
-    ) -> Result<Option<GetInvoiceResponse>, LightningRpcError> {
-        let invoices = self
-            .node
-            .list_payments_with_filter(|details| {
-                details.direction == PaymentDirection::Inbound
-                    && details.id == PaymentId(get_invoice_request.payment_hash.to_byte_array())
-                    && !matches!(details.kind, PaymentKind::Onchain { .. })
-            })
-            .iter()
-            .map(|details| {
-                let (preimage, payment_hash, _) = get_preimage_and_payment_hash(&details.kind);
-                let status = match details.status {
-                    PaymentStatus::Failed => fedimint_gateway_common::PaymentStatus::Failed,
-                    PaymentStatus::Succeeded => fedimint_gateway_common::PaymentStatus::Succeeded,
-                    PaymentStatus::Pending => fedimint_gateway_common::PaymentStatus::Pending,
-                };
-                GetInvoiceResponse {
-                    preimage: preimage.map(|p| p.to_string()),
-                    payment_hash,
-                    amount: Amount::from_msats(
-                        details
-                            .amount_msat
-                            .expect("amountless invoices are not supported"),
-                    ),
-                    created_at: UNIX_EPOCH + Duration::from_secs(details.latest_update_timestamp),
-                    status,
-                }
-            })
-            .collect::<Vec<_>>();
-
-        Ok(invoices.first().cloned())
-    }
-
-    pub async fn list_transactions(
-        &self,
-        start_secs: u64,
-        end_secs: u64,
-    ) -> Result<ListTransactionsResponse, LightningRpcError> {
-        let transactions = self
-            .node
-            .list_payments_with_filter(|details| {
-                !matches!(details.kind, PaymentKind::Onchain { .. })
-                    && details.latest_update_timestamp >= start_secs
-                    && details.latest_update_timestamp < end_secs
-            })
-            .iter()
-            .map(|details| {
-                let (preimage, payment_hash, payment_kind) =
-                    get_preimage_and_payment_hash(&details.kind);
-                let direction = match details.direction {
-                    PaymentDirection::Outbound => {
-                        fedimint_gateway_common::PaymentDirection::Outbound
-                    }
-                    PaymentDirection::Inbound => fedimint_gateway_common::PaymentDirection::Inbound,
-                };
-                let status = match details.status {
-                    PaymentStatus::Failed => fedimint_gateway_common::PaymentStatus::Failed,
-                    PaymentStatus::Succeeded => fedimint_gateway_common::PaymentStatus::Succeeded,
-                    PaymentStatus::Pending => fedimint_gateway_common::PaymentStatus::Pending,
-                };
-                fedimint_gateway_common::PaymentDetails {
-                    payment_hash,
-                    preimage: preimage.map(|p| p.to_string()),
-                    payment_kind,
-                    amount: Amount::from_msats(
-                        details
-                            .amount_msat
-                            .expect("amountless invoices are not supported"),
-                    ),
-                    direction,
-                    status,
-                    timestamp_secs: details.latest_update_timestamp,
-                }
-            })
-            .collect::<Vec<_>>();
-        Ok(ListTransactionsResponse { transactions })
-    }
-
-    pub fn create_offer(
-        &self,
-        amount: Option<Amount>,
-        description: Option<String>,
-        expiry_secs: Option<u32>,
-        quantity: Option<u64>,
-    ) -> Result<String, LightningRpcError> {
-        let description = description.unwrap_or_default();
-        let offer = if let Some(amount) = amount {
-            self.node
-                .bolt12_payment()
-                .receive(amount.msats, &description, expiry_secs, quantity)
-                .map_err(|err| LightningRpcError::Bolt12Error {
-                    failure_reason: err.to_string(),
-                })?
-        } else {
-            self.node
-                .bolt12_payment()
-                .receive_variable_amount(&description, expiry_secs)
-                .map_err(|err| LightningRpcError::Bolt12Error {
-                    failure_reason: err.to_string(),
-                })?
-        };
-
-        Ok(offer.to_string())
-    }
-
-    pub async fn pay_offer(
-        &self,
-        offer: String,
-        quantity: Option<u64>,
-        amount: Option<Amount>,
-        payer_note: Option<String>,
-    ) -> Result<Preimage, LightningRpcError> {
-        let offer = Offer::from_str(&offer).map_err(|_| LightningRpcError::Bolt12Error {
-            failure_reason: "Failed to parse Bolt12 Offer".to_string(),
-        })?;
-
-        let _offer_lock_guard = self
-            .outbound_offer_lock_pool
-            .blocking_lock(LdkOfferId(offer.id()));
-
-        let payment_id = if let Some(amount) = amount {
-            self.node
-                .bolt12_payment()
-                .send_using_amount(&offer, amount.msats, quantity, payer_note)
-                .map_err(|err| LightningRpcError::Bolt12Error {
-                    failure_reason: err.to_string(),
-                })?
-        } else {
-            self.node
-                .bolt12_payment()
-                .send(&offer, quantity, payer_note)
-                .map_err(|err| LightningRpcError::Bolt12Error {
-                    failure_reason: err.to_string(),
-                })?
-        };
-
-        loop {
-            if let Some(payment_details) = self.node.payment(&payment_id) {
-                match payment_details.status {
-                    PaymentStatus::Pending => {}
-                    PaymentStatus::Succeeded => match payment_details.kind {
-                        PaymentKind::Bolt12Offer {
-                            preimage: Some(preimage),
-                            ..
-                        } => {
-                            info!(target: LOG_LIGHTNING, offer = %offer, payment_id = %payment_id, preimage = %preimage, "Successfully paid offer");
-                            return Ok(Preimage(preimage.0));
-                        }
-                        _ => {
-                            return Err(LightningRpcError::FailedPayment {
-                                failure_reason: "Unexpected payment kind".to_string(),
-                            });
-                        }
-                    },
-                    PaymentStatus::Failed => {
-                        return Err(LightningRpcError::FailedPayment {
-                            failure_reason: "Bolt12 payment failed".to_string(),
-                        });
-                    }
-                }
-            }
-            fedimint_core::runtime::sleep(Duration::from_millis(100)).await;
-        }
     }
 
     pub fn sync_wallet(&self) -> Result<(), LightningRpcError> {
@@ -1182,68 +948,6 @@ impl GatewayLdkClient {
     }
 }
 
-/// Maps LDK's `PaymentKind` to an optional preimage and an optional payment
-/// hash depending on the type of payment.
-fn get_preimage_and_payment_hash(
-    kind: &PaymentKind,
-) -> (
-    Option<Preimage>,
-    Option<sha256::Hash>,
-    fedimint_gateway_common::PaymentKind,
-) {
-    match kind {
-        PaymentKind::Bolt11 {
-            hash,
-            preimage,
-            secret: _,
-        } => (
-            preimage.map(|p| Preimage(p.0)),
-            Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_common::PaymentKind::Bolt11,
-        ),
-        PaymentKind::Bolt11Jit {
-            hash,
-            preimage,
-            secret: _,
-            lsp_fee_limits: _,
-            ..
-        } => (
-            preimage.map(|p| Preimage(p.0)),
-            Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_common::PaymentKind::Bolt11,
-        ),
-        PaymentKind::Bolt12Offer {
-            hash,
-            preimage,
-            secret: _,
-            offer_id: _,
-            payer_note: _,
-            quantity: _,
-        } => (
-            preimage.map(|p| Preimage(p.0)),
-            hash.map(|h| sha256::Hash::from_slice(&h.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_common::PaymentKind::Bolt12Offer,
-        ),
-        PaymentKind::Bolt12Refund {
-            hash,
-            preimage,
-            secret: _,
-            payer_note: _,
-            quantity: _,
-        } => (
-            preimage.map(|p| Preimage(p.0)),
-            hash.map(|h| sha256::Hash::from_slice(&h.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_common::PaymentKind::Bolt12Refund,
-        ),
-        PaymentKind::Spontaneous { hash, preimage } => (
-            preimage.map(|p| Preimage(p.0)),
-            Some(sha256::Hash::from_slice(&hash.0).expect("Failed to convert payment hash")),
-            fedimint_gateway_common::PaymentKind::Bolt11,
-        ),
-        PaymentKind::Onchain { .. } => (None, None, fedimint_gateway_common::PaymentKind::Onchain),
-    }
-}
-
 /// When a port is specified in the Esplora URL, the esplora client inside LDK
 /// node cannot connect to the lightning node when there is a trailing slash.
 /// The `SafeUrl::Display` function will always serialize the `SafeUrl` with a
@@ -1262,15 +966,6 @@ fn get_esplora_url(server_url: SafeUrl) -> anyhow::Result<String> {
         server_url.to_string()
     };
     Ok(server_url)
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-struct LdkOfferId(OfferId);
-
-impl std::hash::Hash for LdkOfferId {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write(&self.0.0);
-    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

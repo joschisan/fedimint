@@ -29,7 +29,6 @@ aquamarine = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true, features = ["json"] }
-bcrypt = { workspace = true }
 bitcoin = { workspace = true }
 bon = { workspace = true }
 clap = { workspace = true }
@@ -44,7 +43,6 @@ fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-cursed-redb = { workspace = true }
 fedimint-derive-secret = { workspace = true }
-fedimint-eventlog = { workspace = true }
 fedimint-gateway-common = { workspace = true }
 fedimint-gatewayv2-cli-core = { workspace = true }
 fedimint-gwv2-client = { workspace = true }
