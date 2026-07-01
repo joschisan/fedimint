@@ -116,20 +116,15 @@ const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 /// graph LR
 /// classDef virtual fill:#fff,stroke-dasharray: 5 5
 ///
-///    Disconnected -- establish lightning connection --> Connected
-///    Connected -- load federation clients --> Running
-///    Connected -- not synced to chain --> Syncing
-///    Syncing -- load federation clients --> Running
-///    Running -- disconnected from lightning node --> Disconnected
-///    Running -- shutdown initiated --> ShuttingDown
+///    Disconnected -- lightning node not synced --> Syncing
+///    Disconnected -- lightning node already synced --> Running
+///    Syncing -- chain synced --> Running
 /// ```
 #[derive(Clone, Debug)]
 pub enum GatewayState {
     Disconnected,
     Syncing,
-    Connected,
     Running { lightning_context: LightningContext },
-    ShuttingDown { lightning_context: LightningContext },
 }
 
 impl Display for GatewayState {
@@ -137,9 +132,7 @@ impl Display for GatewayState {
         match self {
             GatewayState::Disconnected => write!(f, "Disconnected"),
             GatewayState::Syncing => write!(f, "Syncing"),
-            GatewayState::Connected => write!(f, "Connected"),
             GatewayState::Running { .. } => write!(f, "Running"),
-            GatewayState::ShuttingDown { .. } => write!(f, "ShuttingDown"),
         }
     }
 }
@@ -903,8 +896,7 @@ impl Gateway {
         &self,
     ) -> std::result::Result<LightningContext, LightningRpcError> {
         match self.get_state().await {
-            GatewayState::Running { lightning_context }
-            | GatewayState::ShuttingDown { lightning_context } => Ok(lightning_context),
+            GatewayState::Running { lightning_context } => Ok(lightning_context),
             _ => Err(LightningRpcError::FailedToConnect),
         }
     }
