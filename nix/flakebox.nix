@@ -856,6 +856,7 @@ in
       packages = [
         "fedimint-gateway-server"
         "fedimint-gatewayv2-server"
+        "fedimint-gatewayv2-cli"
         "fedimint-gateway-client"
       ];
     };
@@ -911,6 +912,10 @@ in
     gatewaydv2 = pickBinary {
       pkg = gateway-pkgs;
       bin = "gatewaydv2";
+    };
+    gatewaydv2-cli = pickBinary {
+      pkg = gateway-pkgs;
+      bin = "gatewaydv2-cli";
     };
     gateway-cli = pickBinary {
       pkg = gateway-pkgs;

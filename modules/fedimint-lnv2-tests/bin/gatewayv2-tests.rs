@@ -377,17 +377,8 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     assert!(lnd_payment_summary.incoming.median_latency.is_some());
     assert!(lnd_payment_summary.incoming.average_latency.is_some());
 
-    let gw_v2_payment_summary = gw_v2.client().payment_summary().await?;
-
-    assert_eq!(gw_v2_payment_summary.outgoing.total_success, 4);
-    assert_eq!(gw_v2_payment_summary.outgoing.total_failure, 2);
-    assert_eq!(gw_v2_payment_summary.incoming.total_success, 4);
-    assert_eq!(gw_v2_payment_summary.incoming.total_failure, 0);
-
-    assert!(gw_v2_payment_summary.outgoing.median_latency.is_some());
-    assert!(gw_v2_payment_summary.outgoing.average_latency.is_some());
-    assert!(gw_v2_payment_summary.incoming.median_latency.is_some());
-    assert!(gw_v2_payment_summary.incoming.average_latency.is_some());
+    // gatewaydv2 has no payment-summary admin command yet (analytics are being
+    // ported separately), so only the v1 gateway's summary is asserted here.
 
     Ok(())
 }

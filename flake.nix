@@ -505,6 +505,7 @@
           inherit (craneMultiBuild)
             gatewayd
             gatewaydv2
+            gatewaydv2-cli
             fedimint-dbtool
             gateway-cli
             fedimint-cli

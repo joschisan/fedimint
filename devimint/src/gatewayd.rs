@@ -27,7 +27,6 @@ use fedimint_testing_core::node_type::LightningNodeType;
 use semver::Version;
 use tracing::info;
 
-use crate::cmd;
 use crate::envs::{
     FM_GATEWAY_API_ADDR_ENV, FM_GATEWAY_DATA_DIR_ENV, FM_GATEWAY_IROH_LISTEN_ADDR_ENV,
     FM_GATEWAY_LISTEN_ADDR_ENV, FM_GATEWAY_METRICS_LISTEN_ADDR_ENV, FM_PORT_LDK_ENV,
@@ -35,9 +34,12 @@ use crate::envs::{
 };
 use crate::external::{Bitcoind, LightningNode};
 use crate::federation::Federation;
-use crate::util::{Command, ProcessHandle, ProcessManager, poll, poll_with_timeout};
+use crate::util::{
+    Command, ProcessHandle, ProcessManager, get_gatewayv2_cli_path, poll, poll_with_timeout,
+};
 use crate::vars::utf8;
 use crate::version_constants::{VERSION_0_10_0_ALPHA, VERSION_0_11_0_ALPHA};
+use crate::{cmd, gatewaydv2};
 
 #[derive(Debug, Clone)]
 pub struct GatewayClient {
@@ -45,6 +47,13 @@ pub struct GatewayClient {
     iroh_node_id: iroh_base::NodeId,
     password: Option<String>,
     use_iroh: bool,
+    /// Data directory of the gateway daemon, used to locate the
+    /// `gatewaydv2-cli` admin Unix socket for v2 gateways.
+    data_dir: PathBuf,
+    /// Whether this is a `gatewaydv2` (LDK + LNv2 only) gateway, which is
+    /// driven through the picomint-style `gatewaydv2-cli` admin CLI over a
+    /// Unix socket instead of the v1 HTTP `gateway-cli`.
+    v2: bool,
 }
 
 impl<'a> GatewayClient {
@@ -54,6 +63,8 @@ impl<'a> GatewayClient {
             iroh_node_id: gw.node_id,
             password: None,
             use_iroh: false,
+            data_dir: gw.data_dir.clone(),
+            v2: gw.v2,
         }
     }
 
@@ -119,6 +130,10 @@ impl<'a> GatewayClient {
     }
 
     pub async fn lightning_pubkey(&self) -> Result<PublicKey> {
+        if self.v2 {
+            return Ok(gatewaydv2::info(&self.data_dir).await?.lightning_pk);
+        }
+
         let info = self.get_info().await?;
         let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
         let lightning_pub_key = if gateway_cli_version < *VERSION_0_10_0_ALPHA {
@@ -138,10 +153,16 @@ impl<'a> GatewayClient {
 
     pub async fn connect_fed(&self, invite_code: String) -> Result<serde_json::Value> {
         let fed_info = poll("gateway connect-fed", || async {
-            let value = cmd!(self, "connect-fed", invite_code.clone())
-                .out_json()
-                .await
-                .map_err(ControlFlow::Continue)?;
+            let value = if self.v2 {
+                gatewaydv2::federation_join(&self.data_dir, &invite_code)
+                    .await
+                    .map_err(ControlFlow::Continue)?
+            } else {
+                cmd!(self, "connect-fed", invite_code.clone())
+                    .out_json()
+                    .await
+                    .map_err(ControlFlow::Continue)?
+            };
             Ok(value)
         })
         .await?;
@@ -172,6 +193,10 @@ impl<'a> GatewayClient {
     }
 
     pub async fn get_pegin_addr(&self, fed_id: &str) -> Result<String> {
+        if self.v2 {
+            return gatewaydv2::wallet_receive_address(&self.data_dir, fed_id).await;
+        }
+
         let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
         if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
             // New format: JSON object with "address" field
@@ -194,6 +219,10 @@ impl<'a> GatewayClient {
     }
 
     pub async fn get_ln_onchain_address(&self) -> Result<String> {
+        if self.v2 {
+            return gatewaydv2::onchain_receive_address(&self.data_dir).await;
+        }
+
         let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
         if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
             // New format: JSON object with "address" field
@@ -228,6 +257,10 @@ impl<'a> GatewayClient {
     }
 
     pub async fn create_invoice(&self, amount_msats: u64) -> Result<Bolt11Invoice> {
+        if self.v2 {
+            return gatewaydv2::ln_receive(&self.data_dir, amount_msats).await;
+        }
+
         let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
         let invoice_str = if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
             // New format: JSON object with "invoice" field
@@ -248,6 +281,10 @@ impl<'a> GatewayClient {
     }
 
     pub async fn pay_invoice(&self, invoice: Bolt11Invoice) -> Result<()> {
+        if self.v2 {
+            return gatewaydv2::ln_send(&self.data_dir, &invoice).await;
+        }
+
         cmd!(self, "lightning", "pay-invoice", invoice.to_string())
             .run()
             .await?;
@@ -288,6 +325,10 @@ impl<'a> GatewayClient {
     }
 
     pub async fn ecash_balance(&self, federation_id: String) -> anyhow::Result<u64> {
+        if self.v2 {
+            return gatewaydv2::federation_balance(&self.data_dir, &federation_id).await;
+        }
+
         let federation_id = FederationId::from_str(&federation_id)?;
         let balances = self.get_balances().await?;
         let ecash_balance = balances
@@ -386,6 +427,18 @@ impl<'a> GatewayClient {
         push_amount_sats: Option<u64>,
     ) -> Result<Txid> {
         let pubkey = gw.client().lightning_pubkey().await?;
+
+        if self.v2 {
+            return gatewaydv2::channel_open(
+                &self.data_dir,
+                pubkey,
+                &gw.lightning_node_addr,
+                channel_size_sats,
+                push_amount_sats.unwrap_or(0),
+            )
+            .await;
+        }
+
         let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
 
         let txid_str = if gateway_cli_version >= *VERSION_0_11_0_ALPHA {
@@ -455,6 +508,10 @@ impl<'a> GatewayClient {
     }
 
     pub async fn list_channels(&self) -> Result<Vec<ChannelInfo>> {
+        if self.v2 {
+            return gatewaydv2::channel_list(&self.data_dir).await;
+        }
+
         let channels = cmd!(self, "lightning", "list-channels").out_json().await?;
 
         let channels = channels
@@ -512,6 +569,20 @@ impl<'a> GatewayClient {
     }
 
     pub async fn wait_for_block_height(&self, target_block_height: u64) -> Result<()> {
+        if self.v2 {
+            poll("waiting for block height", || async {
+                let info = gatewaydv2::info(&self.data_dir)
+                    .await
+                    .map_err(ControlFlow::Continue)?;
+                if info.block_height >= target_block_height && info.synced_to_chain {
+                    return Ok(());
+                }
+                Err(ControlFlow::Continue(anyhow!("Not synced to block")))
+            })
+            .await?;
+            return Ok(());
+        }
+
         let gateway_cli_version = crate::util::GatewayCli::version_or_default().await;
         poll("waiting for block height", || async {
             let info = self.get_info().await.map_err(ControlFlow::Continue)?;
@@ -780,6 +851,13 @@ pub struct Gatewayd {
     pub iroh_port: u16,
     pub node_id: iroh_base::NodeId,
     pub gateway_index: usize,
+    /// The gateway's data directory (`FM_GATEWAY_DATA_DIR`), used to locate the
+    /// `gatewaydv2-cli` admin Unix socket for v2 gateways.
+    pub data_dir: PathBuf,
+    /// Whether this is the `gatewaydv2` (LDK + LNv2 only) daemon, driven
+    /// through the `gatewaydv2-cli` admin CLI instead of the v1 HTTP
+    /// `gateway-cli`.
+    pub v2: bool,
 }
 
 impl Gatewayd {
@@ -828,6 +906,7 @@ impl Gatewayd {
             ),
         };
         let test_dir = &process_mgr.globals.FM_TEST_DIR;
+        let data_dir = format!("{}/{gw_name}", utf8(test_dir));
         let addr = format!("http://127.0.0.1:{port}/{V1_API_ENDPOINT}");
         let lightning_node_addr = format!("127.0.0.1:{lightning_node_port}");
         let iroh_endpoint = process_mgr
@@ -838,10 +917,7 @@ impl Gatewayd {
             .expect("No gateway for index");
 
         let mut gateway_env: HashMap<String, String> = HashMap::from_iter([
-            (
-                FM_GATEWAY_DATA_DIR_ENV.to_owned(),
-                format!("{}/{gw_name}", utf8(test_dir)),
-            ),
+            (FM_GATEWAY_DATA_DIR_ENV.to_owned(), data_dir.clone()),
             (
                 FM_GATEWAY_LISTEN_ADDR_ENV.to_owned(),
                 format!("127.0.0.1:{port}"),
@@ -898,6 +974,21 @@ impl Gatewayd {
             "waiting for gateway to be ready to respond to rpc",
             timeout,
             || async {
+                if v2 {
+                    // gatewaydv2 is driven through the `gatewaydv2-cli` admin CLI
+                    // over its Unix socket. It has no gateway identity key and
+                    // registers no pubkey, so `info` responding over the socket is
+                    // sufficient readiness. Nothing reads a gatewaydv2 gateway id.
+                    let mut argv = get_gatewayv2_cli_path();
+                    argv.push("--data-dir".to_string());
+                    argv.push(data_dir.clone());
+                    cmd!(argv, "info")
+                        .out_json()
+                        .await
+                        .map_err(ControlFlow::Continue)?;
+                    return Ok((String::new(), None));
+                }
+
                 // Once the gateway id is available via RPC, the gateway is ready
                 let info = cmd!(
                     crate::util::get_gateway_cli_path(),
@@ -910,12 +1001,7 @@ impl Gatewayd {
                 .out_json()
                 .await
                 .map_err(ControlFlow::Continue)?;
-                let (gateway_id, iroh_gateway_id) = if v2 {
-                    // gatewaydv2 has no gateway identity key and registers no
-                    // pubkey, so the `info` RPC responding is sufficient
-                    // readiness. Nothing reads a gatewaydv2 gateway id.
-                    (String::new(), None)
-                } else if gatewayd_version < *VERSION_0_10_0_ALPHA {
+                let (gateway_id, iroh_gateway_id) = if gatewayd_version < *VERSION_0_10_0_ALPHA {
                     let gateway_id = info["gateway_id"]
                         .as_str()
                         .context("gateway_id must be a string")
@@ -963,6 +1049,8 @@ impl Gatewayd {
             iroh_port: iroh_endpoint.port(),
             node_id: iroh_endpoint.node_id(),
             gateway_index,
+            data_dir: PathBuf::from(data_dir),
+            v2,
         };
 
         Ok(gatewayd)

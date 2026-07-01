@@ -2457,6 +2457,7 @@ dependencies = [
  "fedimint-connectors",
  "fedimint-core",
  "fedimint-gateway-common",
+ "fedimint-gatewayv2-cli-core",
  "fedimint-ln-client",
  "fedimint-ln-server",
  "fedimint-lnv2-client",

@@ -588,6 +588,14 @@ pub fn get_gateway_cli_path() -> Vec<String> {
     )
 }
 
+const GATEWAYV2_CLI_FALLBACK: &str = "gatewaydv2-cli";
+
+/// Resolver for the `gatewaydv2-cli` binary, the picomint-style admin CLI that
+/// drives the `gatewaydv2` daemon over its Unix socket.
+pub fn get_gatewayv2_cli_path() -> Vec<String> {
+    get_command_str_for_alias(&[], &[GATEWAYV2_CLI_FALLBACK])
+}
+
 const LOAD_TEST_TOOL_FALLBACK: &str = "fedimint-load-test-tool";
 
 const LNCLI_FALLBACK: &str = "lncli";
