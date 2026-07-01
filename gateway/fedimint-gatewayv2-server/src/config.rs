@@ -4,64 +4,44 @@ use std::path::PathBuf;
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use fedimint_core::util::SafeUrl;
-use fedimint_gateway_common::LightningMode;
 use fedimint_lnv2_common::gateway_api::PaymentFee;
 
 use super::envs;
-use crate::envs::{
-    FM_BITCOIND_PASSWORD_ENV, FM_BITCOIND_URL_ENV, FM_BITCOIND_USERNAME_ENV, FM_ESPLORA_URL_ENV,
-};
+use crate::envs::{FM_BITCOIND_URL_ENV, FM_ESPLORA_URL_ENV};
 
-/// Command line parameters for starting the gateway. `mode`, `data_dir`,
-/// `listen`, and `api_addr` are all required.
+/// Command line parameters for starting the gateway. `gatewaydv2` is LDK + LNv2
+/// only, so there is no lightning-backend subcommand.
 #[derive(Parser)]
 #[command(version)]
-#[command(
-    group(
-        ArgGroup::new("bitcoind_password_auth")
-           .args(["bitcoind_password"])
-           .multiple(false)
-    ),
-    group(
-        ArgGroup::new("bitcoind_auth")
-            .args(["bitcoind_url"])
-            .requires("bitcoind_password_auth")
-            .requires_all(["bitcoind_username", "bitcoind_url"])
-    ),
-    group(
-        ArgGroup::new("bitcoin_rpc")
-            .required(true)
-            .multiple(true)
-            .args(["bitcoind_url", "esplora_url"])
-    )
-)]
+#[command(group(
+    ArgGroup::new("bitcoin_rpc")
+        .required(true)
+        .multiple(true)
+        .args(["bitcoind_url", "esplora_url"])
+))]
 pub struct GatewayOpts {
-    #[clap(subcommand)]
-    pub mode: LightningMode,
-
     /// Path to folder containing gateway config and data files
-    #[arg(long = "data-dir", env = envs::FM_GATEWAY_DATA_DIR_ENV)]
+    #[arg(long = "data-dir", env = envs::FM_DATA_DIR_ENV)]
     pub data_dir: PathBuf,
 
-    /// Gateway webserver listen address
-    #[arg(long = "listen", env = envs::FM_GATEWAY_LISTEN_ADDR_ENV)]
-    listen: SocketAddr,
+    /// Address the gateway's API webserver (the LNv2 routes) listens on.
+    #[arg(long = "api-addr", env = envs::FM_API_ADDR_ENV, default_value = "0.0.0.0:8080")]
+    api_addr: SocketAddr,
+
+    /// Address and port for the LDK node's lightning P2P (BOLT) interface.
+    #[arg(long = "ldk-addr", env = envs::FM_LDK_ADDR_ENV, default_value = "0.0.0.0:9735")]
+    ldk_addr: SocketAddr,
+
+    /// The LDK node's advertised alias.
+    #[arg(long = "ldk-alias", env = envs::FM_LDK_ALIAS_ENV, default_value = "")]
+    ldk_alias: String,
 
     /// Bitcoin network this gateway will be running on
-    #[arg(long = "network", env = envs::FM_GATEWAY_NETWORK_ENV)]
+    #[arg(long = "network", env = envs::FM_NETWORK_ENV, default_value = "bitcoin")]
     network: Network,
 
-    /// The username to use when connecting to bitcoind
-    #[arg(long, env = FM_BITCOIND_USERNAME_ENV)]
-    pub bitcoind_username: Option<String>,
-
-    /// The password to use when connecting to bitcoind
-    #[arg(long, env = FM_BITCOIND_PASSWORD_ENV)]
-    pub bitcoind_password: Option<String>,
-
-    /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
-    /// This should not include authentication parameters, they should be
-    /// included in `FM_BITCOIND_USERNAME` and `FM_BITCOIND_PASSWORD`
+    /// Bitcoind RPC URL with credentials embedded in the URL, e.g.
+    /// `http://user:pass@127.0.0.1:8332`.
     #[arg(long, env = FM_BITCOIND_URL_ENV)]
     pub bitcoind_url: Option<SafeUrl>,
 
@@ -83,7 +63,9 @@ impl GatewayOpts {
     /// uses to store runtime parameters.
     pub fn to_gateway_parameters(&self) -> anyhow::Result<GatewayParameters> {
         Ok(GatewayParameters {
-            listen: self.listen,
+            listen: self.api_addr,
+            ldk_addr: self.ldk_addr,
+            ldk_alias: self.ldk_alias.clone(),
             network: self.network,
             default_routing_fees: self.default_routing_fees,
             default_transaction_fees: self.default_transaction_fees,
@@ -97,6 +79,8 @@ impl GatewayOpts {
 #[derive(Debug)]
 pub struct GatewayParameters {
     pub listen: SocketAddr,
+    pub ldk_addr: SocketAddr,
+    pub ldk_alias: String,
     pub network: Network,
     pub default_routing_fees: PaymentFee,
     pub default_transaction_fees: PaymentFee,

@@ -950,11 +950,18 @@ impl Gatewayd {
         // here.
 
         let process = if v2 {
+            // gatewaydv2 uses the stripped (no `FM_GATEWAY_` prefix) env names and
+            // has no lightning-backend subcommand (it is LDK-only). Bitcoind /
+            // esplora config is inherited from the globally exported env.
+            gateway_env.insert("FM_DATA_DIR".to_owned(), data_dir.clone());
+            gateway_env.insert("FM_API_ADDR".to_owned(), format!("127.0.0.1:{port}"));
+            gateway_env.insert("FM_LDK_ADDR".to_owned(), lightning_node_addr.clone());
+            gateway_env.insert(
+                "FM_NETWORK".to_owned(),
+                process_mgr.globals.FM_GATEWAY_NETWORK.clone(),
+            );
             process_mgr
-                .spawn_daemon(
-                    &gw_name,
-                    cmd!(crate::util::GatewaydV2, ln_type).envs(gateway_env),
-                )
+                .spawn_daemon(&gw_name, cmd!(crate::util::GatewaydV2).envs(gateway_env))
                 .await?
         } else {
             process_mgr

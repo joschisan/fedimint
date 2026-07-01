@@ -1,26 +1,27 @@
 /// Environment variable that specifies the directory of the gateway's database.
-pub const FM_GATEWAY_DATA_DIR_ENV: &str = "FM_GATEWAY_DATA_DIR";
+pub const FM_DATA_DIR_ENV: &str = "FM_DATA_DIR";
 
-/// Environment variable that specifies the address the gateway's HTTP server
-/// should listen on.
-pub const FM_GATEWAY_LISTEN_ADDR_ENV: &str = "FM_GATEWAY_LISTEN_ADDR";
+/// Environment variable that specifies the address the gateway's API webserver
+/// (the LNv2 routes) should listen on.
+pub const FM_API_ADDR_ENV: &str = "FM_API_ADDR";
+
+/// Environment variable that specifies the address and port for the LDK node's
+/// lightning P2P (BOLT) interface.
+pub const FM_LDK_ADDR_ENV: &str = "FM_LDK_ADDR";
+
+/// Environment variable that specifies the LDK node's advertised alias.
+pub const FM_LDK_ALIAS_ENV: &str = "FM_LDK_ALIAS";
 
 /// Environment variable that specifies that Bitcoin network that the gateway
 /// should use. Must match the network of the Lightning node.
-pub const FM_GATEWAY_NETWORK_ENV: &str = "FM_GATEWAY_NETWORK";
+pub const FM_NETWORK_ENV: &str = "FM_NETWORK";
 
 /// Environment variable that instructs the gateway to skip waiting for the
 /// bitcoin node to sync to the chain.
-pub const FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV: &str = "FM_GATEWAY_SKIP_WAIT_FOR_SYNC";
+pub const FM_SKIP_WAIT_FOR_SYNC_ENV: &str = "FM_SKIP_WAIT_FOR_SYNC";
 
-/// The username to use when connecting to a bitcoin node over RPC
-pub const FM_BITCOIND_USERNAME_ENV: &str = "FM_BITCOIND_USERNAME";
-
-/// The password to use when connecting to a bitcoin node over RPC
-pub const FM_BITCOIND_PASSWORD_ENV: &str = "FM_BITCOIND_PASSWORD";
-
-/// The URL to use when connecting to a bitcoin node over RPC.
-/// Should not include authentication parameters: (e.g `http://127.0.0.1:8332`)
+/// The URL to use when connecting to a bitcoin node over RPC, with credentials
+/// embedded in the URL (e.g. `http://user:pass@127.0.0.1:8332`).
 pub const FM_BITCOIND_URL_ENV: &str = "FM_BITCOIND_URL";
 
 /// The URL to use when connecting to an Esplora server for bitcoin blockchain

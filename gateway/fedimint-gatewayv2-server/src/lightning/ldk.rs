@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -104,7 +105,7 @@ pub(crate) fn build_ldk_node(
     data_dir: &Path,
     chain_source: &ChainSource,
     network: Network,
-    lightning_port: u16,
+    ldk_addr: SocketAddr,
     alias: String,
     mnemonic: Mnemonic,
     runtime: Arc<tokio::runtime::Runtime>,
@@ -120,12 +121,20 @@ pub(crate) fn build_ldk_node(
     bytes[..truncated.len()].copy_from_slice(truncated);
     let node_alias = Some(NodeAlias(bytes));
 
+    let listening_address = match ldk_addr {
+        SocketAddr::V4(addr) => SocketAddress::TcpIpV4 {
+            addr: addr.ip().octets(),
+            port: addr.port(),
+        },
+        SocketAddr::V6(addr) => SocketAddress::TcpIpV6 {
+            addr: addr.ip().octets(),
+            port: addr.port(),
+        },
+    };
+
     let mut node_builder = ldk_node::Builder::from_config(ldk_node::config::Config {
         network,
-        listening_addresses: Some(vec![SocketAddress::TcpIpV4 {
-            addr: [0, 0, 0, 0],
-            port: lightning_port,
-        }]),
+        listening_addresses: Some(vec![listening_address]),
         node_alias,
         ..Default::default()
     });

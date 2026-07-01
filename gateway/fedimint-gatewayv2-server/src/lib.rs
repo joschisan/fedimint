@@ -41,7 +41,7 @@ use clap::Parser;
 use client::GatewayClientBuilder;
 use config::GatewayOpts;
 pub use config::GatewayParameters;
-use envs::FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV;
+use envs::FM_SKIP_WAIT_FOR_SYNC_ENV;
 use federation_manager::FederationManager;
 use fedimint_bip39::{Bip39RootSecretStrategy, Mnemonic};
 use fedimint_client::ClientHandleArc;
@@ -59,14 +59,13 @@ use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_core::task::{TaskGroup, TaskShutdownToken, sleep};
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::backoff_util::fibonacci_max_one_hour;
-use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, Spanned, retry};
+use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned, retry};
 use fedimint_core::{Amount, fedimint_build_code_version_env, get_network_for_address};
 use fedimint_gateway_common::{
     ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
     CreateInvoiceForOperatorPayload, DepositAddressPayload, GatewayFedConfig, LeaveFedPayload,
-    LightningMode, OpenChannelRequest, PayInvoiceForOperatorPayload, ReceiveEcashPayload,
-    ReceiveEcashResponse, SendOnchainRequest, SpendEcashPayload, SpendEcashResponse,
-    WithdrawResponse,
+    OpenChannelRequest, PayInvoiceForOperatorPayload, ReceiveEcashPayload, ReceiveEcashResponse,
+    SendOnchainRequest, SpendEcashPayload, SpendEcashResponse, WithdrawResponse,
 };
 use fedimint_gatewayv2_cli_core as cli;
 use fedimint_gwv2_client::{
@@ -112,8 +111,8 @@ pub struct Gateway {
     /// The gateway's federation manager.
     federation_manager: Arc<RwLock<FederationManager>>,
 
-    /// The LDK node's public lightning port.
-    lightning_port: u16,
+    /// The LDK node's lightning P2P (BOLT) listen address.
+    ldk_addr: SocketAddr,
 
     /// The LDK node's advertised alias.
     alias: String,
@@ -214,21 +213,15 @@ async fn withdraw_v2(
 }
 
 impl Gateway {
-    /// Builds the bitcoind chain source for the LDK node from the configured
-    /// RPC credentials. LDK uses bitcoind purely as a chain-data source via
-    /// node-level RPCs, so -- unlike v1 gatewayd -- no watch-only wallet is
-    /// created.
-    fn bitcoind_chain_source(opts: &GatewayOpts) -> ChainSource {
+    /// Builds the bitcoind chain source for the LDK node, reading the RPC
+    /// credentials embedded in the bitcoind URL (`http://user:pass@host:port`).
+    /// LDK uses bitcoind purely as a chain-data source via node-level RPCs, so
+    /// -- unlike v1 gatewayd -- no watch-only wallet is created.
+    fn bitcoind_chain_source(bitcoind_url: &SafeUrl) -> ChainSource {
         ChainSource::Bitcoind {
-            username: opts
-                .bitcoind_username
-                .clone()
-                .expect("FM_BITCOIND_URL is set but FM_BITCOIND_USERNAME is not"),
-            password: opts
-                .bitcoind_password
-                .clone()
-                .expect("FM_BITCOIND_URL is set but FM_BITCOIND_PASSWORD is not"),
-            server_url: opts.bitcoind_url.clone().expect("No bitcoind url set"),
+            username: bitcoind_url.username().to_string(),
+            password: bitcoind_url.password().unwrap_or_default().to_string(),
+            server_url: bitcoind_url.clone(),
         }
     }
 
@@ -258,7 +251,7 @@ impl Gateway {
         }
         let chain_source = match (opts.bitcoind_url.as_ref(), opts.esplora_url.as_ref()) {
             // Use bitcoind by default if both are set
-            (Some(_), _) => Self::bitcoind_chain_source(&opts),
+            (Some(url), _) => Self::bitcoind_chain_source(url),
             (None, Some(url)) => ChainSource::Esplora {
                 server_url: url.clone(),
             },
@@ -279,18 +272,8 @@ impl Gateway {
             "Starting gatewayd",
         );
 
-        let LightningMode::Ldk {
-            lightning_port,
-            alias,
-        } = opts.mode
-        else {
-            panic!("gatewaydv2 only supports the LDK lightning backend, not LND");
-        };
-
         Ok(Gateway::new(
-            lightning_port,
-            alias,
-            &gateway_parameters,
+            gateway_parameters,
             gateway_db,
             client_builder,
             chain_source,
@@ -300,15 +283,15 @@ impl Gateway {
     /// Assembles a [`Gateway`] from its parameters. The lightning node is not
     /// created here — it is built in [`Self::run`].
     fn new(
-        lightning_port: u16,
-        alias: String,
-        gateway_parameters: &GatewayParameters,
+        gateway_parameters: GatewayParameters,
         gateway_db: Database,
         client_builder: GatewayClientBuilder,
         chain_source: ChainSource,
     ) -> Gateway {
-        let &GatewayParameters {
+        let GatewayParameters {
             listen,
+            ldk_addr,
+            ldk_alias,
             network,
             default_routing_fees,
             default_transaction_fees,
@@ -319,8 +302,8 @@ impl Gateway {
 
         Self {
             federation_manager: Arc::new(RwLock::new(FederationManager::new())),
-            lightning_port,
-            alias,
+            ldk_addr,
+            alias: ldk_alias,
             lightning_node: None,
             outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
             pending_channels: Arc::new(RwLock::new(BTreeMap::new())),
@@ -399,7 +382,7 @@ impl Gateway {
             self.network,
         );
 
-        if info.synced_to_chain || is_env_var_set(FM_GATEWAY_SKIP_WAIT_FOR_SYNC_ENV) {
+        if info.synced_to_chain || is_env_var_set(FM_SKIP_WAIT_FOR_SYNC_ENV) {
             info!(target: LOG_GATEWAY, "Gateway is already synced to chain");
         } else {
             info!(target: LOG_GATEWAY, "Waiting for chain sync");
@@ -698,7 +681,7 @@ impl Gateway {
                 &self.client_builder.data_dir().join(LDK_NODE_DB_FOLDER),
                 &self.chain_source,
                 self.network,
-                self.lightning_port,
+                self.ldk_addr,
                 self.alias.clone(),
                 mnemonic.clone(),
                 runtime.clone(),
