@@ -13,8 +13,6 @@ pub mod ldk;
 
 use bitcoin::hashes::sha256;
 use fedimint_core::secp256k1::PublicKey;
-use fedimint_gateway_common::ChannelInfo;
-use fedimint_lightning::Preimage;
 pub use ldk::GatewayLdkClient;
 use serde::{Deserialize, Serialize};
 
@@ -25,11 +23,6 @@ pub struct GetNodeInfoResponse {
     pub network: String,
     pub block_height: u32,
     pub synced_to_chain: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct PayInvoiceResponse {
-    pub preimage: Preimage,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -44,31 +37,6 @@ pub struct CreateInvoiceRequest {
 pub enum InvoiceDescription {
     Direct(String),
     Hash(sha256::Hash),
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CreateInvoiceResponse {
-    pub invoice: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GetLnOnchainAddressResponse {
-    pub address: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SendOnchainResponse {
-    pub txid: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OpenChannelResponse {
-    pub funding_txid: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ListChannelsResponse {
-    pub channels: Vec<ChannelInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

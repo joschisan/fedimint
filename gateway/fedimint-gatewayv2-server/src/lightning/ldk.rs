@@ -1,14 +1,3 @@
-// These methods were previously implemented behind the `ILnRpcClient` trait,
-// where clippy exempts them from signature-shaped lints. They are now inherent
-// methods on `GatewayLdkClient`, but their shapes are deliberately preserved:
-// the `async`/`Result` surface is the lightning-client API the gateway awaits
-// and `?`s uniformly, and the by-value request structs mirror that API.
-#![allow(
-    clippy::unused_async,
-    clippy::needless_pass_by_value,
-    clippy::unnecessary_wraps
-)]
-
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::str::FromStr;
@@ -40,11 +29,7 @@ use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description};
 use tokio::sync::{RwLock, oneshot};
 use tracing::{debug, error, info, warn};
 
-use super::{
-    CreateInvoiceRequest, CreateInvoiceResponse, GetBalancesResponse, GetLnOnchainAddressResponse,
-    GetNodeInfoResponse, InvoiceDescription, ListChannelsResponse, OpenChannelResponse,
-    PayInvoiceResponse, SendOnchainResponse,
-};
+use super::{CreateInvoiceRequest, GetBalancesResponse, GetNodeInfoResponse, InvoiceDescription};
 
 /// Forwards `ldk-node`'s log records into the gateway's `tracing` subscriber.
 ///
@@ -142,7 +127,7 @@ impl GatewayLdkClient {
     /// There's no need to manually stop the node.
     pub fn new(
         data_dir: &Path,
-        chain_source: ChainSource,
+        chain_source: &ChainSource,
         network: Network,
         lightning_port: u16,
         alias: String,
@@ -198,7 +183,7 @@ impl GatewayLdkClient {
                 );
             }
             ChainSource::Esplora { server_url } => {
-                node_builder.set_chain_source_esplora(get_esplora_url(server_url)?, None);
+                node_builder.set_chain_source_esplora(get_esplora_url(&server_url)?, None);
             }
         }
         let Some(data_dir_str) = data_dir.to_str() else {
@@ -335,7 +320,7 @@ impl GatewayLdkClient {
     }
 
     /// Returns high-level info about the lightning node.
-    pub async fn info(&self) -> Result<GetNodeInfoResponse, LightningRpcError> {
+    pub fn info(&self) -> GetNodeInfoResponse {
         let node_status = self.node.status();
         let ldk_block_height = node_status.current_best_block.height;
         let onchain_sync = node_status.latest_onchain_wallet_sync_timestamp;
@@ -343,7 +328,7 @@ impl GatewayLdkClient {
         let is_running = node_status.is_running;
         debug!(target: LOG_LIGHTNING, ?onchain_sync, ?lightning_sync, ?is_running, "LDK Sync Status");
 
-        Ok(GetNodeInfoResponse {
+        GetNodeInfoResponse {
             pub_key: self.node.node_id(),
             alias: match self.node.node_alias() {
                 Some(alias) => alias.to_string(),
@@ -354,7 +339,7 @@ impl GatewayLdkClient {
             // `synced_to_chain` is used for determining if the Lightning node is ready, so we care
             // about the `lightning_sync` status.
             synced_to_chain: lightning_sync.is_some(),
-        })
+        }
     }
 
     /// Attempts to pay an invoice using the lightning node, waiting for the
@@ -364,10 +349,10 @@ impl GatewayLdkClient {
     /// flight it waits for that one to complete instead of starting another.
     pub async fn pay(
         &self,
-        invoice: Bolt11Invoice,
+        invoice: &Bolt11Invoice,
         max_delay: u64,
         max_fee: Amount,
-    ) -> Result<PayInvoiceResponse, LightningRpcError> {
+    ) -> Result<Preimage, LightningRpcError> {
         let payment_id = PaymentId(*invoice.payment_hash().as_byte_array());
 
         // Lock by the payment hash to prevent multiple simultaneous calls with the same
@@ -391,7 +376,7 @@ impl GatewayLdkClient {
                 self.node
                     .bolt11_payment()
                     .send(
-                        &invoice,
+                        invoice,
                         Some(SendingParameters {
                             max_total_routing_fee_msat: Some(Some(max_fee.msats)),
                             max_total_cltv_expiry_delta: Some(max_delay as u32),
@@ -422,9 +407,7 @@ impl GatewayLdkClient {
                             ..
                         } = payment_details.kind
                         {
-                            return Ok(PayInvoiceResponse {
-                                preimage: Preimage(preimage.0),
-                            });
+                            return Ok(Preimage(preimage.0));
                         }
                     }
                     PaymentStatus::Failed => {
@@ -438,13 +421,9 @@ impl GatewayLdkClient {
         }
     }
 
-    /// Completes an HTLC that was intercepted by the gateway. Must be called
-    /// for all successfully intercepted HTLCs sent to the stream returned
-    /// by [`Self::route_htlcs`].
-    pub async fn complete_htlc(
-        &self,
-        htlc: InterceptPaymentResponse,
-    ) -> Result<(), LightningRpcError> {
+    /// Settles or fails a claimable inbound payment on the lightning node,
+    /// per the [`PaymentAction`] in the response.
+    pub fn complete_htlc(&self, htlc: InterceptPaymentResponse) -> Result<(), LightningRpcError> {
         let InterceptPaymentResponse {
             action,
             payment_hash,
@@ -486,10 +465,10 @@ impl GatewayLdkClient {
     /// payment hash in the [`CreateInvoiceRequest`] determines if the invoice
     /// is intended to be an ecash payment or a direct payment to this
     /// lightning node.
-    pub async fn create_invoice(
+    pub fn create_invoice(
         &self,
         create_invoice_request: CreateInvoiceRequest,
-    ) -> Result<CreateInvoiceResponse, LightningRpcError> {
+    ) -> Result<String, LightningRpcError> {
         let payment_hash_or = if let Some(payment_hash) = create_invoice_request.payment_hash {
             let ph = PaymentHash(*payment_hash.as_byte_array());
             Some(ph)
@@ -528,22 +507,16 @@ impl GatewayLdkClient {
             failure_reason: e.to_string(),
         })?;
 
-        Ok(CreateInvoiceResponse {
-            invoice: invoice.to_string(),
-        })
+        Ok(invoice.to_string())
     }
 
     /// Gets a funding address belonging to the lightning node's on-chain
     /// wallet.
-    pub async fn get_ln_onchain_address(
-        &self,
-    ) -> Result<GetLnOnchainAddressResponse, LightningRpcError> {
+    pub fn get_ln_onchain_address(&self) -> Result<String, LightningRpcError> {
         self.node
             .onchain_payment()
             .new_address()
-            .map(|address| GetLnOnchainAddressResponse {
-                address: address.to_string(),
-            })
+            .map(|address| address.to_string())
             .map_err(|e| LightningRpcError::FailedToGetLnOnchainAddress {
                 failure_reason: e.to_string(),
             })
@@ -551,14 +524,14 @@ impl GatewayLdkClient {
 
     /// Executes an onchain transaction using the lightning node's on-chain
     /// wallet.
-    pub async fn send_onchain(
+    pub fn send_onchain(
         &self,
         SendOnchainRequest {
             address,
             amount,
             fee_rate_sats_per_vbyte,
         }: SendOnchainRequest,
-    ) -> Result<SendOnchainResponse, LightningRpcError> {
+    ) -> Result<String, LightningRpcError> {
         let onchain = self.node.onchain_payment();
 
         let retain_reserves = false;
@@ -578,9 +551,7 @@ impl GatewayLdkClient {
             failure_reason: e.to_string(),
         })?;
 
-        Ok(SendOnchainResponse {
-            txid: txid.to_string(),
-        })
+        Ok(txid.to_string())
     }
 
     /// Opens a channel with a peer lightning node.
@@ -595,7 +566,7 @@ impl GatewayLdkClient {
             base_fee_msat,
             parts_per_million,
         }: OpenChannelRequest,
-    ) -> Result<OpenChannelResponse, LightningRpcError> {
+    ) -> Result<String, LightningRpcError> {
         let push_amount_msats_or = if push_amount_sats == 0 {
             None
         } else {
@@ -665,13 +636,7 @@ impl GatewayLdkClient {
             .map_err(|err| LightningRpcError::FailedToOpenChannel {
                 failure_reason: err.to_string(),
             })? {
-            Ok(outpoint) => {
-                let funding_txid = outpoint.txid;
-
-                Ok(OpenChannelResponse {
-                    funding_txid: funding_txid.to_string(),
-                })
-            }
+            Ok(outpoint) => Ok(outpoint.txid.to_string()),
             Err(err) => Err(LightningRpcError::FailedToOpenChannel {
                 failure_reason: err.to_string(),
             }),
@@ -679,14 +644,12 @@ impl GatewayLdkClient {
     }
 
     /// Closes all channels with a peer lightning node.
-    pub async fn close_channels_with_peer(
+    pub fn close_channels_with_peer(
         &self,
-        CloseChannelsWithPeerRequest {
-            pubkey,
-            force,
-            sats_per_vbyte: _,
-        }: CloseChannelsWithPeerRequest,
-    ) -> Result<CloseChannelsWithPeerResponse, LightningRpcError> {
+        request: &CloseChannelsWithPeerRequest,
+    ) -> CloseChannelsWithPeerResponse {
+        let pubkey = request.pubkey;
+        let force = request.force;
         let mut num_channels_closed = 0;
 
         info!(%pubkey, "Closing all channels with peer");
@@ -722,13 +685,13 @@ impl GatewayLdkClient {
             }
         }
 
-        Ok(CloseChannelsWithPeerResponse {
+        CloseChannelsWithPeerResponse {
             num_channels_closed,
-        })
+        }
     }
 
     /// Lists the lightning node's active channels with all peers.
-    pub async fn list_channels(&self) -> Result<ListChannelsResponse, LightningRpcError> {
+    pub fn list_channels(&self) -> Vec<ChannelInfo> {
         let mut channels = Vec::new();
         let network_graph = self.node.network_graph();
 
@@ -774,17 +737,13 @@ impl GatewayLdkClient {
             });
         }
 
-        Ok(ListChannelsResponse { channels })
+        channels
     }
 
     /// Connects to a lightning peer, persisting the connection so the node
     /// reconnects on restart.
-    pub async fn connect_peer(
-        &self,
-        node_id: PublicKey,
-        host: String,
-    ) -> Result<(), LightningRpcError> {
-        let address = SocketAddress::from_str(&host).map_err(|e| {
+    pub fn connect_peer(&self, node_id: PublicKey, host: &str) -> Result<(), LightningRpcError> {
+        let address = SocketAddress::from_str(host).map_err(|e| {
             LightningRpcError::FailedToConnectToPeer {
                 failure_reason: e.to_string(),
             }
@@ -797,7 +756,7 @@ impl GatewayLdkClient {
     }
 
     /// Disconnects from a lightning peer.
-    pub async fn disconnect_peer(&self, node_id: PublicKey) -> Result<(), LightningRpcError> {
+    pub fn disconnect_peer(&self, node_id: PublicKey) -> Result<(), LightningRpcError> {
         self.node
             .disconnect(node_id)
             .map_err(|e| LightningRpcError::FailedToConnectToPeer {
@@ -806,7 +765,7 @@ impl GatewayLdkClient {
     }
 
     /// Lists the node's lightning peers as `(node_id, address, is_connected)`.
-    pub async fn list_peers(&self) -> Vec<(PublicKey, String, bool)> {
+    pub fn list_peers(&self) -> Vec<(PublicKey, String, bool)> {
         self.node
             .list_peers()
             .into_iter()
@@ -816,7 +775,7 @@ impl GatewayLdkClient {
 
     /// Returns a summary of the lightning node's balance, including the onchain
     /// wallet, outbound liquidity, and inbound liquidity.
-    pub async fn get_balances(&self) -> Result<GetBalancesResponse, LightningRpcError> {
+    pub fn get_balances(&self) -> GetBalancesResponse {
         let balances = self.node.list_balances();
         let channel_lists = self
             .node
@@ -830,18 +789,17 @@ impl GatewayLdkClient {
             .map(|channel| channel.inbound_capacity_msat)
             .sum();
 
-        Ok(GetBalancesResponse {
+        GetBalancesResponse {
             onchain_balance_sats: balances.total_onchain_balance_sats,
             lightning_balance_msats: balances.total_lightning_balance_sats * 1000,
             inbound_lightning_liquidity_msats: total_inbound_liquidity_balance_msat,
-        })
+        }
     }
 
-    pub fn sync_wallet(&self) -> Result<(), LightningRpcError> {
+    pub fn sync_wallet(&self) {
         block_in_place(|| {
             let _ = self.node.sync_wallets();
         });
-        Ok(())
     }
 
     /// Waits for the lightning node to be synced to the Bitcoin blockchain.
@@ -850,7 +808,7 @@ impl GatewayLdkClient {
         // than background sync would. In production, background sync is
         // sufficient
         if is_env_var_set(FM_IN_DEVIMINT_ENV) {
-            self.sync_wallet()?;
+            self.sync_wallet();
         }
 
         // Wait for the Lightning node to sync
@@ -858,7 +816,7 @@ impl GatewayLdkClient {
             "Wait for chain sync",
             backoff_util::background_backoff(),
             || async {
-                let info = self.info().await?;
+                let info = self.info();
                 let block_height = info.block_height;
                 if info.synced_to_chain {
                     Ok(())
@@ -885,7 +843,7 @@ impl GatewayLdkClient {
 ///
 /// To handle this, we explicitly construct the esplora URL when a port is
 /// specified.
-fn get_esplora_url(server_url: SafeUrl) -> anyhow::Result<String> {
+fn get_esplora_url(server_url: &SafeUrl) -> anyhow::Result<String> {
     // Esplora client cannot handle trailing slashes
     let host = server_url
         .host_str()

@@ -105,7 +105,7 @@ fn router(gateway: Arc<Gateway>) -> Router {
 // --- top-level ---
 
 async fn info(Extension(gateway): Extension<Arc<Gateway>>) -> Result<Json<Value>, GatewayError> {
-    let node = gateway.ldk().info().await?;
+    let node = gateway.ldk().info();
     Ok(Json(json!(cli::InfoResponse {
         lightning_pk: node.pub_key,
         api_url: gateway.api_url.clone(),
@@ -129,10 +129,9 @@ async fn mnemonic(
 async fn ldk_balances(
     Extension(gateway): Extension<Arc<Gateway>>,
 ) -> Result<Json<Value>, GatewayError> {
-    let balances = gateway.ldk().get_balances().await?;
-    let channels = gateway.ldk().list_channels().await?;
+    let balances = gateway.ldk().get_balances();
+    let channels = gateway.ldk().list_channels();
     let total_outbound_capacity_msat = channels
-        .channels
         .iter()
         .map(|channel| channel.outbound_liquidity_sats * 1000)
         .sum();
@@ -146,7 +145,7 @@ async fn ldk_balances(
 async fn ldk_onchain_receive(
     Extension(gateway): Extension<Arc<Gateway>>,
 ) -> Result<Json<Value>, GatewayError> {
-    let address = gateway.handle_get_ln_onchain_address_msg().await?;
+    let address = gateway.handle_get_ln_onchain_address_msg()?;
     Ok(Json(json!(cli::LdkOnchainReceiveResponse {
         address: address.into_unchecked(),
     })))
@@ -156,13 +155,11 @@ async fn ldk_onchain_send(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkOnchainSendRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    let txid = gateway
-        .handle_send_onchain_msg(SendOnchainRequest {
-            address: req.address,
-            amount: BitcoinAmountOrAll::Amount(req.amount),
-            fee_rate_sats_per_vbyte: req.sat_per_vbyte,
-        })
-        .await?;
+    let txid = gateway.handle_send_onchain_msg(&SendOnchainRequest {
+        address: req.address,
+        amount: BitcoinAmountOrAll::Amount(req.amount),
+        fee_rate_sats_per_vbyte: req.sat_per_vbyte,
+    })?;
     Ok(Json(json!(cli::LdkOnchainSendResponse { txid })))
 }
 
@@ -190,13 +187,11 @@ async fn ldk_channel_close(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkChannelCloseRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    let response = gateway
-        .handle_close_channels_with_peer_msg(CloseChannelsWithPeerRequest {
-            pubkey: req.pubkey,
-            force: req.force,
-            sats_per_vbyte: req.sat_per_vbyte,
-        })
-        .await?;
+    let response = gateway.handle_close_channels_with_peer_msg(&CloseChannelsWithPeerRequest {
+        pubkey: req.pubkey,
+        force: req.force,
+        sats_per_vbyte: req.sat_per_vbyte,
+    });
     Ok(Json(json!(cli::LdkChannelCloseResponse {
         num_channels_closed: response.num_channels_closed,
     })))
@@ -207,7 +202,6 @@ async fn ldk_channel_list(
 ) -> Result<Json<Value>, GatewayError> {
     let channels = gateway
         .handle_list_channels_msg()
-        .await?
         .into_iter()
         .map(|channel| cli::ChannelInfo {
             remote_pubkey: channel.remote_pubkey,
@@ -229,13 +223,12 @@ async fn ldk_ln_receive(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkLnReceiveRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    let invoice = gateway
-        .handle_create_invoice_for_operator_msg(CreateInvoiceForOperatorPayload {
+    let invoice =
+        gateway.handle_create_invoice_for_operator_msg(CreateInvoiceForOperatorPayload {
             amount_msats: req.amount_msat,
             expiry_secs: req.expiry_secs,
             description: req.description,
-        })
-        .await?;
+        })?;
     Ok(Json(json!(cli::LdkLnReceiveResponse {
         invoice: invoice.to_string(),
     })))
@@ -259,7 +252,7 @@ async fn ldk_peer_connect(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkPeerConnectRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    gateway.ldk().connect_peer(req.pubkey, req.host).await?;
+    gateway.ldk().connect_peer(req.pubkey, &req.host)?;
     Ok(Json(json!(())))
 }
 
@@ -267,7 +260,7 @@ async fn ldk_peer_disconnect(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkPeerDisconnectRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    gateway.ldk().disconnect_peer(req.pubkey).await?;
+    gateway.ldk().disconnect_peer(req.pubkey)?;
     Ok(Json(json!(())))
 }
 
@@ -277,7 +270,6 @@ async fn ldk_peer_list(
     let peers = gateway
         .ldk()
         .list_peers()
-        .await
         .into_iter()
         .map(|(node_id, address, is_connected)| cli::PeerInfo {
             node_id,

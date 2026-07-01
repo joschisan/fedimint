@@ -448,7 +448,7 @@ impl Gateway {
     /// Asserts the LDK node is on the configured Bitcoin network and waits for
     /// it to sync to the chain before the gateway starts serving.
     async fn prepare_lightning(&self, ln_client: &GatewayLdkClient) -> anyhow::Result<()> {
-        let info = ln_client.info().await?;
+        let info = ln_client.info();
         anyhow::ensure!(
             self.network.to_string() == info.network,
             "Lightning node network {} does not match gateway network {}",
@@ -518,7 +518,7 @@ impl Gateway {
                 incoming_chan_id: 0,
                 htlc_id: 0,
             };
-            if let Err(err) = ln_client.complete_htlc(outcome).await {
+            if let Err(err) = ln_client.complete_htlc(outcome) {
                 warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to fail unmatched HTLC");
             }
             return;
@@ -805,7 +805,7 @@ impl Gateway {
                 retry("create LDK Node", fibonacci_max_one_hour(), || async {
                     GatewayLdkClient::new(
                         &self.client_builder.data_dir().join(LDK_NODE_DB_FOLDER),
-                        self.chain_source.clone(),
+                        &self.chain_source,
                         self.network,
                         lightning_port,
                         alias.clone(),
@@ -827,12 +827,8 @@ impl Gateway {
 impl Gateway {
     /// Returns a list of Lightning network channels from the Gateway's
     /// Lightning node.
-    async fn handle_list_channels_msg(
-        &self,
-    ) -> AdminResult<Vec<fedimint_gateway_common::ChannelInfo>> {
-        let context = self.ldk();
-        let response = context.list_channels().await?;
-        Ok(response.channels)
+    fn handle_list_channels_msg(&self) -> Vec<fedimint_gateway_common::ChannelInfo> {
+        self.ldk().list_channels()
     }
 
     /// Handle a request to have the Gateway leave a federation. The Gateway
@@ -964,41 +960,38 @@ impl Gateway {
     /// specified by `pubkey`.
     async fn handle_open_channel_msg(&self, payload: OpenChannelRequest) -> AdminResult<Txid> {
         info!(target: LOG_GATEWAY, pubkey = %payload.pubkey, host = %payload.host, amount = %payload.channel_size_sats, "Opening Lightning channel...");
-        let context = self.ldk();
-        let res = context.open_channel(payload).await?;
-        info!(target: LOG_GATEWAY, txid = %res.funding_txid, "Initiated channel open");
-        Txid::from_str(&res.funding_txid)
+        let funding_txid = self.ldk().open_channel(payload).await?;
+        info!(target: LOG_GATEWAY, txid = %funding_txid, "Initiated channel open");
+        Txid::from_str(&funding_txid)
             .map_err(|e| anyhow!("Received invalid channel funding txid string {e}"))
     }
 
     /// Instructs the Gateway's Lightning node to close all channels with a peer
     /// specified by `pubkey`.
-    async fn handle_close_channels_with_peer_msg(
+    fn handle_close_channels_with_peer_msg(
         &self,
-        payload: CloseChannelsWithPeerRequest,
-    ) -> AdminResult<CloseChannelsWithPeerResponse> {
+        payload: &CloseChannelsWithPeerRequest,
+    ) -> CloseChannelsWithPeerResponse {
         info!(target: LOG_GATEWAY, close_channel_request = %payload, "Closing lightning channel...");
-        let response = self.ldk().close_channels_with_peer(payload.clone()).await?;
+        let response = self.ldk().close_channels_with_peer(payload);
         info!(target: LOG_GATEWAY, close_channel_request = %payload, "Initiated channel closure");
-        Ok(response)
+        response
     }
 
     /// Send funds from the gateway's lightning node on-chain wallet.
-    async fn handle_send_onchain_msg(&self, payload: SendOnchainRequest) -> AdminResult<Txid> {
-        let context = self.ldk();
-        let response = context.send_onchain(payload.clone()).await?;
-        let txid = Txid::from_str(&response.txid)
+    fn handle_send_onchain_msg(&self, payload: &SendOnchainRequest) -> AdminResult<Txid> {
+        let response = self.ldk().send_onchain(payload.clone())?;
+        let txid = Txid::from_str(&response)
             .map_err(|e| anyhow!("Failed to parse withdrawal TXID: {e}"))?;
         info!(onchain_request = %payload, txid = %txid, "Sent onchain transaction");
         Ok(txid)
     }
 
     /// Generates an onchain address to fund the gateway's lightning node.
-    async fn handle_get_ln_onchain_address_msg(&self) -> AdminResult<Address> {
-        let context = self.ldk();
-        let response = context.get_ln_onchain_address().await?;
+    fn handle_get_ln_onchain_address_msg(&self) -> AdminResult<Address> {
+        let response = self.ldk().get_ln_onchain_address()?;
 
-        let address = Address::from_str(&response.address).map_err(|e| anyhow!("{e}"))?;
+        let address = Address::from_str(&response).map_err(|e| anyhow!("{e}"))?;
 
         address
             .require_network(self.network)
@@ -1007,23 +1000,17 @@ impl Gateway {
 
     /// Creates an invoice that is directly payable to the gateway's lightning
     /// node.
-    async fn handle_create_invoice_for_operator_msg(
+    fn handle_create_invoice_for_operator_msg(
         &self,
         payload: CreateInvoiceForOperatorPayload,
     ) -> AdminResult<Bolt11Invoice> {
-        Bolt11Invoice::from_str(
-            &self
-                .ldk()
-                .create_invoice(CreateInvoiceRequest {
-                    payment_hash: None, /* Empty payment hash indicates an invoice payable
-                                         * directly to the gateway. */
-                    amount_msat: payload.amount_msats,
-                    expiry_secs: payload.expiry_secs.unwrap_or(3600),
-                    description: payload.description.map(InvoiceDescription::Direct),
-                })
-                .await?
-                .invoice,
-        )
+        Bolt11Invoice::from_str(&self.ldk().create_invoice(CreateInvoiceRequest {
+            payment_hash: None, /* Empty payment hash indicates an invoice payable
+                                 * directly to the gateway. */
+            amount_msat: payload.amount_msats,
+            expiry_secs: payload.expiry_secs.unwrap_or(3600),
+            description: payload.description.map(InvoiceDescription::Direct),
+        })?)
         .map_err(|e| anyhow!("{e}"))
     }
 
@@ -1045,11 +1032,11 @@ impl Gateway {
                 .context("Invoice is missing amount")?
                 .saturating_div(FEE_DENOMINATOR);
 
-        let res = self
+        let preimage = self
             .ldk()
-            .pay(payload.invoice, MAX_DELAY, Amount::from_msats(max_fee))
+            .pay(&payload.invoice, MAX_DELAY, Amount::from_msats(max_fee))
             .await?;
-        Ok(res.preimage)
+        Ok(preimage)
     }
 
     // Handles a request the spend the gateway's ecash for a given federation.
@@ -1213,14 +1200,12 @@ impl Gateway {
             }
         };
 
-        let invoice = self
-            .create_invoice_via_lnrpc_v2(
-                payment_hash,
-                payload.amount,
-                payload.description.clone(),
-                payload.expiry_secs,
-            )
-            .await?;
+        let invoice = self.create_invoice_via_lnrpc_v2(
+            payment_hash,
+            payload.amount,
+            payload.description.clone(),
+            payload.expiry_secs,
+        )?;
 
         let mut dbtx = self.gateway_db.begin_transaction().await;
 
@@ -1245,7 +1230,7 @@ impl Gateway {
 
     /// Retrieves a BOLT11 invoice from the connected Lightning node with a
     /// specific `payment_hash`.
-    pub async fn create_invoice_via_lnrpc_v2(
+    pub fn create_invoice_via_lnrpc_v2(
         &self,
         payment_hash: sha256::Hash,
         amount: Amount,
@@ -1256,31 +1241,23 @@ impl Gateway {
 
         let response = match description {
             Bolt11InvoiceDescription::Direct(description) => {
-                lnrpc
-                    .create_invoice(CreateInvoiceRequest {
-                        payment_hash: Some(payment_hash),
-                        amount_msat: amount.msats,
-                        expiry_secs: expiry_time,
-                        description: Some(InvoiceDescription::Direct(description)),
-                    })
-                    .await?
+                lnrpc.create_invoice(CreateInvoiceRequest {
+                    payment_hash: Some(payment_hash),
+                    amount_msat: amount.msats,
+                    expiry_secs: expiry_time,
+                    description: Some(InvoiceDescription::Direct(description)),
+                })?
             }
-            Bolt11InvoiceDescription::Hash(hash) => {
-                lnrpc
-                    .create_invoice(CreateInvoiceRequest {
-                        payment_hash: Some(payment_hash),
-                        amount_msat: amount.msats,
-                        expiry_secs: expiry_time,
-                        description: Some(InvoiceDescription::Hash(hash)),
-                    })
-                    .await?
-            }
+            Bolt11InvoiceDescription::Hash(hash) => lnrpc.create_invoice(CreateInvoiceRequest {
+                payment_hash: Some(payment_hash),
+                amount_msat: amount.msats,
+                expiry_secs: expiry_time,
+                description: Some(InvoiceDescription::Hash(hash)),
+            })?,
         };
 
-        Bolt11Invoice::from_str(&response.invoice).map_err(|e| {
-            LightningRpcError::FailedToGetInvoice {
-                failure_reason: e.to_string(),
-            }
+        Bolt11Invoice::from_str(&response).map_err(|e| LightningRpcError::FailedToGetInvoice {
+            failure_reason: e.to_string(),
         })
     }
 
@@ -1486,7 +1463,7 @@ impl Gateway {
 impl IGatewayClientV2 for Gateway {
     async fn complete_htlc(&self, htlc_response: InterceptPaymentResponse) {
         loop {
-            match self.ldk().complete_htlc(htlc_response.clone()).await {
+            match self.ldk().complete_htlc(htlc_response.clone()) {
                 Ok(..) => return,
                 Err(err) => {
                     warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failure trying to complete payment");
@@ -1523,9 +1500,9 @@ impl IGatewayClientV2 for Gateway {
         max_fee: Amount,
     ) -> std::result::Result<[u8; 32], LightningRpcError> {
         self.ldk()
-            .pay(invoice, max_delay, max_fee)
+            .pay(&invoice, max_delay, max_fee)
             .await
-            .map(|response| response.preimage.0)
+            .map(|preimage| preimage.0)
     }
 
     async fn min_contract_amount(
