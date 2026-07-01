@@ -18,11 +18,8 @@ use bitcoin::hashes::sha256;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_gateway_common::ChannelInfo;
 use fedimint_lightning::Preimage;
-use futures::stream::BoxStream;
 pub use ldk::GatewayLdkClient;
 use serde::{Deserialize, Serialize};
-
-pub type RouteHtlcStream<'a> = BoxStream<'a, InterceptPaymentRequest>;
 
 /// Represents an active connection to the lightning node.
 #[derive(Clone, Debug)]
@@ -40,16 +37,6 @@ pub struct GetNodeInfoResponse {
     pub network: String,
     pub block_height: u32,
     pub synced_to_chain: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct InterceptPaymentRequest {
-    pub payment_hash: sha256::Hash,
-    pub amount_msat: u64,
-    pub expiry: u32,
-    pub incoming_chan_id: u64,
-    pub short_channel_id: Option<u64>,
-    pub htlc_id: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -22,9 +22,7 @@ pub mod envs;
 mod error;
 mod federation_manager;
 mod lightning;
-mod metrics;
 pub mod rpc_server;
-mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -58,12 +56,12 @@ use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::secp256k1::schnorr::Signature;
-use fedimint_core::task::{TaskGroup, TaskHandle, TaskShutdownToken, sleep};
+use fedimint_core::task::{TaskGroup, TaskShutdownToken, sleep};
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::backoff_util::fibonacci_max_one_hour;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow, SafeUrl, Spanned, retry};
 use fedimint_core::{
-    Amount, BitcoinAmountOrAll, crit, fedimint_build_code_version_env, get_network_for_address,
+    Amount, BitcoinAmountOrAll, fedimint_build_code_version_env, get_network_for_address,
 };
 use fedimint_gateway_common::{
     ChainSource, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse, ConnectFedPayload,
@@ -87,7 +85,6 @@ use fedimint_mintv2_client::{
     MintClientInit as MintV2ClientInit, MintClientModule as MintV2ClientModule,
 };
 use fedimint_wallet_common::PegOutFees;
-use futures::stream::StreamExt;
 use lightning_invoice::Bolt11Invoice;
 use rand::rngs::OsRng;
 use tokio::sync::RwLock;
@@ -96,11 +93,9 @@ use tracing::{debug, info, info_span, warn};
 use crate::db::GatewayDbtxNcExt as _;
 use crate::error::{AdminGatewayError, LNv2Error, PublicGatewayError};
 use crate::lightning::{
-    CreateInvoiceRequest, GatewayLdkClient, InterceptPaymentRequest, InvoiceDescription,
-    LightningContext, RouteHtlcStream,
+    CreateInvoiceRequest, GatewayLdkClient, InvoiceDescription, LightningContext,
 };
 use crate::rpc_server::run_webserver;
-use crate::types::PrettyInterceptPaymentRequest;
 
 /// Default Bitcoin network for testing purposes.
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
@@ -208,12 +203,6 @@ impl Gateway {
             chain_source,
         ))
     }
-}
-
-/// The action to take after handling a payment stream.
-enum ReceivePaymentStreamAction {
-    RetryAfterDelay,
-    NoRetry,
 }
 
 #[derive(Clone)]
@@ -500,80 +489,48 @@ impl Gateway {
         Ok(shutdown_receiver)
     }
 
-    /// Begins the task for listening for intercepted payments from the
-    /// lightning node.
+    /// Creates the LDK lightning node, brings the gateway to a running state,
+    /// and spawns the loop that drives incoming Lightning payments. Unlike the
+    /// LND-backed v1 gateway there is no connection to lose, so the node is
+    /// created once with no reconnect loop.
     fn start_gateway(&self, runtime: Arc<tokio::runtime::Runtime>) {
-        const PAYMENT_STREAM_RETRY_SECONDS: u64 = 60;
+        let gateway = self.clone();
+        self.task_group
+            .clone()
+            .spawn("gateway lightning event loop", |handle| async move {
+                let ln_client: Arc<GatewayLdkClient> =
+                    Arc::from(gateway.create_lightning_client(runtime).await);
 
-        let self_copy = self.clone();
-        let tg = self.task_group.clone();
-        self.task_group.spawn(
-            "Subscribe to intercepted lightning payments in stream",
-            |handle| async move {
-                // Repeatedly attempt to establish a connection to the lightning node and create a payment stream, re-trying if the connection is broken.
-                loop {
-                    if handle.is_shutting_down() {
-                        info!(target: LOG_GATEWAY, "Gateway lightning payment stream handler loop is shutting down");
-                        break;
-                    }
-
-                    let payment_stream_task_group = tg.make_subgroup();
-                    let lnrpc_route = self_copy.create_lightning_client(runtime.clone()).await;
-
-                    debug!(target: LOG_GATEWAY, "Establishing lightning payment stream...");
-                    let (stream, ln_client) = match lnrpc_route.route_htlcs(&payment_stream_task_group).await
-                    {
-                        Ok((stream, ln_client)) => (stream, ln_client),
-                        Err(err) => {
-                            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to open lightning payment stream");
-                            // `route_htlcs` may have already spawned tasks into the
-                            // subgroup before failing (e.g. the LNv1 interceptor is
-                            // spawned before LNv2 setup, which can fail). Tear the
-                            // subgroup down so no stale task keeps owning the LND HTLC
-                            // stream, which would prevent the retry from taking over and
-                            // could cause it to cancel real HTLCs after `gateway_receiver`
-                            // is dropped.
-                            if let Err(err) = payment_stream_task_group.shutdown_join_all(None).await {
-                                crit!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Lightning payment stream task group shutdown");
-                            }
-                            sleep(Duration::from_secs(PAYMENT_STREAM_RETRY_SECONDS)).await;
-                            continue
-                        }
-                    };
-
-                    // Successful calls to `route_htlcs` establish a connection
-                    self_copy.set_gateway_state(GatewayState::Connected).await;
-                    info!(target: LOG_GATEWAY, "Established lightning payment stream");
-
-                    let route_payments_response =
-                        self_copy.route_lightning_payments(&handle, stream, ln_client).await;
-
-                    self_copy.set_gateway_state(GatewayState::Disconnected).await;
-                    if let Err(err) = payment_stream_task_group.shutdown_join_all(None).await {
-                        crit!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Lightning payment stream task group shutdown");
-                    }
-
-                    match route_payments_response {
-                        ReceivePaymentStreamAction::RetryAfterDelay => {
-                            warn!(target: LOG_GATEWAY, retry_interval = %PAYMENT_STREAM_RETRY_SECONDS, "Disconnected from lightning node");
-                            sleep(Duration::from_secs(PAYMENT_STREAM_RETRY_SECONDS)).await;
-                        }
-                        ReceivePaymentStreamAction::NoRetry => break,
-                    }
+                if !gateway.bring_up_lightning(ln_client.clone()).await {
+                    return;
                 }
-            },
-        );
+
+                // Re-drive any incoming payments that became claimable while the
+                // gateway was down, or that were interrupted mid-claim. This is
+                // what makes the daemon-side claim crash-durable now that v2 no
+                // longer spawns the Complete state machine.
+                gateway.reconcile_pending_claims().await;
+
+                info!(target: LOG_GATEWAY, "Gateway is running");
+                let _ = handle
+                    .cancel_on_shutdown(async move {
+                        loop {
+                            let (payment_hash, amount_msat) =
+                                ln_client.next_incoming_payment().await;
+                            gateway
+                                .handle_payment_claimable(&ln_client, payment_hash, amount_msat)
+                                .await;
+                        }
+                    })
+                    .await;
+                info!(target: LOG_GATEWAY, "Gateway lightning event loop shut down");
+            });
     }
 
-    /// Handles a stream of incoming payments from the lightning node after
-    /// ensuring the gateway is properly configured. Awaits until the stream
-    /// is closed, then returns with the appropriate action to take.
-    async fn route_lightning_payments<'a>(
-        &'a self,
-        handle: &TaskHandle,
-        mut stream: RouteHtlcStream<'a>,
-        ln_client: Arc<GatewayLdkClient>,
-    ) -> ReceivePaymentStreamAction {
+    /// Waits for the LDK node to sync and transitions the gateway into the
+    /// `Running` state with a populated `LightningContext`. Returns `false` if
+    /// the node info or chain sync could not be obtained.
+    async fn bring_up_lightning(&self, ln_client: Arc<GatewayLdkClient>) -> bool {
         let LightningInfo::Connected {
             public_key: lightning_public_key,
             alias: lightning_alias,
@@ -583,7 +540,7 @@ impl Gateway {
         } = ln_client.parsed_node_info().await
         else {
             warn!(target: LOG_GATEWAY, "Failed to retrieve Lightning info");
-            return ReceivePaymentStreamAction::RetryAfterDelay;
+            return false;
         };
 
         assert!(
@@ -599,7 +556,7 @@ impl Gateway {
             info!(target: LOG_GATEWAY, "Waiting for chain sync");
             if let Err(err) = ln_client.wait_for_chain_sync().await {
                 warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to wait for chain sync");
-                return ReceivePaymentStreamAction::RetryAfterDelay;
+                return false;
             }
         }
 
@@ -611,201 +568,56 @@ impl Gateway {
         };
         self.set_gateway_state(GatewayState::Running { lightning_context })
             .await;
-        info!(target: LOG_GATEWAY, "Gateway is running");
-
-        // Runs until the connection to the lightning node breaks or we receive the
-        // shutdown signal.
-        let htlc_task_group = self.task_group.make_subgroup();
-        if handle
-            .cancel_on_shutdown(async move {
-                loop {
-                    let payment_request_or = tokio::select! {
-                        payment_request_or = stream.next() => {
-                            payment_request_or
-                        }
-                        () = self.is_shutting_down_safely() => {
-                            break;
-                        }
-                    };
-
-                    let Some(payment_request) = payment_request_or else {
-                        warn!(
-                            target: LOG_GATEWAY,
-                            "Unexpected response from incoming lightning payment stream. Shutting down payment processor"
-                        );
-                        break;
-                    };
-
-                    let state_guard = self.state.read().await;
-                    if let GatewayState::Running { ref lightning_context } = *state_guard {
-                        // Spawn a subtask to handle each payment in parallel
-                        let gateway = self.clone();
-                        let lightning_context = lightning_context.clone();
-                        htlc_task_group.spawn_cancellable_silent(
-                            "handle_lightning_payment",
-                            async move {
-                                let start = fedimint_core::time::now();
-                                let outcome = gateway
-                                    .handle_lightning_payment(payment_request, &lightning_context)
-                                    .await;
-                                metrics::HTLC_HANDLING_DURATION_SECONDS
-                                    .with_label_values(&[outcome])
-                                    .observe(
-                                        fedimint_core::time::now()
-                                            .duration_since(start)
-                                            .unwrap_or_default()
-                                            .as_secs_f64(),
-                                    );
-                            },
-                        );
-                    } else {
-                        warn!(
-                            target: LOG_GATEWAY,
-                            state = %state_guard,
-                            "Gateway isn't in a running state, cannot handle incoming payments."
-                        );
-                        break;
-                    }
-                }
-            })
-            .await
-            .is_ok()
-        {
-            warn!(target: LOG_GATEWAY, "Lightning payment stream connection broken. Gateway is disconnected");
-            ReceivePaymentStreamAction::RetryAfterDelay
-        } else {
-            info!(target: LOG_GATEWAY, "Received shutdown signal");
-            ReceivePaymentStreamAction::NoRetry
-        }
+        true
     }
 
-    /// Polls the Gateway's state waiting for it to shutdown so the thread
-    /// processing payment requests can exit.
-    async fn is_shutting_down_safely(&self) {
-        loop {
-            if let GatewayState::ShuttingDown { .. } = self.get_state().await {
-                return;
-            }
-
-            fedimint_core::task::sleep(Duration::from_secs(1)).await;
-        }
-    }
-
-    /// Handles an intercepted lightning payment. If the payment is part of an
-    /// incoming payment to a federation, spawns a state machine and hands the
-    /// payment off to it. If the payment's last-hop short channel id maps to
-    /// a known federation but no LNv2 offer matched, cancels (fails back) the
-    /// HTLC so the sender can retry rather than treating the gateway as a dead
-    /// route. Otherwise (real-channel forwards), resumes the HTLC so the
-    /// lightning node can route it as a normal forward.
-    ///
-    /// Returns the outcome label for metrics tracking.
-    async fn handle_lightning_payment(
+    /// Handles an inbound Lightning payment that the LDK node reports as
+    /// claimable. If it matches a registered LNv2 incoming contract of the
+    /// expected amount, records it in the pending-claim work-list and spawns
+    /// the settle task; otherwise fails the HTLC so the sender is refunded.
+    async fn handle_payment_claimable(
         &self,
-        payment_request: InterceptPaymentRequest,
-        lightning_context: &LightningContext,
-    ) -> &'static str {
-        info!(
-            target: LOG_GATEWAY,
-            lightning_payment = %PrettyInterceptPaymentRequest(&payment_request),
-            "Intercepting lightning payment",
-        );
+        ln_client: &Arc<GatewayLdkClient>,
+        payment_hash: sha256::Hash,
+        amount_msat: u64,
+    ) {
+        let payment_image = PaymentImage::Hash(payment_hash);
 
-        let lnv2_start = fedimint_core::time::now();
-        let lnv2_result = self
-            .try_handle_lightning_payment_lnv2(&payment_request, lightning_context)
-            .await;
-        let lnv2_outcome = if lnv2_result.is_ok() {
-            "success"
-        } else {
-            "error"
-        };
-        metrics::HTLC_LNV2_ATTEMPT_DURATION_SECONDS
-            .with_label_values(&[lnv2_outcome])
-            .observe(
-                fedimint_core::time::now()
-                    .duration_since(lnv2_start)
-                    .unwrap_or_default()
-                    .as_secs_f64(),
+        let matches = self
+            .gateway_db
+            .begin_transaction_nc()
+            .await
+            .load_registered_incoming_contract(payment_image.clone())
+            .await
+            .is_some_and(|registered| registered.incoming_amount_msats == amount_msat);
+
+        if !matches {
+            warn!(
+                target: LOG_GATEWAY,
+                %payment_hash,
+                "Claimable payment has no matching registered incoming contract; failing HTLC"
             );
-        if lnv2_result.is_ok() {
-            return "lnv2";
-        }
-
-        // The LNv2 attempt did not match, so this HTLC is not an incoming
-        // payment for one of our federations. The gateway's interceptor sees
-        // every HTLC; resume so the lightning node forwards it as a regular
-        // routing node.
-        Self::forward_lightning_payment(payment_request, lightning_context).await;
-        "forward"
-    }
-
-    /// Tries to handle a lightning payment using the LNv2 protocol.
-    /// Returns `Ok` if the payment was handled, `Err` otherwise.
-    async fn try_handle_lightning_payment_lnv2(
-        &self,
-        htlc_request: &InterceptPaymentRequest,
-        lightning_context: &LightningContext,
-    ) -> Result<()> {
-        // If `payment_hash` has been registered as a LNv2 payment, we try to complete
-        // the payment by getting the preimage from the federation
-        // using the LNv2 protocol. If the `payment_hash` is not registered,
-        // this payment is either a legacy Lightning payment or the end destination is
-        // not a Fedimint.
-        let (contract, client) = self
-            .get_registered_incoming_contract_and_client_v2(
-                PaymentImage::Hash(htlc_request.payment_hash),
-                htlc_request.amount_msat,
-            )
-            .await?;
-
-        if let Err(err) = client
-            .get_first_module::<GatewayClientModuleV2>()
-            .expect("Must have client module")
-            .relay_incoming_htlc(
-                htlc_request.payment_hash,
-                htlc_request.incoming_chan_id,
-                htlc_request.htlc_id,
-                contract,
-                htlc_request.amount_msat,
-            )
-            .await
-        {
-            warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Error relaying incoming lightning payment");
-
             let outcome = InterceptPaymentResponse {
                 action: PaymentAction::Cancel,
-                payment_hash: htlc_request.payment_hash,
-                incoming_chan_id: htlc_request.incoming_chan_id,
-                htlc_id: htlc_request.htlc_id,
+                payment_hash,
+                incoming_chan_id: 0,
+                htlc_id: 0,
             };
-
-            if let Err(err) = lightning_context.lnrpc.complete_htlc(outcome).await {
-                warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error sending HTLC response to lightning node");
+            if let Err(err) = ln_client.complete_htlc(outcome).await {
+                warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to fail unmatched HTLC");
             }
+            return;
         }
 
-        Ok(())
-    }
+        let mut dbtx = self.gateway_db.begin_transaction().await;
+        dbtx.save_pending_claim(payment_image.clone()).await;
+        dbtx.commit_tx().await;
 
-    /// Forwards a lightning payment to the next hop like a normal lightning
-    /// node. Used when the intercepted HTLC is not destined for any federation
-    /// this gateway serves, so LND should route it normally over a real
-    /// channel.
-    async fn forward_lightning_payment(
-        htlc_request: InterceptPaymentRequest,
-        lightning_context: &LightningContext,
-    ) {
-        let outcome = InterceptPaymentResponse {
-            action: PaymentAction::Forward,
-            payment_hash: htlc_request.payment_hash,
-            incoming_chan_id: htlc_request.incoming_chan_id,
-            htlc_id: htlc_request.htlc_id,
-        };
-
-        if let Err(err) = lightning_context.lnrpc.complete_htlc(outcome).await {
-            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error sending lightning payment response to lightning node");
-        }
+        let gateway = self.clone();
+        self.task_group
+            .spawn_cancellable_silent("settle incoming payment", async move {
+                gateway.settle_incoming_payment(payment_image).await;
+            });
     }
 
     /// Helper function for atomically changing the Gateway's internal state.
@@ -1739,6 +1551,126 @@ impl Gateway {
             .into_value();
 
         Ok((registered_incoming_contract.contract, client))
+    }
+
+    /// Settles one incoming Lightning payment end-to-end: submits the
+    /// federation-side receive (the `ReceiveStateMachine` only — no
+    /// `CompleteStateMachine`, unlike v1) and, on success, claims the upstream
+    /// HTLC on the LDK node. This is the daemon-side "trailer" that replaces
+    /// the v1 Complete SM.
+    ///
+    /// Idempotent and safe to call from both the live `PaymentClaimable`
+    /// handler and the boot reconciliation: `relay_direct_swap` no-ops on
+    /// `operation_exists`, the claim is gated by `ClaimedIncomingContract`, and
+    /// `complete_htlc` retries until the node accepts the claim.
+    async fn settle_incoming_payment(&self, payment_image: PaymentImage) {
+        let mut dbtx = self.gateway_db.begin_transaction_nc().await;
+        if dbtx
+            .is_incoming_contract_claimed(payment_image.clone())
+            .await
+        {
+            return;
+        }
+        let Some(registered) = dbtx
+            .load_registered_incoming_contract(payment_image.clone())
+            .await
+        else {
+            warn!(target: LOG_GATEWAY, ?payment_image, "Claimable payment has no registered incoming contract; ignoring");
+            self.clear_pending_claim(payment_image).await;
+            return;
+        };
+        drop(dbtx);
+
+        let client = match self.select_client(registered.federation_id).await {
+            Ok(client) => client.into_value(),
+            Err(err) => {
+                // The federation client could not be loaded; leave the payment
+                // pending so the next boot reconciliation retries it.
+                warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Cannot settle incoming payment: client unavailable");
+                return;
+            }
+        };
+
+        let final_state = client
+            .get_first_module::<GatewayClientModuleV2>()
+            .expect("Must have client module")
+            .relay_direct_swap(registered.contract, registered.incoming_amount_msats)
+            .await;
+
+        let PaymentImage::Hash(payment_hash) = payment_image else {
+            // Only hash payment images correspond to an upstream Lightning HTLC.
+            self.clear_pending_claim(payment_image).await;
+            return;
+        };
+
+        // Settle the upstream HTLC on success; otherwise fail it back so the
+        // sender is refunded promptly. This mirrors the v1 Complete state
+        // machine, which cancels on any non-`Success` terminal, and the old
+        // relay-error path, which cancelled when the receive could not be
+        // submitted (e.g. insufficient gateway liquidity).
+        let preimage = match final_state {
+            Ok(FinalReceiveState::Success(preimage)) => Some(preimage),
+            Ok(other) => {
+                warn!(target: LOG_GATEWAY, ?other, %payment_hash, "Incoming receive did not succeed; failing back the HTLC");
+                None
+            }
+            Err(err) => {
+                warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), %payment_hash, "Failed to submit incoming receive; failing back the HTLC");
+                None
+            }
+        };
+
+        let action = match preimage {
+            Some(preimage) => PaymentAction::Settle(Preimage(preimage)),
+            None => PaymentAction::Cancel,
+        };
+
+        // Retries internally until the node accepts the settle/cancel.
+        self.complete_htlc(InterceptPaymentResponse {
+            action,
+            payment_hash,
+            incoming_chan_id: 0,
+            htlc_id: 0,
+        })
+        .await;
+
+        let mut dbtx = self.gateway_db.begin_transaction().await;
+        if preimage.is_some() {
+            dbtx.save_claimed_incoming_contract(PaymentImage::Hash(payment_hash))
+                .await;
+        }
+        dbtx.remove_pending_claim(PaymentImage::Hash(payment_hash))
+            .await;
+        dbtx.commit_tx().await;
+    }
+
+    async fn clear_pending_claim(&self, payment_image: PaymentImage) {
+        let mut dbtx = self.gateway_db.begin_transaction().await;
+        dbtx.remove_pending_claim(payment_image).await;
+        dbtx.commit_tx().await;
+    }
+
+    /// Re-drives every incoming payment still in the pending-claim work-list on
+    /// boot — receives whose HTLC became claimable while the gateway was down,
+    /// or that were interrupted mid-claim. This is what makes the daemon-side
+    /// claim crash-durable now that v2 no longer spawns the Complete SM.
+    async fn reconcile_pending_claims(&self) {
+        let pending = self
+            .gateway_db
+            .begin_transaction_nc()
+            .await
+            .load_pending_claims()
+            .await;
+
+        for payment_image in pending {
+            let gateway = self.clone();
+            self.task_group.spawn_cancellable_silent(
+                "settle incoming payment (reconcile)",
+                async move {
+                    gateway.settle_incoming_payment(payment_image).await;
+                },
+            );
+        }
     }
 }
 

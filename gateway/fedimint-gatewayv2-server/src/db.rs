@@ -35,6 +35,19 @@ enum DbKeyPrefix {
     /// `PaymentImage -> RegisteredIncomingContract` for registered LNv2
     /// incoming contracts.
     RegisteredIncomingContract = 0x04,
+    /// Work-list of incoming payments whose upstream Lightning HTLC has become
+    /// claimable (an LDK `PaymentClaimable` fired) but which the gateway has
+    /// not yet finished settling. Seeds the per-client claim trailer on
+    /// boot; an entry is removed once the receive reaches a terminal state.
+    /// Bounding the boot scan to genuinely-pending payments is why this
+    /// exists separately from [`DbKeyPrefix::RegisteredIncomingContract`]
+    /// (which is retained for the lifetime of the payment so `verify` can
+    /// read settled receives).
+    PendingIncomingClaim = 0x05,
+    /// Set of payment images whose upstream HTLC the gateway has already
+    /// claimed. Gates double-claims when a live claim task and the boot
+    /// reconciliation race on the same payment.
+    ClaimedIncomingContract = 0x06,
 }
 
 /// Returns the isolated, prefix-namespaced database for a federation's client.
@@ -100,6 +113,32 @@ impl_db_record!(
     db_prefix = DbKeyPrefix::RegisteredIncomingContract,
 );
 
+#[derive(Debug, Encodable, Decodable)]
+pub struct PendingIncomingClaimKey(pub PaymentImage);
+
+#[derive(Debug, Encodable, Decodable)]
+pub struct PendingIncomingClaimKeyPrefix;
+
+impl_db_record!(
+    key = PendingIncomingClaimKey,
+    value = (),
+    db_prefix = DbKeyPrefix::PendingIncomingClaim,
+);
+
+impl_db_lookup!(
+    key = PendingIncomingClaimKey,
+    query_prefix = PendingIncomingClaimKeyPrefix
+);
+
+#[derive(Debug, Encodable, Decodable)]
+pub struct ClaimedIncomingContractKey(pub PaymentImage);
+
+impl_db_record!(
+    key = ClaimedIncomingContractKey,
+    value = (),
+    db_prefix = DbKeyPrefix::ClaimedIncomingContract,
+);
+
 #[allow(async_fn_in_trait)]
 pub trait GatewayDbtxNcExt {
     /// Persists the BIP39 root entropy. Written once on first boot.
@@ -142,6 +181,24 @@ pub trait GatewayDbtxNcExt {
         &mut self,
         payment_image: PaymentImage,
     ) -> Option<RegisteredIncomingContract>;
+
+    /// Records that an incoming payment's upstream HTLC has become claimable
+    /// and still needs settling. Idempotent.
+    async fn save_pending_claim(&mut self, payment_image: PaymentImage);
+
+    /// Removes an incoming payment from the pending-claim work-list once it has
+    /// reached a terminal state (claimed or refunded).
+    async fn remove_pending_claim(&mut self, payment_image: PaymentImage);
+
+    /// Returns every incoming payment still awaiting settlement, used to seed
+    /// the claim trailer on boot.
+    async fn load_pending_claims(&mut self) -> Vec<PaymentImage>;
+
+    /// Marks an incoming payment's upstream HTLC as claimed, gating double
+    /// claims. Returns whether it was already marked.
+    async fn save_claimed_incoming_contract(&mut self, payment_image: PaymentImage) -> bool;
+
+    async fn is_incoming_contract_claimed(&mut self, payment_image: PaymentImage) -> bool;
 }
 
 impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
@@ -221,5 +278,35 @@ impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
     ) -> Option<RegisteredIncomingContract> {
         self.get_value(&RegisteredIncomingContractKey(payment_image))
             .await
+    }
+
+    async fn save_pending_claim(&mut self, payment_image: PaymentImage) {
+        self.insert_entry(&PendingIncomingClaimKey(payment_image), &())
+            .await;
+    }
+
+    async fn remove_pending_claim(&mut self, payment_image: PaymentImage) {
+        self.remove_entry(&PendingIncomingClaimKey(payment_image))
+            .await;
+    }
+
+    async fn load_pending_claims(&mut self) -> Vec<PaymentImage> {
+        self.find_by_prefix(&PendingIncomingClaimKeyPrefix)
+            .await
+            .map(|(key, ()): (PendingIncomingClaimKey, ())| key.0)
+            .collect::<Vec<PaymentImage>>()
+            .await
+    }
+
+    async fn save_claimed_incoming_contract(&mut self, payment_image: PaymentImage) -> bool {
+        self.insert_entry(&ClaimedIncomingContractKey(payment_image), &())
+            .await
+            .is_some()
+    }
+
+    async fn is_incoming_contract_claimed(&mut self, payment_image: PaymentImage) -> bool {
+        self.get_value(&ClaimedIncomingContractKey(payment_image))
+            .await
+            .is_some()
     }
 }

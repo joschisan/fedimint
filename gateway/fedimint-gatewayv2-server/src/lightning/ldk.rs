@@ -15,12 +15,12 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::{Hash, sha256};
 use bitcoin::{FeeRate, Network, OutPoint};
 use fedimint_bip39::Mnemonic;
 use fedimint_core::envs::{FM_IN_DEVIMINT_ENV, is_env_var_set, is_running_in_test_env};
 use fedimint_core::secp256k1::PublicKey;
-use fedimint_core::task::{TaskGroup, TaskHandle, block_in_place};
+use fedimint_core::task::block_in_place;
 use fedimint_core::util::{FmtCompact, SafeUrl, backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, crit};
 use fedimint_gateway_common::{
@@ -37,15 +37,13 @@ use ldk_node::payment::{PaymentKind, PaymentStatus, SendingParameters};
 use lightning::ln::channelmanager::PaymentId;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description};
-use tokio::sync::mpsc::Sender;
 use tokio::sync::{RwLock, oneshot};
-use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, warn};
 
 use super::{
     CreateInvoiceRequest, CreateInvoiceResponse, GetBalancesResponse, GetLnOnchainAddressResponse,
-    GetNodeInfoResponse, InterceptPaymentRequest, InvoiceDescription, ListChannelsResponse,
-    OpenChannelResponse, PayInvoiceResponse, RouteHtlcStream, SendOnchainResponse,
+    GetNodeInfoResponse, InvoiceDescription, ListChannelsResponse, OpenChannelResponse,
+    PayInvoiceResponse, SendOnchainResponse,
 };
 
 /// Forwards `ldk-node`'s log records into the gateway's `tracing` subscriber.
@@ -116,11 +114,6 @@ impl LogWriter for LdkTracingLogger {
 pub struct GatewayLdkClient {
     /// The underlying lightning node.
     node: Arc<ldk_node::Node>,
-
-    task_group: TaskGroup,
-
-    /// The HTLC stream, until it is taken by calling [`Self::route_htlcs`].
-    htlc_stream_receiver_or: Option<tokio::sync::mpsc::Receiver<InterceptPaymentRequest>>,
 
     /// Lock pool used to ensure that our implementation of [`Self::pay`]
     /// doesn't allow for multiple simultaneous calls with the same invoice
@@ -220,132 +213,100 @@ impl GatewayLdkClient {
             LightningRpcError::FailedToConnect
         })?;
 
-        let (htlc_stream_sender, htlc_stream_receiver) = tokio::sync::mpsc::channel(1024);
-        let task_group = TaskGroup::new();
-
-        let node_clone = node.clone();
-        let pending_channels = Arc::new(RwLock::new(BTreeMap::new()));
-        let pending_channels_clone = pending_channels.clone();
-        task_group.spawn("ldk lightning node event handler", |handle| async move {
-            loop {
-                Self::handle_next_event(
-                    &node_clone,
-                    &htlc_stream_sender,
-                    &handle,
-                    pending_channels_clone.clone(),
-                )
-                .await;
-            }
-        });
-
         info!("Successfully started LDK Gateway");
         Ok(GatewayLdkClient {
             node,
-            task_group,
-            htlc_stream_receiver_or: Some(htlc_stream_receiver),
             outbound_lightning_payment_lock_pool: lockable::LockPool::new(),
-            pending_channels,
+            pending_channels: Arc::new(RwLock::new(BTreeMap::new())),
         })
     }
 
-    async fn handle_next_event(
-        node: &ldk_node::Node,
-        htlc_stream_sender: &Sender<InterceptPaymentRequest>,
-        handle: &TaskHandle,
-        pending_channels: Arc<
-            RwLock<BTreeMap<UserChannelId, oneshot::Sender<anyhow::Result<OutPoint>>>>,
-        >,
-    ) {
-        // We manually check for task termination in case we receive a payment while the
-        // task is shutting down. In that case, we want to finish the payment
-        // before shutting this task down.
-        let event = tokio::select! {
-            event = node.next_event_async() => {
-                event
-            }
-            () = handle.make_shutdown_rx() => {
-                return;
-            }
-        };
+    /// Drives the LDK event queue until an inbound payment becomes claimable,
+    /// returning its payment hash and claimable amount. Channel lifecycle
+    /// events (`ChannelPending` / `ChannelClosed`) are handled inline to
+    /// unblock [`Self::open_channel`]; all other events are ignored. Each
+    /// event is acknowledged with `event_handled` before the next is
+    /// pulled.
+    ///
+    /// The gateway calls this in a loop (see `Gateway::process_ldk_events`); on
+    /// shutdown the caller cancels the future at the `next_event_async` await.
+    pub async fn next_incoming_payment(&self) -> (sha256::Hash, u64) {
+        loop {
+            let event = self.node.next_event_async().await;
 
-        match event {
-            ldk_node::Event::PaymentClaimable {
-                payment_id: _,
-                payment_hash,
-                claimable_amount_msat,
-                claim_deadline,
-                custom_records: _,
-            } => {
-                if let Err(err) = htlc_stream_sender
-                    .send(InterceptPaymentRequest {
-                        payment_hash: Hash::from_slice(&payment_hash.0)
-                            .expect("Failed to create Hash"),
-                        amount_msat: claimable_amount_msat,
-                        expiry: claim_deadline.unwrap_or_default(),
-                        short_channel_id: None,
-                        incoming_chan_id: 0,
-                        htlc_id: 0,
-                    })
-                    .await
-                {
-                    warn!(target: LOG_LIGHTNING, err = %err.fmt_compact(), "Failed send InterceptHtlcRequest to stream");
-                }
-            }
-            ldk_node::Event::ChannelPending {
-                channel_id,
-                user_channel_id,
-                former_temporary_channel_id: _,
-                counterparty_node_id: _,
-                funding_txo,
-            } => {
-                info!(target: LOG_LIGHTNING, %channel_id, "LDK Channel is pending");
-                let mut channels = pending_channels.write().await;
-                if let Some(sender) = channels.remove(&UserChannelId(user_channel_id)) {
-                    let _ = sender.send(Ok(funding_txo));
-                } else {
-                    debug!(
-                        ?user_channel_id,
-                        "No channel pending channel open for user channel id"
-                    );
-                }
-            }
-            ldk_node::Event::ChannelClosed {
-                channel_id,
-                user_channel_id,
-                counterparty_node_id: _,
-                reason,
-            } => {
-                info!(target: LOG_LIGHTNING, %channel_id, "LDK Channel is closed");
-                let mut channels = pending_channels.write().await;
-                if let Some(sender) = channels.remove(&UserChannelId(user_channel_id)) {
-                    let reason = if let Some(reason) = reason {
-                        reason.to_string()
+            let claimable = match event {
+                ldk_node::Event::PaymentClaimable {
+                    payment_hash,
+                    claimable_amount_msat,
+                    ..
+                } => Some((
+                    sha256::Hash::from_slice(&payment_hash.0).expect("Failed to create Hash"),
+                    claimable_amount_msat,
+                )),
+                ldk_node::Event::ChannelPending {
+                    channel_id,
+                    user_channel_id,
+                    funding_txo,
+                    ..
+                } => {
+                    info!(target: LOG_LIGHTNING, %channel_id, "LDK Channel is pending");
+                    if let Some(sender) = self
+                        .pending_channels
+                        .write()
+                        .await
+                        .remove(&UserChannelId(user_channel_id))
+                    {
+                        let _ = sender.send(Ok(funding_txo));
                     } else {
-                        "Channel has been closed".to_string()
-                    };
-                    let _ = sender.send(Err(anyhow::anyhow!(reason)));
-                } else {
-                    debug!(
-                        ?user_channel_id,
-                        "No channel pending channel open for user channel id"
-                    );
+                        debug!(
+                            ?user_channel_id,
+                            "No channel open pending for user channel id"
+                        );
+                    }
+                    None
                 }
-            }
-            _ => {}
-        }
+                ldk_node::Event::ChannelClosed {
+                    channel_id,
+                    user_channel_id,
+                    reason,
+                    ..
+                } => {
+                    info!(target: LOG_LIGHTNING, %channel_id, "LDK Channel is closed");
+                    if let Some(sender) = self
+                        .pending_channels
+                        .write()
+                        .await
+                        .remove(&UserChannelId(user_channel_id))
+                    {
+                        let reason = reason.map_or_else(
+                            || "Channel has been closed".to_string(),
+                            |r| r.to_string(),
+                        );
+                        let _ = sender.send(Err(anyhow::anyhow!(reason)));
+                    } else {
+                        debug!(
+                            ?user_channel_id,
+                            "No channel open pending for user channel id"
+                        );
+                    }
+                    None
+                }
+                _ => None,
+            };
 
-        // `PaymentClaimable` and `ChannelPending` events are the only event types that
-        // we are interested in. We can safely ignore all other events.
-        if let Err(err) = node.event_handled() {
-            warn!(err = %err.fmt_compact(), "LDK could not mark event handled");
+            if let Err(err) = self.node.event_handled() {
+                warn!(err = %err.fmt_compact(), "LDK could not mark event handled");
+            }
+
+            if let Some(payment) = claimable {
+                return payment;
+            }
         }
     }
 }
 
 impl Drop for GatewayLdkClient {
     fn drop(&mut self) {
-        self.task_group.shutdown();
-
         info!(target: LOG_LIGHTNING, "Stopping LDK Node...");
         match self.node.stop() {
             Err(err) => {
@@ -461,30 +422,6 @@ impl GatewayLdkClient {
             }
             fedimint_core::runtime::sleep(Duration::from_millis(100)).await;
         }
-    }
-
-    /// Consumes the client and returns a stream of intercepted HTLCs and a new
-    /// client. [`Self::complete_htlc`] must be called for all successfully
-    /// intercepted HTLCs sent to the returned stream.
-    ///
-    /// `route_htlcs` can only be called once for a given client, since the
-    /// returned stream grants exclusive routing decisions to the caller. For
-    /// this reason it consumes the client (`Box<Self>`) and returns one wrapped
-    /// in an `Arc`.
-    pub async fn route_htlcs<'a>(
-        mut self: Box<Self>,
-        _task_group: &TaskGroup,
-    ) -> Result<(RouteHtlcStream<'a>, Arc<GatewayLdkClient>), LightningRpcError> {
-        let route_htlc_stream = match self.htlc_stream_receiver_or.take() {
-            Some(stream) => Ok(Box::pin(ReceiverStream::new(stream))),
-            None => Err(LightningRpcError::FailedToRouteHtlcs {
-                failure_reason:
-                    "Stream does not exist. Likely was already taken by calling `route_htlcs()`."
-                        .to_string(),
-            }),
-        }?;
-
-        Ok((route_htlc_stream, Arc::new(*self)))
     }
 
     /// Completes an HTLC that was intercepted by the gateway. Must be called
