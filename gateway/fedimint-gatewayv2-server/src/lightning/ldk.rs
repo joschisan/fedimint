@@ -25,7 +25,7 @@ use fedimint_core::util::{FmtCompact, SafeUrl, backoff_util, retry};
 use fedimint_core::{Amount, BitcoinAmountOrAll, crit};
 use fedimint_gateway_common::{
     ChainSource, ChannelInfo, CloseChannelsWithPeerRequest, CloseChannelsWithPeerResponse,
-    LightningInfo, OpenChannelRequest, SendOnchainRequest,
+    OpenChannelRequest, SendOnchainRequest,
 };
 use fedimint_lightning::{InterceptPaymentResponse, LightningRpcError, PaymentAction, Preimage};
 use fedimint_logging::{LOG_LIGHTNING, LOG_LIGHTNING_LDK};
@@ -320,6 +320,20 @@ impl Drop for GatewayLdkClient {
 }
 
 impl GatewayLdkClient {
+    /// The lightning node's public key (its node id). Cheap, local read.
+    pub fn public_key(&self) -> PublicKey {
+        self.node.node_id()
+    }
+
+    /// The lightning node's alias, or a default derived from its node id.
+    /// Cheap, local read.
+    pub fn alias(&self) -> String {
+        self.node.node_alias().map_or_else(
+            || format!("LDK Fedimint Gateway Node {}", self.node.node_id()),
+            |alias| alias.to_string(),
+        )
+    }
+
     /// Returns high-level info about the lightning node.
     pub async fn info(&self) -> Result<GetNodeInfoResponse, LightningRpcError> {
         let node_status = self.node.status();
@@ -828,27 +842,6 @@ impl GatewayLdkClient {
             let _ = self.node.sync_wallets();
         });
         Ok(())
-    }
-
-    /// Retrieves the basic information about the gateway's connected lightning
-    /// node.
-    pub async fn parsed_node_info(&self) -> LightningInfo {
-        if let Ok(info) = self.info().await
-            && let Ok(network) =
-                Network::from_str(&info.network).map_err(|e| LightningRpcError::InvalidMetadata {
-                    failure_reason: format!("Invalid network {}: {e}", info.network),
-                })
-        {
-            return LightningInfo::Connected {
-                public_key: info.pub_key,
-                alias: info.alias,
-                network,
-                block_height: u64::from(info.block_height),
-                synced_to_chain: info.synced_to_chain,
-            };
-        }
-
-        LightningInfo::NotConnected
     }
 
     /// Waits for the lightning node to be synced to the Bitcoin blockchain.

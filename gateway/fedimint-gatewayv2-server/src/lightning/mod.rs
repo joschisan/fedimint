@@ -11,24 +11,12 @@
 
 pub mod ldk;
 
-use std::sync::Arc;
-
-use bitcoin::Network;
 use bitcoin::hashes::sha256;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_gateway_common::ChannelInfo;
 use fedimint_lightning::Preimage;
 pub use ldk::GatewayLdkClient;
 use serde::{Deserialize, Serialize};
-
-/// Represents an active connection to the lightning node.
-#[derive(Clone, Debug)]
-pub struct LightningContext {
-    pub lnrpc: Arc<GatewayLdkClient>,
-    pub lightning_public_key: PublicKey,
-    pub lightning_alias: String,
-    pub lightning_network: Network,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GetNodeInfoResponse {

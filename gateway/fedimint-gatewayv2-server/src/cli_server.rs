@@ -105,12 +105,8 @@ fn router(gateway: Arc<Gateway>) -> Router {
 // --- top-level ---
 
 async fn info(Extension(gateway): Extension<Arc<Gateway>>) -> Result<Json<Value>, GatewayError> {
-    let context = gateway
-        .get_lightning_context()
-        .await
-        .map_err(AdminGatewayError::Lightning)?;
-    let node = context
-        .lnrpc
+    let node = gateway
+        .ldk()
         .info()
         .await
         .map_err(AdminGatewayError::Lightning)?;
@@ -137,17 +133,13 @@ async fn mnemonic(
 async fn ldk_balances(
     Extension(gateway): Extension<Arc<Gateway>>,
 ) -> Result<Json<Value>, GatewayError> {
-    let context = gateway
-        .get_lightning_context()
-        .await
-        .map_err(AdminGatewayError::Lightning)?;
-    let balances = context
-        .lnrpc
+    let balances = gateway
+        .ldk()
         .get_balances()
         .await
         .map_err(AdminGatewayError::Lightning)?;
-    let channels = context
-        .lnrpc
+    let channels = gateway
+        .ldk()
         .list_channels()
         .await
         .map_err(AdminGatewayError::Lightning)?;
@@ -279,12 +271,8 @@ async fn ldk_peer_connect(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkPeerConnectRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    let context = gateway
-        .get_lightning_context()
-        .await
-        .map_err(AdminGatewayError::Lightning)?;
-    context
-        .lnrpc
+    gateway
+        .ldk()
         .connect_peer(req.pubkey, req.host)
         .await
         .map_err(AdminGatewayError::Lightning)?;
@@ -295,12 +283,8 @@ async fn ldk_peer_disconnect(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkPeerDisconnectRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    let context = gateway
-        .get_lightning_context()
-        .await
-        .map_err(AdminGatewayError::Lightning)?;
-    context
-        .lnrpc
+    gateway
+        .ldk()
         .disconnect_peer(req.pubkey)
         .await
         .map_err(AdminGatewayError::Lightning)?;
@@ -310,12 +294,8 @@ async fn ldk_peer_disconnect(
 async fn ldk_peer_list(
     Extension(gateway): Extension<Arc<Gateway>>,
 ) -> Result<Json<Value>, GatewayError> {
-    let context = gateway
-        .get_lightning_context()
-        .await
-        .map_err(AdminGatewayError::Lightning)?;
-    let peers = context
-        .lnrpc
+    let peers = gateway
+        .ldk()
         .list_peers()
         .await
         .into_iter()
