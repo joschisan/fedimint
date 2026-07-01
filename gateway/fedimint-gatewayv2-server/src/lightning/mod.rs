@@ -11,9 +11,7 @@
 
 pub mod ldk;
 
-use bitcoin::hashes::sha256;
 use fedimint_core::secp256k1::PublicKey;
-pub use ldk::GatewayLdkClient;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -23,20 +21,6 @@ pub struct GetNodeInfoResponse {
     pub network: String,
     pub block_height: u32,
     pub synced_to_chain: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CreateInvoiceRequest {
-    pub payment_hash: Option<sha256::Hash>,
-    pub amount_msat: u64,
-    pub expiry_secs: u32,
-    pub description: Option<InvoiceDescription>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum InvoiceDescription {
-    Direct(String),
-    Hash(sha256::Hash),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -2,10 +2,7 @@ use std::collections::BTreeMap;
 
 use fedimint_client::ClientHandleArc;
 use fedimint_core::config::{FederationId, FederationIdPrefix, JsonClientConfig};
-use fedimint_core::invite_code::InviteCode;
 use fedimint_core::util::Spanned;
-use fedimint_gateway_common::{ConnectorType, FederationConfig};
-use fedimint_lnv2_common::gateway_api::PaymentFee;
 
 use crate::AdminResult;
 
@@ -73,25 +70,5 @@ impl FederationManager {
             );
         }
         federations
-    }
-}
-
-/// Builds the transient [`FederationConfig`] used only to populate
-/// [`FederationInfo`](fedimint_gateway_common::FederationInfo) responses. The
-/// gateway no longer persists a per-federation config: fees are global and the
-/// `federation_index`/connector fields are vestigial LNv1 concepts, so they are
-/// filled with defaults.
-pub(crate) fn transient_federation_config(
-    invite_code: InviteCode,
-    lightning_fee: PaymentFee,
-    transaction_fee: PaymentFee,
-) -> FederationConfig {
-    FederationConfig {
-        invite_code,
-        federation_index: 0,
-        lightning_fee,
-        transaction_fee,
-        #[allow(deprecated)]
-        _connector: ConnectorType::Tcp,
     }
 }

@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,7 +15,6 @@ use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_derive_secret::DerivableSecret;
 use fedimint_gwv2_client::GatewayClientInitV2;
 
-use crate::config::DatabaseBackend;
 use crate::db::get_client_database;
 use crate::{AdminResult, Gateway};
 
@@ -24,7 +22,6 @@ use crate::{AdminResult, Gateway};
 pub struct GatewayClientBuilder {
     work_dir: PathBuf,
     registry: ClientModuleInitRegistry,
-    db_backend: DatabaseBackend,
     connectors: ConnectorRegistry,
 }
 
@@ -32,13 +29,11 @@ impl GatewayClientBuilder {
     pub async fn new(
         work_dir: PathBuf,
         registry: ClientModuleInitRegistry,
-        db_backend: DatabaseBackend,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             connectors: ConnectorRegistry::build_from_client_env()?.bind().await?,
             work_dir,
             registry,
-            db_backend,
         })
     }
 
@@ -101,25 +96,11 @@ impl GatewayClientBuilder {
         let db_path = self.work_dir.join(format!("{federation_id}.db"));
 
         let (db, root_secret) = if db_path.exists() {
-            let db = match self.db_backend {
-                DatabaseBackend::RocksDb => {
-                    let rocksdb = fedimint_rocksdb::RocksDb::build(db_path.clone())
-                        .open()
-                        .await
-                        .map_err(|e| {
-                            anyhow::anyhow!("Failed to create a federation client: {e}")
-                        })?;
-                    Database::new(rocksdb, ModuleDecoderRegistry::default())
-                }
-                DatabaseBackend::CursedRedb => {
-                    let cursed_redb = fedimint_cursed_redb::MemAndRedb::new(db_path.clone())
-                        .await
-                        .map_err(|e| {
-                            anyhow::anyhow!("Failed to create a federation client: {e}")
-                        })?;
-                    Database::new(cursed_redb, ModuleDecoderRegistry::default())
-                }
-            };
+            let rocksdb = fedimint_rocksdb::RocksDb::build(db_path.clone())
+                .open()
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to create a federation client: {e}"))?;
+            let db = Database::new(rocksdb, ModuleDecoderRegistry::default());
             let root_secret = RootSecret::Custom(self.client_plainrootsecret(&db).await?);
             (db, root_secret)
         } else {
@@ -164,17 +145,5 @@ impl GatewayClientBuilder {
             ));
         }
         Ok(())
-    }
-
-    /// Returns a vector of "legacy" federations which did not derive their
-    /// client secret's from the gateway's mnemonic.
-    pub fn legacy_federations(&self, all_federations: BTreeSet<FederationId>) -> Vec<FederationId> {
-        all_federations
-            .into_iter()
-            .filter(|federation_id| {
-                let db_path = self.work_dir.join(format!("{federation_id}.db"));
-                db_path.exists()
-            })
-            .collect::<Vec<FederationId>>()
     }
 }

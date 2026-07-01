@@ -18,7 +18,6 @@ use clap::Args;
 use fedimint_core::Amount;
 use fedimint_core::config::FederationId;
 use fedimint_core::invite_code::InviteCode;
-use fedimint_core::util::SafeUrl;
 use fedimint_mintv2_common::Denomination;
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
@@ -66,8 +65,6 @@ pub const ROUTE_FEDERATION_MODULE_WALLET_RECEIVE: &str = "/federation/module/wal
 pub struct InfoResponse {
     /// Lightning node public key (LDK node id).
     pub lightning_pk: PublicKey,
-    /// The gateway's advertised HTTP API url, if configured.
-    pub api_url: Option<SafeUrl>,
     pub network: String,
     pub block_height: u64,
     pub synced_to_chain: bool,

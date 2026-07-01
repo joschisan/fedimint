@@ -15,9 +15,9 @@ use axum::{Extension, Json, Router};
 use fedimint_core::config::FederationId;
 use fedimint_core::{Amount, BitcoinAmountOrAll};
 use fedimint_gateway_common::{
-    CloseChannelsWithPeerRequest, ConnectFedPayload, CreateInvoiceForOperatorPayload,
-    DepositAddressPayload, LeaveFedPayload, OpenChannelRequest, PayInvoiceForOperatorPayload,
-    ReceiveEcashPayload, SendOnchainRequest, SpendEcashPayload, WithdrawPayload,
+    CloseChannelsWithPeerRequest, CreateInvoiceForOperatorPayload, DepositAddressPayload,
+    LeaveFedPayload, OpenChannelRequest, PayInvoiceForOperatorPayload, ReceiveEcashPayload,
+    SendOnchainRequest, SpendEcashPayload,
 };
 use fedimint_gatewayv2_cli_core as cli;
 use fedimint_logging::LOG_GATEWAY;
@@ -105,10 +105,9 @@ fn router(gateway: Arc<Gateway>) -> Router {
 // --- top-level ---
 
 async fn info(Extension(gateway): Extension<Arc<Gateway>>) -> Result<Json<Value>, GatewayError> {
-    let node = gateway.ldk().info();
+    let node = gateway.info();
     Ok(Json(json!(cli::InfoResponse {
         lightning_pk: node.pub_key,
-        api_url: gateway.api_url.clone(),
         network: gateway.network.to_string(),
         block_height: u64::from(node.block_height),
         synced_to_chain: node.synced_to_chain,
@@ -119,9 +118,7 @@ async fn mnemonic(
     Extension(gateway): Extension<Arc<Gateway>>,
 ) -> Result<Json<Value>, GatewayError> {
     let response = gateway.handle_mnemonic_msg().await?;
-    Ok(Json(json!(cli::MnemonicResponse {
-        mnemonic: response.mnemonic,
-    })))
+    Ok(Json(json!(response)))
 }
 
 // --- ldk ---
@@ -129,8 +126,8 @@ async fn mnemonic(
 async fn ldk_balances(
     Extension(gateway): Extension<Arc<Gateway>>,
 ) -> Result<Json<Value>, GatewayError> {
-    let balances = gateway.ldk().get_balances();
-    let channels = gateway.ldk().list_channels();
+    let balances = gateway.get_balances();
+    let channels = gateway.list_channels();
     let total_outbound_capacity_msat = channels
         .iter()
         .map(|channel| channel.outbound_liquidity_sats * 1000)
@@ -252,7 +249,7 @@ async fn ldk_peer_connect(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkPeerConnectRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    gateway.ldk().connect_peer(req.pubkey, &req.host)?;
+    gateway.connect_peer(req.pubkey, &req.host)?;
     Ok(Json(json!(())))
 }
 
@@ -260,7 +257,7 @@ async fn ldk_peer_disconnect(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::LdkPeerDisconnectRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    gateway.ldk().disconnect_peer(req.pubkey)?;
+    gateway.disconnect_peer(req.pubkey)?;
     Ok(Json(json!(())))
 }
 
@@ -268,7 +265,6 @@ async fn ldk_peer_list(
     Extension(gateway): Extension<Arc<Gateway>>,
 ) -> Result<Json<Value>, GatewayError> {
     let peers = gateway
-        .ldk()
         .list_peers()
         .into_iter()
         .map(|(node_id, address, is_connected)| cli::PeerInfo {
@@ -286,13 +282,7 @@ async fn federation_join(
     Extension(gateway): Extension<Arc<Gateway>>,
     Json(req): Json<cli::FederationJoinRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    gateway
-        .handle_connect_federation(ConnectFedPayload {
-            invite_code: req.invite.to_string(),
-            use_tor: None,
-            recover: None,
-        })
-        .await?;
+    gateway.handle_connect_federation(req.invite).await?;
     Ok(Json(json!(())))
 }
 
@@ -321,15 +311,7 @@ async fn federation_enable(
 async fn federation_list(
     Extension(gateway): Extension<Arc<Gateway>>,
 ) -> Result<Json<Value>, GatewayError> {
-    let federations = gateway
-        .list_federation_infos()
-        .await
-        .into_iter()
-        .map(|info| cli::FederationInfo {
-            federation_id: info.federation_id,
-            federation_name: info.federation_name,
-        })
-        .collect();
+    let federations = gateway.list_federation_infos().await;
     Ok(Json(json!(cli::FederationListResponse { federations })))
 }
 
@@ -407,12 +389,7 @@ async fn wallet_send(
 ) -> Result<Json<Value>, GatewayError> {
     // The cli-core `--fee` is not wired: walletv2 fetches current fees itself.
     let response = gateway
-        .handle_withdraw_msg(WithdrawPayload {
-            federation_id: req.federation_id,
-            amount: BitcoinAmountOrAll::Amount(req.amount),
-            address: req.address,
-            quoted_fees: None,
-        })
+        .handle_withdraw_msg(req.federation_id, req.address, req.amount)
         .await?;
     Ok(Json(json!(cli::FederationWalletSendResponse {
         txid: response.txid,
@@ -445,7 +422,9 @@ async fn mint_counts(
     federation_id: FederationId,
 ) -> AdminResult<BTreeMap<Denomination, u64>> {
     let client = gateway.select_client(federation_id).await?.into_value();
-    let mint = client.get_first_module::<MintV2ClientModule>()?;
+    let mint = client
+        .get_first_module::<MintV2ClientModule>()
+        .expect("MintV2 module is always attached to gateway clients");
     Ok(mint.get_count_by_denomination().await)
 }
 

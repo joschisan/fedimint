@@ -40,7 +40,6 @@ fedimint-client = { workspace = true }
 fedimint-client-module = { workspace = true }
 fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
-fedimint-cursed-redb = { workspace = true }
 fedimint-derive-secret = { workspace = true }
 fedimint-gateway-common = { workspace = true }
 fedimint-gatewayv2-cli-core = { workspace = true }
@@ -50,7 +49,6 @@ fedimint-lnurl = { workspace = true }
 fedimint-lnv2-client = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 fedimint-logging = { workspace = true }
-fedimint-metrics = { workspace = true }
 fedimint-mintv2-client = { workspace = true }
 fedimint-mintv2-common = { workspace = true }
 fedimint-rocksdb = { workspace = true }
