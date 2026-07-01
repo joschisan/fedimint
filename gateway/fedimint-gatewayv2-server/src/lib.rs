@@ -66,7 +66,7 @@ use fedimint_gateway_common::{
     CreateInvoiceForOperatorPayload, DepositAddressPayload, FederationInfo, GatewayFedConfig,
     LeaveFedPayload, LightningMode, MnemonicResponse, OpenChannelRequest,
     PayInvoiceForOperatorPayload, ReceiveEcashPayload, ReceiveEcashResponse, SendOnchainRequest,
-    SpendEcashPayload, SpendEcashResponse, V1_API_ENDPOINT, WithdrawPayload, WithdrawResponse,
+    SpendEcashPayload, SpendEcashResponse, WithdrawPayload, WithdrawResponse,
 };
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
@@ -105,64 +105,6 @@ const DB_FILE: &str = "gatewayd.db";
 /// Name of the folder that the gateway uses to store its node database when
 /// running in LDK mode.
 const LDK_NODE_DB_FOLDER: &str = "ldk_node";
-
-#[bon::bon]
-impl Gateway {
-    /// Construct a [`Gateway`] using a fluent builder API.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let gateway = Gateway::builder(lightning_mode, client_builder, gateway_db)
-    ///     .listen(addr)
-    ///     .api_addr(url)
-    ///     .network(Network::Regtest)
-    ///     .chain_source(chain_source)
-    ///     .build()
-    ///     .await?;
-    /// ```
-    #[builder(start_fn = builder, finish_fn = build)]
-    pub fn new_with_builder(
-        #[builder(start_fn)] lightning_mode: LightningMode,
-        #[builder(start_fn)] client_builder: GatewayClientBuilder,
-        #[builder(start_fn)] gateway_db: Database,
-        chain_source: ChainSource,
-        #[builder(default = ([127, 0, 0, 1], 80).into())] listen: SocketAddr,
-        api_addr: Option<SafeUrl>,
-        #[builder(default = DEFAULT_NETWORK)] network: Network,
-        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)] default_routing_fees: PaymentFee,
-        #[builder(default = PaymentFee::TRANSACTION_FEE_DEFAULT)]
-        default_transaction_fees: PaymentFee,
-        metrics_listen: Option<SocketAddr>,
-    ) -> anyhow::Result<Gateway> {
-        let versioned_api = api_addr.map(|addr| {
-            addr.join(V1_API_ENDPOINT)
-                .expect("Failed to version gateway API address")
-        });
-
-        let metrics_listen = metrics_listen.unwrap_or_else(|| {
-            SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-                listen.port() + 1,
-            )
-        });
-
-        Ok(Gateway::new(
-            lightning_mode,
-            GatewayParameters {
-                listen,
-                versioned_api,
-                network,
-                default_routing_fees,
-                default_transaction_fees,
-                skip_setup: true,
-                metrics_listen,
-            },
-            gateway_db,
-            client_builder,
-            chain_source,
-        ))
-    }
-}
 
 #[derive(Clone)]
 pub struct Gateway {
@@ -372,8 +314,8 @@ impl Gateway {
         ))
     }
 
-    /// Helper function for creating a gateway from either
-    /// `new_with_default_modules` or `Gateway::builder`.
+    /// Assembles a [`Gateway`] from its parameters. The lightning node is not
+    /// created here — it is built in [`Self::run`].
     fn new(
         lightning_mode: LightningMode,
         gateway_parameters: GatewayParameters,

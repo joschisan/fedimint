@@ -3800,7 +3800,6 @@ dependencies = [
  "async-trait",
  "axum 0.8.9",
  "bitcoin",
- "bon",
  "clap",
  "erased-serde",
  "esplora-client 0.12.3",
