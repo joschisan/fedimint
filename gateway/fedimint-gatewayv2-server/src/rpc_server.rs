@@ -7,7 +7,6 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use bitcoin::hashes::sha256;
 use fedimint_core::config::FederationId;
-use fedimint_core::util::FmtCompact;
 use fedimint_gateway_common::{RECEIVE_ECASH_ENDPOINT, ReceiveEcashPayload, V1_API_ENDPOINT};
 use fedimint_lnurl::LnurlResponse;
 use fedimint_lnv2_common::endpoint_constants::{
@@ -19,45 +18,28 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 
 use crate::Gateway;
 use crate::error::{GatewayError, LnurlError};
 
-/// Creates the webserver's routes and spawns the webserver in a separate task.
-///
-/// The webserver serves only the public routes used by fedimint clients (the
-/// LNv2 payment protocol and ecash receive). Gateway administration is handled
+/// Runs the public API webserver until the task is aborted (on process
+/// shutdown). Serves only the public routes used by fedimint clients (the LNv2
+/// payment protocol and ecash receive); gateway administration is handled
 /// out-of-band by the `gatewaydv2-cli` admin CLI over a Unix socket (see
-/// [`crate::cli_server`]).
-pub async fn run_webserver(gateway: Arc<Gateway>) -> anyhow::Result<()> {
-    let task_group = gateway.task_group.clone();
-
-    let routes = routes(gateway.clone());
+/// [`crate::cli_server`]). Spawned as a fire-and-forget task from `main`,
+/// picomint-style.
+pub async fn run_public(gateway: Gateway) -> anyhow::Result<()> {
+    let listen = gateway.listen;
+    let routes = routes(Arc::new(gateway));
     let api_v1 = Router::new()
         .nest(&format!("/{V1_API_ENDPOINT}"), routes.clone())
         // Backwards compatibility: Continue supporting gateway APIs without versioning
         .merge(routes);
 
-    let handle = task_group.make_handle();
-    let shutdown_rx = handle.make_shutdown_rx();
-    let listener = TcpListener::bind(&gateway.listen).await?;
-    let serve = axum::serve(listener, api_v1.into_make_service());
-    task_group.spawn("Gateway Webserver", |_| async {
-        let graceful = serve.with_graceful_shutdown(async {
-            shutdown_rx.await;
-        });
-
-        match graceful.await {
-            Err(err) => {
-                warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Error shutting down gatewayd webserver");
-            }
-            _ => {
-                info!(target: LOG_GATEWAY, "Successfully shutdown webserver");
-            }
-        }
-    });
-    info!(target: LOG_GATEWAY, listen = %gateway.listen, "Successfully started webserver");
+    let listener = TcpListener::bind(&listen).await?;
+    info!(target: LOG_GATEWAY, %listen, "Successfully started webserver");
+    axum::serve(listener, api_v1.into_make_service()).await?;
 
     Ok(())
 }

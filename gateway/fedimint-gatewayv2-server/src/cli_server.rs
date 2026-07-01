@@ -26,17 +26,16 @@ use fedimint_mintv2_common::Denomination;
 use hex::ToHex;
 use serde_json::{Value, json};
 use tokio::net::UnixListener;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::db::GatewayDbtxNcExt as _;
 use crate::error::GatewayError;
 use crate::{AdminResult, Gateway};
 
-/// Binds the admin Unix socket and spawns the server task. Mirrors
-/// [`crate::rpc_server::run_webserver`] but over a `UnixListener`.
-pub fn run_cli_server(gateway: Arc<Gateway>) -> anyhow::Result<()> {
-    let task_group = gateway.task_group.clone();
-
+/// Runs the admin server over a local Unix socket until the task is aborted (on
+/// process shutdown). Mirrors [`crate::rpc_server::run_public`] but over a
+/// `UnixListener`. Spawned as a fire-and-forget task from `main`.
+pub async fn run_cli(gateway: Gateway) -> anyhow::Result<()> {
     let socket_path = gateway
         .client_builder
         .data_dir()
@@ -44,21 +43,11 @@ pub fn run_cli_server(gateway: Arc<Gateway>) -> anyhow::Result<()> {
     // Remove any stale socket left by a previous run before binding.
     let _ = std::fs::remove_file(&socket_path);
 
-    let router = router(gateway);
+    let router = router(Arc::new(gateway));
 
-    let handle = task_group.make_handle();
-    let shutdown_rx = handle.make_shutdown_rx();
     let listener = UnixListener::bind(&socket_path)?;
-    let serve = axum::serve(listener, router.into_make_service());
-    task_group.spawn("gatewaydv2 cli server", |_| async move {
-        let graceful = serve.with_graceful_shutdown(async {
-            shutdown_rx.await;
-        });
-        if let Err(err) = graceful.await {
-            warn!(target: LOG_GATEWAY, %err, "gatewaydv2 cli server error");
-        }
-    });
     info!(target: LOG_GATEWAY, socket = %socket_path.display(), "Started gatewaydv2 cli server");
+    axum::serve(listener, router.into_make_service()).await?;
 
     Ok(())
 }

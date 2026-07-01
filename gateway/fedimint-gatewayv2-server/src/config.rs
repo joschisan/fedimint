@@ -26,19 +26,19 @@ pub struct GatewayOpts {
 
     /// Address the gateway's API webserver (the LNv2 routes) listens on.
     #[arg(long = "api-addr", env = envs::FM_API_ADDR_ENV, default_value = "0.0.0.0:8080")]
-    api_addr: SocketAddr,
+    pub api_addr: SocketAddr,
 
     /// Address and port for the LDK node's lightning P2P (BOLT) interface.
     #[arg(long = "ldk-addr", env = envs::FM_LDK_ADDR_ENV, default_value = "0.0.0.0:9735")]
-    ldk_addr: SocketAddr,
+    pub ldk_addr: SocketAddr,
 
     /// The LDK node's advertised alias.
     #[arg(long = "ldk-alias", env = envs::FM_LDK_ALIAS_ENV, default_value = "")]
-    ldk_alias: String,
+    pub ldk_alias: String,
 
     /// Bitcoin network this gateway will be running on
     #[arg(long = "network", env = envs::FM_NETWORK_ENV, default_value = "bitcoin")]
-    network: Network,
+    pub network: Network,
 
     /// Bitcoind RPC URL with credentials embedded in the URL, e.g.
     /// `http://user:pass@127.0.0.1:8332`.
@@ -51,37 +51,9 @@ pub struct GatewayOpts {
 
     /// The default routing fees that are applied to new federations
     #[arg(long = "default-routing-fees", env = envs::FM_DEFAULT_ROUTING_FEES_ENV, default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
-    default_routing_fees: PaymentFee,
+    pub default_routing_fees: PaymentFee,
 
     /// The default transaction fees that are applied to new federations
     #[arg(long = "default-transaction-fees", env = envs::FM_DEFAULT_TRANSACTION_FEES_ENV, default_value_t = PaymentFee::TRANSACTION_FEE_DEFAULT)]
-    default_transaction_fees: PaymentFee,
-}
-
-impl GatewayOpts {
-    /// Converts the command line parameters into a helper struct the Gateway
-    /// uses to store runtime parameters.
-    pub fn to_gateway_parameters(&self) -> anyhow::Result<GatewayParameters> {
-        Ok(GatewayParameters {
-            listen: self.api_addr,
-            ldk_addr: self.ldk_addr,
-            ldk_alias: self.ldk_alias.clone(),
-            network: self.network,
-            default_routing_fees: self.default_routing_fees,
-            default_transaction_fees: self.default_transaction_fees,
-        })
-    }
-}
-
-/// `GatewayParameters` is a helper struct that can be derived from
-/// `GatewayOpts` that holds the CLI or environment variables that are specified
-/// by the user.
-#[derive(Debug)]
-pub struct GatewayParameters {
-    pub listen: SocketAddr,
-    pub ldk_addr: SocketAddr,
-    pub ldk_alias: String,
-    pub network: Network,
-    pub default_routing_fees: PaymentFee,
     pub default_transaction_fees: PaymentFee,
 }

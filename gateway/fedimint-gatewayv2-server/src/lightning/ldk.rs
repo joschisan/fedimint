@@ -98,10 +98,10 @@ impl LogWriter for LdkTracingLogger {
 }
 
 /// Builds and starts the LDK node from the gateway's configuration and returns
-/// it. The node is stopped on gateway shutdown (see [`Gateway::run`]); the
-/// gateway's lightning bookkeeping (the pay lock-pool and pending-channels map)
-/// lives on [`Gateway`] itself.
-pub(crate) fn build_ldk_node(
+/// it. Called from `main` before the [`Gateway`] is assembled; the gateway's
+/// lightning bookkeeping (the pay lock-pool and pending-channels map) lives on
+/// [`Gateway`] itself.
+pub fn build_ldk_node(
     data_dir: &Path,
     chain_source: &ChainSource,
     network: Network,
@@ -187,108 +187,23 @@ pub(crate) fn build_ldk_node(
 }
 
 impl Gateway {
-    /// Drives the LDK event queue until an inbound payment becomes claimable,
-    /// returning its payment hash and claimable amount. Channel lifecycle
-    /// events (`ChannelPending` / `ChannelClosed`) are handled inline to
-    /// unblock [`Self::open_channel`]; all other events are ignored. Each
-    /// event is acknowledged with `event_handled` before the next is
-    /// pulled.
-    ///
-    /// The gateway calls this in a loop (see `Gateway::process_ldk_events`); on
-    /// shutdown the caller cancels the future at the `next_event_async` await.
-    pub async fn next_incoming_payment(&self) -> (sha256::Hash, u64) {
-        loop {
-            let event = self.node().next_event_async().await;
-
-            let claimable = match event {
-                ldk_node::Event::PaymentClaimable {
-                    payment_hash,
-                    claimable_amount_msat,
-                    ..
-                } => Some((
-                    sha256::Hash::from_slice(&payment_hash.0).expect("Failed to create Hash"),
-                    claimable_amount_msat,
-                )),
-                ldk_node::Event::ChannelPending {
-                    channel_id,
-                    user_channel_id,
-                    funding_txo,
-                    ..
-                } => {
-                    info!(target: LOG_LIGHTNING, %channel_id, "LDK Channel is pending");
-                    if let Some(sender) = self
-                        .pending_channels
-                        .write()
-                        .await
-                        .remove(&UserChannelId(user_channel_id))
-                    {
-                        let _ = sender.send(Ok(funding_txo));
-                    } else {
-                        debug!(
-                            ?user_channel_id,
-                            "No channel open pending for user channel id"
-                        );
-                    }
-                    None
-                }
-                ldk_node::Event::ChannelClosed {
-                    channel_id,
-                    user_channel_id,
-                    reason,
-                    ..
-                } => {
-                    info!(target: LOG_LIGHTNING, %channel_id, "LDK Channel is closed");
-                    if let Some(sender) = self
-                        .pending_channels
-                        .write()
-                        .await
-                        .remove(&UserChannelId(user_channel_id))
-                    {
-                        let reason = reason.map_or_else(
-                            || "Channel has been closed".to_string(),
-                            |r| r.to_string(),
-                        );
-                        let _ = sender.send(Err(anyhow::anyhow!(reason)));
-                    } else {
-                        debug!(
-                            ?user_channel_id,
-                            "No channel open pending for user channel id"
-                        );
-                    }
-                    None
-                }
-                _ => None,
-            };
-
-            if let Err(err) = self.node().event_handled() {
-                warn!(err = %err.fmt_compact(), "LDK could not mark event handled");
-            }
-
-            if let Some(payment) = claimable {
-                return payment;
-            }
-        }
-    }
-}
-
-impl Gateway {
     /// The lightning node's public key (its node id). Cheap, local read.
     pub fn public_key(&self) -> PublicKey {
-        self.node().node_id()
+        self.node.node_id()
     }
 
     /// The lightning node's alias, or a default derived from its node id.
     /// Cheap, local read.
     pub fn alias(&self) -> String {
-        self.node().node_alias().map_or_else(
-            || format!("LDK Fedimint Gateway Node {}", self.node().node_id()),
+        self.node.node_alias().map_or_else(
+            || format!("LDK Fedimint Gateway Node {}", self.node.node_id()),
             |alias| alias.to_string(),
         )
     }
 
     /// Returns high-level info about the lightning node.
     pub fn info(&self) -> GetNodeInfoResponse {
-        let node_status = self.node().status();
+        let node_status = self.node.status();
         let ldk_block_height = node_status.current_best_block.height;
         let onchain_sync = node_status.latest_onchain_wallet_sync_timestamp;
         let lightning_sync = node_status.latest_lightning_wallet_sync_timestamp;
@@ -296,12 +211,12 @@ impl Gateway {
         debug!(target: LOG_LIGHTNING, ?onchain_sync, ?lightning_sync, ?is_running, "LDK Sync Status");
 
         GetNodeInfoResponse {
-            pub_key: self.node().node_id(),
-            alias: match self.node().node_alias() {
+            pub_key: self.node.node_id(),
+            alias: match self.node.node_alias() {
                 Some(alias) => alias.to_string(),
-                None => format!("LDK Fedimint Gateway Node {}", self.node().node_id()),
+                None => format!("LDK Fedimint Gateway Node {}", self.node.node_id()),
             },
-            network: self.node().config().network.to_string(),
+            network: self.node.config().network.to_string(),
             block_height: ldk_block_height,
             // `synced_to_chain` is used for determining if the Lightning node is ready, so we care
             // about the `lightning_sync` status.
@@ -338,9 +253,9 @@ impl Gateway {
         // executed once at a time for a given payment hash, ensuring that there is no
         // race condition between checking if a payment is known and initiating a new
         // payment if it isn't.
-        if self.node().payment(&payment_id).is_none() {
+        if self.node.payment(&payment_id).is_none() {
             assert_eq!(
-                self.node()
+                self.node
                     .bolt11_payment()
                     .send(
                         invoice,
@@ -365,7 +280,7 @@ impl Gateway {
         // events, but interacting with the node event queue here isn't
         // straightforward.
         loop {
-            if let Some(payment_details) = self.node().payment(&payment_id) {
+            if let Some(payment_details) = self.node.payment(&payment_id) {
                 match payment_details.status {
                     PaymentStatus::Pending => {}
                     PaymentStatus::Succeeded => {
@@ -413,7 +328,7 @@ impl Gateway {
         let ph_hex_str = hex::encode(payment_hash);
 
         if let PaymentAction::Settle(preimage) = action {
-            self.node()
+            self.node
                 .bolt11_payment()
                 .claim_for_hash(ph, claimable_amount_msat, PaymentPreimage(preimage.0))
                 .map_err(|_| LightningRpcError::FailedToCompleteHtlc {
@@ -421,12 +336,11 @@ impl Gateway {
                 })?;
         } else {
             warn!(target: LOG_LIGHTNING, payment_hash = %ph_hex_str, "Unwinding payment because the action was not `Settle`");
-            self.node()
-                .bolt11_payment()
-                .fail_for_hash(ph)
-                .map_err(|_| LightningRpcError::FailedToCompleteHtlc {
+            self.node.bolt11_payment().fail_for_hash(ph).map_err(|_| {
+                LightningRpcError::FailedToCompleteHtlc {
                     failure_reason: format!("Failed to unwind LDK payment with hash {ph_hex_str}"),
-                })?;
+                }
+            })?;
         }
 
         Ok(())
@@ -457,14 +371,14 @@ impl Gateway {
         };
 
         let invoice = match payment_hash {
-            Some(payment_hash) => self.node().bolt11_payment().receive_for_hash(
+            Some(payment_hash) => self.node.bolt11_payment().receive_for_hash(
                 amount_msat,
                 &description,
                 expiry_secs,
                 PaymentHash(*payment_hash.as_byte_array()),
             ),
             None => self
-                .node()
+                .node
                 .bolt11_payment()
                 .receive(amount_msat, &description, expiry_secs),
         }
@@ -482,7 +396,7 @@ impl Gateway {
     /// Gets a funding address belonging to the lightning node's on-chain
     /// wallet.
     pub fn get_ln_onchain_address(&self) -> Result<String, LightningRpcError> {
-        self.node()
+        self.node
             .onchain_payment()
             .new_address()
             .map(|address| address.to_string())
@@ -501,7 +415,7 @@ impl Gateway {
             fee_rate_sats_per_vbyte,
         }: SendOnchainRequest,
     ) -> Result<String, LightningRpcError> {
-        let onchain = self.node().onchain_payment();
+        let onchain = self.node.onchain_payment();
 
         let retain_reserves = false;
         let txid = match amount {
@@ -581,7 +495,7 @@ impl Gateway {
         {
             let mut channels = self.pending_channels.write().await;
             let user_channel_id = self
-                .node()
+                .node
                 .open_announced_channel(
                     pubkey,
                     SocketAddress::from_str(&host).map_err(|e| {
@@ -623,13 +537,13 @@ impl Gateway {
 
         info!(%pubkey, "Closing all channels with peer");
         for channel_with_peer in self
-            .node()
+            .node
             .list_channels()
             .iter()
             .filter(|channel| channel.counterparty_node_id == pubkey)
         {
             if force {
-                match self.node().force_close_channel(
+                match self.node.force_close_channel(
                     &channel_with_peer.user_channel_id,
                     pubkey,
                     Some("User initiated force close".to_string()),
@@ -641,7 +555,7 @@ impl Gateway {
                 }
             } else {
                 match self
-                    .node()
+                    .node
                     .close_channel(&channel_with_peer.user_channel_id, pubkey)
                 {
                     Ok(()) => {
@@ -662,17 +576,17 @@ impl Gateway {
     /// Lists the lightning node's active channels with all peers.
     pub fn list_channels(&self) -> Vec<ChannelInfo> {
         let mut channels = Vec::new();
-        let network_graph = self.node().network_graph();
+        let network_graph = self.node.network_graph();
 
         // Build a map of peer pubkey -> address from connected/known peers
         let peer_addresses: std::collections::HashMap<_, _> = self
-            .node()
+            .node
             .list_peers()
             .into_iter()
             .map(|peer| (peer.node_id, peer.address.to_string()))
             .collect();
 
-        for channel_details in &self.node().list_channels() {
+        for channel_details in &self.node.list_channels() {
             let node_id = NodeId::from_pubkey(&channel_details.counterparty_node_id);
             let node_info = network_graph.node(&node_id);
 
@@ -717,7 +631,7 @@ impl Gateway {
                 failure_reason: e.to_string(),
             }
         })?;
-        self.node().connect(node_id, address, true).map_err(|e| {
+        self.node.connect(node_id, address, true).map_err(|e| {
             LightningRpcError::FailedToConnectToPeer {
                 failure_reason: e.to_string(),
             }
@@ -726,7 +640,7 @@ impl Gateway {
 
     /// Disconnects from a lightning peer.
     pub fn disconnect_peer(&self, node_id: PublicKey) -> Result<(), LightningRpcError> {
-        self.node()
+        self.node
             .disconnect(node_id)
             .map_err(|e| LightningRpcError::FailedToConnectToPeer {
                 failure_reason: e.to_string(),
@@ -735,7 +649,7 @@ impl Gateway {
 
     /// Lists the node's lightning peers as `(node_id, address, is_connected)`.
     pub fn list_peers(&self) -> Vec<(PublicKey, String, bool)> {
-        self.node()
+        self.node
             .list_peers()
             .into_iter()
             .map(|peer| (peer.node_id, peer.address.to_string(), peer.is_connected))
@@ -745,9 +659,9 @@ impl Gateway {
     /// Returns a summary of the lightning node's balance, including the onchain
     /// wallet, outbound liquidity, and inbound liquidity.
     pub fn get_balances(&self) -> GetBalancesResponse {
-        let balances = self.node().list_balances();
+        let balances = self.node.list_balances();
         let channel_lists = self
-            .node()
+            .node
             .list_channels()
             .into_iter()
             .filter(|chan| chan.is_usable)
@@ -767,7 +681,7 @@ impl Gateway {
 
     pub fn sync_wallet(&self) {
         block_in_place(|| {
-            let _ = self.node().sync_wallets();
+            let _ = self.node.sync_wallets();
         });
     }
 
