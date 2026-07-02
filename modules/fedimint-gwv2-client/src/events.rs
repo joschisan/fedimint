@@ -58,6 +58,14 @@ pub struct OutgoingPaymentSucceeded {
     /// this field existed; daemon-driven sends always populate it.
     #[serde(default)]
     pub preimage: Option<[u8; 32]>,
+
+    /// The realized Lightning routing fee reported by the node for this
+    /// payment; zero for swaps, which never touch the Lightning network.
+    ///
+    /// `Option` only for backward-compatibility with events serialized before
+    /// this field existed; daemon-driven sends always populate it.
+    #[serde(default)]
+    pub ln_fee: Option<Amount>,
 }
 
 impl Event for OutgoingPaymentSucceeded {

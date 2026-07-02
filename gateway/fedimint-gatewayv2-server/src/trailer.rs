@@ -23,6 +23,7 @@
 
 use bitcoin::hashes::sha256;
 use fedimint_client::ClientHandleArc;
+use fedimint_core::Amount;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::OperationId;
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped as _;
@@ -113,7 +114,13 @@ async fn dispatch_direct_swap(
     preimage: Option<[u8; 32]>,
 ) {
     state
-        .finalize_send_for(row.federation_id, row.contract, row.outpoint, preimage)
+        .finalize_send_for(
+            row.federation_id,
+            row.contract,
+            row.outpoint,
+            preimage,
+            Amount::ZERO,
+        )
         .await;
 }
 

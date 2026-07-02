@@ -257,7 +257,10 @@ impl SendStateMachine {
                         OutgoingPaymentSucceeded {
                             payment_image: old_state.common.contract.payment_image.clone(),
                             target_federation: payment_response.target_federation,
+                            // `IGatewayClientV2::pay` only surfaces the preimage,
+                            // so the realized routing fee is unknown on this path.
                             preimage: Some(payment_response.preimage),
+                            ln_fee: None,
                         },
                     )
                     .await;

@@ -1228,6 +1228,7 @@ async fn gateway_read_payment_log() -> anyhow::Result<()> {
                     payment_image: PaymentImage::Hash([0_u8; 32].consensus_hash()),
                     target_federation: Some(fed2.id()),
                     preimage: None,
+                    ln_fee: None,
                 },
             )
             .await;

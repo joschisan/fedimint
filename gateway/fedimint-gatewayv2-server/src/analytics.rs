@@ -83,15 +83,17 @@ impl Analytics {
 }
 
 /// Schema + the two per-direction payment views. `fee_msat` is the gateway's
-/// realized total fee for the payment: on the outgoing side it includes the
-/// LN routing budget (fedimint's LNv2 fee model doesn't split the two), on
-/// the incoming side it's the receive fee retained from the invoice amount.
+/// own fee for the payment; on the outgoing side `ln_fee_msat` is the LN
+/// routing-fee budget at send time (`send`) and the realized routing cost at
+/// success (`send_success`), so the views can report the slice of the budget
+/// the gateway kept.
 const SCHEMA_SQL: &str = r"
 CREATE TABLE send (
     federation    TEXT NOT NULL,
     payment_image TEXT NOT NULL,
     ts            INTEGER NOT NULL,   -- msecs since unix epoch
     amount_msat   INTEGER NOT NULL,
+    ln_fee_msat   INTEGER NOT NULL,
     fee_msat      INTEGER NOT NULL,
     PRIMARY KEY (federation, payment_image)
 );
@@ -101,6 +103,7 @@ CREATE TABLE send_success (
     payment_image TEXT NOT NULL,
     ts            INTEGER NOT NULL,
     preimage      TEXT NOT NULL,
+    ln_fee_msat   INTEGER NOT NULL,
     PRIMARY KEY (federation, payment_image)
 );
 
@@ -154,7 +157,18 @@ SELECT
         ELSE 'pending'
     END AS status,
     s.amount_msat,
-    s.fee_msat,
+    s.fee_msat       AS gw_fee_msat,
+    s.ln_fee_msat    AS ln_fee_budget_msat,
+    CASE
+        WHEN succ.payment_image IS NOT NULL THEN succ.ln_fee_msat
+        WHEN canc.payment_image IS NOT NULL THEN 0
+        ELSE NULL
+    END AS ln_fee_paid_msat,
+    CASE
+        WHEN succ.payment_image IS NOT NULL THEN s.ln_fee_msat - succ.ln_fee_msat
+        WHEN canc.payment_image IS NOT NULL THEN 0
+        ELSE NULL
+    END AS ln_fee_kept_msat,
     succ.preimage,
     canc.error
 FROM send s
@@ -175,7 +189,7 @@ SELECT
         ELSE 'pending'
     END AS status,
     r.amount_msat,
-    r.fee_msat,
+    r.fee_msat       AS gw_fee_msat,
     succ.preimage,
     fail.error
 FROM receive r
@@ -238,10 +252,12 @@ fn insert_batch(
     for entry in entries {
         let ts = (entry.ts_usecs / 1000) as i64;
         if let Some(e) = as_gw_event::<OutgoingPaymentStarted>(entry) {
+            // The contract escrows invoice amount + gateway fee
+            // (`min_contract_amount`) + the LN routing-fee budget.
             tx.execute(
                 "INSERT OR IGNORE INTO send \
-                 (federation, payment_image, ts, amount_msat, fee_msat) \
-                 VALUES (?, ?, ?, ?, ?)",
+                 (federation, payment_image, ts, amount_msat, ln_fee_msat, fee_msat) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
                     federation,
                     e.outgoing_contract.payment_image.consensus_encode_to_hex(),
@@ -250,18 +266,23 @@ fn insert_batch(
                     e.outgoing_contract
                         .amount
                         .msats
+                        .saturating_sub(e.min_contract_amount.msats) as i64,
+                    e.min_contract_amount
+                        .msats
                         .saturating_sub(e.invoice_amount.msats) as i64,
                 ],
             )?;
         } else if let Some(e) = as_gw_event::<OutgoingPaymentSucceeded>(entry) {
             tx.execute(
                 "INSERT OR IGNORE INTO send_success \
-                 (federation, payment_image, ts, preimage) VALUES (?, ?, ?, ?)",
+                 (federation, payment_image, ts, preimage, ln_fee_msat) \
+                 VALUES (?, ?, ?, ?, ?)",
                 rusqlite::params![
                     federation,
                     e.payment_image.consensus_encode_to_hex(),
                     ts,
                     e.preimage.map(hex::encode).unwrap_or_default(),
+                    e.ln_fee.map_or(0, |fee| fee.msats) as i64,
                 ],
             )?;
         } else if let Some(e) = as_gw_event::<OutgoingPaymentFailed>(entry) {

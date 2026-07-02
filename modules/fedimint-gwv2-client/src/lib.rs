@@ -699,6 +699,7 @@ impl GatewayClientModuleV2 {
         contract: OutgoingContract,
         outpoint: OutPoint,
         preimage: Option<[u8; 32]>,
+        ln_fee: Amount,
     ) -> anyhow::Result<Option<Signature>> {
         match preimage {
             Some(preimage) => {
@@ -733,6 +734,7 @@ impl GatewayClientModuleV2 {
                             payment_image: contract.payment_image.clone(),
                             target_federation: None,
                             preimage: Some(preimage),
+                            ln_fee: Some(ln_fee),
                         },
                     )
                     .await;

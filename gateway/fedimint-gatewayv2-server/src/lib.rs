@@ -499,6 +499,7 @@ impl AppState {
                     payload.contract.clone(),
                     payload.outpoint,
                     None,
+                    Amount::ZERO,
                 )
                 .await
             {
@@ -553,7 +554,7 @@ impl AppState {
                 if let Err(err) = state.start_direct_swap(payment_hash, amount).await {
                     warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), %payment_hash, "Failed to start direct swap; cancelling");
                     state
-                        .finalize_send_for(federation_id, contract, outpoint, None)
+                        .finalize_send_for(federation_id, contract, outpoint, None, Amount::ZERO)
                         .await;
                 }
             });
@@ -642,13 +643,16 @@ impl AppState {
     }
 
     /// Finalizes an outgoing contract on its source federation: claims it with
-    /// `Some(preimage)` or forfeits it with `None`. Best-effort; logs on error.
+    /// `Some(preimage)` or forfeits it with `None`. `ln_fee` is the realized
+    /// Lightning routing fee — zero on the forfeit and direct-swap paths.
+    /// Best-effort; logs on error.
     pub(crate) async fn finalize_send_for(
         &self,
         federation_id: FederationId,
         contract: fedimint_lnv2_common::contracts::OutgoingContract,
         outpoint: fedimint_core::OutPoint,
         preimage: Option<[u8; 32]>,
+        ln_fee: Amount,
     ) {
         let PaymentImage::Hash(payment_hash) = contract.payment_image else {
             warn!(target: LOG_GATEWAY, "Outgoing contract has no payment hash");
@@ -662,7 +666,7 @@ impl AppState {
                 .await?
                 .get_first_module::<GatewayClientModuleV2>()
                 .expect("Must have client module")
-                .finalize_send(operation_id, contract, outpoint, preimage)
+                .finalize_send(operation_id, contract, outpoint, preimage, ln_fee)
                 .await
         };
 
@@ -858,12 +862,17 @@ impl AppState {
             ldk_node::Event::PaymentSuccessful {
                 payment_hash,
                 payment_preimage: Some(preimage),
+                fee_paid_msat,
                 ..
             } => {
                 let payment_hash =
                     sha256::Hash::from_slice(&payment_hash.0).expect("payment hash is 32 bytes");
-                self.handle_payment_successful(payment_hash, preimage.0)
-                    .await;
+                self.handle_payment_successful(
+                    payment_hash,
+                    preimage.0,
+                    Amount::from_msats(fee_paid_msat.unwrap_or(0)),
+                )
+                .await;
             }
             ldk_node::Event::PaymentFailed {
                 payment_hash: Some(payment_hash),
@@ -971,9 +980,15 @@ impl AppState {
 
     /// Handles a successful outbound LN payment: looks up the outgoing
     /// contract row and finalizes the send on the source federation with the
-    /// preimage carried on the `PaymentSuccessful` event. Payments without a
-    /// row (e.g. operator-initiated sends) are ignored.
-    async fn handle_payment_successful(&self, payment_hash: sha256::Hash, preimage: [u8; 32]) {
+    /// preimage and realized routing fee carried on the `PaymentSuccessful`
+    /// event. Payments without a row (e.g. operator-initiated sends) are
+    /// ignored.
+    async fn handle_payment_successful(
+        &self,
+        payment_hash: sha256::Hash,
+        preimage: [u8; 32],
+        ln_fee: Amount,
+    ) {
         if self
             .gateway_db
             .begin_transaction_nc()
@@ -999,6 +1014,7 @@ impl AppState {
                 row.contract,
                 row.outpoint,
                 Some(preimage),
+                ln_fee,
             )
             .await;
         }
@@ -1033,8 +1049,14 @@ impl AppState {
             .get_value(&OutgoingContractKey(operation_id))
             .await
         {
-            self.finalize_send_for(row.federation_id, row.contract, row.outpoint, None)
-                .await;
+            self.finalize_send_for(
+                row.federation_id,
+                row.contract,
+                row.outpoint,
+                None,
+                Amount::ZERO,
+            )
+            .await;
         }
 
         let mut dbtx = self.gateway_db.begin_transaction().await;
