@@ -160,10 +160,6 @@ pub struct AppState {
     /// The default transaction fees for new federations.
     pub default_transaction_fees: PaymentFee,
 
-    /// Serializes concurrent [`AppState::pay`] calls for the same invoice so
-    /// the (non-idempotent) LDK send runs at most once per payment hash.
-    pub outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
-
     /// SQLite mirror of the gwv2 payment events, wiped and rebuilt from the
     /// client event logs on every startup (see [`analytics`]).
     pub analytics: analytics::Analytics,
@@ -1108,22 +1104,11 @@ impl AppState {
     ) -> anyhow::Result<[u8; 32]> {
         let payment_id = PaymentId(*invoice.payment_hash().as_byte_array());
 
-        // Lock by the payment hash to prevent multiple simultaneous calls with the same
-        // invoice from executing. This prevents `ldk-node::Bolt11Payment::send()` from
-        // being called multiple times with the same invoice. This is important because
-        // `ldk-node::Bolt11Payment::send()` is not idempotent, but this function must
-        // be idempotent.
-        let _payment_lock_guard = self
-            .outbound_lightning_payment_lock_pool
-            .async_lock(payment_id)
-            .await;
-
-        // If a payment is not known to the node we can initiate it, and if it is known
-        // we can skip calling `ldk-node::Bolt11Payment::send()` and wait for the
-        // payment to complete. The lock guard above guarantees that this block is only
-        // executed once at a time for a given payment hash, ensuring that there is no
-        // race condition between checking if a payment is known and initiating a new
-        // payment if it isn't.
+        // If a payment is already known to the node we skip the (non-idempotent)
+        // `ldk-node::Bolt11Payment::send()` and just wait for it to complete, so
+        // sequential retries with the same invoice are safe. Concurrent calls with
+        // the same invoice are not guarded against; the only caller is the admin
+        // CLI's `ln send`.
         if self.node.payment(&payment_id).is_none() {
             assert_eq!(
                 self.node

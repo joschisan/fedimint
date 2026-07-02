@@ -46,7 +46,6 @@ hex = { workspace = true }
 ldk-node = { workspace = true }
 lightning = { workspace = true }
 lightning-invoice = { workspace = true }
-lockable = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }

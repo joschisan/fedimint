@@ -130,7 +130,6 @@ fn main() -> anyhow::Result<()> {
         network: opts.network,
         default_routing_fees: opts.default_routing_fees,
         default_transaction_fees: opts.default_transaction_fees,
-        outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
         analytics,
     };
 
