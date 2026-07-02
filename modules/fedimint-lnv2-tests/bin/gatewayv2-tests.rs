@@ -474,6 +474,10 @@ fn assert_analytics(db_path: &Path) -> anyhow::Result<()> {
         4,
     )?;
 
+    // The v2->v2 circular payment is the run's only direct swap
+    assert_count("SELECT COUNT(*) FROM outgoing_payments WHERE direct", 1)?;
+    assert_count("SELECT COUNT(*) FROM incoming_payments WHERE direct", 1)?;
+
     // Amount extraction
     assert_count("SELECT SUM(amount_msat) FROM incoming_payments", 7_500_000)?;
 

@@ -87,6 +87,12 @@ impl Analytics {
 /// routing-fee budget at send time (`send`) and the realized routing cost at
 /// success (`send_success`), so the views can report the slice of the budget
 /// the gateway kept.
+///
+/// A direct swap between two federations writes a `send` row and a `receive`
+/// row with the same payment image, while external LN payments only ever
+/// produce one side — the views expose that as the `direct` column. A swap
+/// whose receive side failed before its state machine started (e.g. funding
+/// rejected) has no receive row and classifies as external.
 const SCHEMA_SQL: &str = r"
 CREATE TABLE send (
     federation    TEXT NOT NULL,
@@ -156,6 +162,7 @@ SELECT
         WHEN canc.payment_image IS NOT NULL THEN 'cancelled'
         ELSE 'pending'
     END AS status,
+    EXISTS(SELECT 1 FROM receive r WHERE r.payment_image = s.payment_image) AS direct,
     s.amount_msat,
     s.fee_msat       AS gw_fee_msat,
     s.ln_fee_msat    AS ln_fee_budget_msat,
@@ -188,6 +195,7 @@ SELECT
         WHEN fail.payment_image IS NOT NULL THEN 'failure'
         ELSE 'pending'
     END AS status,
+    EXISTS(SELECT 1 FROM send s WHERE s.payment_image = r.payment_image) AS direct,
     r.amount_msat,
     r.fee_msat       AS gw_fee_msat,
     succ.preimage,
