@@ -9,11 +9,7 @@ repository = { workspace = true }
 version = { workspace = true }
 
 [features]
-tor = [
-    "fedimint-client/tor",
-    "fedimint-api-client/tor",
-    "fedimint-gateway-common/tor",
-]
+tor = ["fedimint-client/tor", "fedimint-api-client/tor"]
 
 [[bin]]
 name = "gatewaydv2"
@@ -37,10 +33,8 @@ fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-derive-secret = { workspace = true }
 fedimint-eventlog = { workspace = true }
-fedimint-gateway-common = { workspace = true }
 fedimint-gatewayv2-cli-core = { workspace = true }
 fedimint-gwv2-client = { workspace = true }
-fedimint-lightning = { workspace = true }
 fedimint-lnurl = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 fedimint-logging = { workspace = true }

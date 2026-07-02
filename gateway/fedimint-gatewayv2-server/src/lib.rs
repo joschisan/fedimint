@@ -28,40 +28,32 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow, bail, ensure};
-use async_trait::async_trait;
 use axum::response::{IntoResponse, Response};
+use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
-use bitcoin::{Network, OutPoint};
 use fedimint_client::ClientHandleArc;
-use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::core::{ModuleKind, OperationId};
 use fedimint_core::db::{Database, IDatabaseTransactionOpsCoreTyped as _};
 use fedimint_core::encoding::Encodable as _;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::secp256k1::schnorr::Signature;
-use fedimint_core::task::sleep;
 use fedimint_core::time::duration_since_epoch;
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
 use fedimint_core::{Amount, crit};
-use fedimint_gateway_common::{ReceiveEcashPayload, ReceiveEcashResponse};
 use fedimint_gwv2_client::api::GatewayFederationApi as _;
 use fedimint_gwv2_client::events::{
     IncomingPaymentFailed, IncomingPaymentSucceeded, OutgoingPaymentFailed,
     OutgoingPaymentSucceeded,
 };
-use fedimint_gwv2_client::{
-    EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
-};
-use fedimint_lightning::{InterceptPaymentResponse, LightningRpcError, PaymentAction, Preimage};
+use fedimint_gwv2_client::{EXPIRATION_DELTA_MINIMUM_V2, GatewayClientModuleV2};
 use fedimint_lnurl::VerifyResponse;
-use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
+use fedimint_lnv2_common::contracts::PaymentImage;
 use fedimint_lnv2_common::gateway_api::{
     CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
 use fedimint_lnv2_common::{Bolt11InvoiceDescription, LightningInvoice};
 use fedimint_logging::LOG_GATEWAY;
-use fedimint_mintv2_client::MintClientModule as MintV2ClientModule;
 use futures::StreamExt as _;
 use lightning::ln::channelmanager::PaymentId;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
@@ -69,7 +61,7 @@ use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
 use reqwest::StatusCode;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use crate::client::GatewayClientFactory;
@@ -130,23 +122,6 @@ pub(crate) fn as_gw_event<E: fedimint_eventlog::Event>(
         .flatten()
 }
 
-/// Newtype over [`ldk_node::UserChannelId`] so it can key the
-/// [`AppState::pending_channels`] map.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct UserChannelId(pub ldk_node::UserChannelId);
-
-impl PartialOrd for UserChannelId {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for UserChannelId {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.0.cmp(&other.0.0)
-    }
-}
-
 /// The shared, cheaply-cloneable gateway state. Constructed as a struct
 /// literal in `main` and handed to every long-running task (webserver, admin
 /// CLI, LDK event loop, per-federation trailers); modeled on picomint's
@@ -187,22 +162,6 @@ pub struct AppState {
     /// Serializes concurrent [`AppState::pay`] calls for the same invoice so
     /// the (non-idempotent) LDK send runs at most once per payment hash.
     pub outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
-
-    /// Channels currently being opened, keyed by `UserChannelId`. The LDK event
-    /// loop uses the sender to hand the funding outpoint back to the waiting
-    /// [`crate::cli`] open-channel caller.
-    pub pending_channels:
-        Arc<RwLock<BTreeMap<UserChannelId, oneshot::Sender<anyhow::Result<OutPoint>>>>>,
-}
-
-impl std::fmt::Debug for AppState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AppState")
-            .field("client_factory", &self.client_factory)
-            .field("gateway_db", &self.gateway_db)
-            .field("api_addr", &self.api_addr)
-            .finish_non_exhaustive()
-    }
 }
 
 impl AppState {
@@ -262,22 +221,17 @@ impl AppState {
             .await
             .expect("mnemonic should be set");
 
-        let client = Box::pin(self.client_factory.open(
-            federation_id,
-            config,
-            Arc::new(self.clone()),
-            &mnemonic,
-        ))
-        .await
-        .map_err(|err| {
-            warn!(
-                target: LOG_GATEWAY,
-                federation_id = %federation_id,
-                err = %err,
-                "Failed to lazily load federation client"
-            );
-            not_connected()
-        })?;
+        let client = Box::pin(self.client_factory.open(federation_id, config, &mnemonic))
+            .await
+            .map_err(|err| {
+                warn!(
+                    target: LOG_GATEWAY,
+                    federation_id = %federation_id,
+                    err = %err,
+                    "Failed to lazily load federation client"
+                );
+                not_connected()
+            })?;
 
         clients.insert(federation_id, client.clone());
 
@@ -349,10 +303,7 @@ impl AppState {
 
         // Fresh connection: download and persist the config WITHOUT building a
         // client. The client (and its first join) happens lazily on first use.
-        let config = self
-            .client_factory
-            .download_config(&invite, Arc::new(self.clone()))
-            .await?;
+        let config = self.client_factory.download_config(&invite).await?;
 
         Self::ensure_v2_modules(&config)?;
 
@@ -364,62 +315,6 @@ impl AppState {
         dbtx.commit_tx().await;
 
         Ok(())
-    }
-
-    /// Handles a request to receive ecash into the gateway. Only a federation
-    /// whose client is already loaded can be targeted, since the ecash bundle
-    /// carries just a federation id prefix.
-    pub async fn receive_ecash(
-        &self,
-        payload: ReceiveEcashPayload,
-    ) -> anyhow::Result<ReceiveEcashResponse> {
-        let federation_id_prefix = base32::decode_prefixed::<fedimint_mintv2_client::ECash>(
-            FEDIMINT_PREFIX,
-            &payload.notes,
-        )
-        .ok()
-        .and_then(|e| e.mint())
-        .map(|id| id.to_prefix())
-        .ok_or_else(|| anyhow!("Invalid ecash format: could not parse as ECash"))?;
-
-        let client = self
-            .clients
-            .read()
-            .await
-            .iter()
-            .find_map(|(federation_id, client)| {
-                (federation_id.to_prefix() == federation_id_prefix).then(|| client.clone())
-            })
-            .ok_or_else(|| anyhow!("No federation available for prefix {federation_id_prefix}"))?;
-
-        let mint = client
-            .get_first_module::<MintV2ClientModule>()
-            .expect("MintV2 module is always attached to gateway clients");
-
-        let ecash: fedimint_mintv2_client::ECash =
-            base32::decode_prefixed(FEDIMINT_PREFIX, &payload.notes)
-                .map_err(|e| anyhow!("Expected ECash for MintV2 federation: {e}"))?;
-        let amount = ecash.amount();
-
-        let operation_id = mint
-            .receive(ecash, serde_json::Value::Null)
-            .await
-            .map_err(|e| anyhow!("{e}"))?;
-
-        if payload.wait {
-            let final_state = mint
-                .await_final_receive_operation_state(operation_id)
-                .await
-                .map_err(|e| anyhow!("{e}"))?;
-            match final_state {
-                fedimint_mintv2_client::FinalReceiveOperationState::Success => {}
-                fedimint_mintv2_client::FinalReceiveOperationState::Rejected => {
-                    bail!("ECash receive was rejected");
-                }
-            }
-        }
-
-        Ok(ReceiveEcashResponse { amount })
     }
 }
 
@@ -921,53 +816,14 @@ impl AppState {
 
         Err("Event stream ended before the receive reached a terminal state".to_string())
     }
-
-    /// Retrieves the registered incoming contract for a payment image and the
-    /// client for its federation, validating the requested amount against the
-    /// issued invoice.
-    async fn registered_incoming_contract(
-        &self,
-        payment_image: PaymentImage,
-        amount_msats: u64,
-    ) -> anyhow::Result<(IncomingContract, ClientHandleArc)> {
-        let PaymentImage::Hash(payment_hash) = payment_image else {
-            bail!("PaymentImage is not a payment hash");
-        };
-
-        let operation_id = OperationId::from_encodable(&payment_hash);
-
-        let registered = self
-            .gateway_db
-            .begin_transaction_nc()
-            .await
-            .get_value(&IncomingContractKey(operation_id))
-            .await
-            .ok_or(anyhow!("No corresponding decryption contract available"))?;
-
-        // The sender pays the invoice amount, which is the contract amount plus
-        // the gateway's receive fee — so validate against the issued invoice,
-        // not `contract.commitment.amount`.
-        let LightningInvoice::Bolt11(invoice) = &registered.invoice;
-        if invoice.amount_milli_satoshis() != Some(amount_msats) {
-            bail!(
-                "The available decryption contract's amount is not equal to the requested amount"
-            );
-        }
-
-        let client = self.select_client(registered.federation_id).await?;
-
-        Ok((registered.contract, client))
-    }
 }
 
 // LDK event loop
 impl AppState {
     /// Drives the LDK node's event queue until the task is aborted (on process
     /// shutdown). Inbound payments become claimable here; outbound payment
-    /// outcomes finalize their outgoing contracts; channel lifecycle events
-    /// (`ChannelPending` / `ChannelClosed`) are forwarded to a waiting
-    /// [`crate::cli`] open-channel caller. Each event is acknowledged with
-    /// `event_handled` before the next is pulled. Modeled on picomint's
+    /// outcomes finalize their outgoing contracts. Each event is acknowledged
+    /// with `event_handled` before the next is pulled. Modeled on picomint's
     /// `process_ldk_events`.
     pub async fn process_ldk_events(self) {
         info!(target: LOG_GATEWAY, "Gateway is running");
@@ -1009,40 +865,6 @@ impl AppState {
                 let payment_hash =
                     sha256::Hash::from_slice(&payment_hash.0).expect("payment hash is 32 bytes");
                 self.handle_payment_failed(payment_hash).await;
-            }
-            ldk_node::Event::ChannelPending {
-                channel_id,
-                user_channel_id,
-                funding_txo,
-                ..
-            } => {
-                info!(target: LOG_GATEWAY, %channel_id, "LDK Channel is pending");
-                if let Some(sender) = self
-                    .pending_channels
-                    .write()
-                    .await
-                    .remove(&UserChannelId(user_channel_id))
-                {
-                    let _ = sender.send(Ok(funding_txo));
-                }
-            }
-            ldk_node::Event::ChannelClosed {
-                channel_id,
-                user_channel_id,
-                reason,
-                ..
-            } => {
-                info!(target: LOG_GATEWAY, %channel_id, "LDK Channel is closed");
-                if let Some(sender) = self
-                    .pending_channels
-                    .write()
-                    .await
-                    .remove(&UserChannelId(user_channel_id))
-                {
-                    let reason = reason
-                        .map_or_else(|| "Channel has been closed".to_string(), |r| r.to_string());
-                    let _ = sender.send(Err(anyhow!(reason)));
-                }
             }
             _ => {}
         }
@@ -1222,11 +1044,7 @@ impl AppState {
     /// Claims (settles) a claimable inbound HTLC on the lightning node with the
     /// given `preimage`. Called by the receive trailer once the federation-side
     /// receive succeeds.
-    pub(crate) fn claim_for_hash(
-        &self,
-        payment_hash: sha256::Hash,
-        preimage: [u8; 32],
-    ) -> std::result::Result<(), LightningRpcError> {
+    fn claim_for_hash(&self, payment_hash: sha256::Hash, preimage: [u8; 32]) -> anyhow::Result<()> {
         let ph = PaymentHash(*payment_hash.as_byte_array());
 
         // TODO: Get the actual amount from the LDK node. This value is only used
@@ -1237,30 +1055,24 @@ impl AppState {
         self.node
             .bolt11_payment()
             .claim_for_hash(ph, claimable_amount_msat, PaymentPreimage(preimage))
-            .map_err(|_| LightningRpcError::FailedToCompleteHtlc {
-                failure_reason: format!("Failed to claim LDK payment with hash {payment_hash}"),
-            })
+            .map_err(|_| anyhow!("Failed to claim LDK payment with hash {payment_hash}"))
     }
 
     /// Fails a claimable inbound HTLC back to the sender (refund).
-    pub(crate) fn fail_for_hash(
-        &self,
-        payment_hash: sha256::Hash,
-    ) -> std::result::Result<(), LightningRpcError> {
+    fn fail_for_hash(&self, payment_hash: sha256::Hash) -> anyhow::Result<()> {
         let ph = PaymentHash(*payment_hash.as_byte_array());
 
-        self.node.bolt11_payment().fail_for_hash(ph).map_err(|_| {
-            LightningRpcError::FailedToCompleteHtlc {
-                failure_reason: format!("Failed to fail LDK payment with hash {payment_hash}"),
-            }
-        })
+        self.node
+            .bolt11_payment()
+            .fail_for_hash(ph)
+            .map_err(|_| anyhow!("Failed to fail LDK payment with hash {payment_hash}"))
     }
 
     /// Claims an inbound HTLC with `preimage` (settle). Best-effort; logs on
     /// error since the node may retry event delivery.
     pub(crate) fn claim_htlc(&self, payment_hash: sha256::Hash, preimage: [u8; 32]) {
         if let Err(err) = self.claim_for_hash(payment_hash, preimage) {
-            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to claim HTLC");
+            warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Failed to claim HTLC");
         }
     }
 
@@ -1268,7 +1080,7 @@ impl AppState {
     /// error.
     pub(crate) fn fail_htlc(&self, payment_hash: sha256::Hash) {
         if let Err(err) = self.fail_for_hash(payment_hash) {
-            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to fail HTLC");
+            warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Failed to fail HTLC");
         }
     }
 
@@ -1282,7 +1094,7 @@ impl AppState {
         invoice: &Bolt11Invoice,
         max_delay: u64,
         max_fee: Amount,
-    ) -> std::result::Result<Preimage, LightningRpcError> {
+    ) -> anyhow::Result<[u8; 32]> {
         let payment_id = PaymentId(*invoice.payment_hash().as_byte_array());
 
         // Lock by the payment hash to prevent multiple simultaneous calls with the same
@@ -1316,9 +1128,7 @@ impl AppState {
                     )
                     // TODO: Investigate whether all error types returned by `Bolt11Payment::send()`
                     // result in idempotency.
-                    .map_err(|e| LightningRpcError::FailedPayment {
-                        failure_reason: format!("LDK payment failed to initialize: {e:?}"),
-                    })?,
+                    .map_err(|e| anyhow!("LDK payment failed to initialize: {e:?}"))?,
                 payment_id
             );
         }
@@ -1337,112 +1147,15 @@ impl AppState {
                             ..
                         } = payment_details.kind
                         {
-                            return Ok(Preimage(preimage.0));
+                            return Ok(preimage.0);
                         }
                     }
                     ldk_node::payment::PaymentStatus::Failed => {
-                        return Err(LightningRpcError::FailedPayment {
-                            failure_reason: "LDK payment failed".to_string(),
-                        });
+                        return Err(anyhow!("LDK payment failed"));
                     }
                 }
             }
             fedimint_core::runtime::sleep(Duration::from_millis(100)).await;
         }
-    }
-
-    /// Settles or fails a claimable inbound payment per the [`PaymentAction`].
-    /// Retained only for the (dead-for-v2) `IGatewayClientV2::complete_htlc`
-    /// trait method — the live receive path uses [`Self::claim_for_hash`] /
-    /// [`Self::fail_for_hash`] directly.
-    fn complete_htlc_once(
-        &self,
-        htlc: InterceptPaymentResponse,
-    ) -> std::result::Result<(), LightningRpcError> {
-        if let PaymentAction::Settle(preimage) = htlc.action {
-            self.claim_for_hash(htlc.payment_hash, preimage.0)
-        } else {
-            warn!(target: LOG_GATEWAY, payment_hash = %htlc.payment_hash, "Unwinding payment because the action was not `Settle`");
-            self.fail_for_hash(htlc.payment_hash)
-        }
-    }
-}
-
-#[async_trait]
-impl IGatewayClientV2 for AppState {
-    async fn complete_htlc(&self, htlc_response: InterceptPaymentResponse) {
-        loop {
-            match self.complete_htlc_once(htlc_response.clone()) {
-                Ok(..) => return,
-                Err(err) => {
-                    warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failure trying to complete payment");
-                }
-            }
-
-            sleep(Duration::from_secs(5)).await;
-        }
-    }
-
-    async fn is_direct_swap(
-        &self,
-        invoice: &Bolt11Invoice,
-    ) -> anyhow::Result<Option<(IncomingContract, ClientHandleArc)>> {
-        if self.node.node_id() == invoice.get_payee_pub_key() {
-            let (contract, client) = self
-                .registered_incoming_contract(
-                    PaymentImage::Hash(*invoice.payment_hash()),
-                    invoice
-                        .amount_milli_satoshis()
-                        .expect("The amount invoice has been previously checked"),
-                )
-                .await?;
-            Ok(Some((contract, client)))
-        } else {
-            Ok(None)
-        }
-    }
-
-    async fn pay(
-        &self,
-        invoice: Bolt11Invoice,
-        max_delay: u64,
-        max_fee: Amount,
-    ) -> std::result::Result<[u8; 32], LightningRpcError> {
-        self.pay(&invoice, max_delay, max_fee)
-            .await
-            .map(|preimage| preimage.0)
-    }
-
-    async fn min_contract_amount(
-        &self,
-        federation_id: &FederationId,
-        amount: u64,
-    ) -> anyhow::Result<Amount> {
-        Ok(self
-            .gateway_info(federation_id)
-            .await?
-            .ok_or(anyhow!("Routing Info not available"))?
-            .send_fee_minimum
-            .add_to(amount))
-    }
-
-    /// `gatewaydv2` does not support LNv1, so no invoice is ever treated as an
-    /// LNv1 invoice and the LNv2 -> LNv1 swap path below is never taken.
-    async fn is_lnv1_invoice(
-        &self,
-        _invoice: &Bolt11Invoice,
-    ) -> Option<fedimint_core::util::Spanned<ClientHandleArc>> {
-        None
-    }
-
-    /// Unreachable: [`Self::is_lnv1_invoice`] always returns `None`, so the
-    /// caller never reaches the LNv1 swap. `gatewaydv2` has no LNv1 module to
-    /// perform the swap with.
-    async fn relay_lnv1_swap(
-        &self,
-        _client: &ClientHandleArc,
-        _invoice: &Bolt11Invoice,
-    ) -> anyhow::Result<FinalReceiveState> {
-        bail!("LNv1 swaps are not supported by gatewaydv2")
     }
 }

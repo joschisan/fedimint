@@ -19,8 +19,8 @@ use fedimint_mintv2_client::MintClientInit as MintV2ClientInit;
 use rand::rngs::OsRng;
 use tracing::debug;
 
+use crate::DB_FILE;
 use crate::db::{RootEntropyKey, get_client_database};
-use crate::{AppState, DB_FILE};
 
 /// Reads the gateway's mnemonic from the persisted BIP39 root entropy, if it
 /// has been established.
@@ -38,6 +38,7 @@ pub async fn load_mnemonic(gateway_db: &Database) -> Option<Mnemonic> {
 /// on picomint's `GatewayClientFactory`.
 #[derive(Debug, Clone)]
 pub struct GatewayClientFactory {
+    db: Database,
     work_dir: PathBuf,
     registry: ClientModuleInitRegistry,
     connectors: ConnectorRegistry,
@@ -73,13 +74,16 @@ impl GatewayClientFactory {
             .await
             .expect("root entropy was just ensured");
 
-        // The gateway module will be attached when the federation clients are
-        // created, because it needs the `AppState` injected.
         let mut registry = ClientModuleInitRegistry::new();
         registry.attach(MintV2ClientInit);
         registry.attach(fedimint_walletv2_client::WalletClientInit);
+        // The v2 gateway orchestrates payments in the daemon itself, so no
+        // daemon-side callback interface is provided; see
+        // `GatewayClientInitV2::gateway`.
+        registry.attach(GatewayClientInitV2 { gateway: None });
 
         let factory = Self {
+            db: gateway_db.clone(),
             connectors: ConnectorRegistry::build_from_client_env()?.bind().await?,
             work_dir: data_dir.to_owned(),
             registry,
@@ -99,31 +103,21 @@ impl GatewayClientFactory {
 
     /// Constructs the client builder with the modules, database, and connector
     /// used to create clients for connected federations.
-    async fn create_client_builder(&self, state: Arc<AppState>) -> anyhow::Result<ClientBuilder> {
-        let mut registry = self.registry.clone();
-
-        registry.attach(GatewayClientInitV2 {
-            gateway: state.clone(),
-        });
-
+    async fn create_client_builder(&self) -> anyhow::Result<ClientBuilder> {
         let mut client_builder = Client::builder()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create a federation client: {e}"))?
             .with_iroh_enable_dht(true);
-        client_builder.with_module_inits(registry);
+        client_builder.with_module_inits(self.registry.clone());
         Ok(client_builder)
     }
 
     /// Downloads a federation's `ClientConfig` from its invite without building
     /// or joining a client. Used at connect time to persist the config; the
     /// client itself is built lazily on first use.
-    pub async fn download_config(
-        &self,
-        invite_code: &InviteCode,
-        state: Arc<AppState>,
-    ) -> anyhow::Result<ClientConfig> {
+    pub async fn download_config(&self, invite_code: &InviteCode) -> anyhow::Result<ClientConfig> {
         let preview = self
-            .create_client_builder(state)
+            .create_client_builder()
             .await?
             .preview(self.connectors.clone(), invite_code)
             .await?;
@@ -137,7 +131,6 @@ impl GatewayClientFactory {
         &self,
         federation_id: FederationId,
         config: ClientConfig,
-        state: Arc<AppState>,
         mnemonic: &Mnemonic,
     ) -> anyhow::Result<fedimint_client::ClientHandleArc> {
         let db_path = self.work_dir.join(format!("{federation_id}.db"));
@@ -151,7 +144,7 @@ impl GatewayClientFactory {
             let root_secret = RootSecret::Custom(self.client_plainrootsecret(&db).await?);
             (db, root_secret)
         } else {
-            let db = get_client_database(&state.gateway_db, &federation_id);
+            let db = get_client_database(&self.db, &federation_id);
 
             let root_secret = RootSecret::StandardDoubleDerive(
                 Bip39RootSecretStrategy::<12>::to_root_secret(mnemonic),
@@ -161,7 +154,7 @@ impl GatewayClientFactory {
 
         Self::verify_client_config(&db, federation_id).await?;
 
-        let client_builder = self.create_client_builder(state).await?;
+        let client_builder = self.create_client_builder().await?;
 
         if Client::is_initialized(&db).await {
             client_builder

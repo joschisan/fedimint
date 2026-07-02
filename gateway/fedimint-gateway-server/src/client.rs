@@ -76,7 +76,7 @@ impl GatewayClientBuilder {
         });
 
         registry.attach(GatewayClientInitV2 {
-            gateway: gateway.clone(),
+            gateway: Some(gateway.clone()),
         });
 
         let mut client_builder = Client::builder()

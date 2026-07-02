@@ -150,7 +150,10 @@ impl CompleteStateMachine {
             action,
         };
 
-        context.gateway.complete_htlc(intercept_htlc_response).await;
+        context
+            .gateway()
+            .complete_htlc(intercept_htlc_response)
+            .await;
     }
 
     async fn transition_completion(

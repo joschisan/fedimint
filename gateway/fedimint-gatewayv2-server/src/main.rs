@@ -127,7 +127,6 @@ fn main() -> anyhow::Result<()> {
         default_routing_fees: opts.default_routing_fees,
         default_transaction_fees: opts.default_transaction_fees,
         outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
-        pending_channels: Arc::new(RwLock::new(BTreeMap::new())),
     };
 
     // 5. Fire-and-forget every long-running task. Federation clients are

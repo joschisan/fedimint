@@ -68,7 +68,11 @@ pub struct GatewayOperationMetaV2;
 
 #[derive(Debug, Clone)]
 pub struct GatewayClientInitV2 {
-    pub gateway: Arc<dyn IGatewayClientV2>,
+    /// Daemon-side callback interface used by the Send and Complete state
+    /// machines and by [`GatewayClientModuleV2::send_payment`]. Only the v1
+    /// gateway drives those paths and it always provides the callback; the v2
+    /// gateway orchestrates payments in the daemon itself and passes `None`.
+    pub gateway: Option<Arc<dyn IGatewayClientV2>>,
 }
 
 impl ModuleInit for GatewayClientInitV2 {
@@ -116,7 +120,18 @@ pub struct GatewayClientModuleV2 {
     pub client_ctx: ClientContext<Self>,
     pub module_api: DynModuleApi,
     pub keypair: Keypair,
-    pub gateway: Arc<dyn IGatewayClientV2>,
+    pub gateway: Option<Arc<dyn IGatewayClientV2>>,
+}
+
+impl GatewayClientModuleV2 {
+    /// The daemon-side callback interface. See
+    /// [`GatewayClientInitV2::gateway`] for why this is only available on the
+    /// v1 gateway.
+    fn gateway(&self) -> &Arc<dyn IGatewayClientV2> {
+        self.gateway.as_ref().expect(
+            "only the v1 gateway calls back into the daemon and it always provides the callback",
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -125,7 +140,18 @@ pub struct GatewayClientContextV2 {
     pub decoder: Decoder,
     pub tpe_agg_pk: AggregatePublicKey,
     pub tpe_pks: BTreeMap<PeerId, PublicKeyShare>,
-    pub gateway: Arc<dyn IGatewayClientV2>,
+    pub gateway: Option<Arc<dyn IGatewayClientV2>>,
+}
+
+impl GatewayClientContextV2 {
+    /// The daemon-side callback interface. See
+    /// [`GatewayClientInitV2::gateway`] for why this is only available on the
+    /// v1 gateway.
+    fn gateway(&self) -> &Arc<dyn IGatewayClientV2> {
+        self.gateway
+            .as_ref()
+            .expect("only the v1 gateway spawns the state machines that call back into the daemon and it always provides the callback")
+    }
 }
 
 impl Context for GatewayClientContextV2 {
@@ -319,7 +345,7 @@ impl GatewayClientModuleV2 {
         );
 
         let min_contract_amount = self
-            .gateway
+            .gateway()
             .min_contract_amount(&payload.federation_id, amount)
             .await?;
 

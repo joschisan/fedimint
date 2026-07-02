@@ -907,7 +907,16 @@ impl Gatewayd {
         };
         let test_dir = &process_mgr.globals.FM_TEST_DIR;
         let data_dir = format!("{}/{gw_name}", utf8(test_dir));
-        let addr = format!("http://127.0.0.1:{port}/{V1_API_ENDPOINT}");
+        // gatewaydv2 serves its public API unversioned at the URL root, so its
+        // registered URL is bare; v1 gatewayd nests its API under `/v1`. This
+        // matters for consumers that join paths relative to the registered URL
+        // (e.g. recurringd's LNURL verify route) — the LNv2 client itself joins
+        // absolute paths, which ignore the base URL's path either way.
+        let addr = if v2 {
+            format!("http://127.0.0.1:{port}/")
+        } else {
+            format!("http://127.0.0.1:{port}/{V1_API_ENDPOINT}")
+        };
         let lightning_node_addr = format!("127.0.0.1:{lightning_node_port}");
         let iroh_endpoint = process_mgr
             .globals

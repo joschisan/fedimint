@@ -21,7 +21,7 @@ use fedimint_ln_server::common::lightning_invoice::Bolt11Invoice;
 use serde_json::Value;
 
 use crate::cmd;
-use crate::util::{JsonValueExt, get_gatewayv2_cli_path};
+use crate::util::{JsonValueExt, get_gatewayv2_cli_path, poll_simple};
 use crate::vars::utf8;
 
 /// Base argv for the admin CLI: `gatewaydv2-cli --data-dir <dir>`. Mirrors
@@ -93,7 +93,7 @@ pub async fn channel_open(
     channel_size_sats: u64,
     push_amount_sats: u64,
 ) -> Result<Txid> {
-    let value = cmd!(
+    cmd!(
         gateway_cmd(data_dir),
         "ldk",
         "channel",
@@ -104,13 +104,29 @@ pub async fn channel_open(
         "--push-amount-sat",
         push_amount_sats
     )
-    .out_json()
+    .run()
     .await?;
 
-    let txid_str = value["funding_txid"]
-        .as_str()
-        .context("funding_txid must be a string")?;
-    Ok(Txid::from_str(txid_str)?)
+    // The daemon initiates the open fire-and-forget (picomint-style): the
+    // funding transaction is negotiated and broadcast asynchronously. Poll the
+    // channel list until LDK reports the funding txid so callers can wait for
+    // it in the mempool before mining confirmation blocks.
+    poll_simple("gatewaydv2 channel funding txid", || async {
+        let resp: LdkChannelListResponse = cmd!(gateway_cmd(data_dir), "ldk", "channel", "list")
+            .out_json()
+            .await?
+            .to_typed()?;
+
+        let funding_txid = resp
+            .channels
+            .iter()
+            .find(|channel| channel.remote_pubkey.to_string() == pubkey.to_string())
+            .and_then(|channel| channel.funding_txid)
+            .context("channel does not have a funding txid yet")?;
+
+        Ok(Txid::from_str(&funding_txid.to_string())?)
+    })
+    .await
 }
 
 /// `gatewaydv2-cli ldk channel list`, mapped to devimint's [`ChannelInfo`].

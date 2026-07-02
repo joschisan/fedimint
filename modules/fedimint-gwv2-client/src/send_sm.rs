@@ -177,9 +177,9 @@ impl SendStateMachine {
         // the LNv1 protocol and if the gateway supports the target federation.
         // If it does, we can fund an LNv1 incoming contract to satisfy the LNv2
         // outgoing payment.
-        if let Some(client) = context.gateway.is_lnv1_invoice(&invoice).await {
+        if let Some(client) = context.gateway().is_lnv1_invoice(&invoice).await {
             let final_state = context
-                .gateway
+                .gateway()
                 .relay_lnv1_swap(client.value(), &invoice)
                 .await;
             return match final_state {
@@ -197,7 +197,7 @@ impl SendStateMachine {
         }
 
         match context
-            .gateway
+            .gateway()
             .is_direct_swap(&invoice)
             .await
             .map_err(|e| Cancelled::RegistrationError(e.to_string()))?
@@ -228,7 +228,7 @@ impl SendStateMachine {
             }
             None => {
                 let preimage = context
-                    .gateway
+                    .gateway()
                     .pay(invoice, max_delay, max_fee)
                     .await
                     .map_err(|e| Cancelled::LightningRpcError(e.to_string()))?;

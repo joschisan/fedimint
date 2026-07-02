@@ -28,11 +28,10 @@ use ldk_node::lightning::routing::gossip::NodeId;
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use serde_json::{Value, json};
 use tokio::net::UnixListener;
-use tokio::sync::oneshot;
 use tracing::{error, info};
 
 use crate::db::{ClientConfigKey, DisabledFederationKey};
-use crate::{AppState, GatewayError, UserChannelId, client};
+use crate::{AppState, GatewayError, client};
 
 /// Runs the admin server over a local Unix socket until the task is aborted (on
 /// process shutdown). Mirrors [`crate::public::run_public`] but over a
@@ -188,47 +187,33 @@ async fn ldk_onchain_send(
     Ok(Json(json!(cli_core::LdkOnchainSendResponse { txid })))
 }
 
-/// Opens a Lightning channel to a peer and waits for the funding transaction.
+/// Opens a Lightning channel to a peer. Fire-and-forget, picomint-style: the
+/// funding transaction is negotiated and broadcast asynchronously; callers
+/// observe it via the channel list.
 async fn ldk_channel_open(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkChannelOpenRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, host = %req.host, amount = %req.channel_size_sat, "Opening Lightning channel...");
-
     let push_amount_msat = if req.push_amount_sat == 0 {
         None
     } else {
         Some(req.push_amount_sat * 1000)
     };
 
-    // The funding outpoint arrives via the LDK `ChannelPending` event; the
-    // event loop resolves the oneshot registered in `pending_channels`.
-    let (tx, rx) = oneshot::channel();
+    state
+        .node
+        .open_announced_channel(
+            req.pubkey,
+            SocketAddress::from_str(&req.host).map_err(|e| anyhow!("Invalid address: {e}"))?,
+            req.channel_size_sat,
+            push_amount_msat,
+            None,
+        )
+        .map_err(|e| anyhow!("Failed to open channel: {e}"))?;
 
-    {
-        let mut channels = state.pending_channels.write().await;
+    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, "Initiated channel open");
 
-        let user_channel_id = state
-            .node
-            .open_announced_channel(
-                req.pubkey,
-                SocketAddress::from_str(&req.host).map_err(|e| anyhow!("Invalid address: {e}"))?,
-                req.channel_size_sat,
-                push_amount_msat,
-                None,
-            )
-            .map_err(|e| anyhow!("Failed to open channel: {e}"))?;
-
-        channels.insert(UserChannelId(user_channel_id), tx);
-    }
-
-    let funding_txid = rx.await.map_err(|e| anyhow!("{e}"))??.txid;
-
-    info!(target: LOG_GATEWAY, txid = %funding_txid, "Initiated channel open");
-
-    // The cli-core contract has no open-channel response; return the funding
-    // txid, which is more useful than an empty body.
-    Ok(Json(json!({ "funding_txid": funding_txid })))
+    Ok(Json(json!(())))
 }
 
 /// Closes all channels with a peer.
@@ -368,7 +353,7 @@ async fn ldk_ln_send(
         .await?;
 
     Ok(Json(json!(cli_core::LdkLnSendResponse {
-        preimage: preimage.0.encode_hex::<String>(),
+        preimage: preimage.encode_hex::<String>(),
     })))
 }
 
@@ -547,21 +532,56 @@ async fn mint_send(
 }
 
 /// Receive ecash into the gateway. The ecash bundle itself carries the target
-/// federation id, so no federation argument is needed. Blocks until issuance
-/// either completes or fails federation-side.
+/// federation id prefix, so no federation argument is needed — but only a
+/// federation whose client is already loaded can be targeted. Blocks until
+/// issuance either completes or fails federation-side.
 async fn mint_receive(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationMintReceiveRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    let response = state
-        .receive_ecash(fedimint_gateway_common::ReceiveEcashPayload {
-            notes: req.ecash,
-            wait: true,
+    let federation_id_prefix =
+        base32::decode_prefixed::<fedimint_mintv2_client::ECash>(FEDIMINT_PREFIX, &req.ecash)
+            .ok()
+            .and_then(|ecash| ecash.mint())
+            .map(|federation_id| federation_id.to_prefix())
+            .ok_or_else(|| anyhow!("Invalid ecash format: could not parse as ECash"))?;
+
+    let client = state
+        .clients
+        .read()
+        .await
+        .iter()
+        .find_map(|(federation_id, client)| {
+            (federation_id.to_prefix() == federation_id_prefix).then(|| client.clone())
         })
-        .await?;
+        .ok_or_else(|| anyhow!("No federation available for prefix {federation_id_prefix}"))?;
+
+    let mint = client
+        .get_first_module::<MintV2ClientModule>()
+        .expect("MintV2 module is always attached to gateway clients");
+
+    let ecash: fedimint_mintv2_client::ECash = base32::decode_prefixed(FEDIMINT_PREFIX, &req.ecash)
+        .map_err(|e| anyhow!("Expected ECash for MintV2 federation: {e}"))?;
+    let amount = ecash.amount();
+
+    let operation_id = mint
+        .receive(ecash, serde_json::Value::Null)
+        .await
+        .map_err(|e| anyhow!("{e}"))?;
+
+    match mint
+        .await_final_receive_operation_state(operation_id)
+        .await
+        .map_err(|e| anyhow!("{e}"))?
+    {
+        fedimint_mintv2_client::FinalReceiveOperationState::Success => {}
+        fedimint_mintv2_client::FinalReceiveOperationState::Rejected => {
+            return Err(anyhow!("ECash receive was rejected").into());
+        }
+    }
 
     Ok(Json(json!(cli_core::FederationMintReceiveResponse {
-        amount: response.amount,
+        amount
     })))
 }
 
