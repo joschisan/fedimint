@@ -4,10 +4,10 @@ use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::core::OperationId;
 use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::{impl_db_lookup, impl_db_record};
+use fedimint_core::{OutPoint, impl_db_lookup, impl_db_record};
 use fedimint_eventlog::EventLogId;
 use fedimint_lnv2_common::LightningInvoice;
-use fedimint_lnv2_common::contracts::IncomingContract;
+use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract};
 use futures::StreamExt;
 
 /// Database key prefixes for the gateway's metadata database, mirroring the
@@ -37,19 +37,24 @@ enum DbKeyPrefix {
     /// "Leaving" a federation only disables it; the config and client state
     /// are retained so in-flight payments settle and it can be re-enabled.
     DisabledFederation = 0x03,
+    /// `OperationId -> OutgoingContractRow` for outgoing (send) contracts the
+    /// gateway is paying. Keyed by `OperationId::from_encodable(payment_hash)`.
+    /// Looked up by the LDK `PaymentSuccessful`/`PaymentFailed` handlers to
+    /// finalize external sends, and by the receive trailer to finalize direct
+    /// swaps.
+    OutgoingContract = 0x04,
     /// `OperationId -> IncomingContractRow` for registered incoming (receive)
     /// contracts. Keyed by `OperationId::from_encodable(payment_hash)`. Looked
     /// up by the LDK `PaymentClaimable` handler and by `verify`.
-    IncomingContract = 0x04,
+    IncomingContract = 0x05,
     /// Set of LDK-event `payment_hash`es already processed by the event loop.
-    /// Presence means an upstream HTLC arrived and was handled, letting the
-    /// receive trailer tell an external LN receive from an internal direct
-    /// swap.
-    ProcessedLdkEvent = 0x05,
+    /// Written atomically with the handler's work, so presence implies the
+    /// handler ran to completion and it is safe to skip re-processing.
+    ProcessedLdkEvent = 0x06,
     /// `FederationId -> EventLogId`: the cursor for that federation's receive
     /// trailer. Advanced past each dispatched event; a crashed trailer just
     /// re-dispatches idempotently from the persisted cursor on restart.
-    TrailerCursor = 0x06,
+    TrailerCursor = 0x07,
 }
 
 /// Returns the isolated, prefix-namespaced database for a federation's client.
@@ -96,6 +101,24 @@ impl_db_record!(
     key = DisabledFederationKey,
     value = (),
     db_prefix = DbKeyPrefix::DisabledFederation,
+);
+
+/// Row describing an outgoing (send) contract the gateway is paying.
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct OutgoingContractRow {
+    pub federation_id: FederationId,
+    pub contract: OutgoingContract,
+    pub outpoint: OutPoint,
+    pub invoice: LightningInvoice,
+}
+
+#[derive(Debug, Encodable, Decodable)]
+pub struct OutgoingContractKey(pub OperationId);
+
+impl_db_record!(
+    key = OutgoingContractKey,
+    value = OutgoingContractRow,
+    db_prefix = DbKeyPrefix::OutgoingContract,
 );
 
 /// Row describing a registered incoming (receive) contract and the invoice the
@@ -162,6 +185,19 @@ pub trait GatewayDbtxNcExt {
 
     /// Returns whether a federation's public-facing endpoints are gated off.
     async fn is_federation_disabled(&mut self, federation_id: FederationId) -> bool;
+
+    /// Saves an outgoing contract row, returning the previous row for the same
+    /// operation if it existed.
+    async fn save_outgoing_contract(
+        &mut self,
+        operation_id: OperationId,
+        row: OutgoingContractRow,
+    ) -> Option<OutgoingContractRow>;
+
+    async fn load_outgoing_contract(
+        &mut self,
+        operation_id: OperationId,
+    ) -> Option<OutgoingContractRow>;
 
     /// Saves a registered incoming contract row, returning the previous row for
     /// the same operation if it existed.
@@ -244,6 +280,22 @@ impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
         self.get_value(&DisabledFederationKey { federation_id })
             .await
             .is_some()
+    }
+
+    async fn save_outgoing_contract(
+        &mut self,
+        operation_id: OperationId,
+        row: OutgoingContractRow,
+    ) -> Option<OutgoingContractRow> {
+        self.insert_entry(&OutgoingContractKey(operation_id), &row)
+            .await
+    }
+
+    async fn load_outgoing_contract(
+        &mut self,
+        operation_id: OperationId,
+    ) -> Option<OutgoingContractRow> {
+        self.get_value(&OutgoingContractKey(operation_id)).await
     }
 
     async fn save_incoming_contract(

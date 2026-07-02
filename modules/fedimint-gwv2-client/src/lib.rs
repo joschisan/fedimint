@@ -1,4 +1,4 @@
-mod api;
+pub mod api;
 mod complete_sm;
 pub mod events;
 mod receive_sm;
@@ -706,6 +706,7 @@ impl GatewayClientModuleV2 {
                         OutgoingPaymentSucceeded {
                             payment_image: contract.payment_image.clone(),
                             target_federation: None,
+                            preimage: Some(preimage),
                         },
                     )
                     .await;
@@ -724,6 +725,7 @@ impl GatewayClientModuleV2 {
                         OutgoingPaymentFailed {
                             payment_image: contract.payment_image.clone(),
                             error: Cancelled::Failure,
+                            forfeit_signature: Some(signature),
                         },
                     )
                     .await;

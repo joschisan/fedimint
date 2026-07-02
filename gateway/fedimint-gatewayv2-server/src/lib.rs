@@ -31,7 +31,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ::lightning::ln::channelmanager::PaymentId;
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow, bail, ensure};
 use async_trait::async_trait;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::hashes::{Hash, sha256};
@@ -47,6 +47,7 @@ use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::core::{ModuleKind, OperationId};
 use fedimint_core::db::Database;
+use fedimint_core::encoding::Encodable as _;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::secp256k1::schnorr::Signature;
@@ -61,7 +62,11 @@ use fedimint_gateway_common::{
     SendOnchainRequest, SpendEcashPayload, SpendEcashResponse, WithdrawResponse,
 };
 use fedimint_gatewayv2_cli_core as cli;
-use fedimint_gwv2_client::events::{IncomingPaymentFailed, IncomingPaymentSucceeded};
+use fedimint_gwv2_client::api::GatewayFederationApi as _;
+use fedimint_gwv2_client::events::{
+    IncomingPaymentFailed, IncomingPaymentSucceeded, OutgoingPaymentFailed,
+    OutgoingPaymentSucceeded,
+};
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
 };
@@ -84,7 +89,7 @@ use tokio::sync::{RwLock, oneshot};
 use tracing::{debug, info, info_span, warn};
 
 pub use crate::cli_server::run_cli;
-use crate::db::{GatewayDbtxNcExt as _, IncomingContractRow};
+use crate::db::{GatewayDbtxNcExt as _, IncomingContractRow, OutgoingContractRow};
 use crate::lightning::ldk::UserChannelId;
 pub use crate::lightning::ldk::build_ldk_node;
 pub use crate::rpc_server::run_public;
@@ -328,6 +333,24 @@ impl Gateway {
                 self.handle_payment_claimable(payment_hash, claimable_amount_msat)
                     .await;
             }
+            ldk_node::Event::PaymentSuccessful {
+                payment_hash,
+                payment_preimage: Some(preimage),
+                ..
+            } => {
+                let payment_hash =
+                    sha256::Hash::from_slice(&payment_hash.0).expect("payment hash is 32 bytes");
+                self.handle_payment_successful(payment_hash, preimage.0)
+                    .await;
+            }
+            ldk_node::Event::PaymentFailed {
+                payment_hash: Some(payment_hash),
+                ..
+            } => {
+                let payment_hash =
+                    sha256::Hash::from_slice(&payment_hash.0).expect("payment hash is 32 bytes");
+                self.handle_payment_failed(payment_hash).await;
+            }
             ldk_node::Event::ChannelPending {
                 channel_id,
                 user_channel_id,
@@ -458,6 +481,78 @@ impl Gateway {
         }
     }
 
+    /// Handles a successful outbound LN payment: looks up the outgoing
+    /// contract row and finalizes the send on the source federation with the
+    /// preimage carried on the `PaymentSuccessful` event. Payments without a
+    /// row (e.g. operator-initiated sends) are ignored.
+    async fn handle_payment_successful(&self, payment_hash: sha256::Hash, preimage: [u8; 32]) {
+        if self
+            .gateway_db
+            .begin_transaction_nc()
+            .await
+            .is_ldk_event_processed(payment_hash.to_byte_array())
+            .await
+        {
+            return;
+        }
+
+        let operation_id = OperationId::from_encodable(&payment_hash);
+
+        if let Some(row) = self
+            .gateway_db
+            .begin_transaction_nc()
+            .await
+            .load_outgoing_contract(operation_id)
+            .await
+        {
+            self.finalize_send_for(
+                row.federation_id,
+                row.contract,
+                row.outpoint,
+                Some(preimage),
+            )
+            .await;
+        }
+
+        let mut dbtx = self.gateway_db.begin_transaction().await;
+        dbtx.mark_ldk_event_processed(payment_hash.to_byte_array())
+            .await;
+        dbtx.commit_tx().await;
+    }
+
+    /// Handles a failed outbound LN payment: looks up the outgoing contract
+    /// row and forfeits the send on the source federation so the sender is
+    /// refunded. Payments without a row are ignored.
+    async fn handle_payment_failed(&self, payment_hash: sha256::Hash) {
+        if self
+            .gateway_db
+            .begin_transaction_nc()
+            .await
+            .is_ldk_event_processed(payment_hash.to_byte_array())
+            .await
+        {
+            return;
+        }
+
+        let operation_id = OperationId::from_encodable(&payment_hash);
+
+        if let Some(row) = self
+            .gateway_db
+            .begin_transaction_nc()
+            .await
+            .load_outgoing_contract(operation_id)
+            .await
+        {
+            self.finalize_send_for(row.federation_id, row.contract, row.outpoint, None)
+                .await;
+        }
+
+        let mut dbtx = self.gateway_db.begin_transaction().await;
+        dbtx.mark_ldk_event_processed(payment_hash.to_byte_array())
+            .await;
+        dbtx.commit_tx().await;
+    }
+
     /// Fails an inbound HTLC back to the sender (refund). Best-effort: logs on
     /// error since the node may retry event delivery.
     fn fail_htlc(&self, payment_hash: sha256::Hash) {
@@ -574,7 +669,19 @@ impl Gateway {
     /// not yet loaded. Clients are loaded lazily — nothing is built at boot;
     /// each federation's client is constructed the first time it is needed and
     /// cached thereafter (double-checked locking).
-    pub async fn select_client(
+    ///
+    /// Returns a concrete boxed future (rather than being an `async fn`) to
+    /// break the async type cycle: building a client spawns its receive
+    /// trailer, which itself lazily loads clients via `select_client`.
+    pub fn select_client(
+        &self,
+        federation_id: FederationId,
+    ) -> futures::future::BoxFuture<'_, AdminResult<Spanned<fedimint_client::ClientHandleArc>>>
+    {
+        Box::pin(self.select_client_inner(federation_id))
+    }
+
+    async fn select_client_inner(
         &self,
         federation_id: FederationId,
     ) -> AdminResult<Spanned<fedimint_client::ClientHandleArc>> {
@@ -972,19 +1079,285 @@ impl Gateway {
         }))
     }
 
-    /// Instructs this gateway to pay a Lightning network invoice via the LNv2
-    /// protocol.
+    /// Orchestrates an outgoing LNv2 payment, modeled on picomint's
+    /// `AppState::send`. Verifies the request, registers the contract in the
+    /// daemon-global outgoing-contract table, logs the send-started event on
+    /// the source federation, and kicks off either a direct-swap receive on
+    /// the target federation or a fire-and-forget LN send via LDK. Returns
+    /// once a terminal [`OutgoingPaymentSucceeded`] / [`OutgoingPaymentFailed`]
+    /// event is observed in the source federation's event log: the terminal is
+    /// driven out-of-band by the LDK `PaymentSuccessful`/`PaymentFailed`
+    /// handlers (external sends) or the receive trailer (direct swaps).
+    ///
+    /// No [`SendStateMachine`] is spawned — the daemon owns the payment.
+    ///
+    /// [`SendStateMachine`]: fedimint_gwv2_client::GatewayClientModuleV2
     async fn send_payment_v2(
         &self,
         payload: SendPaymentPayload,
     ) -> Result<std::result::Result<[u8; 32], Signature>> {
-        self.select_client(payload.federation_id)
+        let f1_client = self
+            .select_client(payload.federation_id)
             .await?
-            .value()
+            .into_value();
+
+        let f1_module = f1_client
+            .get_first_module::<GatewayClientModuleV2>()
+            .expect("Must have client module");
+
+        // --- Verify the request -------------------------------------------
+
+        ensure!(
+            payload.contract.claim_pk == f1_module.keypair.public_key(),
+            "The outgoing contract is keyed to another gateway"
+        );
+
+        // This prevents DOS attacks where an attacker submits a different
+        // invoice for the sender's contract.
+        ensure!(
+            payload.contract.verify_invoice_auth(
+                payload.invoice.consensus_hash::<sha256::Hash>(),
+                &payload.auth,
+            ),
+            "Invalid auth signature for the invoice data"
+        );
+
+        // The contract must be confirmed by the federation before we act on it
+        // to prevent DOS attacks.
+        let (contract_id, expiration) = f1_module
+            .module_api
+            .outgoing_contract_expiration(payload.outpoint)
+            .await
+            .map_err(|_| anyhow!("The gateway can not reach the federation"))?
+            .ok_or(anyhow!("The outgoing contract has not yet been confirmed"))?;
+
+        ensure!(
+            contract_id == payload.contract.contract_id(),
+            "Contract Id returned by the federation does not match contract in request"
+        );
+
+        let LightningInvoice::Bolt11(invoice) = payload.invoice.clone();
+
+        let payment_hash = *invoice.payment_hash();
+
+        let amount = invoice
+            .amount_milli_satoshis()
+            .ok_or(anyhow!("Invoice is missing amount"))?;
+
+        ensure!(
+            PaymentImage::Hash(payment_hash) == payload.contract.payment_image,
+            "The invoices payment hash does not match the contracts payment hash"
+        );
+
+        let min_contract_amount = self
+            .routing_info_v2(&payload.federation_id)
+            .await?
+            .ok_or(anyhow!("Routing Info not available"))?
+            .send_fee_minimum
+            .add_to(amount);
+
+        let operation_id = OperationId::from_encodable(&payment_hash);
+
+        // --- Register the outgoing contract; short-circuit on retry -------
+
+        let row = OutgoingContractRow {
+            federation_id: payload.federation_id,
+            contract: payload.contract.clone(),
+            outpoint: payload.outpoint,
+            invoice: payload.invoice.clone(),
+        };
+
+        let mut dbtx = self.gateway_db.begin_transaction().await;
+
+        if dbtx
+            .save_outgoing_contract(operation_id, row)
+            .await
+            .is_some()
+        {
+            // A previous request already owns this payment; await its terminal.
+            return self.await_send_terminal(&f1_client, operation_id).await;
+        }
+
+        dbtx.commit_tx().await;
+
+        f1_module
+            .log_send_started(
+                operation_id,
+                payload.contract.clone(),
+                min_contract_amount,
+                Amount::from_msats(amount),
+                expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM_V2),
+            )
+            .await;
+
+        // --- Kick off the payment; failures cancel via finalize_send ------
+
+        if let Err(err) = self.start_send(&payload, &invoice, min_contract_amount, expiration) {
+            warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), %payment_hash, "Failed to kick off outgoing payment; cancelling");
+            if let Err(err) = f1_module
+                .finalize_send(
+                    operation_id,
+                    payload.contract.clone(),
+                    payload.outpoint,
+                    None,
+                )
+                .await
+            {
+                warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), %payment_hash, "Failed to cancel outgoing payment");
+            }
+        }
+
+        // --- Await the terminal event on the source federation ------------
+
+        self.await_send_terminal(&f1_client, operation_id).await
+    }
+
+    /// Kicks off the external LN payment or the direct-swap receive for a
+    /// registered outgoing contract. Any error is turned into a cancellation
+    /// (forfeit) by the caller.
+    fn start_send(
+        &self,
+        payload: &SendPaymentPayload,
+        invoice: &Bolt11Invoice,
+        min_contract_amount: Amount,
+        expiration: u64,
+    ) -> Result<()> {
+        ensure!(!invoice.is_expired(), "The invoice has already expired");
+
+        let max_delay = expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM_V2);
+
+        ensure!(
+            max_delay > 0,
+            "The contract expiration is too close to forward the payment"
+        );
+
+        let max_fee = payload
+            .contract
+            .amount
+            .checked_sub(min_contract_amount)
+            .ok_or(anyhow!("The outgoing contract is underfunded"))?;
+
+        if self.public_key() == invoice.get_payee_pub_key() {
+            // Direct swap: the invoice was issued by this gateway, so a
+            // registered incoming contract is the payment's target. Fund it;
+            // the receive trailer finalizes the send once the receive settles.
+            let gateway = self.clone();
+            let contract = payload.contract.clone();
+            let outpoint = payload.outpoint;
+            let federation_id = payload.federation_id;
+            let payment_hash = *invoice.payment_hash();
+            let amount = invoice
+                .amount_milli_satoshis()
+                .expect("amount was checked by the caller");
+
+            tokio::spawn(async move {
+                if let Err(err) = gateway.start_direct_swap(payment_hash, amount).await {
+                    warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), %payment_hash, "Failed to start direct swap; cancelling");
+                    gateway
+                        .finalize_send_for(federation_id, contract, outpoint, None)
+                        .await;
+                }
+            });
+
+            Ok(())
+        } else {
+            // External LN payment, fire-and-forget: the outcome arrives via
+            // the LDK `PaymentSuccessful` / `PaymentFailed` events.
+            self.send_bolt11_payment(invoice, max_delay, max_fee)
+                .map_err(|e| anyhow!("{e}"))
+        }
+    }
+
+    /// Funds the registered incoming contract that is the target of a direct
+    /// swap (see [`Gateway::start_send`]).
+    async fn start_direct_swap(&self, payment_hash: sha256::Hash, amount_msat: u64) -> Result<()> {
+        let operation_id = OperationId::from_encodable(&payment_hash);
+
+        let registered = self
+            .gateway_db
+            .begin_transaction_nc()
+            .await
+            .load_incoming_contract(operation_id)
+            .await
+            .ok_or(anyhow!("No corresponding decryption contract available"))?;
+
+        let LightningInvoice::Bolt11(invoice) = &registered.invoice;
+        ensure!(
+            invoice.amount_milli_satoshis() == Some(amount_msat),
+            "Direct-swap amount mismatch"
+        );
+
+        let client_operation_id = OperationId::from_encodable(&registered.contract);
+
+        self.select_client(registered.federation_id)
+            .await?
+            .into_value()
             .get_first_module::<GatewayClientModuleV2>()
             .expect("Must have client module")
-            .send_payment(payload)
-            .await
+            .start_receive(client_operation_id, registered.contract, amount_msat)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Tails the operation's event log on the source federation until the send
+    /// reaches a terminal event, returning the preimage on success or the
+    /// forfeit signature on cancellation. Replays history, so a completed
+    /// operation returns immediately.
+    async fn await_send_terminal(
+        &self,
+        client: &ClientHandleArc,
+        operation_id: OperationId,
+    ) -> Result<std::result::Result<[u8; 32], Signature>> {
+        let mut stream = client.subscribe_operation_events(operation_id);
+
+        while let Some(entry) = stream.next().await {
+            if let Some(ev) = as_gw_event::<OutgoingPaymentSucceeded>(&entry) {
+                return Ok(Ok(ev.preimage.expect("preimage is always recorded")));
+            }
+
+            if let Some(ev) = as_gw_event::<OutgoingPaymentFailed>(&entry) {
+                warn!(target: LOG_GATEWAY, error = ?ev.error, "Outgoing lightning payment is cancelled");
+                return Ok(Err(ev
+                    .forfeit_signature
+                    .expect("forfeit signature is always recorded")));
+            }
+        }
+
+        Err(anyhow!(
+            "Event stream ended before the send reached a terminal state"
+        ))
+    }
+
+    /// Finalizes an outgoing contract on its source federation: claims it with
+    /// `Some(preimage)` or forfeits it with `None`. Best-effort; logs on error.
+    async fn finalize_send_for(
+        &self,
+        federation_id: FederationId,
+        contract: fedimint_lnv2_common::contracts::OutgoingContract,
+        outpoint: fedimint_core::OutPoint,
+        preimage: Option<[u8; 32]>,
+    ) {
+        let PaymentImage::Hash(payment_hash) = contract.payment_image else {
+            warn!(target: LOG_GATEWAY, "Outgoing contract has no payment hash");
+            return;
+        };
+
+        let operation_id = OperationId::from_encodable(&payment_hash);
+
+        let finalize = async {
+            self.select_client(federation_id)
+                .await?
+                .into_value()
+                .get_first_module::<GatewayClientModuleV2>()
+                .expect("Must have client module")
+                .finalize_send(operation_id, contract, outpoint, preimage)
+                .await
+        };
+
+        if let Err(err) = finalize.await {
+            warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), %payment_hash, "Failed to finalize outgoing payment");
+        }
     }
 
     /// For the LNv2 protocol, this will create an invoice by fetching it from
@@ -1221,38 +1594,61 @@ impl Gateway {
         }
     }
 
-    /// Dispatches one event-log entry: on a terminal receive for an external LN
-    /// payment (a real HTLC arrived, tracked via `is_ldk_event_processed`),
-    /// claim the HTLC with the revealed preimage or fail it back on
-    /// failure/refund. Internal direct swaps carry no HTLC and are skipped.
+    /// Dispatches one event-log entry, driving the external side effect that
+    /// makes a terminal receive final from the outside world's point of view
+    /// (mirroring picomint's trailer dispatch):
+    ///
+    /// - Direct swap (the daemon has an outgoing-contract row for this payment
+    ///   hash): finalize the send on the source federation so the sender gets
+    ///   the preimage (or forfeit signature).
+    /// - External LN receive (no outgoing row): claim the upstream HTLC on the
+    ///   LDK node with the revealed preimage, or fail it back so the LN sender
+    ///   is refunded.
     async fn dispatch_receive_event(&self, entry: &fedimint_eventlog::PersistedLogEntry) {
         if let Some(ev) = as_gw_event::<IncomingPaymentSucceeded>(entry) {
             let PaymentImage::Hash(payment_hash) = ev.payment_image else {
                 return;
             };
 
-            if self.htlc_arrived(payment_hash).await {
-                let preimage = ev.preimage.expect("preimage is always recorded");
-                self.claim_htlc(payment_hash, preimage);
+            let preimage = ev.preimage.expect("preimage is always recorded");
+
+            match self.load_direct_swap_target(payment_hash).await {
+                Some(row) => {
+                    self.finalize_send_for(
+                        row.federation_id,
+                        row.contract,
+                        row.outpoint,
+                        Some(preimage),
+                    )
+                    .await;
+                }
+                None => self.claim_htlc(payment_hash, preimage),
             }
         } else if let Some(ev) = as_gw_event::<IncomingPaymentFailed>(entry) {
             let PaymentImage::Hash(payment_hash) = ev.payment_image else {
                 return;
             };
 
-            if self.htlc_arrived(payment_hash).await {
-                self.fail_htlc(payment_hash);
+            match self.load_direct_swap_target(payment_hash).await {
+                Some(row) => {
+                    self.finalize_send_for(row.federation_id, row.contract, row.outpoint, None)
+                        .await;
+                }
+                None => self.fail_htlc(payment_hash),
             }
         }
     }
 
-    /// Whether an upstream Lightning HTLC actually arrived for `payment_hash`
-    /// (as opposed to an internal direct swap, which has no HTLC to settle).
-    async fn htlc_arrived(&self, payment_hash: sha256::Hash) -> bool {
+    /// Returns the outgoing-contract row this receive is the direct-swap
+    /// target of, if any.
+    async fn load_direct_swap_target(
+        &self,
+        payment_hash: sha256::Hash,
+    ) -> Option<OutgoingContractRow> {
         self.gateway_db
             .begin_transaction_nc()
             .await
-            .is_ldk_event_processed(payment_hash.to_byte_array())
+            .load_outgoing_contract(OperationId::from_encodable(&payment_hash))
             .await
     }
 }

@@ -3,6 +3,7 @@ use std::time::SystemTime;
 use fedimint_core::Amount;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::ModuleKind;
+use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_eventlog::{
     Event, EventKind, EventPersistence, PersistedLogEntry, StructuredPaymentEvents,
     filter_events_by_kind, join_events,
@@ -49,6 +50,14 @@ pub struct OutgoingPaymentSucceeded {
 
     /// The target federation ID if a swap was performed, otherwise `None`.
     pub target_federation: Option<FederationId>,
+
+    /// The preimage that proves the payment succeeded. The daemon-side send
+    /// waiter reads it from here to return it to the sending client.
+    ///
+    /// `Option` only for backward-compatibility with events serialized before
+    /// this field existed; daemon-driven sends always populate it.
+    #[serde(default)]
+    pub preimage: Option<[u8; 32]>,
 }
 
 impl Event for OutgoingPaymentSucceeded {
@@ -65,6 +74,15 @@ pub struct OutgoingPaymentFailed {
 
     /// The reason the outgoing payment was cancelled.
     pub error: Cancelled,
+
+    /// The forfeit signature releasing the gateway's claim on the outgoing
+    /// contract, so the sender can be refunded. The daemon-side send waiter
+    /// reads it from here to return it to the sending client.
+    ///
+    /// `Option` only for backward-compatibility with events serialized before
+    /// this field existed; daemon-driven sends always populate it.
+    #[serde(default)]
+    pub forfeit_signature: Option<Signature>,
 }
 
 impl Event for OutgoingPaymentFailed {

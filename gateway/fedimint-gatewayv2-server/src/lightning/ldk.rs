@@ -223,6 +223,34 @@ impl Gateway {
         }
     }
 
+    /// Fires an outgoing BOLT11 payment without waiting for the outcome, which
+    /// is delivered asynchronously via the LDK `PaymentSuccessful` /
+    /// `PaymentFailed` events. Used by the daemon-driven LNv2 send path; the
+    /// caller guarantees single-fire per payment hash via the outgoing-contract
+    /// row.
+    pub fn send_bolt11_payment(
+        &self,
+        invoice: &Bolt11Invoice,
+        max_delay: u64,
+        max_fee: Amount,
+    ) -> Result<(), LightningRpcError> {
+        self.node
+            .bolt11_payment()
+            .send(
+                invoice,
+                Some(SendingParameters {
+                    max_total_routing_fee_msat: Some(Some(max_fee.msats)),
+                    max_total_cltv_expiry_delta: Some(max_delay as u32),
+                    max_path_count: None,
+                    max_channel_saturation_power_of_half: None,
+                }),
+            )
+            .map(|_| ())
+            .map_err(|e| LightningRpcError::FailedPayment {
+                failure_reason: format!("LDK payment failed to initialize: {e:?}"),
+            })
+    }
+
     /// Attempts to pay an invoice using the lightning node, waiting for the
     /// payment to complete and returning the preimage.
     ///

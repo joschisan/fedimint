@@ -257,6 +257,7 @@ impl SendStateMachine {
                         OutgoingPaymentSucceeded {
                             payment_image: old_state.common.contract.payment_image.clone(),
                             target_federation: payment_response.target_federation,
+                            preimage: Some(payment_response.preimage),
                         },
                     )
                     .await;
@@ -290,6 +291,7 @@ impl SendStateMachine {
                         OutgoingPaymentFailed {
                             payment_image: old_state.common.contract.payment_image.clone(),
                             error: e.clone(),
+                            forfeit_signature: None,
                         },
                     )
                     .await;
