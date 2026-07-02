@@ -294,7 +294,7 @@ if both are set, bitcoind is used.
 | `FM_DATA_DIR`                 | yes      |                  | Directory for gateway db + LDK node data    |
 | `FM_NETWORK`                  | no       | `bitcoin`        | `bitcoin`, `testnet`, `signet`, `regtest`   |
 | `FM_BITCOIND_URL`             | one of   |                  | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
-| `FM_ESPLORA_URL`              | one of   |                  | Esplora HTTP URL, e.g. `https://mempool.space/api` |
+| `FM_ESPLORA_URL`              | one of   |                  | Esplora HTTP URL, e.g. `https://blockstream.info/api` |
 | `FM_API_ADDR`                 | no       | `0.0.0.0:8080`   | Public API listen address                   |
 | `FM_LDK_ADDR`                 | no       | `0.0.0.0:9735`   | LDK Lightning P2P listen address (BOLT)     |
 | `FM_LDK_ALIAS`                | no       | `LDK Gateway`    | The LDK node's advertised alias             |

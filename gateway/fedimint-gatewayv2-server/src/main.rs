@@ -83,7 +83,7 @@ pub struct GatewayOpts {
     #[arg(long, env = "FM_BITCOIND_URL")]
     pub bitcoind_url: Option<SafeUrl>,
 
-    /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
+    /// Esplora HTTP base URL, e.g. <https://blockstream.info/api>
     #[arg(long, env = "FM_ESPLORA_URL")]
     pub esplora_url: Option<SafeUrl>,
 

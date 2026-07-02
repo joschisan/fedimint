@@ -25,7 +25,9 @@ services:
       # Read by both the daemon and `gatewaydv2-cli`, so CLI commands run via
       # `docker exec` find the admin socket without extra flags.
       FM_DATA_DIR: /data
-      FM_ESPLORA_URL: https://mempool.space/api
+      # mempool.space's esplora-compat fee-estimates endpoint is deprecated and
+      # returns a "warning" key that LDK's parser rejects — use blockstream.info.
+      FM_ESPLORA_URL: https://blockstream.info/api
 
 volumes:
   gatewaydv2_data:
