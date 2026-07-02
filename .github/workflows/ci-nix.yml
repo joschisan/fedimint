@@ -350,6 +350,8 @@ jobs:
             image: fedimint/fedimint-cli
           - name: gatewayd
             image: fedimint/gatewayd
+          - name: gatewaydv2
+            image: fedimint/gatewaydv2
           - name: gateway-cli
             image: fedimint/gateway-cli
           - name: fedimint-recurringd
@@ -436,7 +438,7 @@ jobs:
       - name: Create and push multi-arch manifests
         run: |
           # hardcode container names since they're not available as outputs from the container job
-          containers="fedimintd fedimint-cli gatewayd gateway-cli fedimint-recurringd fedimint-recurringdv2 devtools"
+          containers="fedimintd fedimint-cli gatewayd gatewaydv2 gateway-cli fedimint-recurringd fedimint-recurringdv2 devtools"
 
           # Reference the following blog post for multi arch images with nix and docker manifest
           # https://tech.aufomm.com/how-to-build-multi-arch-docker-image-on-nixos

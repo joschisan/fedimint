@@ -1,0 +1,31 @@
+# NOTE: gatewaydv2 has not shipped in a tagged release yet, so no registry
+# image exists — CI publishes `fedimint/gatewaydv2` for release tags and
+# `releases/*` branches only. Until then, build the image on the deployment
+# host from a checkout of the repo and load it under the `local` tag:
+#
+#   nix build .#container.gatewaydv2
+#   docker tag "$(docker load < result | awk '{ print $3 }')" fedimint/gatewaydv2:local
+#
+# Once a release ships, replace the image below with its tag, e.g.
+# `fedimint/gatewaydv2:v0.12.0`.
+
+services:
+  gatewaydv2:
+    image: fedimint/gatewaydv2:local
+    container_name: gatewaydv2
+    restart: unless-stopped
+    ports:
+      # Public API
+      - "8080:8080"
+      # LDK lightning P2P (BOLT default port)
+      - "9735:9735"
+    volumes:
+      - gatewaydv2_data:/data
+    environment:
+      # Read by both the daemon and `gatewaydv2-cli`, so CLI commands run via
+      # `docker exec` find the admin socket without extra flags.
+      FM_DATA_DIR: /data
+      FM_ESPLORA_URL: https://mempool.space/api
+
+volumes:
+  gatewaydv2_data:

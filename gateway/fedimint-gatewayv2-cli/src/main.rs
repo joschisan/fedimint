@@ -42,9 +42,9 @@ use tower_service::Service;
 #[command(version)]
 struct Cli {
     /// Path to the gateway's data directory (must match the daemon's
-    /// `FM_GATEWAY_DATA_DIR`). The CLI finds the admin Unix socket at
+    /// `FM_DATA_DIR`). The CLI finds the admin Unix socket at
     /// `{DATA_DIR}/cli.sock`.
-    #[arg(long = "data-dir", env = "FM_GATEWAY_DATA_DIR")]
+    #[arg(long = "data-dir", env = "FM_DATA_DIR")]
     data_dir: PathBuf,
 
     #[command(subcommand)]

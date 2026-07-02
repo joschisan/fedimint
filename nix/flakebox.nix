@@ -996,6 +996,20 @@ in
           };
         };
 
+        gatewaydv2 = pkgs.dockerTools.buildLayeredImage {
+          name = "gatewaydv2";
+          # sqlite3 lets operators query the analytics db via `docker exec`;
+          # see gateway/fedimint-gatewayv2-server/README.md
+          contents = [
+            gateway-pkgs
+            pkgs.sqlite-interactive.bin
+          ]
+          ++ defaultPackages;
+          config = {
+            Cmd = [ "${gateway-pkgs}/bin/gatewaydv2" ];
+          };
+        };
+
         gateway-cli = pkgs.dockerTools.buildLayeredImage {
           name = "gateway-cli";
           contents = [ gateway-pkgs ] ++ defaultPackages;
