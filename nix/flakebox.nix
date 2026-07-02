@@ -855,9 +855,18 @@ in
 
       packages = [
         "fedimint-gateway-server"
+        "fedimint-gateway-client"
+      ];
+    };
+
+    # Kept separate from gateway-pkgs so the gatewaydv2 container doesn't
+    # pay for (or ship) the v1 gateway binaries.
+    gatewayv2-pkgs = fedimintBuildPackageGroup {
+      pname = "gatewayv2-pkgs";
+
+      packages = [
         "fedimint-gatewayv2-server"
         "fedimint-gatewayv2-cli"
-        "fedimint-gateway-client"
       ];
     };
 
@@ -910,11 +919,11 @@ in
       bin = "gatewayd";
     };
     gatewaydv2 = pickBinary {
-      pkg = gateway-pkgs;
+      pkg = gatewayv2-pkgs;
       bin = "gatewaydv2";
     };
     gatewaydv2-cli = pickBinary {
-      pkg = gateway-pkgs;
+      pkg = gatewayv2-pkgs;
       bin = "gatewaydv2-cli";
     };
     gateway-cli = pickBinary {
@@ -1001,12 +1010,12 @@ in
           # sqlite3 lets operators query the analytics db via `docker exec`;
           # see gateway/fedimint-gatewayv2-server/README.md
           contents = [
-            gateway-pkgs
+            gatewayv2-pkgs
             pkgs.sqlite-interactive.bin
           ]
           ++ defaultPackages;
           config = {
-            Cmd = [ "${gateway-pkgs}/bin/gatewaydv2" ];
+            Cmd = [ "${gatewayv2-pkgs}/bin/gatewaydv2" ];
           };
         };
 

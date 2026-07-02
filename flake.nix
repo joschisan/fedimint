@@ -517,6 +517,7 @@
           inherit (craneMultiBuild)
             client-pkgs
             gateway-pkgs
+            gatewayv2-pkgs
             fedimint-pkgs
             devimint
             ;
