@@ -14,6 +14,7 @@
 #![allow(clippy::large_futures)]
 #![allow(clippy::struct_field_names)]
 
+pub mod analytics;
 pub mod cli;
 pub mod client;
 pub mod db;
@@ -162,6 +163,10 @@ pub struct AppState {
     /// Serializes concurrent [`AppState::pay`] calls for the same invoice so
     /// the (non-idempotent) LDK send runs at most once per payment hash.
     pub outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
+
+    /// SQLite mirror of the gwv2 payment events, wiped and rebuilt from the
+    /// client event logs on every startup (see [`analytics`]).
+    pub analytics: analytics::Analytics,
 }
 
 impl AppState {
@@ -235,10 +240,16 @@ impl AppState {
 
         clients.insert(federation_id, client.clone());
 
-        // Spawn this federation's receive trailer exactly once, when the client
-        // is first built. It tails the client's event log and settles inbound
-        // Lightning HTLCs as receives reach a terminal state.
+        // Spawn this federation's trailers exactly once, when the client is
+        // first built. The receive trailer tails the client's event log and
+        // settles inbound Lightning HTLCs as receives reach a terminal state;
+        // the analytics trailer mirrors the payment events into SQLite.
         tokio::spawn(trailer::run(self.clone(), federation_id, client.clone()));
+        tokio::spawn(analytics::trailer(
+            self.analytics.clone(),
+            federation_id,
+            client.clone(),
+        ));
 
         Ok(client)
     }

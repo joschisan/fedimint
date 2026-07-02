@@ -27,6 +27,7 @@ use fedimint_core::envs::is_running_in_test_env;
 use fedimint_core::fedimint_build_code_version_env;
 use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::util::{FmtCompact as _, SafeUrl, handle_version_hash_command};
+use fedimint_gatewayv2_server::analytics::Analytics;
 use fedimint_gatewayv2_server::cli::run_cli;
 use fedimint_gatewayv2_server::client::GatewayClientFactory;
 use fedimint_gatewayv2_server::public::run_public;
@@ -115,7 +116,10 @@ fn main() -> anyhow::Result<()> {
     //    node be `Arc<Node>` on `AppState` rather than lazily created later.
     let node = build_ldk_node(&opts, mnemonic, runtime.clone())?;
 
-    // 4. Assemble the shared gateway state.
+    // 4. Assemble the shared gateway state. The analytics SQLite mirror is derived
+    //    state and starts fresh on every boot.
+    let analytics = Analytics::wipe_and_init(&opts.data_dir)?;
+
     let state = AppState {
         clients: Arc::new(RwLock::new(BTreeMap::new())),
         node,
@@ -127,6 +131,7 @@ fn main() -> anyhow::Result<()> {
         default_routing_fees: opts.default_routing_fees,
         default_transaction_fees: opts.default_transaction_fees,
         outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
+        analytics,
     };
 
     // 5. Fire-and-forget every long-running task. Federation clients are
