@@ -302,47 +302,54 @@ impl Gateway {
         }
     }
 
-    /// Settles or fails a claimable inbound payment on the lightning node,
-    /// per the [`PaymentAction`] in the response.
+    /// Claims (settles) a claimable inbound HTLC on the lightning node with the
+    /// given `preimage`. Called by the receive trailer once the federation-side
+    /// receive succeeds.
+    pub fn claim_for_hash(
+        &self,
+        payment_hash: sha256::Hash,
+        preimage: [u8; 32],
+    ) -> Result<(), LightningRpcError> {
+        let ph = PaymentHash(*payment_hash.as_byte_array());
+
+        // TODO: Get the actual amount from the LDK node. This value is only used
+        // by `ldk-node` to ensure that the amount claimed isn't less than the
+        // amount expected, which we already verified when the payment arrived.
+        let claimable_amount_msat = 999_999_999_999_999;
+
+        self.node
+            .bolt11_payment()
+            .claim_for_hash(ph, claimable_amount_msat, PaymentPreimage(preimage))
+            .map_err(|_| LightningRpcError::FailedToCompleteHtlc {
+                failure_reason: format!("Failed to claim LDK payment with hash {payment_hash}"),
+            })
+    }
+
+    /// Fails a claimable inbound HTLC back to the sender (refund).
+    pub fn fail_for_hash(&self, payment_hash: sha256::Hash) -> Result<(), LightningRpcError> {
+        let ph = PaymentHash(*payment_hash.as_byte_array());
+
+        self.node.bolt11_payment().fail_for_hash(ph).map_err(|_| {
+            LightningRpcError::FailedToCompleteHtlc {
+                failure_reason: format!("Failed to fail LDK payment with hash {payment_hash}"),
+            }
+        })
+    }
+
+    /// Settles or fails a claimable inbound payment per the [`PaymentAction`].
+    /// Retained only for the (dead-for-v2) `IGatewayClientV2::complete_htlc`
+    /// trait method — the live receive path uses [`Self::claim_for_hash`] /
+    /// [`Self::fail_for_hash`] directly.
     pub fn complete_htlc_once(
         &self,
         htlc: InterceptPaymentResponse,
     ) -> Result<(), LightningRpcError> {
-        let InterceptPaymentResponse {
-            action,
-            payment_hash,
-            incoming_chan_id: _,
-            htlc_id: _,
-        } = htlc;
-
-        let ph = PaymentHash(*payment_hash.clone().as_byte_array());
-
-        // TODO: Get the actual amount from the LDK node. Probably makes the
-        // most sense to pipe it through the `InterceptHtlcResponse` struct.
-        // This value is only used by `ldk-node` to ensure that the amount
-        // claimed isn't less than the amount expected, but we've already
-        // verified that the amount is correct when we intercepted the payment.
-        let claimable_amount_msat = 999_999_999_999_999;
-
-        let ph_hex_str = hex::encode(payment_hash);
-
-        if let PaymentAction::Settle(preimage) = action {
-            self.node
-                .bolt11_payment()
-                .claim_for_hash(ph, claimable_amount_msat, PaymentPreimage(preimage.0))
-                .map_err(|_| LightningRpcError::FailedToCompleteHtlc {
-                    failure_reason: format!("Failed to claim LDK payment with hash {ph_hex_str}"),
-                })?;
+        if let PaymentAction::Settle(preimage) = htlc.action {
+            self.claim_for_hash(htlc.payment_hash, preimage.0)
         } else {
-            warn!(target: LOG_LIGHTNING, payment_hash = %ph_hex_str, "Unwinding payment because the action was not `Settle`");
-            self.node.bolt11_payment().fail_for_hash(ph).map_err(|_| {
-                LightningRpcError::FailedToCompleteHtlc {
-                    failure_reason: format!("Failed to unwind LDK payment with hash {ph_hex_str}"),
-                }
-            })?;
+            warn!(target: LOG_LIGHTNING, payment_hash = %htlc.payment_hash, "Unwinding payment because the action was not `Settle`");
+            self.fail_for_hash(htlc.payment_hash)
         }
-
-        Ok(())
     }
 
     /// Requests the lightning node to create an invoice. A `payment_hash` makes

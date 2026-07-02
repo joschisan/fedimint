@@ -41,6 +41,7 @@ fedimint-client-module = { workspace = true }
 fedimint-connectors = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-derive-secret = { workspace = true }
+fedimint-eventlog = { workspace = true }
 fedimint-gateway-common = { workspace = true }
 fedimint-gatewayv2-cli-core = { workspace = true }
 fedimint-gwv2-client = { workspace = true }

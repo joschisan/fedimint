@@ -3815,6 +3815,7 @@ dependencies = [
  "fedimint-dummy-client",
  "fedimint-dummy-common",
  "fedimint-dummy-server",
+ "fedimint-eventlog",
  "fedimint-gateway-common",
  "fedimint-gatewayv2-cli-core",
  "fedimint-gwv2-client",

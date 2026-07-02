@@ -488,12 +488,11 @@ impl GatewayClientModuleV2 {
     /// just returns the existing operation id.
     pub async fn start_receive(
         &self,
+        operation_id: OperationId,
         contract: IncomingContract,
         amount_msat: u64,
     ) -> anyhow::Result<OperationId> {
         let operation_start = now();
-
-        let operation_id = OperationId::from_encodable(&contract);
 
         if self.client_ctx.operation_exists(operation_id).await {
             return Ok(operation_id);
@@ -560,7 +559,11 @@ impl GatewayClientModuleV2 {
         contract: IncomingContract,
         amount_msat: u64,
     ) -> anyhow::Result<FinalReceiveState> {
-        let operation_id = self.start_receive(contract, amount_msat).await?;
+        let operation_id = OperationId::from_encodable(&contract);
+
+        let operation_id = self
+            .start_receive(operation_id, contract, amount_msat)
+            .await?;
 
         Ok(self.await_receive(operation_id).await)
     }

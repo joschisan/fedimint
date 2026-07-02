@@ -61,28 +61,30 @@ use fedimint_gateway_common::{
     SendOnchainRequest, SpendEcashPayload, SpendEcashResponse, WithdrawResponse,
 };
 use fedimint_gatewayv2_cli_core as cli;
+use fedimint_gwv2_client::events::{IncomingPaymentFailed, IncomingPaymentSucceeded};
 use fedimint_gwv2_client::{
     EXPIRATION_DELTA_MINIMUM_V2, FinalReceiveState, GatewayClientModuleV2, IGatewayClientV2,
 };
-use fedimint_lightning::{InterceptPaymentResponse, LightningRpcError, PaymentAction, Preimage};
+use fedimint_lightning::{InterceptPaymentResponse, LightningRpcError, Preimage};
 use fedimint_lnurl::VerifyResponse;
-use fedimint_lnv2_common::Bolt11InvoiceDescription;
 use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::{
     CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
 };
+use fedimint_lnv2_common::{Bolt11InvoiceDescription, LightningInvoice};
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::{
     MintClientInit as MintV2ClientInit, MintClientModule as MintV2ClientModule,
 };
 use fedimint_wallet_common::PegOutFees;
+use futures::StreamExt as _;
 use lightning_invoice::Bolt11Invoice;
 use rand::rngs::OsRng;
 use tokio::sync::{RwLock, oneshot};
 use tracing::{debug, info, info_span, warn};
 
 pub use crate::cli_server::run_cli;
-use crate::db::GatewayDbtxNcExt as _;
+use crate::db::{GatewayDbtxNcExt as _, IncomingContractRow};
 use crate::lightning::ldk::UserChannelId;
 pub use crate::lightning::ldk::build_ldk_node;
 pub use crate::rpc_server::run_public;
@@ -92,6 +94,18 @@ pub const DEFAULT_NETWORK: Network = Network::Regtest;
 
 pub type Result<T> = anyhow::Result<T>;
 pub type AdminResult<T> = anyhow::Result<T>;
+
+/// Decodes an event-log entry into a specific gateway event, gating on the
+/// entry's `kind`/`module` first. `PersistedLogEntry::to_event` only attempts a
+/// JSON deserialization, so without this gate a sibling event with a
+/// compatible shape could decode by accident.
+fn as_gw_event<E: fedimint_eventlog::Event>(
+    entry: &fedimint_eventlog::PersistedLogEntry,
+) -> Option<E> {
+    (entry.kind == E::KIND && entry.module_kind() == E::MODULE.as_ref())
+        .then(|| entry.to_event::<E>())
+        .flatten()
+}
 
 /// Name of the gateway's database that is used for metadata and configuration
 /// storage.
@@ -354,45 +368,110 @@ impl Gateway {
 
     /// Handles an inbound Lightning payment that the LDK node reports as
     /// claimable. If it matches a registered LNv2 incoming contract of the
-    /// expected amount, records it in the pending-claim work-list and spawns
-    /// the settle task; otherwise fails the HTLC so the sender is refunded.
+    /// expected amount, submits the incoming-contract funding tx and spawns the
+    /// federation-local Receive state machine (via [`start_receive`]);
+    /// otherwise (or if funding fails, e.g. insufficient gateway liquidity)
+    /// fails the HTLC so the sender is refunded promptly.
+    ///
+    /// The upstream HTLC is *not* claimed here — that is driven out-of-band by
+    /// the per-client receive trailer once the Receive SM reaches success.
+    /// `mark_ldk_event_processed` records that a real HTLC arrived, which the
+    /// trailer uses to tell an external LN receive (claim the HTLC) from an
+    /// internal direct swap (no HTLC to claim).
+    ///
+    /// [`start_receive`]: fedimint_gwv2_client::GatewayClientModuleV2::start_receive
     async fn handle_payment_claimable(&self, payment_hash: sha256::Hash, amount_msat: u64) {
-        let payment_image = PaymentImage::Hash(payment_hash);
-
-        let matches = self
+        // The single-threaded event loop processes one event at a time, so this
+        // read-then-act on the processed set is not racy.
+        if self
             .gateway_db
             .begin_transaction_nc()
             .await
-            .load_registered_incoming_contract(payment_image.clone())
+            .is_ldk_event_processed(payment_hash.to_byte_array())
             .await
-            .is_some_and(|registered| registered.incoming_amount_msats == amount_msat);
-
-        if !matches {
-            warn!(
-                target: LOG_GATEWAY,
-                %payment_hash,
-                "Claimable payment has no matching registered incoming contract; failing HTLC"
-            );
-            let outcome = InterceptPaymentResponse {
-                action: PaymentAction::Cancel,
-                payment_hash,
-                incoming_chan_id: 0,
-                htlc_id: 0,
-            };
-            if let Err(err) = self.complete_htlc_once(outcome) {
-                warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to fail unmatched HTLC");
-            }
+        {
             return;
         }
 
-        let mut dbtx = self.gateway_db.begin_transaction().await;
-        dbtx.save_pending_claim(payment_image.clone()).await;
-        dbtx.commit_tx().await;
+        let operation_id = OperationId::from_encodable(&payment_hash);
 
-        let gateway = self.clone();
-        tokio::spawn(async move {
-            gateway.settle_incoming_payment(payment_image).await;
-        });
+        let registered = self
+            .gateway_db
+            .begin_transaction_nc()
+            .await
+            .load_incoming_contract(operation_id)
+            .await;
+
+        let Some(registered) = registered else {
+            warn!(
+                target: LOG_GATEWAY,
+                %payment_hash,
+                "Claimable payment has no registered incoming contract; failing HTLC"
+            );
+            self.fail_htlc(payment_hash);
+            return;
+        };
+
+        // The HTLC pays the invoice amount, which is the contract amount plus
+        // the gateway's receive fee — so validate against the issued invoice,
+        // not `contract.commitment.amount`.
+        let LightningInvoice::Bolt11(invoice) = &registered.invoice;
+        if invoice.amount_milli_satoshis() != Some(amount_msat) {
+            warn!(
+                target: LOG_GATEWAY,
+                %payment_hash,
+                "Claimable payment amount does not match the issued invoice; failing HTLC"
+            );
+            self.fail_htlc(payment_hash);
+            return;
+        }
+
+        // The client-side operation is keyed by the contract (matching
+        // `relay_direct_swap`, which the Send state machine uses for direct
+        // swaps), so both receive paths land on the same operation.
+        let client_operation_id = OperationId::from_encodable(&registered.contract);
+
+        let start = async {
+            self.select_client(registered.federation_id)
+                .await?
+                .into_value()
+                .get_first_module::<GatewayClientModuleV2>()
+                .expect("Must have client module")
+                .start_receive(client_operation_id, registered.contract, amount_msat)
+                .await
+        };
+
+        match start.await {
+            Ok(..) => {
+                let mut dbtx = self.gateway_db.begin_transaction().await;
+                dbtx.mark_ldk_event_processed(payment_hash.to_byte_array())
+                    .await;
+                dbtx.commit_tx().await;
+            }
+            Err(err) => {
+                // Funding the incoming contract failed (e.g. the gateway is not
+                // pegged in / has insufficient liquidity). Fail the HTLC back so
+                // the sender is refunded, matching the v1 relay-error path.
+                warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), %payment_hash, "Failed to start incoming receive; failing HTLC");
+                self.fail_htlc(payment_hash);
+            }
+        }
+    }
+
+    /// Fails an inbound HTLC back to the sender (refund). Best-effort: logs on
+    /// error since the node may retry event delivery.
+    fn fail_htlc(&self, payment_hash: sha256::Hash) {
+        if let Err(err) = self.fail_for_hash(payment_hash) {
+            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to fail HTLC");
+        }
+    }
+
+    /// Claims an inbound HTLC with `preimage` (settle). Best-effort; logs on
+    /// error.
+    fn claim_htlc(&self, payment_hash: sha256::Hash, preimage: [u8; 32]) {
+        if let Err(err) = self.claim_for_hash(payment_hash, preimage) {
+            warn!(target: LOG_GATEWAY, err = %err.fmt_compact(), "Failed to claim HTLC");
+        }
     }
 
     /// Returns the `ClientConfig` for each federation the gateway is connected
@@ -559,6 +638,15 @@ impl Gateway {
         })?;
 
         federation_manager.add_client(client.clone());
+
+        // Spawn this federation's receive trailer exactly once, when the client
+        // is first built. It tails the client's event log and settles inbound
+        // Lightning HTLCs as receives reach a terminal state.
+        tokio::spawn(
+            self.clone()
+                .run_receive_trailer(federation_id, client.value().clone()),
+        );
+
         Ok(client)
     }
 
@@ -948,14 +1036,18 @@ impl Gateway {
             payload.expiry_secs,
         )?;
 
+        let operation_id = OperationId::from_encodable(&payment_hash);
+
+        let row = IncomingContractRow {
+            federation_id: payload.federation_id,
+            contract: payload.contract,
+            invoice: LightningInvoice::Bolt11(invoice.clone()),
+        };
+
         let mut dbtx = self.gateway_db.begin_transaction().await;
 
         if dbtx
-            .save_registered_incoming_contract(
-                payload.federation_id,
-                payload.amount,
-                payload.contract,
-            )
+            .save_incoming_contract(operation_id, row)
             .await
             .is_some()
         {
@@ -986,46 +1078,58 @@ impl Gateway {
         payment_hash: sha256::Hash,
         wait: bool,
     ) -> std::result::Result<VerifyResponse, String> {
-        let registered_contract = self
+        let registered = self
             .gateway_db
             .begin_transaction_nc()
             .await
-            .load_registered_incoming_contract(PaymentImage::Hash(payment_hash))
+            .load_incoming_contract(OperationId::from_encodable(&payment_hash))
             .await
             .ok_or("Unknown payment hash".to_string())?;
 
         let client = self
-            .select_client(registered_contract.federation_id)
+            .select_client(registered.federation_id)
             .await
             .map_err(|_| "Not connected to federation".to_string())?
             .into_value();
 
-        let operation_id = OperationId::from_encodable(&registered_contract.contract);
+        // Client-side operations are keyed by the contract (see
+        // `handle_payment_claimable` / `relay_direct_swap`).
+        let operation_id = OperationId::from_encodable(&registered.contract);
 
-        if !(wait || client.operation_exists(operation_id).await) {
+        // Fast path: scan the operation's event log for a terminal receive.
+        if !wait {
+            for entry in client.read_operation_events(operation_id).await {
+                if let Some(ev) = as_gw_event::<IncomingPaymentSucceeded>(&entry) {
+                    return Ok(VerifyResponse {
+                        settled: true,
+                        preimage: Some(ev.preimage.expect("preimage is always recorded")),
+                    });
+                }
+            }
+
             return Ok(VerifyResponse {
                 settled: false,
                 preimage: None,
             });
         }
 
-        let state = client
-            .get_first_module::<GatewayClientModuleV2>()
-            .expect("Must have client module")
-            .await_receive(operation_id)
-            .await;
+        // Slow path: tail the operation's event log until it reaches a terminal.
+        let mut stream = client.subscribe_operation_events(operation_id);
 
-        let preimage = match state {
-            FinalReceiveState::Success(preimage) => Ok(preimage),
-            FinalReceiveState::Failure => Err("Payment has failed".to_string()),
-            FinalReceiveState::Refunded => Err("Payment has been refunded".to_string()),
-            FinalReceiveState::Rejected => Err("Payment has been rejected".to_string()),
-        }?;
+        while let Some(entry) = stream.next().await {
+            if let Some(ev) = as_gw_event::<IncomingPaymentSucceeded>(&entry) {
+                return Ok(VerifyResponse {
+                    settled: true,
+                    preimage: Some(ev.preimage.expect("preimage is always recorded")),
+                });
+            }
 
-        Ok(VerifyResponse {
-            settled: true,
-            preimage: Some(preimage),
-        })
+            if as_gw_event::<IncomingPaymentFailed>(&entry).is_some() {
+                return Err("Payment has failed".to_string());
+            }
+        }
+
+        Err("Event stream ended before the receive reached a terminal state".to_string())
     }
 
     /// Retrieves the persisted `CreateInvoicePayload` from the database
@@ -1036,143 +1140,120 @@ impl Gateway {
         payment_image: PaymentImage,
         amount_msats: u64,
     ) -> Result<(IncomingContract, ClientHandleArc)> {
-        let registered_incoming_contract = self
+        let PaymentImage::Hash(payment_hash) = payment_image else {
+            bail!("PaymentImage is not a payment hash");
+        };
+
+        let operation_id = OperationId::from_encodable(&payment_hash);
+
+        let registered = self
             .gateway_db
             .begin_transaction_nc()
             .await
-            .load_registered_incoming_contract(payment_image)
+            .load_incoming_contract(operation_id)
             .await
             .ok_or(anyhow!("No corresponding decryption contract available"))?;
 
-        if registered_incoming_contract.incoming_amount_msats != amount_msats {
+        // The sender pays the invoice amount, which is the contract amount plus
+        // the gateway's receive fee — so validate against the issued invoice,
+        // not `contract.commitment.amount`.
+        let LightningInvoice::Bolt11(invoice) = &registered.invoice;
+        if invoice.amount_milli_satoshis() != Some(amount_msats) {
             bail!(
                 "The available decryption contract's amount is not equal to the requested amount"
             );
         }
 
         let client = self
-            .select_client(registered_incoming_contract.federation_id)
+            .select_client(registered.federation_id)
             .await?
             .into_value();
 
-        Ok((registered_incoming_contract.contract, client))
+        Ok((registered.contract, client))
     }
 
-    /// Settles one incoming Lightning payment end-to-end: submits the
-    /// federation-side receive (the `ReceiveStateMachine` only — no
-    /// `CompleteStateMachine`, unlike v1) and, on success, claims the upstream
-    /// HTLC on the LDK node. This is the daemon-side "trailer" that replaces
-    /// the v1 Complete SM.
+    /// Per-federation receive trailer, spawned once when a client is built (see
+    /// [`Gateway::select_client`]). Tails this federation's client event log
+    /// from a persisted [`TrailerCursor`] and drives the external side effect
+    /// that finalizes a receive, mirroring picomint's daemon-wide trailer but
+    /// scoped to one client (fedimint event logs are per-client).
     ///
-    /// Idempotent and safe to call from both the live `PaymentClaimable`
-    /// handler and the boot reconciliation: `relay_direct_swap` no-ops on
-    /// `operation_exists`, the claim is gated by `ClaimedIncomingContract`, and
-    /// `complete_htlc` retries until the node accepts the claim.
-    async fn settle_incoming_payment(&self, payment_image: PaymentImage) {
-        let mut dbtx = self.gateway_db.begin_transaction_nc().await;
-        if dbtx
-            .is_incoming_contract_claimed(payment_image.clone())
-            .await
-        {
-            return;
-        }
-        let Some(registered) = dbtx
-            .load_registered_incoming_contract(payment_image.clone())
-            .await
-        else {
-            warn!(target: LOG_GATEWAY, ?payment_image, "Claimable payment has no registered incoming contract; ignoring");
-            self.clear_pending_claim(payment_image).await;
-            return;
-        };
-        drop(dbtx);
+    /// The federation-local `ReceiveStateMachine` reaches a terminal
+    /// [`IncomingPaymentSucceeded`] / [`IncomingPaymentFailed`] on its own; the
+    /// trailer then claims or fails the upstream Lightning HTLC. Dispatches are
+    /// idempotent, so a crashed trailer just re-runs from the cursor.
+    ///
+    /// [`TrailerCursor`]: crate::db::TrailerCursorKey
+    pub async fn run_receive_trailer(self, federation_id: FederationId, client: ClientHandleArc) {
+        const CHUNK: u64 = 100;
 
-        let client = match self.select_client(registered.federation_id).await {
-            Ok(client) => client.into_value(),
-            Err(err) => {
-                // The federation client could not be loaded; leave the payment
-                // pending so the next boot reconciliation retries it.
-                warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), "Cannot settle incoming payment: client unavailable");
-                return;
-            }
-        };
-
-        let final_state = client
-            .get_first_module::<GatewayClientModuleV2>()
-            .expect("Must have client module")
-            .relay_direct_swap(registered.contract, registered.incoming_amount_msats)
-            .await;
-
-        let PaymentImage::Hash(payment_hash) = payment_image else {
-            // Only hash payment images correspond to an upstream Lightning HTLC.
-            self.clear_pending_claim(payment_image).await;
-            return;
-        };
-
-        // Settle the upstream HTLC on success; otherwise fail it back so the
-        // sender is refunded promptly. This mirrors the v1 Complete state
-        // machine, which cancels on any non-`Success` terminal, and the old
-        // relay-error path, which cancelled when the receive could not be
-        // submitted (e.g. insufficient gateway liquidity).
-        let preimage = match final_state {
-            Ok(FinalReceiveState::Success(preimage)) => Some(preimage),
-            Ok(other) => {
-                warn!(target: LOG_GATEWAY, ?other, %payment_hash, "Incoming receive did not succeed; failing back the HTLC");
-                None
-            }
-            Err(err) => {
-                warn!(target: LOG_GATEWAY, err = %err.fmt_compact_anyhow(), %payment_hash, "Failed to submit incoming receive; failing back the HTLC");
-                None
-            }
-        };
-
-        let action = match preimage {
-            Some(preimage) => PaymentAction::Settle(Preimage(preimage)),
-            None => PaymentAction::Cancel,
-        };
-
-        // Retries internally until the node accepts the settle/cancel.
-        self.complete_htlc(InterceptPaymentResponse {
-            action,
-            payment_hash,
-            incoming_chan_id: 0,
-            htlc_id: 0,
-        })
-        .await;
-
-        let mut dbtx = self.gateway_db.begin_transaction().await;
-        if preimage.is_some() {
-            dbtx.save_claimed_incoming_contract(PaymentImage::Hash(payment_hash))
-                .await;
-        }
-        dbtx.remove_pending_claim(PaymentImage::Hash(payment_hash))
-            .await;
-        dbtx.commit_tx().await;
-    }
-
-    async fn clear_pending_claim(&self, payment_image: PaymentImage) {
-        let mut dbtx = self.gateway_db.begin_transaction().await;
-        dbtx.remove_pending_claim(payment_image).await;
-        dbtx.commit_tx().await;
-    }
-
-    /// Re-drives every incoming payment still in the pending-claim work-list on
-    /// boot — receives whose HTLC became claimable while the gateway was down,
-    /// or that were interrupted mid-claim. This is what makes the daemon-side
-    /// claim crash-durable now that v2 no longer spawns the Complete SM.
-    pub async fn reconcile_pending_claims(self) {
-        let pending = self
+        let mut cursor = self
             .gateway_db
             .begin_transaction_nc()
             .await
-            .load_pending_claims()
+            .load_trailer_cursor(federation_id)
             .await;
 
-        for payment_image in pending {
-            let gateway = self.clone();
-            tokio::spawn(async move {
-                gateway.settle_incoming_payment(payment_image).await;
-            });
+        let mut log_event_added = client.log_event_added_rx();
+
+        info!(target: LOG_GATEWAY, %federation_id, "Receive trailer running");
+
+        loop {
+            let entries = client.get_event_log(cursor, CHUNK).await;
+
+            for entry in &entries {
+                self.dispatch_receive_event(entry).await;
+                cursor = Some(entry.id().next());
+            }
+
+            if let Some(cursor) = cursor
+                && !entries.is_empty()
+            {
+                let mut dbtx = self.gateway_db.begin_transaction().await;
+                dbtx.save_trailer_cursor(federation_id, cursor).await;
+                dbtx.commit_tx().await;
+            }
+
+            // Caught up: block until the client orders a new event into the log.
+            if (entries.len() as u64) < CHUNK && log_event_added.changed().await.is_err() {
+                break;
+            }
         }
+    }
+
+    /// Dispatches one event-log entry: on a terminal receive for an external LN
+    /// payment (a real HTLC arrived, tracked via `is_ldk_event_processed`),
+    /// claim the HTLC with the revealed preimage or fail it back on
+    /// failure/refund. Internal direct swaps carry no HTLC and are skipped.
+    async fn dispatch_receive_event(&self, entry: &fedimint_eventlog::PersistedLogEntry) {
+        if let Some(ev) = as_gw_event::<IncomingPaymentSucceeded>(entry) {
+            let PaymentImage::Hash(payment_hash) = ev.payment_image else {
+                return;
+            };
+
+            if self.htlc_arrived(payment_hash).await {
+                let preimage = ev.preimage.expect("preimage is always recorded");
+                self.claim_htlc(payment_hash, preimage);
+            }
+        } else if let Some(ev) = as_gw_event::<IncomingPaymentFailed>(entry) {
+            let PaymentImage::Hash(payment_hash) = ev.payment_image else {
+                return;
+            };
+
+            if self.htlc_arrived(payment_hash).await {
+                self.fail_htlc(payment_hash);
+            }
+        }
+    }
+
+    /// Whether an upstream Lightning HTLC actually arrived for `payment_hash`
+    /// (as opposed to an internal direct swap, which has no HTLC to settle).
+    async fn htlc_arrived(&self, payment_hash: sha256::Hash) -> bool {
+        self.gateway_db
+            .begin_transaction_nc()
+            .await
+            .is_ldk_event_processed(payment_hash.to_byte_array())
+            .await
     }
 }
 

@@ -73,14 +73,12 @@ fn main() -> anyhow::Result<()> {
     );
 
     // 5. Fire-and-forget every long-running task. Federation clients are
-    //    lazy-loaded on first use; all work is persisted incrementally and
-    //    idempotent on retry, so the runtime drop on process exit aborts cleanly.
-    //    Boot reconciliation re-drives incoming payments interrupted by a previous
-    //    shutdown.
+    //    lazy-loaded on first use, each spawning its own receive trailer when
+    //    built; all work is persisted incrementally and idempotent on retry, so the
+    //    runtime drop on process exit aborts cleanly.
     runtime.spawn(gateway.clone().process_ldk_events());
     runtime.spawn(run_cli(gateway.clone()));
     runtime.spawn(run_public(gateway.clone()));
-    runtime.spawn(gateway.reconcile_pending_claims());
 
     // 6. Block main on SIGTERM so the runtime stays alive; on signal, return and
     //    let the runtime drop abort all tasks.

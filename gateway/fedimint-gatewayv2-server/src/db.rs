@@ -1,17 +1,22 @@
 use std::collections::BTreeMap;
 
 use fedimint_core::config::{ClientConfig, FederationId};
+use fedimint_core::core::OperationId;
 use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::{Amount, impl_db_lookup, impl_db_record};
-use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
+use fedimint_core::{impl_db_lookup, impl_db_record};
+use fedimint_eventlog::EventLogId;
+use fedimint_lnv2_common::LightningInvoice;
+use fedimint_lnv2_common::contracts::IncomingContract;
 use futures::StreamExt;
 
-/// Database key prefixes for the gateway's metadata database.
+/// Database key prefixes for the gateway's metadata database, mirroring the
+/// picomint gateway daemon's schema.
 ///
 /// The gateway persists only what it cannot reconstruct from the wire: the
 /// single root entropy, the set of joined federations (their `ClientConfig`),
-/// the registered LNv2 incoming contracts, and — behind
+/// the in-flight LNv2 contracts, the LDK-event idempotency set and the
+/// per-federation event-log trailer cursor, and — behind
 /// [`DbKeyPrefix::ClientDatabase`] — the namespaced per-federation client
 /// databases. Everything else (the gateway identity keypair, the
 /// per-federation client secrets) is derived from the root entropy.
@@ -32,22 +37,19 @@ enum DbKeyPrefix {
     /// "Leaving" a federation only disables it; the config and client state
     /// are retained so in-flight payments settle and it can be re-enabled.
     DisabledFederation = 0x03,
-    /// `PaymentImage -> RegisteredIncomingContract` for registered LNv2
-    /// incoming contracts.
-    RegisteredIncomingContract = 0x04,
-    /// Work-list of incoming payments whose upstream Lightning HTLC has become
-    /// claimable (an LDK `PaymentClaimable` fired) but which the gateway has
-    /// not yet finished settling. Seeds the per-client claim trailer on
-    /// boot; an entry is removed once the receive reaches a terminal state.
-    /// Bounding the boot scan to genuinely-pending payments is why this
-    /// exists separately from [`DbKeyPrefix::RegisteredIncomingContract`]
-    /// (which is retained for the lifetime of the payment so `verify` can
-    /// read settled receives).
-    PendingIncomingClaim = 0x05,
-    /// Set of payment images whose upstream HTLC the gateway has already
-    /// claimed. Gates double-claims when a live claim task and the boot
-    /// reconciliation race on the same payment.
-    ClaimedIncomingContract = 0x06,
+    /// `OperationId -> IncomingContractRow` for registered incoming (receive)
+    /// contracts. Keyed by `OperationId::from_encodable(payment_hash)`. Looked
+    /// up by the LDK `PaymentClaimable` handler and by `verify`.
+    IncomingContract = 0x04,
+    /// Set of LDK-event `payment_hash`es already processed by the event loop.
+    /// Presence means an upstream HTLC arrived and was handled, letting the
+    /// receive trailer tell an external LN receive from an internal direct
+    /// swap.
+    ProcessedLdkEvent = 0x05,
+    /// `FederationId -> EventLogId`: the cursor for that federation's receive
+    /// trailer. Advanced past each dispatched event; a crashed trailer just
+    /// re-dispatches idempotently from the persisted cursor on restart.
+    TrailerCursor = 0x06,
 }
 
 /// Returns the isolated, prefix-namespaced database for a federation's client.
@@ -96,47 +98,40 @@ impl_db_record!(
     db_prefix = DbKeyPrefix::DisabledFederation,
 );
 
-#[derive(Debug, Encodable, Decodable)]
-pub struct RegisteredIncomingContractKey(pub PaymentImage);
-
-#[derive(Debug, Encodable, Decodable)]
-pub struct RegisteredIncomingContract {
+/// Row describing a registered incoming (receive) contract and the invoice the
+/// gateway issued for it.
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct IncomingContractRow {
     pub federation_id: FederationId,
-    /// The amount of the incoming contract, in msats.
-    pub incoming_amount_msats: u64,
     pub contract: IncomingContract,
+    pub invoice: LightningInvoice,
 }
 
+#[derive(Debug, Encodable, Decodable)]
+pub struct IncomingContractKey(pub OperationId);
+
 impl_db_record!(
-    key = RegisteredIncomingContractKey,
-    value = RegisteredIncomingContract,
-    db_prefix = DbKeyPrefix::RegisteredIncomingContract,
+    key = IncomingContractKey,
+    value = IncomingContractRow,
+    db_prefix = DbKeyPrefix::IncomingContract,
 );
 
 #[derive(Debug, Encodable, Decodable)]
-pub struct PendingIncomingClaimKey(pub PaymentImage);
-
-#[derive(Debug, Encodable, Decodable)]
-pub struct PendingIncomingClaimKeyPrefix;
+pub struct ProcessedLdkEventKey(pub [u8; 32]);
 
 impl_db_record!(
-    key = PendingIncomingClaimKey,
+    key = ProcessedLdkEventKey,
     value = (),
-    db_prefix = DbKeyPrefix::PendingIncomingClaim,
-);
-
-impl_db_lookup!(
-    key = PendingIncomingClaimKey,
-    query_prefix = PendingIncomingClaimKeyPrefix
+    db_prefix = DbKeyPrefix::ProcessedLdkEvent,
 );
 
 #[derive(Debug, Encodable, Decodable)]
-pub struct ClaimedIncomingContractKey(pub PaymentImage);
+pub struct TrailerCursorKey(pub FederationId);
 
 impl_db_record!(
-    key = ClaimedIncomingContractKey,
-    value = (),
-    db_prefix = DbKeyPrefix::ClaimedIncomingContract,
+    key = TrailerCursorKey,
+    value = EventLogId,
+    db_prefix = DbKeyPrefix::TrailerCursor,
 );
 
 #[allow(async_fn_in_trait)]
@@ -168,37 +163,33 @@ pub trait GatewayDbtxNcExt {
     /// Returns whether a federation's public-facing endpoints are gated off.
     async fn is_federation_disabled(&mut self, federation_id: FederationId) -> bool;
 
-    /// Saves a registered incoming contract, returning the previous contract
-    /// with the same payment image if it existed.
-    async fn save_registered_incoming_contract(
+    /// Saves a registered incoming contract row, returning the previous row for
+    /// the same operation if it existed.
+    async fn save_incoming_contract(
         &mut self,
-        federation_id: FederationId,
-        incoming_amount: Amount,
-        contract: IncomingContract,
-    ) -> Option<RegisteredIncomingContract>;
+        operation_id: OperationId,
+        row: IncomingContractRow,
+    ) -> Option<IncomingContractRow>;
 
-    async fn load_registered_incoming_contract(
+    async fn load_incoming_contract(
         &mut self,
-        payment_image: PaymentImage,
-    ) -> Option<RegisteredIncomingContract>;
+        operation_id: OperationId,
+    ) -> Option<IncomingContractRow>;
 
-    /// Records that an incoming payment's upstream HTLC has become claimable
-    /// and still needs settling. Idempotent.
-    async fn save_pending_claim(&mut self, payment_image: PaymentImage);
+    /// Marks an LDK event `payment_hash` as processed. Returns `true` if it was
+    /// already marked (i.e. the caller should skip re-processing).
+    async fn mark_ldk_event_processed(&mut self, payment_hash: [u8; 32]) -> bool;
 
-    /// Removes an incoming payment from the pending-claim work-list once it has
-    /// reached a terminal state (claimed or refunded).
-    async fn remove_pending_claim(&mut self, payment_image: PaymentImage);
+    /// Returns whether an LDK event `payment_hash` was processed, i.e. whether
+    /// an upstream Lightning HTLC actually arrived for it (distinguishing an
+    /// external LN receive from an internal direct swap in the trailer).
+    async fn is_ldk_event_processed(&mut self, payment_hash: [u8; 32]) -> bool;
 
-    /// Returns every incoming payment still awaiting settlement, used to seed
-    /// the claim trailer on boot.
-    async fn load_pending_claims(&mut self) -> Vec<PaymentImage>;
+    /// Reads the receive-trailer cursor for a federation, if one is stored.
+    async fn load_trailer_cursor(&mut self, federation_id: FederationId) -> Option<EventLogId>;
 
-    /// Marks an incoming payment's upstream HTLC as claimed, gating double
-    /// claims. Returns whether it was already marked.
-    async fn save_claimed_incoming_contract(&mut self, payment_image: PaymentImage) -> bool;
-
-    async fn is_incoming_contract_claimed(&mut self, payment_image: PaymentImage) -> bool;
+    /// Persists the receive-trailer cursor for a federation.
+    async fn save_trailer_cursor(&mut self, federation_id: FederationId, cursor: EventLogId);
 }
 
 impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
@@ -255,58 +246,40 @@ impl<Cap: Send> GatewayDbtxNcExt for DatabaseTransaction<'_, Cap> {
             .is_some()
     }
 
-    async fn save_registered_incoming_contract(
+    async fn save_incoming_contract(
         &mut self,
-        federation_id: FederationId,
-        incoming_amount: Amount,
-        contract: IncomingContract,
-    ) -> Option<RegisteredIncomingContract> {
-        self.insert_entry(
-            &RegisteredIncomingContractKey(contract.commitment.payment_image.clone()),
-            &RegisteredIncomingContract {
-                federation_id,
-                incoming_amount_msats: incoming_amount.msats,
-                contract,
-            },
-        )
-        .await
+        operation_id: OperationId,
+        row: IncomingContractRow,
+    ) -> Option<IncomingContractRow> {
+        self.insert_entry(&IncomingContractKey(operation_id), &row)
+            .await
     }
 
-    async fn load_registered_incoming_contract(
+    async fn load_incoming_contract(
         &mut self,
-        payment_image: PaymentImage,
-    ) -> Option<RegisteredIncomingContract> {
-        self.get_value(&RegisteredIncomingContractKey(payment_image))
-            .await
+        operation_id: OperationId,
+    ) -> Option<IncomingContractRow> {
+        self.get_value(&IncomingContractKey(operation_id)).await
     }
 
-    async fn save_pending_claim(&mut self, payment_image: PaymentImage) {
-        self.insert_entry(&PendingIncomingClaimKey(payment_image), &())
-            .await;
-    }
-
-    async fn remove_pending_claim(&mut self, payment_image: PaymentImage) {
-        self.remove_entry(&PendingIncomingClaimKey(payment_image))
-            .await;
-    }
-
-    async fn load_pending_claims(&mut self) -> Vec<PaymentImage> {
-        self.find_by_prefix(&PendingIncomingClaimKeyPrefix)
-            .await
-            .map(|(key, ()): (PendingIncomingClaimKey, ())| key.0)
-            .collect::<Vec<PaymentImage>>()
-            .await
-    }
-
-    async fn save_claimed_incoming_contract(&mut self, payment_image: PaymentImage) -> bool {
-        self.insert_entry(&ClaimedIncomingContractKey(payment_image), &())
+    async fn mark_ldk_event_processed(&mut self, payment_hash: [u8; 32]) -> bool {
+        self.insert_entry(&ProcessedLdkEventKey(payment_hash), &())
             .await
             .is_some()
     }
 
-    async fn is_incoming_contract_claimed(&mut self, payment_image: PaymentImage) -> bool {
-        self.get_value(&ClaimedIncomingContractKey(payment_image))
+    async fn is_ldk_event_processed(&mut self, payment_hash: [u8; 32]) -> bool {
+        self.get_value(&ProcessedLdkEventKey(payment_hash))
             .await
             .is_some()
+    }
+
+    async fn load_trailer_cursor(&mut self, federation_id: FederationId) -> Option<EventLogId> {
+        self.get_value(&TrailerCursorKey(federation_id)).await
+    }
+
+    async fn save_trailer_cursor(&mut self, federation_id: FederationId, cursor: EventLogId) {
+        self.insert_entry(&TrailerCursorKey(federation_id), &cursor)
+            .await;
     }
 }
