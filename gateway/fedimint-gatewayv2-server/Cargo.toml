@@ -17,7 +17,7 @@ tor = [
 
 [[bin]]
 name = "gatewaydv2"
-path = "src/bin/gatewaydv2.rs"
+path = "src/main.rs"
 
 [lib]
 name = "fedimint_gatewayv2_server"
@@ -25,17 +25,12 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-aquamarine = { workspace = true }
-async-stream = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true, features = ["json"] }
 bitcoin = { workspace = true }
 clap = { workspace = true }
-erased-serde = { workspace = true }
-esplora-client = { workspace = true }
 fedimint-api-client = { workspace = true }
 fedimint-bip39 = { workspace = true }
-fedimint-bitcoind = { workspace = true, features = ["bitcoincore"] }
 fedimint-client = { workspace = true }
 fedimint-client-module = { workspace = true }
 fedimint-connectors = { workspace = true }
@@ -47,16 +42,12 @@ fedimint-gatewayv2-cli-core = { workspace = true }
 fedimint-gwv2-client = { workspace = true }
 fedimint-lightning = { workspace = true }
 fedimint-lnurl = { workspace = true }
-fedimint-lnv2-client = { workspace = true }
 fedimint-lnv2-common = { workspace = true }
 fedimint-logging = { workspace = true }
 fedimint-mintv2-client = { workspace = true }
-fedimint-mintv2-common = { workspace = true }
 fedimint-rocksdb = { workspace = true }
-fedimint-wallet-common = { workspace = true }
 fedimint-walletv2-client = { workspace = true }
 futures = { workspace = true }
-futures-util = { workspace = true }
 hex = { workspace = true }
 ldk-node = { workspace = true }
 lightning = { workspace = true }
@@ -64,16 +55,10 @@ lightning-invoice = { workspace = true }
 lockable = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
-strum = { workspace = true }
-strum_macros = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true }
-tokio-stream = { workspace = true }
 tower-http = { workspace = true, features = ["cors", "auth"] }
 tracing = { workspace = true, features = ["log"] }
-url = { workspace = true, features = ["serde"] }
 
 [target.'cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))'.dependencies]
 tikv-jemallocator = { workspace = true }
