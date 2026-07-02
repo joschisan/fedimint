@@ -1,3 +1,6 @@
+use std::path::Path;
+use std::time::Duration;
+
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use clap::{Parser, Subcommand};
@@ -91,6 +94,9 @@ async fn main() -> anyhow::Result<()> {
                     test_payments(&dev_fed).await?;
                     test_lnurl_pay(&dev_fed).await?;
                     test_lnurl_recovery(&dev_fed).await?;
+                    // The expected analytics row counts cover the full run, so
+                    // this only makes sense after all scenarios above.
+                    test_analytics(&dev_fed).await?;
                 }
             }
 
@@ -377,8 +383,108 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
     assert!(lnd_payment_summary.incoming.median_latency.is_some());
     assert!(lnd_payment_summary.incoming.average_latency.is_some());
 
-    // gatewaydv2 has no payment-summary admin command yet (analytics are being
-    // ported separately), so only the v1 gateway's summary is asserted here.
+    // gatewaydv2 exposes no payment-summary admin command; its analytics
+    // SQLite mirror is asserted in `test_analytics` at the end of the run.
+
+    Ok(())
+}
+
+/// Asserts the contents of gatewaydv2's analytics SQLite mirror after all
+/// scenarios above have completed, modeled on picomint's analytics test.
+///
+/// Expected gatewaydv2 rows for the full test run:
+///  - refund matrix: 2 cancelled sends (v2->lnd, v2->v2); the matching receives
+///    abort before the receive state machine, so no receive rows
+///  - circular payments: 2 successful sends (v2->lnd, v2->v2) and 2 successful
+///    receives (lnd->v2 and the v2->v2 direct swap)
+///  - client -> gateways: 1 successful send (v2 pays lnd's invoice; the lnd->v2
+///    leg pays the LDK node's own invoice, which never touches a federation)
+///  - gateways -> client: 1 successful receive (lnd->v2; the v2->lnd leg is an
+///    operator-initiated LDK send with no outgoing contract)
+///  - hold invoice: 1 successful send
+///  - `test_fees`: 1 successful receive
+///  - `test_lnurl_pay`: 2 successful receives (clients a+b on the lnd->v2 leg)
+///  - `test_lnurl_recovery`: 5 successful receives (3 pre- + 2 post-recovery)
+async fn test_analytics(dev_fed: &DevJitFed) -> anyhow::Result<()> {
+    info!("Testing analytics...");
+
+    let db_path = dev_fed
+        .gw_v2()
+        .await?
+        .data_dir
+        .join("analytics")
+        .join("analytics.sqlite");
+
+    // The analytics trailers mirror the client event logs asynchronously, so
+    // give them a bounded window to catch up with the final payments.
+    retry(
+        "Waiting for the analytics trailers to catch up".to_string(),
+        backoff_util::custom_backoff(Duration::from_millis(200), Duration::from_secs(2), Some(30)),
+        || async { assert_analytics(&db_path) },
+    )
+    .await?;
+
+    info!("Analytics assertions passed");
+
+    Ok(())
+}
+
+fn assert_analytics(db_path: &Path) -> anyhow::Result<()> {
+    let conn = rusqlite::Connection::open(db_path)?;
+
+    let assert_count = |sql: &str, expected: i64| -> anyhow::Result<()> {
+        let actual: i64 = conn.query_row(sql, [], |row| row.get(0))?;
+
+        ensure!(
+            actual == expected,
+            "`{sql}` returned {actual}, expected {expected}"
+        );
+
+        Ok(())
+    };
+
+    // Raw event tables
+    assert_count("SELECT COUNT(*) FROM send", 6)?;
+    assert_count("SELECT COUNT(*) FROM send_success", 4)?;
+    assert_count("SELECT COUNT(*) FROM send_cancel", 2)?;
+    assert_count("SELECT COUNT(*) FROM receive", 11)?;
+    assert_count("SELECT COUNT(*) FROM receive_success", 11)?;
+    assert_count("SELECT COUNT(*) FROM receive_failure", 0)?;
+
+    // The views stitch the event tables into one row per payment
+    assert_count("SELECT COUNT(*) FROM outgoing_payments", 6)?;
+    assert_count(
+        "SELECT COUNT(*) FROM outgoing_payments WHERE status = 'success'",
+        4,
+    )?;
+    assert_count(
+        "SELECT COUNT(*) FROM outgoing_payments WHERE status = 'cancelled'",
+        2,
+    )?;
+    assert_count("SELECT COUNT(*) FROM incoming_payments", 11)?;
+    assert_count(
+        "SELECT COUNT(*) FROM incoming_payments WHERE status = 'success'",
+        11,
+    )?;
+
+    // Join key sanity — (federation, payment_image) must match across tables
+    assert_count(
+        "SELECT COUNT(*) FROM send s INNER JOIN send_success succ \
+         ON succ.federation = s.federation AND succ.payment_image = s.payment_image",
+        4,
+    )?;
+
+    // Amount extraction
+    assert_count("SELECT SUM(amount_msat) FROM incoming_payments", 7_500_000)?;
+
+    // LN fee accounting is consistent on every successful send: the realized
+    // fee never exceeds the budget and the gateway keeps the difference.
+    assert_count(
+        "SELECT COUNT(*) FROM outgoing_payments WHERE status = 'success' \
+         AND (ln_fee_paid_msat > ln_fee_budget_msat \
+              OR ln_fee_kept_msat != ln_fee_budget_msat - ln_fee_paid_msat)",
+        0,
+    )?;
 
     Ok(())
 }
