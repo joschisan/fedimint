@@ -1,0 +1,31 @@
+# The image is published to Docker Hub by the manually-dispatched
+# `.github/workflows/gatewaydv2-image.yml` workflow on every push to
+# `gatewayv2`. It pushes `ghcr.io/joschisan/gatewaydv2:latest` and
+# `ghcr.io/joschisan/gatewaydv2:<sha>`.
+# The deployment host just pulls and restarts:
+#
+#   docker compose pull && docker compose up -d
+#
+# Pin to a `<sha>` tag instead of `latest` if you want reproducible deploys.
+
+services:
+  gatewaydv2:
+    image: ghcr.io/joschisan/gatewaydv2:latest
+    container_name: gatewaydv2
+    restart: unless-stopped
+    ports:
+      # Public API on the default HTTP port, so the gateway is reachable at
+      # plain `http://<host>`
+      - "80:8080"
+      # LDK lightning P2P (BOLT default port)
+      - "9735:9735"
+    volumes:
+      - gatewaydv2_data:/data
+    environment:
+      # Read by both the daemon and `gatewaydv2-cli`, so CLI commands run via
+      # `docker exec` find the admin socket without extra flags.
+      FM_DATA_DIR: /data
+      FM_ESPLORA_URL: https://mempool.space/api
+
+volumes:
+  gatewaydv2_data:

@@ -117,14 +117,16 @@ pub fn utf8(path: &Path) -> &str {
     path.as_os_str().to_str().expect("must be valid utf8")
 }
 
-// Port offsets from FM_GATEWAY_BASE_PORT when set: 0-2 are Iroh ports for each
-// gateway, 3-4 LND, 5-6 LDK, 7-8 LDK2
-const GATEWAY_PORT_OFFSET_LND: u16 = 3;
-const GATEWAY_PORT_OFFSET_LND_METRICS: u16 = 4;
-const GATEWAY_PORT_OFFSET_LDK: u16 = 5;
-const GATEWAY_PORT_OFFSET_LDK_METRICS: u16 = 6;
-const GATEWAY_PORT_OFFSET_LDK2: u16 = 7;
-const GATEWAY_PORT_OFFSET_LDK2_METRICS: u16 = 8;
+// Port offsets from FM_GATEWAY_BASE_PORT when set: 0-3 are Iroh ports for each
+// gateway, 4-5 LND, 6-7 LDK, 8-9 LDK2, 10-11 GWV2
+const GATEWAY_PORT_OFFSET_LND: u16 = 4;
+const GATEWAY_PORT_OFFSET_LND_METRICS: u16 = 5;
+const GATEWAY_PORT_OFFSET_LDK: u16 = 6;
+const GATEWAY_PORT_OFFSET_LDK_METRICS: u16 = 7;
+const GATEWAY_PORT_OFFSET_LDK2: u16 = 8;
+const GATEWAY_PORT_OFFSET_LDK2_METRICS: u16 = 9;
+const GATEWAY_PORT_OFFSET_V2: u16 = 10;
+const GATEWAY_PORT_OFFSET_V2_METRICS: u16 = 11;
 
 declare_vars! {
     Global = (test_dir: &Path, num_feds: usize, fed_size: usize, offline_nodes: usize, federation_base_ports: u16, num_gateways: usize, gateway_base_port: Option<u16>) =>
@@ -155,6 +157,7 @@ declare_vars! {
         FM_PORT_LND_LISTEN: u16 = port_alloc(1)?; env: "FM_PORT_LND_LISTEN";
         FM_PORT_LDK: u16 = port_alloc(1)?; env: "FM_PORT_LDK";
         FM_PORT_LDK2: u16 = port_alloc(1)?; env: "FM_PORT_LDK";
+        FM_PORT_LDK3: u16 = port_alloc(1)?; env: "FM_PORT_LDK3";
         FM_PORT_LND_RPC: u16 = port_alloc(1)?; env: "FM_PORT_LND_RPC";
         FM_PORT_LND_REST: u16 = port_alloc(1)?; env: "FM_PORT_LND_REST";
         FM_PORT_ESPLORA: u16 = port_alloc(1)?; env: "FM_PORT_ESPLORA";
@@ -183,6 +186,14 @@ declare_vars! {
             Some(b) => b + GATEWAY_PORT_OFFSET_LDK2_METRICS,
             None => port_alloc(1)?,
         }; env: "FM_PORT_GW_LDK2_METRICS";
+        FM_PORT_GW_V2: u16 = match gateway_base_port {
+            Some(b) => b + GATEWAY_PORT_OFFSET_V2,
+            None => port_alloc(1)?,
+        }; env: "FM_PORT_GW_V2";
+        FM_PORT_GW_V2_METRICS: u16 = match gateway_base_port {
+            Some(b) => b + GATEWAY_PORT_OFFSET_V2_METRICS,
+            None => port_alloc(1)?,
+        }; env: "FM_PORT_GW_V2_METRICS";
         FM_PORT_FAUCET: u16 = 15243u16; env: "FM_PORT_FAUCET";
         FM_PORT_RECURRINGD: u16 = port_alloc(1)?; env: "FM_PORT_RECURRINGD";
         FM_PORT_RECURRINGDV2: u16 = port_alloc(1)?; env: "FM_PORT_RECURRINGDV2";
@@ -191,7 +202,7 @@ declare_vars! {
         fedimintd_overrides: FederationsNetOverrides = FederationsNetOverrides::new(FM_FEDERATION_BASE_PORT, num_feds, NumPeers::from(fed_size)); env: "NOT_USED_FOR_ANYTHING";
         gw_base_port: u16 = match gateway_base_port {
             Some(b) => b,
-            None => port_alloc(3)?,
+            None => port_alloc(4)?,
         }; env: "NOT_USED_FOR_ANYTHING";
         gatewayd_overrides: GatewaydNetOverrides = GatewaydNetOverrides::new(gw_base_port, num_gateways); env: "NOT_USED_FOR_ANYTHING";
 
@@ -272,7 +283,7 @@ impl Global {
                     .unwrap(),
             )?
         };
-        let num_gateways: usize = 3;
+        let num_gateways: usize = 4;
         let this = Self::init(
             test_dir,
             num_feds,

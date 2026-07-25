@@ -507,6 +507,8 @@
         packages = {
           inherit (craneMultiBuild)
             gatewayd
+            gatewaydv2
+            gatewaydv2-cli
             fedimint-dbtool
             gateway-cli
             fedimint-cli
@@ -518,6 +520,7 @@
           inherit (craneMultiBuild)
             client-pkgs
             gateway-pkgs
+            gatewayv2-pkgs
             fedimint-pkgs
             devimint
             ;
