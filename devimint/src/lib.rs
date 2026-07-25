@@ -36,6 +36,7 @@ pub mod external;
 pub mod faucet;
 pub mod federation;
 pub mod gatewayd;
+pub mod gatewaydv2;
 mod process_reaper;
 pub mod recurringd;
 pub mod recurringdv2;

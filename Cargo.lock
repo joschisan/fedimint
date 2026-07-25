@@ -2537,6 +2537,7 @@ dependencies = [
  "fedimint-connectors",
  "fedimint-core",
  "fedimint-gateway-common",
+ "fedimint-gatewayv2-cli-core",
  "fedimint-ln-client",
  "fedimint-ln-server",
  "fedimint-lnv2-client",
@@ -3838,6 +3839,87 @@ dependencies = [
 ]
 
 [[package]]
+name = "fedimint-gatewayv2-cli"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "fedimint-gatewayv2-cli-core",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-service",
+]
+
+[[package]]
+name = "fedimint-gatewayv2-cli-core"
+version = "0.12.0"
+dependencies = [
+ "bitcoin",
+ "clap",
+ "fedimint-core",
+ "fedimint-mintv2-common",
+ "lightning-invoice",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fedimint-gatewayv2-server"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "async-trait",
+ "axum 0.8.9",
+ "bitcoin",
+ "clap",
+ "fedimint-api-client",
+ "fedimint-bip39",
+ "fedimint-build",
+ "fedimint-client",
+ "fedimint-client-module",
+ "fedimint-connectors",
+ "fedimint-core",
+ "fedimint-derive-secret",
+ "fedimint-dummy-client",
+ "fedimint-dummy-common",
+ "fedimint-dummy-server",
+ "fedimint-eventlog",
+ "fedimint-gatewayv2-cli-core",
+ "fedimint-gwv2-client",
+ "fedimint-ldk-node",
+ "fedimint-ln-server",
+ "fedimint-lnurl",
+ "fedimint-lnv2-common",
+ "fedimint-lnv2-server",
+ "fedimint-logging",
+ "fedimint-mintv2-client",
+ "fedimint-rocksdb",
+ "fedimint-testing",
+ "fedimint-tpe",
+ "fedimint-unknown-common",
+ "fedimint-unknown-server",
+ "fedimint-walletv2-client",
+ "futures",
+ "hex",
+ "itertools 0.14.0",
+ "lightning",
+ "lightning-invoice",
+ "rand 0.8.5",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde_json",
+ "tikv-jemallocator",
+ "tokio",
+ "tower-http",
+ "tracing",
+]
+
+[[package]]
 name = "fedimint-gw-client"
 version = "0.12.0"
 dependencies = [
@@ -4203,6 +4285,7 @@ dependencies = [
  "itertools 0.14.0",
  "lightning-invoice",
  "reqwest 0.12.28",
+ "rusqlite",
  "serde",
  "serde_json",
  "strum 0.27.1",

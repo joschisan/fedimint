@@ -12,6 +12,10 @@ name = "lnv2-module-tests"
 path = "bin/tests.rs"
 
 [[bin]]
+name = "gatewayv2-module-tests"
+path = "bin/gatewayv2-tests.rs"
+
+[[bin]]
 name = "lnv1-lnv2-swap-tests"
 path = "bin/swap_tests.rs"
 
@@ -47,6 +51,7 @@ futures = { workspace = true }
 itertools = { workspace = true }
 lightning-invoice = { workspace = true }
 reqwest = { workspace = true }
+rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }

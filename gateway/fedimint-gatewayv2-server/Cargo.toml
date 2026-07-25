@@ -1,0 +1,77 @@
+[package]
+authors = { workspace = true }
+description = "fedimint-gatewayv2-server sends/receives Lightning Network payments on behalf of Fedimint clients (LDK + LNv2 only)"
+edition = { workspace = true }
+license = { workspace = true }
+name = "fedimint-gatewayv2-server"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[features]
+tor = ["fedimint-client/tor", "fedimint-api-client/tor"]
+
+[[bin]]
+name = "gatewaydv2"
+path = "src/main.rs"
+
+[lib]
+name = "fedimint_gatewayv2_server"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true, features = ["json"] }
+bitcoin = { workspace = true }
+clap = { workspace = true }
+fedimint-api-client = { workspace = true }
+fedimint-bip39 = { workspace = true }
+fedimint-client = { workspace = true }
+fedimint-client-module = { workspace = true }
+fedimint-connectors = { workspace = true }
+fedimint-core = { workspace = true }
+fedimint-derive-secret = { workspace = true }
+fedimint-eventlog = { workspace = true }
+fedimint-gatewayv2-cli-core = { workspace = true }
+fedimint-gwv2-client = { workspace = true }
+fedimint-lnurl = { workspace = true }
+fedimint-lnv2-common = { workspace = true }
+fedimint-logging = { workspace = true }
+fedimint-mintv2-client = { workspace = true }
+fedimint-rocksdb = { workspace = true }
+fedimint-walletv2-client = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+ldk-node = { workspace = true }
+lightning = { workspace = true }
+lightning-invoice = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true, features = ["cors", "auth"] }
+tracing = { workspace = true, features = ["log"] }
+
+[target.'cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))'.dependencies]
+tikv-jemallocator = { workspace = true }
+
+[dev-dependencies]
+assert_matches = { workspace = true }
+fedimint-dummy-client = { workspace = true }
+fedimint-dummy-common = { workspace = true }
+fedimint-dummy-server = { workspace = true }
+fedimint-ln-server = { workspace = true }
+fedimint-lnv2-server = { workspace = true }
+fedimint-testing = { workspace = true }
+fedimint-unknown-common = { workspace = true }
+fedimint-unknown-server = { workspace = true }
+itertools = { workspace = true }
+tpe = { workspace = true }
+
+[build-dependencies]
+fedimint-build = { workspace = true }
+
+[lints]
+workspace = true
