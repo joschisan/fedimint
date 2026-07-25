@@ -3,6 +3,8 @@ use std::time::SystemTime;
 use fedimint_core::Amount;
 use fedimint_core::config::FederationId;
 use fedimint_core::core::ModuleKind;
+use fedimint_core::secp256k1::PublicKey;
+use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_eventlog::{
     Event, EventKind, EventPersistence, PersistedLogEntry, StructuredPaymentEvents,
     filter_events_by_kind, join_events,
@@ -33,6 +35,14 @@ pub struct OutgoingPaymentStarted {
 
     /// The max delay of the payment in blocks.
     pub max_delay: u64,
+
+    /// The public key of the Lightning node this payment is being sent to,
+    /// recovered from the invoice.
+    ///
+    /// `Option` only for backward-compatibility with events serialized before
+    /// this field existed; daemon-driven sends always populate it.
+    #[serde(default)]
+    pub destination_node: Option<PublicKey>,
 }
 
 impl Event for OutgoingPaymentStarted {
@@ -49,6 +59,22 @@ pub struct OutgoingPaymentSucceeded {
 
     /// The target federation ID if a swap was performed, otherwise `None`.
     pub target_federation: Option<FederationId>,
+
+    /// The preimage that proves the payment succeeded. The daemon-side send
+    /// waiter reads it from here to return it to the sending client.
+    ///
+    /// `Option` only for backward-compatibility with events serialized before
+    /// this field existed; daemon-driven sends always populate it.
+    #[serde(default)]
+    pub preimage: Option<[u8; 32]>,
+
+    /// The realized Lightning routing fee reported by the node for this
+    /// payment; zero for swaps, which never touch the Lightning network.
+    ///
+    /// `Option` only for backward-compatibility with events serialized before
+    /// this field existed; daemon-driven sends always populate it.
+    #[serde(default)]
+    pub ln_fee: Option<Amount>,
 }
 
 impl Event for OutgoingPaymentSucceeded {
@@ -65,6 +91,15 @@ pub struct OutgoingPaymentFailed {
 
     /// The reason the outgoing payment was cancelled.
     pub error: Cancelled,
+
+    /// The forfeit signature releasing the gateway's claim on the outgoing
+    /// contract, so the sender can be refunded. The daemon-side send waiter
+    /// reads it from here to return it to the sending client.
+    ///
+    /// `Option` only for backward-compatibility with events serialized before
+    /// this field existed; daemon-driven sends always populate it.
+    #[serde(default)]
+    pub forfeit_signature: Option<Signature>,
 }
 
 impl Event for OutgoingPaymentFailed {
@@ -101,6 +136,15 @@ impl Event for IncomingPaymentStarted {
 pub struct IncomingPaymentSucceeded {
     /// The payment image of the invoice that was paid.
     pub payment_image: PaymentImage,
+
+    /// The preimage revealed by the successful receive. The daemon-side receive
+    /// trailer reads it from here to claim the upstream Lightning HTLC.
+    ///
+    /// `Option` only for backward-compatibility with events serialized before
+    /// this field existed; there are no gatewayv2 deployments, so it is always
+    /// populated (`Some`) now and consumers may unwrap it.
+    #[serde(default)]
+    pub preimage: Option<[u8; 32]>,
 }
 
 impl Event for IncomingPaymentSucceeded {

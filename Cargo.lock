@@ -722,7 +722,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
  "itoa",
  "matchit 0.7.3",
@@ -732,7 +732,7 @@ dependencies = [
  "pin-project-lite",
  "rustversion",
  "serde",
- "sync_wrapper 1.0.2",
+ "sync_wrapper",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
@@ -750,9 +750,9 @@ dependencies = [
  "form_urlencoded",
  "futures-util",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
- "hyper 1.9.0",
+ "hyper",
  "hyper-util",
  "itoa",
  "matchit 0.8.4",
@@ -765,7 +765,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
- "sync_wrapper 1.0.2",
+ "sync_wrapper",
  "tokio",
  "tower 0.5.2",
  "tower-layer",
@@ -794,12 +794,12 @@ dependencies = [
  "bytes",
  "futures-util",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
  "mime",
  "pin-project-lite",
  "rustversion",
- "sync_wrapper 1.0.2",
+ "sync_wrapper",
  "tower-layer",
  "tower-service",
 ]
@@ -813,11 +813,11 @@ dependencies = [
  "bytes",
  "futures-core",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
  "mime",
  "pin-project-lite",
- "sync_wrapper 1.0.2",
+ "sync_wrapper",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -837,7 +837,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
  "mime",
  "pin-project-lite",
@@ -1001,7 +1001,7 @@ checksum = "0c9f5961444b5f51b9c3937e729a212363d0e4cde6390ded6e01e16292078df4"
 dependencies = [
  "async-trait",
  "bdk_core",
- "esplora-client 0.12.3",
+ "esplora-client",
  "futures",
 ]
 
@@ -1504,6 +1504,12 @@ dependencies = [
  "cpufeatures 0.3.0",
  "rand_core 0.10.1",
 ]
+
+[[package]]
+name = "chacha20-poly1305"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b4b0fc281743d80256607bd65e8beedc42cb0787ea119c85b81b4c0eab85e5f"
 
 [[package]]
 name = "chrono"
@@ -2522,7 +2528,7 @@ dependencies = [
  "bon",
  "chrono",
  "clap",
- "esplora-client 0.12.3",
+ "esplora-client",
  "fedimint-aead",
  "fedimint-api-client",
  "fedimint-build",
@@ -2558,7 +2564,7 @@ dependencies = [
  "substring",
  "tar",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tower-http",
  "tracing",
 ]
@@ -2812,23 +2818,6 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "electrum-client"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a0bd443023f9f5c4b7153053721939accc7113cbdf810a024434eed454b3db1"
-dependencies = [
- "bitcoin",
- "byteorder",
- "libc",
- "log",
- "rustls 0.23.38",
- "serde",
- "serde_json",
- "webpki-roots 0.25.4",
- "winapi",
-]
-
-[[package]]
-name = "electrum-client"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ed9a037f88aa61d3627a20af1c68fa0405ed5a16d9a0d9dc0e66adcda44afbe"
@@ -2837,7 +2826,24 @@ dependencies = [
  "byteorder",
  "libc",
  "log",
- "rustls 0.23.38",
+ "rustls",
+ "serde",
+ "serde_json",
+ "webpki-roots 0.25.4",
+ "winapi",
+]
+
+[[package]]
+name = "electrum-client"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5059f13888a90486e7268bbce59b175f5f76b1c55e5b9c568ceaa42d2b8507c"
+dependencies = [
+ "bitcoin",
+ "byteorder",
+ "libc",
+ "log",
+ "rustls",
  "serde",
  "serde_json",
  "webpki-roots 0.25.4",
@@ -3010,20 +3016,6 @@ dependencies = [
 
 [[package]]
 name = "esplora-client"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0da3c186d286e046253ccdc4bb71aa87ef872e4eff2045947c0c4fe3d2b2efc"
-dependencies = [
- "bitcoin",
- "hex-conservative 0.2.2",
- "log",
- "reqwest 0.11.27",
- "serde",
- "tokio",
-]
-
-[[package]]
-name = "esplora-client"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f19e3ea99dbfbef0c1ec26d83e69de0c579f6aa6aaac4f44597805fcc27e97af"
@@ -3154,7 +3146,7 @@ dependencies = [
  "async-trait",
  "bitcoin",
  "bitcoincore-rpc",
- "esplora-client 0.12.3",
+ "esplora-client",
  "fedimint-core",
  "fedimint-logging",
  "fedimint-metrics",
@@ -3353,7 +3345,7 @@ dependencies = [
  "strum 0.27.1",
  "thiserror 2.0.18",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tor-rtcompat",
  "tracing",
  "url",
@@ -3419,7 +3411,7 @@ dependencies = [
  "test-log",
  "thiserror 2.0.18",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-test",
  "tracing",
  "uniffi",
@@ -3715,7 +3707,7 @@ dependencies = [
  "bon",
  "clap",
  "erased-serde",
- "esplora-client 0.12.3",
+ "esplora-client",
  "fedimint-api-client",
  "fedimint-bip39",
  "fedimint-bitcoind",
@@ -3912,9 +3904,8 @@ dependencies = [
 
 [[package]]
 name = "fedimint-ldk-node"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24beb529810a0fc733e99319ac986b8d0c5e201473e3379eac3d17acd80c0f89"
+version = "0.7.0"
+source = "git+https://github.com/joschisan/ldk-node?rev=2485057b976b4245a5caa5c3c94a9db87b114232#2485057b976b4245a5caa5c3c94a9db87b114232"
 dependencies = [
  "base64 0.22.1",
  "bdk_chain",
@@ -3925,15 +3916,15 @@ dependencies = [
  "bip39",
  "bitcoin",
  "chrono",
- "electrum-client 0.23.1",
- "esplora-client 0.11.0",
- "esplora-client 0.12.3",
+ "electrum-client 0.24.1",
+ "esplora-client",
  "libc",
  "lightning",
  "lightning-background-processor",
  "lightning-block-sync",
  "lightning-invoice",
  "lightning-liquidity",
+ "lightning-macros",
  "lightning-net-tokio",
  "lightning-persister",
  "lightning-rapid-gossip-sync",
@@ -3941,13 +3932,14 @@ dependencies = [
  "lightning-types",
  "log",
  "prost 0.11.9",
- "rand 0.8.5",
+ "rand 0.9.4",
  "reqwest 0.12.28",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "tokio",
- "vss-client",
+ "vss-client-ng",
  "winapi",
 ]
 
@@ -4718,7 +4710,7 @@ dependencies = [
  "futures",
  "group",
  "hex",
- "hyper 1.9.0",
+ "hyper",
  "iroh 0.35.0",
  "iroh 1.0.3",
  "iroh-mainline-address-lookup",
@@ -4742,7 +4734,7 @@ dependencies = [
  "tar",
  "test-log",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-util",
  "tower 0.4.13",
  "tracing",
@@ -4758,7 +4750,7 @@ dependencies = [
  "async-trait",
  "bitcoin",
  "bitcoincore-rpc",
- "esplora-client 0.12.3",
+ "esplora-client",
  "fedimint-core",
  "fedimint-logging",
  "fedimint-metrics",
@@ -4882,7 +4874,7 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tracing",
 ]
 
@@ -4902,7 +4894,7 @@ dependencies = [
  "rand 0.8.5",
  "tempfile",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tracing",
 ]
 
@@ -4935,11 +4927,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "544e07140e0b295035d28068a66ed752ada57762571ddbb3ac54124c3d9cc892"
 dependencies = [
  "hex",
- "hyper 1.9.0",
- "hyper-rustls 0.27.7",
+ "hyper",
+ "hyper-rustls",
  "hyper-util",
  "prost 0.13.5",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pemfile",
  "tokio",
  "tokio-stream",
@@ -5544,7 +5536,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f2f12607f92c69b12ed746fabf9ca4f5c482cba46679c1a75b874ed7c26adb"
 dependencies = [
  "futures-io",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pki-types",
 ]
 
@@ -5794,25 +5786,6 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81fe527a889e1532da5c525686d96d4c2e74cdd345badf8dfef9f6b39dd5f5e8"
-dependencies = [
- "bytes",
- "fnv",
- "futures-core",
- "futures-sink",
- "futures-util",
- "http 0.2.12",
- "indexmap 2.9.0",
- "slab",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "h2"
 version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f877e75f39e9827ec50a572dd592684ac28c029578726c85f1b2aa6ab807449"
@@ -5984,18 +5957,18 @@ dependencies = [
  "futures-channel",
  "futures-io",
  "futures-util",
- "h2 0.4.17",
+ "h2",
  "hickory-proto 0.26.1",
  "http 1.3.1",
  "idna",
  "ipnet",
  "jni 0.22.4",
  "rand 0.10.1",
- "rustls 0.23.38",
+ "rustls",
  "thiserror 2.0.18",
  "tinyvec",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tracing",
  "url",
 ]
@@ -6085,12 +6058,12 @@ dependencies = [
  "parking_lot",
  "rand 0.10.1",
  "resolv-conf",
- "rustls 0.23.38",
+ "rustls",
  "smallvec",
  "system-configuration 0.7.0",
  "thiserror 2.0.18",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tracing",
 ]
 
@@ -6179,17 +6152,6 @@ dependencies = [
 
 [[package]]
 name = "http-body"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ceab25649e9960c0311ea418d17bee82c0dcec1bd053b5f9a66e265a693bed2"
-dependencies = [
- "bytes",
- "http 0.2.12",
- "pin-project-lite",
-]
-
-[[package]]
-name = "http-body"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184"
@@ -6207,7 +6169,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "pin-project-lite",
 ]
 
@@ -6250,30 +6212,6 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41dfc780fdec9373c01bae43289ea34c972e40ee3c9f6b3c8801a35f35586ce7"
-dependencies = [
- "bytes",
- "futures-channel",
- "futures-core",
- "futures-util",
- "h2 0.3.26",
- "http 0.2.12",
- "http-body 0.4.6",
- "httparse",
- "httpdate",
- "itoa",
- "pin-project-lite",
- "socket2 0.5.10",
- "tokio",
- "tower-service",
- "tracing",
- "want",
-]
-
-[[package]]
-name = "hyper"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6299f016b246a94207e63da54dbe807655bf9e00044f73ded42c3ac5305fbcca"
@@ -6282,9 +6220,9 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
- "h2 0.4.17",
+ "h2",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "httparse",
  "httpdate",
  "itoa",
@@ -6296,31 +6234,17 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
-dependencies = [
- "futures-util",
- "http 0.2.12",
- "hyper 0.14.32",
- "rustls 0.21.12",
- "tokio",
- "tokio-rustls 0.24.1",
-]
-
-[[package]]
-name = "hyper-rustls"
 version = "0.27.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3c93eb611681b207e1fe55d5a71ecf91572ec8a6705cdb6857f7d8d5242cf58"
 dependencies = [
  "http 1.3.1",
- "hyper 1.9.0",
+ "hyper",
  "hyper-util",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pki-types",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tower-service",
  "webpki-roots 1.0.8",
 ]
@@ -6331,7 +6255,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b90d566bffbce6a75bd8b09a05aa8c2cb1fabb6cb348f8840c9e4c90a0d83b0"
 dependencies = [
- "hyper 1.9.0",
+ "hyper",
  "hyper-util",
  "pin-project-lite",
  "tokio",
@@ -6350,8 +6274,8 @@ dependencies = [
  "futures-core",
  "futures-util",
  "http 1.3.1",
- "http-body 1.0.1",
- "hyper 1.9.0",
+ "http-body",
+ "hyper",
  "ipnet",
  "libc",
  "percent-encoding",
@@ -6523,7 +6447,7 @@ dependencies = [
  "futures",
  "http 1.3.1",
  "http-body-util",
- "hyper 1.9.0",
+ "hyper",
  "hyper-util",
  "log",
  "rand 0.9.4",
@@ -6543,7 +6467,7 @@ dependencies = [
  "futures",
  "http 1.3.1",
  "http-body-util",
- "hyper 1.9.0",
+ "hyper",
  "hyper-util",
  "log",
  "rand 0.10.1",
@@ -6795,7 +6719,7 @@ dependencies = [
  "rcgen",
  "reqwest 0.12.28",
  "ring",
- "rustls 0.23.38",
+ "rustls",
  "rustls-webpki 0.102.8",
  "serde",
  "smallvec",
@@ -6853,7 +6777,7 @@ dependencies = [
  "rand 0.10.1",
  "reqwest 0.13.1",
  "rustc-hash",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pki-types",
  "serde",
  "smallvec",
@@ -6919,7 +6843,7 @@ dependencies = [
  "ndk-context",
  "portable-atomic",
  "rand 0.10.1",
- "rustls 0.23.38",
+ "rustls",
  "simple-dns 0.11.3",
  "strum 0.28.0",
  "tokio",
@@ -7009,7 +6933,7 @@ dependencies = [
  "iroh-quinn-udp",
  "pin-project-lite",
  "rustc-hash",
- "rustls 0.23.38",
+ "rustls",
  "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
@@ -7028,7 +6952,7 @@ dependencies = [
  "rand 0.8.5",
  "ring",
  "rustc-hash",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.18",
@@ -7066,7 +6990,7 @@ dependencies = [
  "hickory-resolver 0.25.2",
  "http 1.3.1",
  "http-body-util",
- "hyper 1.9.0",
+ "hyper",
  "hyper-util",
  "iroh-base 0.35.0",
  "iroh-metrics 0.34.0",
@@ -7080,7 +7004,7 @@ dependencies = [
  "postcard",
  "rand 0.8.5",
  "reqwest 0.12.28",
- "rustls 0.23.38",
+ "rustls",
  "rustls-webpki 0.102.8",
  "serde",
  "sha1",
@@ -7088,7 +7012,7 @@ dependencies = [
  "stun-rs",
  "thiserror 2.0.18",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-util",
  "tokio-websockets 0.11.4",
  "tracing",
@@ -7113,7 +7037,7 @@ dependencies = [
  "hickory-resolver 0.26.1",
  "http 1.3.1",
  "http-body-util",
- "hyper 1.9.0",
+ "hyper",
  "hyper-util",
  "iroh-base 1.0.3",
  "iroh-dns",
@@ -7128,13 +7052,13 @@ dependencies = [
  "postcard",
  "rand 0.10.1",
  "reqwest 0.13.1",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pki-types",
  "serde",
  "serde_bytes",
  "strum 0.28.0",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-util",
  "tokio-websockets 0.13.2",
  "tracing",
@@ -7333,12 +7257,12 @@ dependencies = [
  "http 1.3.1",
  "jsonrpsee-core",
  "pin-project",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pki-types",
  "soketto",
  "thiserror 1.0.69",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-util",
  "tracing",
  "url",
@@ -7355,7 +7279,7 @@ dependencies = [
  "futures-timer",
  "futures-util",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
  "jsonrpsee-types",
  "parking_lot",
@@ -7379,9 +7303,9 @@ checksum = "55e363146da18e50ad2b51a0a7925fc423137a0b1371af8235b1c231a0647328"
 dependencies = [
  "futures-util",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
- "hyper 1.9.0",
+ "hyper",
  "hyper-util",
  "jsonrpsee-core",
  "jsonrpsee-types",
@@ -7551,9 +7475,9 @@ dependencies = [
 
 [[package]]
 name = "lightning"
-version = "0.1.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5273f7cd497b49415c540fada281ab58838c4c409474712064eaaf0aec1b557"
+checksum = "2ab16d2a714c0b26d7230bd388ac383a30fce231c8927c62752afc0471a36dc6"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -7561,28 +7485,31 @@ dependencies = [
  "hashbrown 0.13.2",
  "libm",
  "lightning-invoice",
+ "lightning-macros",
  "lightning-types",
  "possiblyrandom",
 ]
 
 [[package]]
 name = "lightning-background-processor"
-version = "0.1.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04231b97fd7509d73ce9857a416eb1477a55d076d4e22cbf26c649a772bde909"
+checksum = "994fb200e17bbe125491cbe3f35602180a360484b9763837b9ea2130b7293b5f"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
  "bitcoin_hashes",
  "lightning",
+ "lightning-liquidity",
  "lightning-rapid-gossip-sync",
+ "possiblyrandom",
 ]
 
 [[package]]
 name = "lightning-block-sync"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baab5bdee174a2047d939a4ca0dc2e1c23caa0f8cab0b4380aed77a20e116f1e"
+checksum = "ee5069846b07a62aaecdaf25233e067bc69f245b7c8fd00cc9c217053221f875"
 dependencies = [
  "bitcoin",
  "chunked_transfer",
@@ -7593,9 +7520,9 @@ dependencies = [
 
 [[package]]
 name = "lightning-invoice"
-version = "0.33.2"
+version = "0.34.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11209f386879b97198b2bfc9e9c1e5d42870825c6bd4376f17f95357244d6600"
+checksum = "47d83bd798e04ab9eecc8bbef1fa17d3808859bcdc0406bd16c55d51c8834444"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -7605,14 +7532,15 @@ dependencies = [
 
 [[package]]
 name = "lightning-liquidity"
-version = "0.1.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfbed71e656557185f25e006c1bcd8773c5c83387c727166666d3b0bce0f0ca5"
+checksum = "42278510c9f71f32c6e292085747d1f9649f8a88a8d9dc32c0440da3c1356345"
 dependencies = [
  "bitcoin",
  "chrono",
  "lightning",
  "lightning-invoice",
+ "lightning-macros",
  "lightning-types",
  "serde",
  "serde_json",
@@ -7620,9 +7548,9 @@ dependencies = [
 
 [[package]]
 name = "lightning-macros"
-version = "0.1.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d44a6fb8c698180c758fd391ae9631be92a4dbf0a82121e7dd8b1a28d0cfa75"
+checksum = "d4c717494cdc2c8bb85bee7113031248f5f6c64f8802b33c1c9e2d98e594aa71"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7631,9 +7559,9 @@ dependencies = [
 
 [[package]]
 name = "lightning-net-tokio"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb6a6c93b1e592f1d46bb24233cac4a33b4015c99488ee229927a81d16226e45"
+checksum = "8055737e3d2d06240a3fdf10e26b2716110fcea90011a0839e8e82fc6e58ff5e"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -7642,20 +7570,21 @@ dependencies = [
 
 [[package]]
 name = "lightning-persister"
-version = "0.1.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d80558dc398eb4609b1079044d8eb5760a58724627ff57c6d7c194c78906e026"
+checksum = "4c374a770c3654b00fe3b57e30e79416fb30d773b4fefeea231171d3a82dfa1b"
 dependencies = [
  "bitcoin",
  "lightning",
+ "tokio",
  "windows-sys 0.48.0",
 ]
 
 [[package]]
 name = "lightning-rapid-gossip-sync"
-version = "0.1.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78dacdef3e2f5d727754f902f4e6bbc43bfc886fec8e71f36757711060916ebe"
+checksum = "f38ac84d6862b3eaf5129c68a5df0fb8f1760adfccbaafadc18da140325f1168"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -7665,13 +7594,13 @@ dependencies = [
 
 [[package]]
 name = "lightning-transaction-sync"
-version = "0.1.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "031493ff20f40c9bbf80dde70ca5bb5ce86f65d6fda939bfecb5a2d59dc54767"
+checksum = "b7260095a79a44b09ebd97e77855ec8b7996ab939223369f66244974a374bd2c"
 dependencies = [
  "bitcoin",
- "electrum-client 0.21.0",
- "esplora-client 0.11.0",
+ "electrum-client 0.24.1",
+ "esplora-client",
  "futures",
  "lightning",
  "lightning-macros",
@@ -7679,9 +7608,9 @@ dependencies = [
 
 [[package]]
 name = "lightning-types"
-version = "0.2.0"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2cd84d4e71472035903e43caded8ecc123066ce466329ccd5ae537a8d5488c7"
+checksum = "c77c676d4a34cceb2ae3756916e446b4d17f9430a24107e099981f0f9aec77e6"
 dependencies = [
  "bitcoin",
 ]
@@ -7754,9 +7683,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.27"
+version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
+checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "loom"
@@ -8452,7 +8381,7 @@ dependencies = [
  "noq-udp",
  "pin-project-lite",
  "rustc-hash",
- "rustls 0.23.38",
+ "rustls",
  "socket2 0.6.1",
  "thiserror 2.0.18",
  "tokio",
@@ -8478,7 +8407,7 @@ dependencies = [
  "rand_pcg",
  "ring",
  "rustc-hash",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pki-types",
  "slab",
  "sorted-index-buffer",
@@ -9897,7 +9826,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash",
- "rustls 0.23.38",
+ "rustls",
  "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
@@ -9917,7 +9846,7 @@ dependencies = [
  "rand 0.9.4",
  "ring",
  "rustc-hash",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.18",
@@ -10219,48 +10148,6 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "reqwest"
-version = "0.11.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd67538700a17451e7cba03ac727fb961abb7607553461627b97de0b89cf4a62"
-dependencies = [
- "base64 0.21.7",
- "bytes",
- "encoding_rs",
- "futures-core",
- "futures-util",
- "h2 0.3.26",
- "http 0.2.12",
- "http-body 0.4.6",
- "hyper 0.14.32",
- "hyper-rustls 0.24.2",
- "ipnet",
- "js-sys",
- "log",
- "mime",
- "once_cell",
- "percent-encoding",
- "pin-project-lite",
- "rustls 0.21.12",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sync_wrapper 0.1.2",
- "system-configuration 0.5.1",
- "tokio",
- "tokio-rustls 0.24.1",
- "tokio-socks",
- "tower-service",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "webpki-roots 0.25.4",
- "winreg",
-]
-
-[[package]]
-name = "reqwest"
 version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
@@ -10271,12 +10158,12 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.4.17",
+ "h2",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
- "hyper 1.9.0",
- "hyper-rustls 0.27.7",
+ "hyper",
+ "hyper-rustls",
  "hyper-util",
  "js-sys",
  "log",
@@ -10284,14 +10171,14 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pki-types",
  "serde",
  "serde_json",
  "serde_urlencoded",
- "sync_wrapper 1.0.2",
+ "sync_wrapper",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-util",
  "tower 0.5.2",
  "tower-http",
@@ -10315,21 +10202,21 @@ dependencies = [
  "futures-core",
  "futures-util",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
- "hyper 1.9.0",
- "hyper-rustls 0.27.7",
+ "hyper",
+ "hyper-rustls",
  "hyper-util",
  "js-sys",
  "log",
  "percent-encoding",
  "pin-project-lite",
- "rustls 0.23.38",
+ "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
- "sync_wrapper 1.0.2",
+ "sync_wrapper",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-util",
  "tower 0.5.2",
  "tower-http",
@@ -10490,18 +10377,6 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
-dependencies = [
- "log",
- "ring",
- "rustls-webpki 0.101.7",
- "sct",
-]
-
-[[package]]
-name = "rustls"
 version = "0.23.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69f9466fb2c14ea04357e91413efb882e2a6d4a406e625449bc0a5d360d53a21"
@@ -10558,7 +10433,7 @@ dependencies = [
  "jni 0.21.1",
  "log",
  "once_cell",
- "rustls 0.23.38",
+ "rustls",
  "rustls-native-certs",
  "rustls-platform-verifier-android",
  "rustls-webpki 0.103.13",
@@ -10573,16 +10448,6 @@ name = "rustls-platform-verifier-android"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
-
-[[package]]
-name = "rustls-webpki"
-version = "0.101.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
-dependencies = [
- "ring",
- "untrusted",
-]
 
 [[package]]
 name = "rustls-webpki"
@@ -10716,16 +10581,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.104",
-]
-
-[[package]]
-name = "sct"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da046153aa2352493d6cb7da4b6e5c0c057d8a1d0a9aa8560baffdd945acd414"
-dependencies = [
- "ring",
- "untrusted",
 ]
 
 [[package]]
@@ -11527,12 +11382,6 @@ dependencies = [
 
 [[package]]
 name = "sync_wrapper"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2047c6ded9c721764247e62cd3b03c09ffc529b2ba5b10ec482ae507a4a70160"
-
-[[package]]
-name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
@@ -11567,24 +11416,13 @@ dependencies = [
 
 [[package]]
 name = "system-configuration"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba3a3adc5c275d719af8cb4272ea1c4a6d668a777f37e115f6d11ddbc1c8e0e7"
-dependencies = [
- "bitflags 1.3.2",
- "core-foundation 0.9.4",
- "system-configuration-sys 0.5.0",
-]
-
-[[package]]
-name = "system-configuration"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b"
 dependencies = [
  "bitflags 2.11.1",
  "core-foundation 0.9.4",
- "system-configuration-sys 0.6.0",
+ "system-configuration-sys",
 ]
 
 [[package]]
@@ -11595,17 +11433,7 @@ checksum = "a13f3d0daba03132c0aa9767f98351b3488edc2c100cda2d2ec2b04f3d8d3c8b"
 dependencies = [
  "bitflags 2.11.1",
  "core-foundation 0.9.4",
- "system-configuration-sys 0.6.0",
-]
-
-[[package]]
-name = "system-configuration-sys"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a75fb188eb626b924683e3b95e3a48e63551fcfb51949de2f06a9d91dbee93c9"
-dependencies = [
- "core-foundation-sys",
- "libc",
+ "system-configuration-sys",
 ]
 
 [[package]]
@@ -11880,33 +11708,11 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
-version = "0.24.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
-dependencies = [
- "rustls 0.21.12",
- "tokio",
-]
-
-[[package]]
-name = "tokio-rustls"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
- "rustls 0.23.38",
- "tokio",
-]
-
-[[package]]
-name = "tokio-socks"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d4770b8024672c1101b3f6733eab95b18007dbe0847a8afe341fcf79e06043f"
-dependencies = [
- "either",
- "futures-util",
- "thiserror 1.0.69",
+ "rustls",
  "tokio",
 ]
 
@@ -11966,7 +11772,7 @@ dependencies = [
  "rustls-pki-types",
  "simdutf8",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-util",
 ]
 
@@ -11989,7 +11795,7 @@ dependencies = [
  "sha1_smol",
  "simdutf8",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-util",
 ]
 
@@ -12084,11 +11890,11 @@ dependencies = [
  "axum 0.7.9",
  "base64 0.22.1",
  "bytes",
- "h2 0.4.17",
+ "h2",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
- "hyper 1.9.0",
+ "hyper",
  "hyper-timeout",
  "hyper-util",
  "percent-encoding",
@@ -12113,11 +11919,11 @@ dependencies = [
  "axum 0.8.9",
  "base64 0.22.1",
  "bytes",
- "h2 0.4.17",
+ "h2",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
- "hyper 1.9.0",
+ "hyper",
  "hyper-timeout",
  "hyper-util",
  "percent-encoding",
@@ -12142,19 +11948,19 @@ dependencies = [
  "axum 0.8.9",
  "base64 0.22.1",
  "bytes",
- "h2 0.4.17",
+ "h2",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "http-body-util",
- "hyper 1.9.0",
+ "hyper",
  "hyper-timeout",
  "hyper-util",
  "percent-encoding",
  "pin-project",
  "socket2 0.6.1",
- "sync_wrapper 1.0.2",
+ "sync_wrapper",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-stream",
  "tower 0.5.2",
  "tower-layer",
@@ -13001,7 +12807,7 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "subtle",
- "sync_wrapper 1.0.2",
+ "sync_wrapper",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -13197,7 +13003,7 @@ dependencies = [
  "indexmap 2.9.0",
  "pin-project-lite",
  "slab",
- "sync_wrapper 1.0.2",
+ "sync_wrapper",
  "tokio",
  "tokio-util",
  "tower-layer",
@@ -13216,7 +13022,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "http 1.3.1",
- "http-body 1.0.1",
+ "http-body",
  "iri-string",
  "mime",
  "pin-project-lite",
@@ -13630,19 +13436,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
-name = "vss-client"
-version = "0.3.1"
+name = "vss-client-ng"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d787f7640ceae8caef95434f1b14936402b73e18d34868b052a502a5d5085490"
+checksum = "c05f61751537ec3e7cf744e6ed8a56830b8d048f9862871cb4b9c239e3d23b45"
 dependencies = [
  "async-trait",
- "base64 0.21.7",
+ "base64 0.22.1",
  "bitcoin",
  "bitcoin_hashes",
+ "chacha20-poly1305",
+ "log",
  "prost 0.11.9",
  "prost-build 0.11.9",
  "rand 0.8.5",
- "reqwest 0.11.27",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tokio",
