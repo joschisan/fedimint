@@ -204,8 +204,9 @@ impl ReceiveStateMachine {
                 client_ctx
                     .module
                     .client_ctx
-                    .log_event(
+                    .log_event_for_operation(
                         &mut dbtx.module_tx(),
+                        old_state.common.operation_id,
                         IncomingPaymentFailed {
                             payment_image: old_state
                                 .common
@@ -234,8 +235,9 @@ impl ReceiveStateMachine {
             client_ctx
                 .module
                 .client_ctx
-                .log_event(
+                .log_event_for_operation(
                     &mut dbtx.module_tx(),
+                    old_state.common.operation_id,
                     IncomingPaymentFailed {
                         payment_image: old_state.common.contract.commitment.payment_image.clone(),
                         error: "Client config's public keys are inconsistent".to_string(),
@@ -254,10 +256,12 @@ impl ReceiveStateMachine {
             client_ctx
                 .module
                 .client_ctx
-                .log_event(
+                .log_event_for_operation(
                     &mut dbtx.module_tx(),
+                    old_state.common.operation_id,
                     IncomingPaymentSucceeded {
                         payment_image: old_state.common.contract.commitment.payment_image.clone(),
+                        preimage: Some(preimage),
                     },
                 )
                 .await;
@@ -288,8 +292,9 @@ impl ReceiveStateMachine {
         client_ctx
             .module
             .client_ctx
-            .log_event(
+            .log_event_for_operation(
                 &mut dbtx.module_tx(),
+                old_state.common.operation_id,
                 IncomingPaymentFailed {
                     payment_image: old_state.common.contract.commitment.payment_image.clone(),
                     error: "Failed to decrypt preimage".to_string(),

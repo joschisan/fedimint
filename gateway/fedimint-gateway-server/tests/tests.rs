@@ -1214,6 +1214,7 @@ async fn gateway_read_payment_log() -> anyhow::Result<()> {
             invoice_amount: Amount::from_msats(10000),
             operation_start: now(),
             max_delay: 100,
+            destination_node: None,
         };
         fed1_lnv2
             .client_ctx
@@ -1227,6 +1228,8 @@ async fn gateway_read_payment_log() -> anyhow::Result<()> {
                 OutgoingPaymentSucceeded {
                     payment_image: PaymentImage::Hash([0_u8; 32].consensus_hash()),
                     target_federation: Some(fed2.id()),
+                    preimage: None,
+                    ln_fee: None,
                 },
             )
             .await;
@@ -1274,6 +1277,7 @@ async fn gateway_read_payment_log() -> anyhow::Result<()> {
                 &mut fed2_module_dbtx,
                 IncomingPaymentSucceeded {
                     payment_image: PaymentImage::Hash([0_u8; 32].consensus_hash()),
+                    preimage: None,
                 },
             )
             .await;
