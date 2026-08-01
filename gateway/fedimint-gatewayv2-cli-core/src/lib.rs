@@ -40,6 +40,7 @@ pub const ROUTE_LDK_CHANNEL_LIST: &str = "/ldk/channel/list";
 pub const ROUTE_LDK_LSPS1: &str = "/ldk/lsps1";
 pub const ROUTE_LDK_LN_RECEIVE: &str = "/ldk/ln/receive";
 pub const ROUTE_LDK_LN_SEND: &str = "/ldk/ln/send";
+pub const ROUTE_LDK_LN_PROBE: &str = "/ldk/ln/probe";
 pub const ROUTE_LDK_PEER_CONNECT: &str = "/ldk/peer/connect";
 pub const ROUTE_LDK_PEER_DISCONNECT: &str = "/ldk/peer/disconnect";
 pub const ROUTE_LDK_PEER_LIST: &str = "/ldk/peer/list";
@@ -216,6 +217,16 @@ pub struct LdkLnSendRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LdkLnSendResponse {
     pub preimage: String,
+}
+
+// --- /ldk/ln/probe ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct LdkLnProbeRequest {
+    /// The node to probe a route towards.
+    pub node_id: PublicKey,
+    /// The amount to find paths for, in millisatoshis.
+    pub amount_msat: u64,
 }
 
 // --- /ldk/peer/connect ---
