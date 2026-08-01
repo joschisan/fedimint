@@ -68,6 +68,7 @@ fn router() -> Router<AppState> {
         .route(cli_core::ROUTE_LDK_LSPS1, post(ldk_lsps1))
         .route(cli_core::ROUTE_LDK_LN_RECEIVE, post(ldk_ln_receive))
         .route(cli_core::ROUTE_LDK_LN_SEND, post(ldk_ln_send))
+        .route(cli_core::ROUTE_LDK_LN_PROBE, post(ldk_ln_probe))
         .route(cli_core::ROUTE_LDK_PEER_CONNECT, post(ldk_peer_connect))
         .route(
             cli_core::ROUTE_LDK_PEER_DISCONNECT,
@@ -410,6 +411,23 @@ async fn ldk_ln_send(
     Ok(Json(json!(cli_core::LdkLnSendResponse {
         preimage: preimage.encode_hex::<String>(),
     })))
+}
+
+/// Sends payment probes over all routes towards a node for the given amount,
+/// to exercise pathfinding and warm the scorer without moving funds. Probe
+/// outcomes surface only in the daemon's LDK logs (the `Got route` and
+/// `Onion Error` lines), so nothing meaningful is returned here.
+async fn ldk_ln_probe(
+    State(state): State<AppState>,
+    Json(req): Json<cli_core::LdkLnProbeRequest>,
+) -> Result<Json<Value>, GatewayError> {
+    state
+        .node
+        .spontaneous_payment()
+        .send_probes(req.amount_msat, req.node_id)
+        .map_err(|e| anyhow!("Failed to send probes: {e:?}"))?;
+
+    Ok(Json(json!(())))
 }
 
 /// Connects to a Lightning peer, persisting the connection so the node

@@ -17,14 +17,15 @@ use fedimint_gatewayv2_cli_core::{
     FederationDisableRequest, FederationEnableRequest, FederationJoinRequest,
     FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
     FederationWalletReceiveRequest, FederationWalletSendFeeRequest, FederationWalletSendRequest,
-    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkLnReceiveRequest, LdkLnSendRequest,
-    LdkLsps1Request, LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
-    ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE,
-    ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
-    ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
-    ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkLnProbeRequest, LdkLnReceiveRequest,
+    LdkLnSendRequest, LdkLsps1Request, LdkOnchainSendRequest, LdkPeerConnectRequest,
+    LdkPeerDisconnectRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
+    ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_JOIN,
+    ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
+    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_LN_PROBE,
     ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_LSPS1, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_MNEMONIC,
@@ -111,6 +112,9 @@ enum LdkLnCommands {
     Receive(LdkLnReceiveRequest),
     /// Pay a bolt11 invoice
     Send(LdkLnSendRequest),
+    /// Probe the routes towards a node for a given amount. Results are only
+    /// observable in the daemon logs, not returned here.
+    Probe(LdkLnProbeRequest),
 }
 
 #[derive(Subcommand)]
@@ -264,6 +268,7 @@ async fn main() -> Result<()> {
             LdkCommands::Ln(cmd) => match cmd {
                 LdkLnCommands::Receive(req) => request(d, ROUTE_LDK_LN_RECEIVE, req).await?,
                 LdkLnCommands::Send(req) => request(d, ROUTE_LDK_LN_SEND, req).await?,
+                LdkLnCommands::Probe(req) => request(d, ROUTE_LDK_LN_PROBE, req).await?,
             },
             LdkCommands::Peer(cmd) => match cmd {
                 LdkPeerCommands::Connect(req) => request(d, ROUTE_LDK_PEER_CONNECT, req).await?,
