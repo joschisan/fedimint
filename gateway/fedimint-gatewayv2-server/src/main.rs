@@ -33,6 +33,7 @@ use fedimint_core::{Amount, fedimint_build_code_version_env};
 use fedimint_gatewayv2_server::analytics::Analytics;
 use fedimint_gatewayv2_server::cli::run_cli;
 use fedimint_gatewayv2_server::client::GatewayClientFactory;
+use fedimint_gatewayv2_server::probe::run_interest_prober;
 use fedimint_gatewayv2_server::public::run_public;
 use fedimint_gatewayv2_server::{AppState, LDK_NODE_DB_FOLDER};
 use fedimint_lnv2_common::gateway_api::PaymentFee;
@@ -169,6 +170,33 @@ pub struct GatewayOpts {
     /// cheaper ones. 1 restores LDK's default weighting.
     #[arg(long, env = "FM_SCORER_PENALTY_FACTOR", default_value_t = 4)]
     pub scorer_penalty_factor: u64,
+
+    /// Newline-separated public keys of nodes to probe periodically, keeping
+    /// the pathfinding scorer warm for destinations we care about. Repeat the
+    /// flag, or pass a newline-separated list via the env var (a YAML `|-`
+    /// block scalar in compose). Probing is disabled when the list is empty.
+    #[arg(long, env = "FM_INTEREST_PROBE_NODES", value_delimiter = '\n')]
+    pub interest_probe_nodes: Vec<PublicKey>,
+
+    /// Seconds to wait between probing a random node from the interest list.
+    #[arg(long, env = "FM_INTEREST_PROBE_INTERVAL_SECS", default_value_t = 600)]
+    pub interest_probe_interval_secs: u64,
+
+    /// Lower bound in millisatoshis for an interest probe's random amount.
+    #[arg(
+        long,
+        env = "FM_INTEREST_PROBE_MIN_AMOUNT_MSAT",
+        default_value_t = 1_000_000
+    )]
+    pub interest_probe_min_amount_msat: u64,
+
+    /// Upper bound in millisatoshis for an interest probe's random amount.
+    #[arg(
+        long,
+        env = "FM_INTEREST_PROBE_MAX_AMOUNT_MSAT",
+        default_value_t = 1_000_000_000
+    )]
+    pub interest_probe_max_amount_msat: u64,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -224,6 +252,19 @@ fn main() -> anyhow::Result<()> {
     //    runtime drop on process exit aborts cleanly.
     runtime.spawn(state.clone().process_ldk_events());
     runtime.spawn(run_cli(state.clone()));
+
+    // The interest prober is inert without targets, so only spawn it when the
+    // operator has configured a node list.
+    if !opts.interest_probe_nodes.is_empty() {
+        runtime.spawn(run_interest_prober(
+            state.clone(),
+            opts.interest_probe_nodes,
+            opts.interest_probe_interval_secs,
+            opts.interest_probe_min_amount_msat,
+            opts.interest_probe_max_amount_msat,
+        ));
+    }
+
     runtime.spawn(run_public(state));
 
     // 6. Block main on SIGTERM so the runtime stays alive; on signal, return and
