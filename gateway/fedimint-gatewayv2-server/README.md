@@ -311,3 +311,7 @@ if both are set, bitcoind is used.
 | `FM_PROBE_MIN_AMOUNT_MSAT`    | no       | `1000000`        | Lower bound for a probe's random amount     |
 | `FM_PROBE_MAX_AMOUNT_MSAT`    | no       | `100000000`      | Upper bound for a probe's random amount     |
 | `FM_SCORER_PENALTY_FACTOR`    | no       | `4`              | Factor on the scorer's liquidity penalties, weighting payment success probability over routing fees; 1 restores LDK's defaults |
+| `FM_INTEREST_PROBE_NODES`     | no       | *(empty)*        | Newline-separated node pubkeys to probe periodically; enables the interest prober when non-empty |
+| `FM_INTEREST_PROBE_INTERVAL_SECS` | no   | `600`            | Seconds between probing a random node from the interest list |
+| `FM_INTEREST_PROBE_MIN_AMOUNT_MSAT` | no | `1000000`        | Lower bound for an interest probe's random amount |
+| `FM_INTEREST_PROBE_MAX_AMOUNT_MSAT` | no | `1000000000`     | Upper bound for an interest probe's random amount |
