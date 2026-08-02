@@ -37,6 +37,8 @@ pub const ROUTE_LDK_ONCHAIN_SEND: &str = "/ldk/onchain/send";
 pub const ROUTE_LDK_CHANNEL_OPEN: &str = "/ldk/channel/open";
 pub const ROUTE_LDK_CHANNEL_CLOSE: &str = "/ldk/channel/close";
 pub const ROUTE_LDK_CHANNEL_LIST: &str = "/ldk/channel/list";
+pub const ROUTE_LDK_CHANNEL_SPLICE_IN: &str = "/ldk/channel/splice-in";
+pub const ROUTE_LDK_CHANNEL_SPLICE_OUT: &str = "/ldk/channel/splice-out";
 pub const ROUTE_LDK_LSPS1: &str = "/ldk/lsps1";
 pub const ROUTE_LDK_LN_RECEIVE: &str = "/ldk/ln/receive";
 pub const ROUTE_LDK_LN_SEND: &str = "/ldk/ln/send";
@@ -189,6 +191,29 @@ pub struct ChannelInfo {
     pub is_usable: bool,
     pub is_outbound: bool,
     pub funding_txid: Option<bitcoin::Txid>,
+}
+
+// --- /ldk/channel/splice-in ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct LdkChannelSpliceInRequest {
+    /// Peer whose channel to splice on-chain funds into.
+    pub pubkey: PublicKey,
+    /// On-chain funds to add to the channel, in satoshi.
+    pub amount_sat: u64,
+}
+
+// --- /ldk/channel/splice-out ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct LdkChannelSpliceOutRequest {
+    /// Peer whose channel to splice funds out of.
+    pub pubkey: PublicKey,
+    /// Destination on-chain address for the spliced-out funds.
+    pub address: bitcoin::Address<NetworkUnchecked>,
+    /// Amount to remove from the channel, in satoshi (must not exceed the
+    /// channel's outbound capacity).
+    pub amount_sat: u64,
 }
 
 // --- /ldk/ln/receive ---

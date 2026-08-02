@@ -65,6 +65,14 @@ fn router() -> Router<AppState> {
         .route(cli_core::ROUTE_LDK_CHANNEL_OPEN, post(ldk_channel_open))
         .route(cli_core::ROUTE_LDK_CHANNEL_CLOSE, post(ldk_channel_close))
         .route(cli_core::ROUTE_LDK_CHANNEL_LIST, post(ldk_channel_list))
+        .route(
+            cli_core::ROUTE_LDK_CHANNEL_SPLICE_IN,
+            post(ldk_channel_splice_in),
+        )
+        .route(
+            cli_core::ROUTE_LDK_CHANNEL_SPLICE_OUT,
+            post(ldk_channel_splice_out),
+        )
         .route(cli_core::ROUTE_LDK_LSPS1, post(ldk_lsps1))
         .route(cli_core::ROUTE_LDK_LN_RECEIVE, post(ldk_ln_receive))
         .route(cli_core::ROUTE_LDK_LN_SEND, post(ldk_ln_send))
@@ -304,6 +312,56 @@ async fn ldk_channel_close(
     Ok(Json(json!(cli_core::LdkChannelCloseResponse {
         num_channels_closed,
     })))
+}
+
+/// Splices on-chain funds into the channel with a peer, growing its capacity
+/// without closing it. Experimental; the counterparty must support splicing.
+async fn ldk_channel_splice_in(
+    State(state): State<AppState>,
+    Json(req): Json<cli_core::LdkChannelSpliceInRequest>,
+) -> Result<Json<Value>, GatewayError> {
+    let channels = state.node.list_channels();
+    let channel = channels
+        .iter()
+        .find(|channel| channel.counterparty_node_id == req.pubkey)
+        .ok_or_else(|| anyhow!("No channel with peer {}", req.pubkey))?;
+
+    state
+        .node
+        .splice_in(&channel.user_channel_id, req.pubkey, req.amount_sat)
+        .map_err(|e| anyhow!("Failed to splice in: {e}"))?;
+
+    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, amount_sat = req.amount_sat, "Initiated splice-in");
+
+    Ok(Json(json!(())))
+}
+
+/// Splices funds out of the channel with a peer to an on-chain address without
+/// closing it. Experimental; the amount must not exceed the channel's outbound
+/// capacity and the counterparty must support splicing.
+async fn ldk_channel_splice_out(
+    State(state): State<AppState>,
+    Json(req): Json<cli_core::LdkChannelSpliceOutRequest>,
+) -> Result<Json<Value>, GatewayError> {
+    let channels = state.node.list_channels();
+    let channel = channels
+        .iter()
+        .find(|channel| channel.counterparty_node_id == req.pubkey)
+        .ok_or_else(|| anyhow!("No channel with peer {}", req.pubkey))?;
+
+    state
+        .node
+        .splice_out(
+            &channel.user_channel_id,
+            req.pubkey,
+            &req.address.assume_checked(),
+            req.amount_sat,
+        )
+        .map_err(|e| anyhow!("Failed to splice out: {e}"))?;
+
+    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, amount_sat = req.amount_sat, "Initiated splice-out");
+
+    Ok(Json(json!(())))
 }
 
 /// Lists all Lightning channels.
