@@ -17,15 +17,16 @@ use fedimint_gatewayv2_cli_core::{
     FederationDisableRequest, FederationEnableRequest, FederationJoinRequest,
     FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
     FederationWalletReceiveRequest, FederationWalletSendFeeRequest, FederationWalletSendRequest,
-    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkLnProbeRequest, LdkLnReceiveRequest,
-    LdkLnSendRequest, LdkLsps1Request, LdkOnchainSendRequest, LdkPeerConnectRequest,
-    LdkPeerDisconnectRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
-    ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_JOIN,
-    ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
-    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
-    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_LN_PROBE,
+    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
+    LdkChannelSpliceOutRequest, LdkLnProbeRequest, LdkLnReceiveRequest, LdkLnSendRequest,
+    LdkLsps1Request, LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
+    ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE,
+    ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
+    ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
+    ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LN_PROBE,
     ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_LSPS1, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_MNEMONIC,
@@ -104,6 +105,11 @@ enum LdkChannelCommands {
     Close(LdkChannelCloseRequest),
     /// List channels
     List,
+    /// Splice on-chain funds into the channel with a peer (experimental)
+    SpliceIn(LdkChannelSpliceInRequest),
+    /// Splice funds out of the channel with a peer to an on-chain address
+    /// (experimental)
+    SpliceOut(LdkChannelSpliceOutRequest),
 }
 
 #[derive(Subcommand)]
@@ -263,6 +269,12 @@ async fn main() -> Result<()> {
                 LdkChannelCommands::Open(req) => request(d, ROUTE_LDK_CHANNEL_OPEN, req).await?,
                 LdkChannelCommands::Close(req) => request(d, ROUTE_LDK_CHANNEL_CLOSE, req).await?,
                 LdkChannelCommands::List => request(d, ROUTE_LDK_CHANNEL_LIST, ()).await?,
+                LdkChannelCommands::SpliceIn(req) => {
+                    request(d, ROUTE_LDK_CHANNEL_SPLICE_IN, req).await?
+                }
+                LdkChannelCommands::SpliceOut(req) => {
+                    request(d, ROUTE_LDK_CHANNEL_SPLICE_OUT, req).await?
+                }
             },
             LdkCommands::Lsps1(req) => request(d, ROUTE_LDK_LSPS1, req).await?,
             LdkCommands::Ln(cmd) => match cmd {
