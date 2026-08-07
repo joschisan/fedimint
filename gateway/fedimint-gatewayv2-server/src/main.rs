@@ -24,7 +24,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use bitcoin::Network;
-use bitcoin::secp256k1::PublicKey;
 use clap::{ArgGroup, Parser};
 use fedimint_bip39::Mnemonic;
 use fedimint_core::rustls::install_crypto_provider;
@@ -33,7 +32,6 @@ use fedimint_core::{Amount, fedimint_build_code_version_env};
 use fedimint_gatewayv2_server::analytics::Analytics;
 use fedimint_gatewayv2_server::cli::run_cli;
 use fedimint_gatewayv2_server::client::GatewayClientFactory;
-use fedimint_gatewayv2_server::probe::run_interest_prober;
 use fedimint_gatewayv2_server::public::run_public;
 use fedimint_gatewayv2_server::{AppState, LDK_NODE_DB_FOLDER};
 use fedimint_lnv2_common::gateway_api::PaymentFee;
@@ -93,20 +91,6 @@ pub struct GatewayOpts {
     /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
     #[arg(long, env = "FM_ESPLORA_URL")]
     pub esplora_url: Option<SafeUrl>,
-
-    /// Node id of an LSPS1 liquidity provider to buy inbound channels from
-    /// via `gatewaydv2-cli ldk liquidity`.
-    #[arg(
-        long = "lsps1-node-id",
-        env = "FM_LSPS1_NODE_ID",
-        requires = "lsps1_addr"
-    )]
-    pub lsps1_node_id: Option<PublicKey>,
-
-    /// Lightning P2P address of the LSPS1 liquidity provider, e.g.
-    /// `64.23.162.51:9735`.
-    #[arg(long = "lsps1-addr", env = "FM_LSPS1_ADDR", requires = "lsps1_node_id")]
-    pub lsps1_addr: Option<String>,
 
     /// Base send fee in millisatoshis: the gateway's tx cut on outgoing
     /// payments.
@@ -170,33 +154,6 @@ pub struct GatewayOpts {
     /// cheaper ones. 1 restores LDK's default weighting.
     #[arg(long, env = "FM_SCORER_PENALTY_FACTOR", default_value_t = 4)]
     pub scorer_penalty_factor: u64,
-
-    /// Newline-separated public keys of nodes to probe periodically, keeping
-    /// the pathfinding scorer warm for destinations we care about. Repeat the
-    /// flag, or pass a newline-separated list via the env var (a YAML `|-`
-    /// block scalar in compose). Probing is disabled when the list is empty.
-    #[arg(long, env = "FM_INTEREST_PROBE_NODES", value_delimiter = '\n')]
-    pub interest_probe_nodes: Vec<PublicKey>,
-
-    /// Seconds to wait between probing a random node from the interest list.
-    #[arg(long, env = "FM_INTEREST_PROBE_INTERVAL_SECS", default_value_t = 600)]
-    pub interest_probe_interval_secs: u64,
-
-    /// Lower bound in millisatoshis for an interest probe's random amount.
-    #[arg(
-        long,
-        env = "FM_INTEREST_PROBE_MIN_AMOUNT_MSAT",
-        default_value_t = 1_000_000
-    )]
-    pub interest_probe_min_amount_msat: u64,
-
-    /// Upper bound in millisatoshis for an interest probe's random amount.
-    #[arg(
-        long,
-        env = "FM_INTEREST_PROBE_MAX_AMOUNT_MSAT",
-        default_value_t = 1_000_000_000
-    )]
-    pub interest_probe_max_amount_msat: u64,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -252,19 +209,6 @@ fn main() -> anyhow::Result<()> {
     //    runtime drop on process exit aborts cleanly.
     runtime.spawn(state.clone().process_ldk_events());
     runtime.spawn(run_cli(state.clone()));
-
-    // The interest prober is inert without targets, so only spawn it when the
-    // operator has configured a node list.
-    if !opts.interest_probe_nodes.is_empty() {
-        runtime.spawn(run_interest_prober(
-            state.clone(),
-            opts.interest_probe_nodes,
-            opts.interest_probe_interval_secs,
-            opts.interest_probe_min_amount_msat,
-            opts.interest_probe_max_amount_msat,
-        ));
-    }
-
     runtime.spawn(run_public(state));
 
     // 6. Block main on SIGTERM so the runtime stays alive; on signal, return and
@@ -340,13 +284,6 @@ fn build_ldk_node(
                 .amount_range_msat(opts.probe_min_amount_msat, opts.probe_max_amount_msat)
                 .build(),
         );
-    }
-
-    if let (Some(node_id), Some(address)) = (opts.lsps1_node_id, &opts.lsps1_addr) {
-        let address = SocketAddress::from_str(address)
-            .map_err(|e| anyhow!("Invalid LSPS1 socket address: {e}"))?;
-
-        node_builder.set_liquidity_source_lsps1(node_id, address, None);
     }
 
     // LDK uses bitcoind purely as a chain-data source via node-level RPCs, with

@@ -18,7 +18,6 @@ pub mod analytics;
 pub mod cli;
 pub mod client;
 pub mod db;
-pub mod probe;
 pub mod public;
 pub mod trailer;
 
