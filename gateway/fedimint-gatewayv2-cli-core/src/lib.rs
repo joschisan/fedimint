@@ -39,7 +39,6 @@ pub const ROUTE_LDK_CHANNEL_CLOSE: &str = "/ldk/channel/close";
 pub const ROUTE_LDK_CHANNEL_LIST: &str = "/ldk/channel/list";
 pub const ROUTE_LDK_CHANNEL_SPLICE_IN: &str = "/ldk/channel/splice-in";
 pub const ROUTE_LDK_CHANNEL_SPLICE_OUT: &str = "/ldk/channel/splice-out";
-pub const ROUTE_LDK_LSPS1: &str = "/ldk/lsps1";
 pub const ROUTE_LDK_LN_RECEIVE: &str = "/ldk/ln/receive";
 pub const ROUTE_LDK_LN_SEND: &str = "/ldk/ln/send";
 pub const ROUTE_LDK_LN_PROBE: &str = "/ldk/ln/probe";
@@ -122,37 +121,6 @@ pub struct LdkChannelOpenRequest {
     pub channel_size_sat: u64,
     #[arg(long, default_value_t = 0)]
     pub push_amount_sat: u64,
-}
-
-// --- /ldk/lsps1 ---
-
-#[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct LdkLsps1Request {
-    /// The inbound capacity to buy from the LSP, in satoshi
-    pub lsp_balance_sat: u64,
-    /// Satoshi the LSP pushes to our side of the channel on open, paid for
-    /// as part of the order
-    #[arg(long, default_value_t = 0)]
-    pub client_balance_sat: u64,
-    /// Number of blocks the LSP commits to keeping the channel open,
-    /// defaulting to ~3 months
-    #[arg(long, default_value_t = 13_140)]
-    pub channel_expiry_blocks: u32,
-    /// Announce the channel to the network
-    #[arg(long)]
-    #[serde(default)]
-    pub announce: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LdkLsps1Response {
-    pub order_id: String,
-    /// The invoice that pays for the order; the LSP opens the channel once
-    /// it is paid.
-    pub invoice: String,
-    pub fee_total_sat: u64,
-    pub order_total_sat: u64,
-    pub expires_at: String,
 }
 
 // --- /ldk/channel/close ---

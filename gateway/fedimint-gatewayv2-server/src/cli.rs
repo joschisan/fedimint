@@ -73,7 +73,6 @@ fn router() -> Router<AppState> {
             cli_core::ROUTE_LDK_CHANNEL_SPLICE_OUT,
             post(ldk_channel_splice_out),
         )
-        .route(cli_core::ROUTE_LDK_LSPS1, post(ldk_lsps1))
         .route(cli_core::ROUTE_LDK_LN_RECEIVE, post(ldk_ln_receive))
         .route(cli_core::ROUTE_LDK_LN_SEND, post(ldk_ln_send))
         .route(cli_core::ROUTE_LDK_LN_PROBE, post(ldk_ln_probe))
@@ -202,41 +201,6 @@ async fn ldk_onchain_send(
     info!(target: LOG_GATEWAY, txid = %txid, "Sent onchain transaction");
 
     Ok(Json(json!(cli_core::LdkOnchainSendResponse { txid })))
-}
-
-/// Places an LSPS1 order for an inbound channel with the liquidity provider
-/// configured at startup (`--lsps1-node-id` / `--lsps1-addr`) and
-/// returns the invoice that pays for it. The LSP opens the channel once the
-/// invoice is paid; callers observe it via the channel list.
-async fn ldk_lsps1(
-    State(state): State<AppState>,
-    Json(req): Json<cli_core::LdkLsps1Request>,
-) -> Result<Json<Value>, GatewayError> {
-    let order = state
-        .node
-        .lsps1_liquidity()
-        .request_channel(
-            req.lsp_balance_sat,
-            req.client_balance_sat,
-            req.channel_expiry_blocks,
-            req.announce,
-        )
-        .map_err(|e| anyhow!("Failed to order channel: {e}"))?;
-
-    let bolt11 = order
-        .payment_options
-        .bolt11
-        .ok_or(anyhow!("The LSP offered no bolt11 payment option"))?;
-
-    info!(target: LOG_GATEWAY, order_id = %order.order_id.0, "Ordered inbound channel from LSP");
-
-    Ok(Json(json!(cli_core::LdkLsps1Response {
-        order_id: order.order_id.0,
-        invoice: bolt11.invoice.to_string(),
-        fee_total_sat: bolt11.fee_total_sat,
-        order_total_sat: bolt11.order_total_sat,
-        expires_at: bolt11.expires_at.to_rfc3339(),
-    })))
 }
 
 /// Opens a Lightning channel to a peer. Fire-and-forget, picomint-style: the
