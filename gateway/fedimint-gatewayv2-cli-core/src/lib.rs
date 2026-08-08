@@ -140,6 +140,12 @@ pub struct LdkChannelOpenRequest {
     pub channel_size_sat: u64,
     #[arg(long, default_value_t = 0)]
     pub push_amount_sat: u64,
+    /// Announce the channel to the network so other nodes can route through
+    /// it. Requires the node to be configured with a listening address and an
+    /// alias.
+    #[arg(long)]
+    #[serde(default)]
+    pub announce: bool,
 }
 
 // --- /ldk/channel/close ---
@@ -177,6 +183,8 @@ pub struct ChannelInfo {
     pub inbound_liquidity_sat: u64,
     pub is_usable: bool,
     pub is_outbound: bool,
+    /// Whether the channel is, or once confirmed will be, publicly announced.
+    pub is_announced: bool,
     pub funding_txid: Option<bitcoin::Txid>,
 }
 
