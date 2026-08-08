@@ -245,18 +245,32 @@ async fn ldk_channel_open(
         Some(req.push_amount_sat * 1000)
     };
 
-    state
-        .node
-        .open_announced_channel(
-            req.pubkey,
-            SocketAddress::from_str(&req.host).map_err(|e| anyhow!("Invalid address: {e}"))?,
-            req.channel_size_sat,
-            push_amount_msat,
-            None,
-        )
-        .map_err(|e| anyhow!("Failed to open channel: {e}"))?;
+    let host = SocketAddress::from_str(&req.host).map_err(|e| anyhow!("Invalid address: {e}"))?;
 
-    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, "Initiated channel open");
+    // Unannounced by default, matching LDK; a gateway only needs its peers to
+    // route to it, not the wider network.
+    let open_channel = if req.announce {
+        ldk_node::Node::open_announced_channel
+    } else {
+        ldk_node::Node::open_channel
+    };
+
+    open_channel(
+        &state.node,
+        req.pubkey,
+        host,
+        req.channel_size_sat,
+        push_amount_msat,
+        None,
+    )
+    .map_err(|e| anyhow!("Failed to open channel: {e}"))?;
+
+    info!(
+        target: LOG_GATEWAY,
+        pubkey = %req.pubkey,
+        announce = req.announce,
+        "Initiated channel open"
+    );
 
     Ok(Json(json!(())))
 }
@@ -395,6 +409,7 @@ async fn ldk_channel_list(State(state): State<AppState>) -> Result<Json<Value>, 
             inbound_liquidity_sat: channel_details.inbound_capacity_msat / 1000,
             is_usable: channel_details.is_usable,
             is_outbound: channel_details.is_outbound,
+            is_announced: channel_details.is_announced,
             funding_txid: channel_details.funding_txo.map(|txo| txo.txid),
         });
     }
