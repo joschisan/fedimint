@@ -184,6 +184,13 @@ pub const FM_PKARR_DHT_ENABLE_ENV: &str = "FM_PKARR_DHT_ENABLE";
 /// Env var to disable pkarr relay publishing (enabled by default)
 pub const FM_PKARR_RELAYS_ENABLE_ENV: &str = "FM_PKARR_RELAYS_ENABLE";
 
+/// Env var to override the aleph unit creation delay, in milliseconds
+///
+/// The delay is fixed at DKG time and persisted in the local config, so this
+/// is the only way to retune the ordering latency of a federation that already
+/// exists.
+pub const FM_BROADCAST_ROUND_DELAY_MS_ENV: &str = "FM_BROADCAST_ROUND_DELAY_MS";
+
 /// Env var to override tcp api connectivity
 ///
 /// Comma separated key-value list (`peer_id=url,peer_id=url`)

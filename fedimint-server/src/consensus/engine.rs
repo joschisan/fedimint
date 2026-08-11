@@ -14,7 +14,7 @@ use fedimint_core::core::{DynOutput, MODULE_INSTANCE_ID_GLOBAL};
 use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::Decodable;
 use fedimint_core::endpoint_constants::AWAIT_SIGNED_SESSION_OUTCOME_ENDPOINT;
-use fedimint_core::envs::is_running_in_test_env;
+use fedimint_core::envs::{FM_BROADCAST_ROUND_DELAY_MS_ENV, is_running_in_test_env};
 use fedimint_core::epoch::ConsensusItem;
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::registry::ModuleDecoderRegistry;
@@ -58,6 +58,42 @@ use crate::metrics::{
 
 // The name of the directory where the database checkpoints are stored.
 const DB_CHECKPOINTS_DIR: &str = "db_checkpoints";
+
+/// The aleph unit creation delay this guardian runs with.
+///
+/// Normally the value the federation agreed on at DKG, which is persisted in
+/// the local config and can therefore never change afterwards. The env var
+/// overrides it so an existing federation can be retuned by restarting its
+/// guardians — set it to the same value on all of them, since a guardian that
+/// creates units faster than its peers only produces units nobody can use yet.
+fn broadcast_round_delay_ms(cfg: &ServerConfig) -> u16 {
+    let Some(value) = std::env::var_os(FM_BROADCAST_ROUND_DELAY_MS_ENV) else {
+        return cfg.local.broadcast_round_delay_ms;
+    };
+
+    match value.to_string_lossy().parse::<u16>() {
+        Ok(delay) => {
+            warn!(
+                target: LOG_CONSENSUS,
+                delay,
+                configured = cfg.local.broadcast_round_delay_ms,
+                "Overriding the configured broadcast round delay",
+            );
+
+            delay
+        }
+        Err(err) => {
+            warn!(
+                target: LOG_CONSENSUS,
+                err = %err.fmt_compact(),
+                value = %value.to_string_lossy(),
+                "Ignoring an unparsable broadcast round delay override",
+            );
+
+            cfg.local.broadcast_round_delay_ms
+        }
+    }
+}
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
@@ -233,7 +269,7 @@ impl ConsensusEngine {
         const BASE: f64 = 1.02;
 
         let rounds_per_session = self.cfg.consensus.broadcast_rounds_per_session;
-        let round_delay = f64::from(self.cfg.local.broadcast_round_delay_ms);
+        let round_delay = f64::from(broadcast_round_delay_ms(&self.cfg));
 
         let mut delay_config = aleph_bft::default_delay_config();
 
