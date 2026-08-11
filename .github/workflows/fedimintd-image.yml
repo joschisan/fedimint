@@ -1,0 +1,96 @@
+# On-demand build + publish of the `fedimintd` guardian container image from
+# this fork (joschisan/fedimint), living entirely on the `fedimintd-image`
+# branch.
+#
+# Publishes to GitHub Container Registry under the fork owner's namespace,
+# `ghcr.io/joschisan/fedimintd`, using the automatically-provisioned
+# `GITHUB_TOKEN` (needs `permissions: packages: write`) — so there is NO secret
+# to create. Runs on a GitHub-hosted runner because a fork can't use the
+# fedimint org's self-hosted runners.
+#
+# Builds on every push to `fedimintd-image`. This branch carries experimental
+# guardian patches for latency debugging on top of master; to rebuild against a
+# newer master, rebase it and push.
+#
+# The job frees disk up front (the nix build overflows ubuntu-latest's default
+# free space) and can push first-party build outputs to a personal Cachix cache
+# to speed up later runs (see the cache step below to activate).
+name: "Build fedimintd image"
+
+on:
+  push:
+    branches:
+      - fedimintd-image
+
+jobs:
+  build-and-push:
+    name: "Build and push fedimintd"
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Free up disk space
+        # The nix build compresses a multi-GB `target/` archive during its
+        # install phase; ubuntu-latest's ~14 GB free isn't enough and the build
+        # dies with "No space left on device". Reclaim ~25 GB by dropping
+        # preinstalled toolchains this build never touches.
+        run: |
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Prepare
+        uses: ./.github/actions/prepare
+      - uses: dpc/nix-installer-action@c6e05d595d5ed6d6b7c46e42409ca2a126efe13d # dpc/jj-vqymqvyntouw
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with:
+          # Read-only use of the public `fedimint` cache (its third-party deps).
+          # Public reads need no token.
+          name: fedimint
+        continue-on-error: true
+      - name: Fork-owned Cachix cache (durable first-party build cache)
+        # The public `fedimint` cache only holds third-party deps, so every run
+        # recompiles the fedimint workspace from scratch (~40 min). Pushing our
+        # OWN build outputs to a personal cache makes later runs restore them
+        # instead of rebuilding — no 10 GB GitHub-cache limit. To activate:
+        # create a free cache at app.cachix.org (name it `joschisan-fedimint`)
+        # and add its auth token as the `CACHIX_AUTH_TOKEN` secret. Until the
+        # secret exists this is a harmless no-op.
+        uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with:
+          name: joschisan-fedimint
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        continue-on-error: true
+      - uses: ./.github/actions/pin-nix-flake-inputs
+
+      - name: Build fedimintd container
+        run: |
+          nix build -L .#container.fedimintd --system x86_64-linux
+          echo "container_tag=$(docker load < result | awk '{ print $3 }')" >> $GITHUB_ENV
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish
+        run: |
+          nix_tag=${{ env.container_tag }}
+          # Publish both a moving `latest` and the immutable commit sha, so a
+          # deployment can pin to a sha while `:latest` tracks the newest build.
+          for hub_tag in \
+            "ghcr.io/joschisan/fedimintd:latest" \
+            "ghcr.io/joschisan/fedimintd:${GITHUB_SHA::12}"; do
+            docker tag "$nix_tag" "$hub_tag"
+            docker push "$hub_tag"
+          done

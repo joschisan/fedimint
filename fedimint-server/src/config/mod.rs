@@ -50,8 +50,8 @@ pub mod setup;
 /// The default maximum open connections the API can handle
 pub const DEFAULT_MAX_CLIENT_CONNECTIONS: u32 = 1000;
 
-/// Consensus broadcast settings that result in 3 minutes session time
-const DEFAULT_BROADCAST_ROUND_DELAY_MS: u16 = 50;
+/// Consensus broadcast settings that result in 36 seconds session time
+const DEFAULT_BROADCAST_ROUND_DELAY_MS: u16 = 10;
 const DEFAULT_BROADCAST_ROUNDS_PER_SESSION: u16 = 3600;
 
 fn default_broadcast_rounds_per_session() -> u16 {
