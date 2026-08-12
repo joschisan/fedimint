@@ -24,10 +24,10 @@ use fedimint_gatewayv2_cli_core as cli_core;
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule as MintV2ClientModule;
 use hex::ToHex as _;
-use ldk_node::PendingSweepBalance;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
+use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use serde_json::{Value, json};
 use tokio::net::UnixListener;
@@ -323,50 +323,60 @@ async fn ldk_channel_close(
 
 /// Splices on-chain funds into the channel with a peer, growing its capacity
 /// without closing it. Experimental; the counterparty must support splicing.
+///
+/// The channel is named by its `user_channel_id` rather than by peer, since a
+/// peer may hold several; `channel list` reports both fields.
 async fn ldk_channel_splice_in(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkChannelSpliceInRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    let channels = state.node.list_channels();
-    let channel = channels
-        .iter()
-        .find(|channel| channel.counterparty_node_id == req.pubkey)
-        .ok_or_else(|| anyhow!("No channel with peer {}", req.pubkey))?;
-
     state
         .node
-        .splice_in(&channel.user_channel_id, req.pubkey, req.amount_sat)
+        .splice_in(
+            &UserChannelId(req.user_channel_id),
+            req.pubkey,
+            req.amount_sat,
+        )
         .map_err(|e| anyhow!("Failed to splice in: {e}"))?;
 
-    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, amount_sat = req.amount_sat, "Initiated splice-in");
+    info!(
+        target: LOG_GATEWAY,
+        user_channel_id = req.user_channel_id,
+        pubkey = %req.pubkey,
+        amount_sat = req.amount_sat,
+        "Initiated splice-in"
+    );
 
     Ok(Json(json!(())))
 }
 
-/// Splices funds out of the channel with a peer to an on-chain address without
-/// closing it. Experimental; the amount must not exceed the channel's outbound
-/// capacity and the counterparty must support splicing.
+/// Splices funds out of a channel to an on-chain address without closing it.
+/// Experimental; the amount must not exceed the channel's outbound capacity
+/// and the counterparty must support splicing.
+///
+/// The channel is named by its `user_channel_id` rather than by peer, since a
+/// peer may hold several; `channel list` reports both fields.
 async fn ldk_channel_splice_out(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkChannelSpliceOutRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    let channels = state.node.list_channels();
-    let channel = channels
-        .iter()
-        .find(|channel| channel.counterparty_node_id == req.pubkey)
-        .ok_or_else(|| anyhow!("No channel with peer {}", req.pubkey))?;
-
     state
         .node
         .splice_out(
-            &channel.user_channel_id,
+            &UserChannelId(req.user_channel_id),
             req.pubkey,
             &req.address.assume_checked(),
             req.amount_sat,
         )
         .map_err(|e| anyhow!("Failed to splice out: {e}"))?;
 
-    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, amount_sat = req.amount_sat, "Initiated splice-out");
+    info!(
+        target: LOG_GATEWAY,
+        user_channel_id = req.user_channel_id,
+        pubkey = %req.pubkey,
+        amount_sat = req.amount_sat,
+        "Initiated splice-out"
+    );
 
     Ok(Json(json!(())))
 }
@@ -400,6 +410,7 @@ async fn ldk_channel_list(State(state): State<AppState>) -> Result<Json<Value>, 
             .cloned();
 
         channels.push(cli_core::ChannelInfo {
+            user_channel_id: channel_details.user_channel_id.0,
             remote_pubkey: channel_details.counterparty_node_id,
             remote_alias,
             remote_address,
