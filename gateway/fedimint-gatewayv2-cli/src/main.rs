@@ -101,10 +101,9 @@ enum LdkChannelCommands {
     Close(LdkChannelCloseRequest),
     /// List channels
     List,
-    /// Splice on-chain funds into the channel with a peer (experimental)
+    /// Splice on-chain funds into a channel (experimental)
     SpliceIn(LdkChannelSpliceInRequest),
-    /// Splice funds out of the channel with a peer to an on-chain address
-    /// (experimental)
+    /// Splice funds out of a channel to an on-chain address (experimental)
     SpliceOut(LdkChannelSpliceOutRequest),
 }
 

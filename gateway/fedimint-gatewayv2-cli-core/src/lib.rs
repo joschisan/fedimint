@@ -174,6 +174,8 @@ pub struct LdkChannelListResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelInfo {
+    /// Local identifier of the channel, as accepted by the splice commands.
+    pub user_channel_id: u128,
     pub remote_pubkey: PublicKey,
     pub remote_alias: Option<String>,
     pub remote_address: Option<String>,
@@ -192,7 +194,11 @@ pub struct ChannelInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkChannelSpliceInRequest {
-    /// Peer whose channel to splice on-chain funds into.
+    /// Channel to splice on-chain funds into, as reported by `channel list`.
+    /// Identifies the channel rather than the peer, since a peer may hold
+    /// several.
+    pub user_channel_id: u128,
+    /// Peer the channel is with.
     pub pubkey: PublicKey,
     /// On-chain funds to add to the channel, in satoshi.
     pub amount_sat: u64,
@@ -202,7 +208,11 @@ pub struct LdkChannelSpliceInRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkChannelSpliceOutRequest {
-    /// Peer whose channel to splice funds out of.
+    /// Channel to splice funds out of, as reported by `channel list`.
+    /// Identifies the channel rather than the peer, since a peer may hold
+    /// several.
+    pub user_channel_id: u128,
+    /// Peer the channel is with.
     pub pubkey: PublicKey,
     /// Destination on-chain address for the spliced-out funds.
     pub address: bitcoin::Address<NetworkUnchecked>,
