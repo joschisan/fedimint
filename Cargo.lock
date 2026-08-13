@@ -3865,6 +3865,7 @@ dependencies = [
  "lightning-invoice",
  "serde",
  "serde_json",
+ "serde_with",
 ]
 
 [[package]]

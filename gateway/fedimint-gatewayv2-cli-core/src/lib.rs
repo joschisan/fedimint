@@ -21,6 +21,7 @@ use fedimint_core::invite_code::InviteCode;
 use fedimint_mintv2_common::Denomination;
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
+use serde_with::{DisplayFromStr, serde_as};
 
 /// Filename of the gateway's admin CLI Unix socket, inside `DATA_DIR`. The
 /// daemon binds and the CLI connects at `{DATA_DIR}/{CLI_SOCKET_FILENAME}`.
@@ -172,9 +173,11 @@ pub struct LdkChannelListResponse {
     pub channels: Vec<ChannelInfo>,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelInfo {
     /// Local identifier of the channel, as accepted by the splice commands.
+    #[serde_as(as = "DisplayFromStr")]
     pub user_channel_id: u128,
     pub remote_pubkey: PublicKey,
     pub remote_alias: Option<String>,
@@ -192,11 +195,13 @@ pub struct ChannelInfo {
 
 // --- /ldk/channel/splice-in ---
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkChannelSpliceInRequest {
     /// Channel to splice on-chain funds into, as reported by `channel list`.
     /// Identifies the channel rather than the peer, since a peer may hold
     /// several.
+    #[serde_as(as = "DisplayFromStr")]
     pub user_channel_id: u128,
     /// Peer the channel is with.
     pub pubkey: PublicKey,
@@ -206,11 +211,13 @@ pub struct LdkChannelSpliceInRequest {
 
 // --- /ldk/channel/splice-out ---
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkChannelSpliceOutRequest {
     /// Channel to splice funds out of, as reported by `channel list`.
     /// Identifies the channel rather than the peer, since a peer may hold
     /// several.
+    #[serde_as(as = "DisplayFromStr")]
     pub user_channel_id: u128,
     /// Peer the channel is with.
     pub pubkey: PublicKey,
