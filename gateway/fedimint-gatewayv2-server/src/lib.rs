@@ -448,7 +448,13 @@ impl AppState {
             "The invoices payment hash does not match the contracts payment hash"
         );
 
-        ensure!(!invoice.is_expired(), "The invoice has already expired");
+        // The invoice's expiry is deliberately not checked here. Rejecting the
+        // request returns a plain error, which leaves the sender's contract
+        // funded until it times out, while attempting the payment fails it via
+        // the LDK `PaymentFailed` event and hence hands the sender a forfeit
+        // signature to reclaim the funds immediately. Neither ldk-node nor LDK
+        // enforce the expiry either, so an invoice the payee still honors is
+        // simply paid.
 
         let min_contract_amount = self
             .gateway_info(&payload.federation_id)
