@@ -223,13 +223,6 @@ impl ClientModuleInit for MintClientInit {
         // downloaded while a slice was outstanding, which the timeout bounds.
         let mut pending: BTreeMap<u64, Vec<RecoveryItem>> = BTreeMap::new();
 
-        // Items downloaded so far, scanned or still waiting in `pending`.
-        // Progress follows this rather than `next_index`: downloading is the
-        // paced work, and being unordered it can leave the in-order scan
-        // stalled on one slow slice while the rest pile up. Reporting only
-        // scanned items would then sit at zero and jump to complete at the end.
-        let mut downloaded = state.next_index;
-
         loop {
             let items = loop {
                 if let Some(items) = pending.remove(&state.next_index) {
@@ -240,16 +233,6 @@ impl ClientModuleInit for MintClientInit {
                     .next()
                     .await
                     .context("Recovery stream finished before recovery is complete")?;
-
-                downloaded += items.len() as u64;
-
-                // Held one short of the total so a download never reports a
-                // completed recovery: the scan below owns the final state, once
-                // every item has actually been applied in order.
-                args.update_recovery_progress(RecoveryProgress {
-                    complete: downloaded.min(state.total_items.saturating_sub(1)) as u32,
-                    total: state.total_items as u32,
-                });
 
                 pending.insert(start, items);
             };
@@ -336,6 +319,11 @@ impl ClientModuleInit for MintClientInit {
             }
 
             dbtx.commit_tx().await;
+
+            args.update_recovery_progress(RecoveryProgress {
+                complete: state.next_index.try_into().unwrap_or(u32::MAX),
+                total: state.total_items.try_into().unwrap_or(u32::MAX),
+            });
         }
     }
 
