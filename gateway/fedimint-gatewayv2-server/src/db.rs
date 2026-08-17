@@ -103,7 +103,7 @@ impl_db_record!(
 );
 
 /// Row describing an outgoing (send) contract the gateway is paying.
-#[derive(Debug, Clone, Encodable, Decodable)]
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct OutgoingContractRow {
     pub federation_id: FederationId,
     pub contract: OutgoingContract,
