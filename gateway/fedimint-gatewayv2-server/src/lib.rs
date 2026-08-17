@@ -490,14 +490,24 @@ impl AppState {
 
         let mut dbtx = self.gateway_db.begin_transaction().await;
 
-        if dbtx
+        if let Some(existing_row) = dbtx
             .insert_entry(&OutgoingContractKey(operation_id), &row)
             .await
-            .is_some()
         {
             // A previous request already owns this payment; drop the
             // re-insert and await its terminal.
             dbtx.ignore_uncommitted();
+
+            // Only the request that funded the registered contract may await
+            // its terminal. The operation is keyed by the payment hash, so a
+            // *different* contract for the same invoice lands here too, and the
+            // terminal it would be handed carries a forfeit signature over the
+            // registered contract, which cannot settle it. Refuse rather than
+            // answer for a contract the gateway never took on.
+            ensure!(
+                existing_row == row,
+                "Another outgoing contract is already registered for this invoice"
+            );
 
             return Self::subscribe_send(&f1_client, operation_id).await;
         }
