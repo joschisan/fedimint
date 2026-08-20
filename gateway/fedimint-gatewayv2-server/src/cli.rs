@@ -31,7 +31,7 @@ use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use serde_json::{Value, json};
 use tokio::net::UnixListener;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::db::{ClientConfigKey, DisabledFederationKey};
 use crate::{AppState, GatewayError, client};
@@ -275,50 +275,41 @@ async fn ldk_channel_open(
     Ok(Json(json!(())))
 }
 
-/// Closes all channels with a peer.
+/// Closes a channel.
+///
+/// The channel is named by its `user_channel_id` rather than by peer, since a
+/// peer may hold several; `channel list` reports both fields.
 async fn ldk_channel_close(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkChannelCloseRequest>,
 ) -> Result<Json<Value>, GatewayError> {
-    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, "Closing all channels with peer");
+    let user_channel_id = UserChannelId(req.user_channel_id);
 
-    let mut num_channels_closed = 0;
-
-    for channel in state
-        .node
-        .list_channels()
-        .iter()
-        .filter(|channel| channel.counterparty_node_id == req.pubkey)
-    {
-        if req.force {
-            match state.node.force_close_channel(
-                &channel.user_channel_id,
+    if req.force {
+        state
+            .node
+            .force_close_channel(
+                &user_channel_id,
                 req.pubkey,
                 Some("User initiated force close".to_string()),
-            ) {
-                Ok(()) => num_channels_closed += 1,
-                Err(err) => {
-                    error!(target: LOG_GATEWAY, pubkey = %req.pubkey, err = %err, "Could not force close channel");
-                }
-            }
-        } else {
-            match state
-                .node
-                .close_channel(&channel.user_channel_id, req.pubkey)
-            {
-                Ok(()) => num_channels_closed += 1,
-                Err(err) => {
-                    error!(target: LOG_GATEWAY, pubkey = %req.pubkey, err = %err, "Could not close channel");
-                }
-            }
-        }
+            )
+            .map_err(|e| anyhow!("Failed to force close channel: {e}"))?;
+    } else {
+        state
+            .node
+            .close_channel(&user_channel_id, req.pubkey)
+            .map_err(|e| anyhow!("Failed to close channel: {e}"))?;
     }
 
-    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, "Initiated channel closure");
+    info!(
+        target: LOG_GATEWAY,
+        user_channel_id = req.user_channel_id,
+        pubkey = %req.pubkey,
+        force = req.force,
+        "Initiated channel closure"
+    );
 
-    Ok(Json(json!(cli_core::LdkChannelCloseResponse {
-        num_channels_closed,
-    })))
+    Ok(Json(json!(())))
 }
 
 /// Splices on-chain funds into the channel with a peer, growing its capacity

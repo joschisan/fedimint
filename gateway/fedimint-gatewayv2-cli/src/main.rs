@@ -97,7 +97,7 @@ enum LdkOnchainCommands {
 enum LdkChannelCommands {
     /// Open a channel
     Open(LdkChannelOpenRequest),
-    /// Close channels with a peer
+    /// Close a channel
     Close(LdkChannelCloseRequest),
     /// List channels
     List,

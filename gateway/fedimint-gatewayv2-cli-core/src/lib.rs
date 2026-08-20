@@ -151,19 +151,20 @@ pub struct LdkChannelOpenRequest {
 
 // --- /ldk/channel/close ---
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkChannelCloseRequest {
+    /// Channel to close, as reported by `channel list`. Identifies the channel
+    /// rather than the peer, since a peer may hold several.
+    #[serde_as(as = "DisplayFromStr")]
+    pub user_channel_id: u128,
+    /// Peer the channel is with.
     pub pubkey: PublicKey,
     #[arg(long)]
     #[serde(default)]
     pub force: bool,
     #[arg(long, required_unless_present = "force")]
     pub sat_per_vbyte: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LdkChannelCloseResponse {
-    pub num_channels_closed: u32,
 }
 
 // --- /ldk/channel/list ---
