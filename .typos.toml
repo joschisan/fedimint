@@ -21,6 +21,9 @@ tpe = "tpe"
 # appears in bitcoin test addresses
 nd = "nd"
 
+# `lightning::util::ser::Writeable` is LDK's own spelling of the trait
+Writeable = "Writeable"
+
 [files]
 extend-exclude = [
   "db/**",
