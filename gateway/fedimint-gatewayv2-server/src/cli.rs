@@ -729,8 +729,8 @@ async fn wallet_send_fee(
 }
 
 /// Withdraw onchain from a federation. Blocks until the send reaches a
-/// terminal state. The cli-core `--fee` is not wired: walletv2 fetches the
-/// current fee itself.
+/// terminal state. `--fee` overrides the federation's fee quote; without it
+/// walletv2 fetches the current one itself.
 async fn wallet_send(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationWalletSendRequest>,
@@ -748,16 +748,11 @@ async fn wallet_send(
 
     let wallet = client.get_first_module::<fedimint_walletv2_client::WalletClientModule>()?;
 
-    let fee = wallet
-        .send_fee()
-        .await
-        .map_err(|e| anyhow!("Error withdrawing funds onchain: {e}"))?;
-
     let operation_id = wallet
         .send(
             address.as_unchecked().clone(),
             req.amount,
-            Some(fee),
+            req.fee,
             serde_json::Value::Null,
         )
         .await

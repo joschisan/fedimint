@@ -163,8 +163,6 @@ pub struct LdkChannelCloseRequest {
     #[arg(long)]
     #[serde(default)]
     pub force: bool,
-    #[arg(long, required_unless_present = "force")]
-    pub sat_per_vbyte: Option<u64>,
 }
 
 // --- /ldk/channel/list ---
@@ -412,6 +410,9 @@ pub struct FederationWalletSendRequest {
     pub federation_id: FederationId,
     pub address: bitcoin::Address<NetworkUnchecked>,
     pub amount: bitcoin::Amount,
+    /// On-chain fee to attach, overriding the federation's current quote.
+    /// The federation rejects anything below its consensus fee, so this can
+    /// only raise the fee, never lower it.
     #[arg(long)]
     pub fee: Option<bitcoin::Amount>,
 }
