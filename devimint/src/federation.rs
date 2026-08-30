@@ -978,7 +978,14 @@ impl Federation {
                 gateways
                     .iter()
                     .enumerate()
-                    .filter(|(_, gw)| gw.gatewayd_version >= *VERSION_0_11_0_ALPHA)
+                    // `payment-log` is a v1 `gateway-cli` route; the gatewaydv2
+                    // daemon rejects it as an invalid request. The balance poll
+                    // below still waits for the deposit to be claimed there, so
+                    // v2 gateways skip the deterministic wait rather than block
+                    // on a command they do not implement.
+                    .filter(|(_, gw)| {
+                        !gw.v2 && gw.gatewayd_version >= *VERSION_0_11_0_ALPHA
+                    })
                     .map(|(i, gw)| {
                         let fed_id = fed_id.clone();
                         let gateway_name = gw.gw_name.clone();
@@ -1041,20 +1048,29 @@ impl Federation {
                 let gateway_id = gateway_id.clone();
                 let deposit_address = deposit_address.clone();
                 async move {
-                    let gw_info = gw
-                        .client()
-                        .get_info()
-                        .await
-                        .map_err(ControlFlow::Continue)?;
-
-                    let block_height: u64 = if gw.gatewayd_version < *VERSION_0_10_0_ALPHA {
-                        gw_info["block_height"]
-                            .as_u64()
-                            .expect("Could not parse block height")
+                    let block_height: u64 = if gw.v2 {
+                        // gatewaydv2 exposes block height via its admin CLI's
+                        // `info` (typed), not the v1 HTTP info JSON.
+                        crate::gatewaydv2::info(&gw.data_dir)
+                            .await
+                            .map_err(ControlFlow::Continue)?
+                            .block_height
                     } else {
-                        gw_info["lightning_info"]["connected"]["block_height"]
-                            .as_u64()
-                            .expect("Could not parse block height")
+                        let gw_info = gw
+                            .client()
+                            .get_info()
+                            .await
+                            .map_err(ControlFlow::Continue)?;
+
+                        if gw.gatewayd_version < *VERSION_0_10_0_ALPHA {
+                            gw_info["block_height"]
+                                .as_u64()
+                                .expect("Could not parse block height")
+                        } else {
+                            gw_info["lightning_info"]["connected"]["block_height"]
+                                .as_u64()
+                                .expect("Could not parse block height")
+                        }
                     };
 
                     if bitcoind_block_height != block_height {

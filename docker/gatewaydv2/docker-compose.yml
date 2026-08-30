@@ -1,0 +1,139 @@
+# Reference deployment for `gatewaydv2`, mirroring the mainnet host that serves
+# the Good Hope federation.
+#
+# The image is published by `.github/workflows/gatewaydv2-image.yml` on every
+# push to `gatewayv2`. It pushes `ghcr.io/joschisan/gatewaydv2:latest` and
+# `ghcr.io/joschisan/gatewaydv2:<sha>`. The deployment host pulls and restarts:
+#
+#   docker compose pull && docker compose up -d
+#
+# Pin to a `<sha>` tag instead of `latest` if you want reproducible deploys.
+#
+# Before first use, replace both REPLACE_ME credentials below — see the
+# bitcoind service for how to generate a matching pair.
+
+services:
+  gatewaydv2:
+    image: ghcr.io/joschisan/gatewaydv2:latest
+    container_name: gatewaydv2
+    restart: unless-stopped
+    ports:
+      # LDK lightning P2P (BOLT default port)
+      - "9735:9735"
+    volumes:
+      - gatewaydv2_data:/data
+    environment:
+      # Read by both the daemon and `gatewaydv2-cli`, so CLI commands run via
+      # `docker exec` find the admin socket without extra flags.
+      FM_DATA_DIR: /data
+      RUST_LOG: "info,lightning::ln::outbound_payment=debug,lightning::ln::channelmanager=debug"
+      # Local chain backend. The password is the plaintext half of the pair
+      # whose HMAC appears in bitcoind's `-rpcauth` below; the two must match.
+      FM_BITCOIND_URL: http://gatewaydv2:REPLACE_ME_RPC_PASSWORD@bitcoind:8332
+      # Inert while FM_BITCOIND_URL is set — bitcoind wins whenever both are
+      # present. Kept as a one-line revert back to a public backend.
+      FM_ESPLORA_URL: https://mempool.bitaroo.net/api
+      # Reliability-first routing: fees count at 1/20 against the scorer's
+      # penalties, so the router spends the prepaid routing-fee budget on the
+      # most reliable path within the cap instead of keeping the surplus.
+      FM_SCORER_PENALTY_FACTOR: 20
+      # Probe with up to 1M sats so the scorer learns channel liquidity in the
+      # range of our largest payments, and allow that full amount in flight.
+      FM_PROBE_MAX_AMOUNT_MSAT: 1000000000
+      FM_PROBE_MAX_LOCKED_MSAT: 1000000000
+      # The in-daemon interest prober is left disabled: the deployment drives
+      # probes from host cron instead, one `gatewaydv2-cli ldk ln probe` per
+      # destination on a staggered schedule, so each probe is identifiable by
+      # its firing time in the LDK logs and the amount can be randomised.
+      # Uncomment to hand the job back to the daemon.
+#      FM_INTEREST_PROBE_INTERVAL_SECS: 60
+#      FM_INTEREST_PROBE_MAX_AMOUNT_MSAT: 500000000
+#      FM_INTEREST_PROBE_NODES: |-
+#        02fc6bf390208dda96f489491b5c79830c39dfc07c998cc5f469ce3801cd01c5b2
+#        037f990e61acee8a7697966afd29dd88f3b1f8a7b14d625c4f8742bd952003a590
+#        030bd936b47a53af5eba629529dff8b2222aa9ae0ed2c12476b2bcf28bc996b8a6
+#        03c913d061dfe0adbfd87c0e98e66033be0dbbb2413de26bd363c63970480a9a80
+    logging:
+      driver: json-file
+      options:
+        max-size: "200m"
+        max-file: "5"
+
+  # Local chain backend for the LDK node, replacing the public esplora
+  # endpoints that have twice taken the gateway down: fee estimates come from
+  # `estimatesmartfee` over an RPC that never leaves the compose network, so
+  # nothing in the startup path depends on a third party being reachable or
+  # under its rate limit.
+  #
+  # Pruned to a ~30 day window: 12000 MiB covers roughly 4300 blocks plus
+  # their undo data. The chainstate is not prunable and adds ~13 GB on top.
+  #
+  # Generate the credential pair with bitcoin core's helper, which prints the
+  # `-rpcauth` string and the plaintext password separately:
+  #
+  #   python3 share/rpcauth/rpcauth.py gatewaydv2
+  #
+  # Put the password in FM_BITCOIND_URL above and the salt$hash here — but
+  # double the `$` to `$$`, since compose interpolates a single one away.
+  bitcoind:
+    image: bitcoin/bitcoin:31.1
+    container_name: bitcoind
+    restart: unless-stopped
+    command:
+      - -chain=main
+      - -server=1
+      - -prune=12000
+      - -dbcache=300
+      - -rpcbind=0.0.0.0
+      # The compose network sits inside this range; nothing outside it can
+      # reach the RPC port, which is never published to the host.
+      - -rpcallowip=172.16.0.0/12
+      - -rpcauth=gatewaydv2:REPLACE_ME_SALT$$REPLACE_ME_HMAC
+      # Inbound peers are refused and uploads capped: this node exists to feed
+      # the gateway, and serving blocks would compete with payment traffic for
+      # the link. Outbound peers for the download itself are unaffected.
+      - -listen=0
+      - -maxuploadtarget=500M
+    volumes:
+      - bitcoind_data:/home/bitcoin/.bitcoin
+    # The box has 2 vCPU and 3.8 GB of RAM, of which the gateway uses 250 MB.
+    # Capping bitcoind leaves a core free for payment processing during the
+    # initial block download, and makes the kernel pick bitcoind rather than
+    # the gateway if memory ever runs short.
+    cpus: 1.0
+    mem_limit: 1500m
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # TLS termination for the public API: serves https://gatewayv2.fedimint.org
+  # with an automatic Lets Encrypt certificate and proxies plain HTTP on
+  # port 80 so the gateway stays reachable by bare IP. See ./Caddyfile.
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  gatewaydv2_data:
+  bitcoind_data:
+  caddy_data:
+  caddy_config:
+
+# Startup ordering: there is deliberately no `depends_on` here, because a
+# healthcheck-gated dependency would still not cover the case that matters.
+# LDK treats a failed fee-rate fetch at startup as fatal, so on a cold `up -d`
+# the gateway exits with "Failed to start LDK Node: Failed to update fee rate
+# estimates" while bitcoind is still loading its block index, and again while
+# it verifies blocks. `restart: unless-stopped` retries until bitcoind answers;
+# expect roughly half a dozen restarts over ~20 seconds before it settles.
+# This is recovery working as intended, not a fault to debug.
