@@ -1,0 +1,13 @@
+# Mounted read-only into the `caddy` service by docker-compose.yml.
+#
+# The named host gets an automatic Lets Encrypt certificate, which requires
+# the domain to already resolve to this machine on port 80. Replace it with
+# your own hostname; the bare `http://` block below needs no DNS and keeps the
+# gateway reachable by IP while a certificate is still being issued.
+gatewayv2.fedimint.org {
+    reverse_proxy gatewaydv2:8080
+}
+
+http:// {
+    reverse_proxy gatewaydv2:8080
+}
