@@ -178,9 +178,9 @@ impl SendStateMachine {
         // the LNv1 protocol and if the gateway supports the target federation.
         // If it does, we can fund an LNv1 incoming contract to satisfy the LNv2
         // outgoing payment.
-        if let Some(client) = context.gateway.is_lnv1_invoice(&invoice).await {
+        if let Some(client) = context.gateway().is_lnv1_invoice(&invoice).await {
             let final_state = context
-                .gateway
+                .gateway()
                 .relay_lnv1_swap(client.value(), &invoice)
                 .await;
             return match final_state {
@@ -198,7 +198,7 @@ impl SendStateMachine {
         }
 
         match context
-            .gateway
+            .gateway()
             .is_direct_swap(&invoice)
             .await
             .map_err(|e| Cancelled::RegistrationError(e.to_string()))?
@@ -229,7 +229,7 @@ impl SendStateMachine {
             }
             None => {
                 let preimage = context
-                    .gateway
+                    .gateway()
                     .pay(invoice, max_delay, max_fee)
                     .await
                     .map_err(|e| Cancelled::LightningRpcError(e.to_string()))?;
@@ -258,7 +258,7 @@ impl SendStateMachine {
                 // The claim is recorded in the gateway's global database so it spans all
                 // of the gateway's federations, not just the one funding this contract.
                 if !client_ctx
-                    .gateway
+                    .gateway()
                     .claim_payment_image(
                         &old_state.common.contract.payment_image,
                         old_state.common.operation_id,
@@ -273,6 +273,7 @@ impl SendStateMachine {
                             OutgoingPaymentFailed {
                                 payment_image: old_state.common.contract.payment_image.clone(),
                                 error: Cancelled::DuplicatePayment,
+                                forfeit_signature: None,
                             },
                         )
                         .await;
@@ -288,6 +289,10 @@ impl SendStateMachine {
                         OutgoingPaymentSucceeded {
                             payment_image: old_state.common.contract.payment_image.clone(),
                             target_federation: payment_response.target_federation,
+                            // `IGatewayClientV2::pay` only surfaces the preimage,
+                            // so the realized routing fee is unknown on this path.
+                            preimage: Some(payment_response.preimage),
+                            ln_fee: None,
                         },
                     )
                     .await;
@@ -321,6 +326,7 @@ impl SendStateMachine {
                         OutgoingPaymentFailed {
                             payment_image: old_state.common.contract.payment_image.clone(),
                             error: e.clone(),
+                            forfeit_signature: None,
                         },
                     )
                     .await;

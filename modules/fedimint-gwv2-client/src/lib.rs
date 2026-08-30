@@ -1,10 +1,11 @@
-mod api;
+pub mod api;
 mod complete_sm;
 pub mod events;
 mod receive_sm;
 mod send_sm;
 
 use std::collections::BTreeMap;
+use std::convert::Infallible;
 use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -13,7 +14,9 @@ use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::Message;
-use events::{IncomingPaymentStarted, OutgoingPaymentStarted};
+use events::{
+    IncomingPaymentStarted, OutgoingPaymentFailed, OutgoingPaymentStarted, OutgoingPaymentSucceeded,
+};
 use fedimint_api_client::api::DynModuleApi;
 use fedimint_client::ClientHandleArc;
 use fedimint_client_module::module::init::{ClientModuleInit, ClientModuleInitArgs};
@@ -21,12 +24,13 @@ use fedimint_client_module::module::recovery::NoModuleBackup;
 use fedimint_client_module::module::{ClientContext, ClientModule, IClientModule, OutPointRange};
 use fedimint_client_module::sm::{Context, DynState, ModuleNotifier, State, StateTransition};
 use fedimint_client_module::transaction::{
-    ClientOutput, ClientOutputBundle, ClientOutputSM, TransactionBuilder,
+    ClientInput, ClientInputBundle, ClientOutput, ClientOutputBundle, ClientOutputSM,
+    TransactionBuilder,
 };
 use fedimint_client_module::{DynGlobalClientContext, sm_enum_variant_translation};
 use fedimint_core::config::FederationId;
 use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
-use fedimint_core::db::DatabaseTransaction;
+use fedimint_core::db::{AutocommitError, DatabaseTransaction};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{
     Amounts, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
@@ -34,18 +38,20 @@ use fedimint_core::module::{
 use fedimint_core::secp256k1::Keypair;
 use fedimint_core::time::now;
 use fedimint_core::util::Spanned;
-use fedimint_core::{Amount, PeerId, apply, async_trait_maybe_send, secp256k1};
+use fedimint_core::{Amount, OutPoint, PeerId, apply, async_trait_maybe_send, secp256k1};
 use fedimint_lightning::{InterceptPaymentResponse, LightningRpcError};
 use fedimint_lnv2_common::config::LightningClientConfig;
-use fedimint_lnv2_common::contracts::{IncomingContract, PaymentImage};
+use fedimint_lnv2_common::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use fedimint_lnv2_common::gateway_api::SendPaymentPayload;
 use fedimint_lnv2_common::{
-    LightningCommonInit, LightningInvoice, LightningModuleTypes, LightningOutput, LightningOutputV0,
+    LightningCommonInit, LightningInput, LightningInputV0, LightningInvoice, LightningModuleTypes,
+    LightningOutput, LightningOutputV0, OutgoingWitness,
 };
 use futures::StreamExt;
 use lightning_invoice::Bolt11Invoice;
 use receive_sm::{ReceiveSMState, ReceiveStateMachine};
 use secp256k1::schnorr::Signature;
+pub use send_sm::Cancelled;
 use send_sm::{SendSMState, SendStateMachine};
 use serde::{Deserialize, Serialize};
 use tpe::{AggregatePublicKey, PublicKeyShare};
@@ -174,7 +180,11 @@ impl GatewayOperationMetaV2 {
 
 #[derive(Debug, Clone)]
 pub struct GatewayClientInitV2 {
-    pub gateway: Arc<dyn IGatewayClientV2>,
+    /// Daemon-side callback interface used by the Send and Complete state
+    /// machines and by [`GatewayClientModuleV2::send_payment`]. Only the v1
+    /// gateway drives those paths and it always provides the callback; the v2
+    /// gateway orchestrates payments in the daemon itself and passes `None`.
+    pub gateway: Option<Arc<dyn IGatewayClientV2>>,
 }
 
 impl ModuleInit for GatewayClientInitV2 {
@@ -222,7 +232,18 @@ pub struct GatewayClientModuleV2 {
     pub client_ctx: ClientContext<Self>,
     pub module_api: DynModuleApi,
     pub keypair: Keypair,
-    pub gateway: Arc<dyn IGatewayClientV2>,
+    pub gateway: Option<Arc<dyn IGatewayClientV2>>,
+}
+
+impl GatewayClientModuleV2 {
+    /// The daemon-side callback interface. See
+    /// [`GatewayClientInitV2::gateway`] for why this is only available on the
+    /// v1 gateway.
+    fn gateway(&self) -> &Arc<dyn IGatewayClientV2> {
+        self.gateway.as_ref().expect(
+            "only the v1 gateway calls back into the daemon and it always provides the callback",
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -231,7 +252,18 @@ pub struct GatewayClientContextV2 {
     pub decoder: Decoder,
     pub tpe_agg_pk: AggregatePublicKey,
     pub tpe_pks: BTreeMap<PeerId, PublicKeyShare>,
-    pub gateway: Arc<dyn IGatewayClientV2>,
+    pub gateway: Option<Arc<dyn IGatewayClientV2>>,
+}
+
+impl GatewayClientContextV2 {
+    /// The daemon-side callback interface. See
+    /// [`GatewayClientInitV2::gateway`] for why this is only available on the
+    /// v1 gateway.
+    fn gateway(&self) -> &Arc<dyn IGatewayClientV2> {
+        self.gateway
+            .as_ref()
+            .expect("only the v1 gateway spawns the state machines that call back into the daemon and it always provides the callback")
+    }
 }
 
 impl Context for GatewayClientContextV2 {
@@ -428,12 +460,13 @@ impl GatewayClientModuleV2 {
             "Contract Id returned by the federation does not match contract in request"
         );
 
-        let (payment_hash, amount) = match &payload.invoice {
+        let (payment_hash, amount, destination_node) = match &payload.invoice {
             LightningInvoice::Bolt11(invoice) => (
                 invoice.payment_hash(),
                 invoice
                     .amount_milli_satoshis()
                     .ok_or(anyhow!("Invoice is missing amount"))?,
+                invoice.get_payee_pub_key(),
             ),
         };
 
@@ -443,7 +476,7 @@ impl GatewayClientModuleV2 {
         );
 
         let min_contract_amount = self
-            .gateway
+            .gateway()
             .min_contract_amount(&payload.federation_id, amount)
             .await?;
 
@@ -481,6 +514,7 @@ impl GatewayClientModuleV2 {
                     min_contract_amount,
                     invoice_amount: Amount::from_msats(amount),
                     max_delay: expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM_V2),
+                    destination_node: Some(destination_node),
                 },
             )
             .await;
@@ -662,17 +696,61 @@ impl GatewayClientModuleV2 {
         Ok(())
     }
 
-    pub async fn relay_direct_swap(
+    /// Funds the incoming contract and spawns **only** the
+    /// [`ReceiveStateMachine`] (no [`CompleteStateMachine`]), fire-and-forget.
+    /// Returns immediately without awaiting the terminal state; the upstream
+    /// Lightning HTLC (for external receives) is settled out-of-band by the
+    /// daemon-side receive trailer, which tails this federation's event log
+    /// for [`IncomingPaymentSucceeded`].
+    ///
+    /// Idempotent on `operation_id`: a retry with the same contract is a
+    /// no-op.
+    pub async fn start_receive(
         &self,
+        operation_id: OperationId,
         contract: IncomingContract,
         amount_msat: u64,
-    ) -> anyhow::Result<FinalReceiveState> {
+    ) -> anyhow::Result<()> {
+        self.client_ctx
+            .module_db()
+            .autocommit(
+                |dbtx, _| {
+                    let contract = contract.clone();
+                    Box::pin(async move {
+                        self.start_receive_dbtx(dbtx, operation_id, contract, amount_msat)
+                            .await
+                    })
+                },
+                Some(100),
+            )
+            .await
+            .map_err(|e| match e {
+                AutocommitError::ClosureError { error, .. } => error,
+                AutocommitError::CommitFailed {
+                    attempts,
+                    last_error,
+                } => {
+                    panic!("Failed to commit start_receive dbtx after {attempts} attempts: {last_error}")
+                }
+            })
+    }
+
+    /// Same as [`Self::start_receive`], inside the caller's database
+    /// transaction. `dbtx` must be isolated to this module (see
+    /// [`DatabaseTransaction::with_prefix_module_id`]); the daemon's LDK event
+    /// loop uses this to commit the receive atomically with its
+    /// once-per-event marker.
+    pub async fn start_receive_dbtx(
+        &self,
+        dbtx: &mut DatabaseTransaction<'_>,
+        operation_id: OperationId,
+        contract: IncomingContract,
+        amount_msat: u64,
+    ) -> anyhow::Result<()> {
         let operation_start = now();
 
-        let operation_id = OperationId::from_encodable(&contract);
-
         if self.client_ctx.operation_exists(operation_id).await {
-            return Ok(self.await_receive(operation_id).await);
+            return Ok(());
         }
 
         let refund_keypair = self.keypair;
@@ -706,7 +784,8 @@ impl GatewayClientModuleV2 {
         let transaction = TransactionBuilder::new().with_outputs(client_output);
 
         self.client_ctx
-            .finalize_and_submit_transaction(
+            .finalize_and_submit_transaction_dbtx(
+                dbtx,
                 operation_id,
                 LightningCommonInit::KIND.as_str(),
                 |_| GatewayOperationMetaV2::role(GatewayOperationRoleV2::Receive),
@@ -714,10 +793,10 @@ impl GatewayClientModuleV2 {
             )
             .await?;
 
-        let mut dbtx = self.client_ctx.module_db().begin_transaction().await;
         self.client_ctx
-            .log_event(
-                &mut dbtx,
+            .log_event_for_operation(
+                dbtx,
+                operation_id,
                 IncomingPaymentStarted {
                     operation_start,
                     incoming_contract_commitment: commitment,
@@ -725,7 +804,19 @@ impl GatewayClientModuleV2 {
                 },
             )
             .await;
-        dbtx.commit_tx().await;
+
+        Ok(())
+    }
+
+    pub async fn relay_direct_swap(
+        &self,
+        contract: IncomingContract,
+        amount_msat: u64,
+    ) -> anyhow::Result<FinalReceiveState> {
+        let operation_id = OperationId::from_encodable(&contract);
+
+        self.start_receive(operation_id, contract, amount_msat)
+            .await?;
 
         Ok(self.await_receive(operation_id).await)
     }
@@ -803,6 +894,135 @@ impl GatewayClientModuleV2 {
                     return;
                 }
                 None => return,
+            }
+        }
+    }
+
+    /// Logs the [`OutgoingPaymentStarted`] event for a daemon-driven send,
+    /// operation-tagged so the send can be observed via
+    /// `subscribe_operation_events`. Unlike [`Self::send_payment`] this spawns
+    /// no [`SendStateMachine`]: the daemon owns the outgoing payment and calls
+    /// [`Self::finalize_send`] once it learns the outcome.
+    ///
+    /// The `dbtx` must be isolated to this module (see
+    /// [`DatabaseTransaction::with_prefix_module_id`]).
+    pub async fn log_send_started_dbtx(
+        &self,
+        dbtx: &mut DatabaseTransaction<'_>,
+        operation_id: OperationId,
+        event: OutgoingPaymentStarted,
+    ) {
+        self.client_ctx
+            .log_event_for_operation(dbtx, operation_id, event)
+            .await;
+    }
+
+    /// Terminal work for a daemon-driven outgoing contract, replacing the
+    /// [`SendStateMachine`]'s claim/forfeit transition:
+    ///
+    /// - `Ok((preimage, ln_fee))` claims the outgoing contract (submits an
+    ///   [`OutgoingWitness::Claim`] input) and logs
+    ///   [`OutgoingPaymentSucceeded`]; `ln_fee` is the realized Lightning
+    ///   routing fee — zero on the direct-swap path.
+    /// - `Err(error)` signs the forfeit message and logs
+    ///   [`OutgoingPaymentFailed`], which carries the failure reason and the
+    ///   forfeit signature the sending client is refunded with.
+    ///
+    /// Operation-tagged so the terminal is observable via
+    /// `subscribe_operation_events`, which is also how the daemon's send
+    /// waiter retrieves the preimage or forfeit signature.
+    pub async fn finalize_send(
+        &self,
+        operation_id: OperationId,
+        contract: OutgoingContract,
+        outpoint: OutPoint,
+        outcome: Result<([u8; 32], Amount), Cancelled>,
+    ) {
+        self.client_ctx
+            .module_db()
+            .autocommit(
+                |dbtx, _| {
+                    let contract = contract.clone();
+                    let outcome = outcome.clone();
+                    Box::pin(async move {
+                        self.finalize_send_dbtx(dbtx, operation_id, contract, outpoint, outcome)
+                            .await;
+
+                        Ok::<_, Infallible>(())
+                    })
+                },
+                Some(100),
+            )
+            .await
+            .expect("Failed to commit finalize_send dbtx");
+    }
+
+    /// Same as [`Self::finalize_send`], inside the caller's database
+    /// transaction. `dbtx` must be isolated to this module (see
+    /// [`DatabaseTransaction::with_prefix_module_id`]); the daemon's LDK event
+    /// loop uses this to commit the terminal atomically with its
+    /// once-per-event marker.
+    pub async fn finalize_send_dbtx(
+        &self,
+        dbtx: &mut DatabaseTransaction<'_>,
+        operation_id: OperationId,
+        contract: OutgoingContract,
+        outpoint: OutPoint,
+        outcome: Result<([u8; 32], Amount), Cancelled>,
+    ) {
+        match outcome {
+            Ok((preimage, ln_fee)) => {
+                let client_input = ClientInput::<LightningInput> {
+                    input: LightningInput::V0(LightningInputV0::Outgoing(
+                        outpoint,
+                        OutgoingWitness::Claim(preimage),
+                    )),
+                    amounts: Amounts::new_bitcoin(contract.amount),
+                    keys: vec![self.keypair],
+                };
+
+                let inputs = self
+                    .client_ctx
+                    .make_client_inputs(ClientInputBundle::new_no_sm(vec![client_input]));
+
+                self.client_ctx
+                    .finalize_and_submit_transaction_dbtx(
+                        dbtx,
+                        operation_id,
+                        LightningCommonInit::KIND.as_str(),
+                        |_| GatewayOperationMetaV2::role(GatewayOperationRoleV2::Send),
+                        TransactionBuilder::new().with_inputs(inputs),
+                    )
+                    .await
+                    .expect("terminal transaction for an outgoing contract cannot fail to build");
+
+                self.client_ctx
+                    .log_event_for_operation(
+                        dbtx,
+                        operation_id,
+                        OutgoingPaymentSucceeded {
+                            payment_image: contract.payment_image.clone(),
+                            target_federation: None,
+                            preimage: Some(preimage),
+                            ln_fee: Some(ln_fee),
+                        },
+                    )
+                    .await;
+            }
+            Err(error) => {
+                let signature = self.keypair.sign_schnorr(contract.forfeit_message());
+
+                self.client_ctx
+                    .log_event_for_operation(
+                        dbtx,
+                        operation_id,
+                        OutgoingPaymentFailed {
+                            payment_image: contract.payment_image.clone(),
+                            error,
+                            forfeit_signature: Some(signature),
+                        },
+                    )
+                    .await;
             }
         }
     }

@@ -121,7 +121,7 @@ async fn complete_circuit(
     } = circuit;
 
     context
-        .gateway
+        .gateway()
         .complete_htlc(InterceptPaymentResponse {
             incoming_chan_id,
             htlc_id,
