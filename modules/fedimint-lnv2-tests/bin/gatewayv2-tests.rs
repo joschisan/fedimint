@@ -136,6 +136,32 @@ async fn test_gateway_registration(dev_fed: &DevJitFed) -> anyhow::Result<()> {
 
     let gateways = [gw_lnd.addr.clone(), gw_v2.addr.clone()];
 
+    // devimint seeds the guardians' lnv2 gateway lists with every gateway it
+    // spawns. This test asserts the exact contents of those lists, and that
+    // each add and remove it performs is the call that changed them, so it
+    // starts from an empty list rather than relaxing those assertions.
+    let seeded = cmd!(client, "module", "lnv2", "gateways", "list")
+        .out_json()
+        .await?
+        .as_array()
+        .expect("JSON Value is not an array")
+        .iter()
+        .map(|gateway| {
+            gateway
+                .as_str()
+                .expect("JSON Value is not a string")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+
+    for gateway in &seeded {
+        for peer in 0..dev_fed.fed().await?.members.len() {
+            // A seeded gateway is not necessarily registered with every peer,
+            // so this removes where present instead of asserting it did.
+            remove_gateway(&client, peer, gateway).await?;
+        }
+    }
+
     info!("Testing registration of gateways...");
 
     for gateway in &gateways {

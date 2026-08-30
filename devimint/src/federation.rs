@@ -978,7 +978,14 @@ impl Federation {
                 gateways
                     .iter()
                     .enumerate()
-                    .filter(|(_, gw)| gw.gatewayd_version >= *VERSION_0_11_0_ALPHA)
+                    // `payment-log` is a v1 `gateway-cli` route; the gatewaydv2
+                    // daemon rejects it as an invalid request. The balance poll
+                    // below still waits for the deposit to be claimed there, so
+                    // v2 gateways skip the deterministic wait rather than block
+                    // on a command they do not implement.
+                    .filter(|(_, gw)| {
+                        !gw.v2 && gw.gatewayd_version >= *VERSION_0_11_0_ALPHA
+                    })
                     .map(|(i, gw)| {
                         let fed_id = fed_id.clone();
                         let gateway_name = gw.gw_name.clone();
