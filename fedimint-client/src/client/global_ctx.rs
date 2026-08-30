@@ -129,6 +129,7 @@ impl IGlobalClientContext for ModuleGlobalClientContext {
                 &mut dbtx,
                 kind,
                 module_kind.map(|m| (m, self.module_instance_id)),
+                None,
                 serde_json::to_vec(&payload).expect("Serialization can't fail"),
                 persist,
             )

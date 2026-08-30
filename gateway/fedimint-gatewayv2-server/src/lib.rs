@@ -362,6 +362,14 @@ impl AppState {
             .keypair
             .public_key();
 
+        // This route is public and unauthenticated, and both fees come straight
+        // from operator flags without passing a limit check, so their sum must
+        // not be able to panic here.
+        let send_fee_default = self
+            .routing_fee
+            .checked_add(self.send_fee)
+            .context("The configured routing and send fees cannot be added")?;
+
         Ok(Some(RoutingInfo {
             lightning_public_key: self.node.node_id(),
             lightning_alias: Some(self.node.node_alias().map_or_else(
@@ -369,7 +377,7 @@ impl AppState {
                 |alias| alias.to_string(),
             )),
             module_public_key,
-            send_fee_default: self.routing_fee + self.send_fee,
+            send_fee_default,
             // The base fee ensures that the gateway does not loose sats sending the payment due
             // to fees paid on the transaction claiming the outgoing contract or
             // subsequent transactions spending the newly issued ecash

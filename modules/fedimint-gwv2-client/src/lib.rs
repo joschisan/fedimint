@@ -990,7 +990,7 @@ impl GatewayClientModuleV2 {
                         dbtx,
                         operation_id,
                         LightningCommonInit::KIND.as_str(),
-                        |_| GatewayOperationMetaV2,
+                        |_| GatewayOperationMetaV2::role(GatewayOperationRoleV2::Send),
                         TransactionBuilder::new().with_inputs(inputs),
                     )
                     .await
