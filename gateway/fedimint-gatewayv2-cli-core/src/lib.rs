@@ -91,6 +91,9 @@ pub struct LdkBalancesResponse {
     /// The share of the on-chain wallet we can spend right now: sufficiently
     /// confirmed, minus the anchor reserve below.
     pub spendable_onchain_balance_sat: u64,
+    /// What we could claim across all channels, including the timelocked side
+    /// of a channel that has already been closed.
+    pub total_lightning_balance_sat: u64,
     /// On-chain funds withheld so we can always bump a channel's anchor output
     /// to get its force-close transaction confirmed.
     pub total_anchor_channels_reserve_sat: u64,
@@ -102,12 +105,6 @@ pub struct LdkBalancesResponse {
     /// summed. Sits below the outbound capacity, which one payment cannot
     /// exhaust.
     pub total_next_outbound_htlc_limit_sat: u64,
-    /// What we could claim across all channels, including the timelocked side
-    /// of a channel that has already been closed.
-    pub total_lightning_balance_sat: u64,
-    /// Funds from closed channels that are on their way back to the on-chain
-    /// wallet but are not swept into it yet.
-    pub total_pending_closure_balance_sat: u64,
 }
 
 // --- /ldk/onchain/receive ---

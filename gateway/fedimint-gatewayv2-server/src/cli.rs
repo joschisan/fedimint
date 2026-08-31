@@ -24,10 +24,10 @@ use fedimint_gatewayv2_cli_core as cli_core;
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule as MintV2ClientModule;
 use hex::ToHex as _;
+use ldk_node::UserChannelId;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
-use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use serde_json::{Value, json};
 use tokio::net::UnixListener;
@@ -171,31 +171,14 @@ async fn ldk_balances(State(state): State<AppState>) -> Result<Json<Value>, Gate
         .map(|channel| channel.next_outbound_htlc_limit_msat / 1000)
         .sum();
 
-    let total_pending_closure_balance_sat = balances
-        .pending_balances_from_channel_closures
-        .iter()
-        .map(|balance| match balance {
-            PendingSweepBalance::PendingBroadcast {
-                amount_satoshis, ..
-            }
-            | PendingSweepBalance::BroadcastAwaitingConfirmation {
-                amount_satoshis, ..
-            }
-            | PendingSweepBalance::AwaitingThresholdConfirmations {
-                amount_satoshis, ..
-            } => *amount_satoshis,
-        })
-        .sum();
-
     Ok(Json(json!(cli_core::LdkBalancesResponse {
         total_onchain_balance_sat: balances.total_onchain_balance_sats,
         spendable_onchain_balance_sat: balances.spendable_onchain_balance_sats,
         total_anchor_channels_reserve_sat: balances.total_anchor_channels_reserve_sats,
+        total_lightning_balance_sat: balances.total_lightning_balance_sats,
         total_inbound_capacity_sat,
         total_outbound_capacity_sat,
         total_next_outbound_htlc_limit_sat,
-        total_lightning_balance_sat: balances.total_lightning_balance_sats,
-        total_pending_closure_balance_sat,
     })))
 }
 
