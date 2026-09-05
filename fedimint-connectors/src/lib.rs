@@ -952,7 +952,7 @@ impl<T: ?Sized> ConnectionState<T> {
                 backoff: custom_backoff(
                     // First time connections start quick
                     Duration::from_millis(5),
-                    Duration::from_secs(30),
+                    Duration::from_secs(10),
                     None,
                 ),
             }),
@@ -966,14 +966,12 @@ impl<T: ?Sized> ConnectionState<T> {
         Self {
             connection: OnceCell::new(),
             inner: std::sync::Mutex::new(ConnectionStateInner {
-                // set the attempts to 1, indicating that
-                fresh: false,
-                backoff: custom_backoff(
-                    // Connections after a disconnect start with some minimum delay
-                    Duration::from_millis(500),
-                    Duration::from_secs(30),
-                    None,
-                ),
+                // The first attempt after a disconnect is immediate: the
+                // connection was found dead when a request needed it, so
+                // waiting only adds to the stall. Repeated failures back off
+                // from here.
+                fresh: true,
+                backoff: custom_backoff(Duration::from_millis(500), Duration::from_secs(10), None),
             }),
             merge_connection_attempts_chan: std::sync::Mutex::new(broadcast::channel(1).1),
         }

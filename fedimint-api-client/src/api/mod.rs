@@ -33,7 +33,7 @@ use fedimint_core::net::guardian_metadata::SignedGuardianMetadata;
 use fedimint_core::session_outcome::{SessionOutcome, SessionStatus};
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::transaction::{Transaction, TransactionSubmissionOutcome};
-use fedimint_core::util::backoff_util::api_networking_backoff;
+use fedimint_core::util::backoff_util::api_request_backoff;
 use fedimint_core::util::{FmtCompact as _, SafeUrl};
 use fedimint_core::{
     ChainId, NumPeersExt, PeerId, TransactionId, apply, async_trait_maybe_send, dyn_newtype_define,
@@ -271,7 +271,7 @@ pub trait FederationApiExt: IRawFederationApi {
                 async move {
                     let response = util::retry(
                         format!("api-request-{method}-{peer}"),
-                        api_networking_backoff(),
+                        api_request_backoff(),
                         || async {
                             self.request_single_peer(method.clone(), params.clone(), *peer)
                                 .await
@@ -304,7 +304,7 @@ pub trait FederationApiExt: IRawFederationApi {
                             async move {
                                 let response = util::retry(
                                     format!("api-request-{method}-{peer}"),
-                                    api_networking_backoff(),
+                                    api_request_backoff(),
                                     || async {
                                         self.request_single_peer(
                                             method.clone(),

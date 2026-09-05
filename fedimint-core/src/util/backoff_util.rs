@@ -61,3 +61,12 @@ pub fn fibonacci_max_one_hour() -> FibonacciBackoff {
 pub fn api_networking_backoff() -> FibonacciBackoff {
     custom_backoff(Duration::from_millis(250), Duration::from_secs(10), None)
 }
+
+/// [`api_networking_backoff`] with an immediate first retry.
+///
+/// A request that failed because its connection turned out to be dead should
+/// go straight back out on a fresh one; only a second failure says the peer
+/// itself is struggling and warrants a delay.
+pub fn api_request_backoff() -> impl Backoff {
+    std::iter::once(Duration::ZERO).chain(api_networking_backoff())
+}
