@@ -28,7 +28,7 @@ use fedimint_metrics::HistogramExt as _;
 use reqwest::Method;
 use serde_json::Value;
 use tokio::sync::{OnceCell, SetOnce, broadcast, watch};
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::error::ServerError;
 use crate::metrics::{CONNECTION_ATTEMPTS_TOTAL, CONNECTION_DURATION_SECONDS};
@@ -784,7 +784,10 @@ impl<T: IConnection + ?Sized> ConnectionPool<T> {
                 if let Some(existing_conn) = entry_arc.connection.get()
                     && !existing_conn.is_connected()
                 {
-                    trace!(
+                    // Info rather than trace: this is the one place a
+                    // silently dead connection becomes visible, and a
+                    // reconnect is rare enough to be worth a line.
+                    info!(
                         target: LOG_CLIENT_NET_API,
                         %url,
                         "Existing connection is disconnected, removing from pool"

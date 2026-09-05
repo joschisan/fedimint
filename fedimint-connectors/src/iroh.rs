@@ -86,7 +86,7 @@ use iroh::{Endpoint, NodeAddr, NodeId, PublicKey};
 use reqwest::{Method, StatusCode};
 use serde_json::Value;
 use tokio::sync::watch;
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use super::{DynGuaridianConnection, IGuardianConnection, ServerError, ServerResult};
 use crate::{Connectivity, DynGatewayConnection, IConnection, IGatewayConnection, IrohPeerInfo};
@@ -613,7 +613,7 @@ impl IrohConnector {
         node_id: NodeId,
         node_addr: Option<NodeAddr>,
     ) -> ServerResult<Connection> {
-        trace!(target: LOG_NET_IROH, %node_id, "Creating new stable connection");
+        info!(target: LOG_NET_IROH, %node_id, "Creating new stable connection");
         let conn = match node_addr.clone() {
             Some(node_addr) => {
                 trace!(target: LOG_NET_IROH, %node_id, "Using a connectivity override for connection");
@@ -648,7 +648,7 @@ impl IrohConnector {
 
         let endpoint_next = endpoint_next.clone();
 
-        trace!(target: LOG_NET_IROH, %node_id, "Creating new next connection");
+        info!(target: LOG_NET_IROH, %node_id, "Creating new next connection");
         let conn = match node_addr.clone() {
             Some(node_addr) => {
                 trace!(target: LOG_NET_IROH, %node_id, "Using a connectivity override for connection");

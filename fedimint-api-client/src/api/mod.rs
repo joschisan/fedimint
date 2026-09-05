@@ -49,7 +49,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 use crate::metrics::{CLIENT_API_REQUEST_DURATION_SECONDS, CLIENT_API_REQUESTS_TOTAL};
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
@@ -313,6 +313,16 @@ pub trait FederationApiExt: IRawFederationApi {
                                         )
                                         .await
                                         .inspect_err(|err| {
+                                            // Every failed attempt is retried with backoff,
+                                            // so a stalled request shows up here as the
+                                            // error that stalled it, timestamped.
+                                            info!(
+                                                target: LOG_CLIENT_NET_API,
+                                                %peer,
+                                                %method,
+                                                err = %err.fmt_compact(),
+                                                "Peer request failed, retrying"
+                                            );
                                             if err.is_unusual() {
                                                 debug!(target: LOG_CLIENT_NET_API, err = %err.fmt_compact(), "Unusual peer error");
                                             }
