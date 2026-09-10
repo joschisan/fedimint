@@ -264,15 +264,12 @@ fn build_ldk_node(
     scoring_fee_params.anti_probing_penalty_msat *= opts.scorer_penalty_factor;
     node_builder.set_scoring_fee_params(scoring_fee_params);
 
-    // The default peer-to-peer gossip sync takes hours to assemble a usable
-    // network graph on a fresh node, and every routed payment fails with
-    // `RouteNotFound` until it does — pull snapshots from the LDK project's
-    // Rapid Gossip Sync server instead. There is no RGS server for regtest,
-    // where the two-node devimint topology needs no gossip anyway.
+    // Gossip comes from our peers over the p2p network, the ldk-node default.
+    // Rapid Gossip Sync was dropped: its server only reminds a client of a
+    // channel that has been quiet for six days, every fifth day, while the
+    // client prunes anything it has not heard about for seven, so static
+    // channels kept falling out of the graph and the cheapest routes with them.
     if opts.network == Network::Bitcoin {
-        node_builder
-            .set_gossip_source_rgs("https://rapidsync.lightningdevkit.org/snapshot".to_string());
-
         // Keep the pathfinding scorer warm by probing toward the network's
         // most-connected nodes, so the gateway can route before a user's
         // invoice arrives. Timing uses the upstream defaults (10s interval,
