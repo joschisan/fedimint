@@ -1,4 +1,5 @@
 use std::pin::pin;
+use std::sync::Arc;
 
 use anyhow::ensure;
 use async_stream::stream;
@@ -105,14 +106,21 @@ async fn issue_ecash(client: &ClientHandleArc, amount: Amount) -> anyhow::Result
 }
 
 fn fixtures() -> Fixtures {
-    let fixtures = Fixtures::new_primary(MintClientInit, MintInit);
+    let fixtures = Fixtures::new_primary(MintClientInit::default(), MintInit);
 
     fixtures.with_module(DummyClientInit, DummyInit)
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn send_and_receive() -> anyhow::Result<()> {
-    let fixtures = fixtures();
+    // Both accounts' recoveries reuse the same verified federation history.
+    let fixtures = Fixtures::new_primary(
+        MintClientInit {
+            shared_api: Some(Arc::default()),
+        },
+        MintInit,
+    )
+    .with_module(DummyClientInit, DummyInit);
     let fed = fixtures.new_fed_not_degraded().await;
 
     let client_send = fed
@@ -990,7 +998,7 @@ mod db {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_client_db_migrations() -> anyhow::Result<()> {
         let _ = TracingSetup::default().init();
-        let module = DynClientModuleInit::from(MintClientInit);
+        let module = DynClientModuleInit::from(MintClientInit::default());
 
         validate_migrations_client::<_, _, MintClientModule>(
             module,

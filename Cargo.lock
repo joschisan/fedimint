@@ -5173,6 +5173,7 @@ dependencies = [
  "serde",
  "strum 0.27.1",
  "strum_macros 0.27.1",
+ "tokio",
  "tracing",
 ]
 
