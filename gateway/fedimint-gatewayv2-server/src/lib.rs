@@ -79,6 +79,11 @@ pub const DB_FILE: &str = "gatewayd.db";
 /// running in LDK mode.
 pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 
+/// The fewest blocks an inbound HTLC may leave until LDK fails it back for
+/// the gateway to fund the incoming contract and the federation to decrypt
+/// its preimage.
+const CLAIM_DEADLINE_MINIMUM_BLOCKS: u32 = 42;
+
 /// Error type for the gateway's HTTP and admin-socket handlers. Wraps
 /// `anyhow::Error` and responds with `500` plus the error message. The public
 /// routes are the LNv2 protocol, whose clients only branch on success vs
@@ -949,11 +954,17 @@ impl AppState {
             ldk_node::Event::PaymentClaimable {
                 payment_hash,
                 claimable_amount_msat,
+                claim_deadline,
                 ..
             } => {
                 let payment_hash = sha256::Hash::from_byte_array(payment_hash.0);
-                self.handle_payment_claimable(dbtx, payment_hash, claimable_amount_msat)
-                    .await;
+                self.handle_payment_claimable(
+                    dbtx,
+                    payment_hash,
+                    claimable_amount_msat,
+                    claim_deadline,
+                )
+                .await;
             }
             ldk_node::Event::PaymentSuccessful {
                 payment_hash,
@@ -987,9 +998,10 @@ impl AppState {
     }
 
     /// Handles an inbound Lightning payment that the LDK node reports as
-    /// claimable. If it matches the issued invoice's amount, submits the
-    /// incoming-contract funding tx and spawns the federation-local Receive
-    /// state machine (via [`start_receive_dbtx`]); on amount mismatch or
+    /// claimable. If it matches the issued invoice's amount and leaves enough
+    /// blocks until its claim deadline, submits the incoming-contract funding
+    /// tx and spawns the federation-local Receive state machine (via
+    /// [`start_receive_dbtx`]); on amount mismatch, a deadline too close or
     /// funding failure (e.g. insufficient gateway liquidity) fails the HTLC
     /// back so the sender is refunded promptly.
     ///
@@ -1006,6 +1018,7 @@ impl AppState {
         dbtx: &mut DatabaseTransaction<'_>,
         payment_hash: sha256::Hash,
         amount_msat: u64,
+        claim_deadline: Option<u32>,
     ) {
         if dbtx
             .insert_entry(&ProcessedLdkEventKey(payment_hash.to_byte_array()), &())
@@ -1032,6 +1045,23 @@ impl AppState {
                 target: LOG_GATEWAY,
                 %payment_hash,
                 "Claimable payment amount does not match the issued invoice; failing HTLC"
+            );
+            self.fail_for_hash(payment_hash);
+            return;
+        }
+
+        let height = self.node.status().current_best_block.height;
+
+        // LDK fails the HTLC back at its claim deadline, so the contract
+        // funded below has to be decrypted before then; an HTLC without a
+        // known deadline or with too few blocks left is not worth funding.
+        if claim_deadline.is_none_or(|deadline| deadline < height + CLAIM_DEADLINE_MINIMUM_BLOCKS) {
+            warn!(
+                target: LOG_GATEWAY,
+                %payment_hash,
+                ?claim_deadline,
+                height,
+                "Claimable payment deadline is too close; failing HTLC"
             );
             self.fail_for_hash(payment_hash);
             return;
