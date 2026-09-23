@@ -201,7 +201,7 @@ fn main() -> anyhow::Result<()> {
             parts_per_million: opts.routing_fee_ppm,
         },
         analytics,
-        send_lock: Arc::new(Mutex::new(())),
+        contract_lock: Arc::new(Mutex::new(())),
     };
 
     // 5. Fire-and-forget every long-running task. Federation clients are

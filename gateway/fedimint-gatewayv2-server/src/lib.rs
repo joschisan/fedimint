@@ -168,10 +168,10 @@ pub struct AppState {
     /// client event logs on every startup (see [`analytics`]).
     pub analytics: analytics::Analytics,
 
-    /// Held by [`AppState::send`] from opening its database transaction until
-    /// it commits, so the outgoing contract row is only ever registered by one
-    /// request at a time.
-    pub send_lock: Arc<Mutex<()>>,
+    /// Held by [`AppState::send`] and [`AppState::receive`] from opening their
+    /// database transaction until it commits, so the contract rows for a
+    /// payment hash are only ever registered by one request at a time.
+    pub contract_lock: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -504,9 +504,20 @@ impl AppState {
         // The payment is dispatched below inside this transaction, so the row
         // registration and the dispatch must be observed as one step by every
         // other request for the same payment hash.
-        let send_guard = self.send_lock.lock().await;
+        let contract_guard = self.contract_lock.lock().await;
 
         let mut dbtx = self.gateway_db.begin_transaction().await;
+
+        // An invoice this gateway issued for the hash is only ever paid by the
+        // direct-swap branch below; any other invoice for it is refused.
+        if self.node.node_id() != invoice.get_payee_pub_key() {
+            ensure!(
+                dbtx.get_value(&IncomingContractKey(operation_id))
+                    .await
+                    .is_none(),
+                "An invoice for this payment hash was issued by this gateway"
+            );
+        }
 
         if let Some(existing_row) = dbtx
             .insert_entry(&OutgoingContractKey(operation_id), &row)
@@ -528,7 +539,7 @@ impl AppState {
             );
 
             drop(dbtx);
-            drop(send_guard);
+            drop(contract_guard);
 
             return Self::subscribe_send(&f1_client, operation_id).await;
         }
@@ -663,7 +674,7 @@ impl AppState {
 
         dbtx.commit_tx().await;
 
-        drop(send_guard);
+        drop(contract_guard);
 
         // --- Await the terminal event on the source federation ------------
 
@@ -766,6 +777,28 @@ impl AppState {
             }
         };
 
+        let operation_id = OperationId::from_encodable(&payment_hash);
+
+        let contract_guard = self.contract_lock.lock().await;
+
+        let mut dbtx = self.gateway_db.begin_transaction().await;
+
+        // The hash of an outgoing contract this gateway is paying cannot also
+        // be the hash of an invoice it issues.
+        ensure!(
+            dbtx.get_value(&OutgoingContractKey(operation_id))
+                .await
+                .is_none(),
+            "The payment hash is in use by an outgoing contract"
+        );
+
+        ensure!(
+            dbtx.get_value(&IncomingContractKey(operation_id))
+                .await
+                .is_none(),
+            "PaymentHash is already registered"
+        );
+
         let description = match &payload.description {
             Bolt11InvoiceDescription::Direct(description) => LdkBolt11InvoiceDescription::Direct(
                 Description::new(description.clone())
@@ -789,8 +822,6 @@ impl AppState {
 
         let invoice = Bolt11Invoice::from_str(&invoice.to_string()).map_err(|e| anyhow!("{e}"))?;
 
-        let operation_id = OperationId::from_encodable(&payment_hash);
-
         let row = IncomingContractRow {
             federation_id: payload.federation_id,
             contract: payload.contract,
@@ -798,19 +829,12 @@ impl AppState {
             amount: payload.amount,
         };
 
-        let mut dbtx = self.gateway_db.begin_transaction().await;
+        dbtx.insert_new_entry(&IncomingContractKey(operation_id), &row)
+            .await;
 
-        if dbtx
-            .insert_entry(&IncomingContractKey(operation_id), &row)
-            .await
-            .is_some()
-        {
-            bail!("PaymentHash is already registered");
-        }
+        dbtx.commit_tx().await;
 
-        dbtx.commit_tx_result()
-            .await
-            .map_err(|_| anyhow!("Payment hash is already registered"))?;
+        drop(contract_guard);
 
         Ok(invoice)
     }
