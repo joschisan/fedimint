@@ -61,7 +61,7 @@ use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
 use reqwest::StatusCode;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
 use crate::client::GatewayClientFactory;
@@ -167,6 +167,11 @@ pub struct AppState {
     /// SQLite mirror of the gwv2 payment events, wiped and rebuilt from the
     /// client event logs on every startup (see [`analytics`]).
     pub analytics: analytics::Analytics,
+
+    /// Held by [`AppState::send`] from opening its database transaction until
+    /// it commits, so the outgoing contract row is only ever registered by one
+    /// request at a time.
+    pub send_lock: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -496,6 +501,11 @@ impl AppState {
             invoice: payload.invoice.clone(),
         };
 
+        // The payment is dispatched below inside this transaction, so the row
+        // registration and the dispatch must be observed as one step by every
+        // other request for the same payment hash.
+        let send_guard = self.send_lock.lock().await;
+
         let mut dbtx = self.gateway_db.begin_transaction().await;
 
         if let Some(existing_row) = dbtx
@@ -516,6 +526,9 @@ impl AppState {
                 existing_row == row,
                 "Another outgoing contract is already registered for this invoice"
             );
+
+            drop(dbtx);
+            drop(send_guard);
 
             return Self::subscribe_send(&f1_client, operation_id).await;
         }
@@ -649,6 +662,8 @@ impl AppState {
         }
 
         dbtx.commit_tx().await;
+
+        drop(send_guard);
 
         // --- Await the terminal event on the source federation ------------
 

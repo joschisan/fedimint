@@ -40,7 +40,7 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::scoring::ProbabilisticScoringFeeParameters;
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
 use tikv_jemallocator::Jemalloc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
 #[cfg(not(any(target_env = "msvc", target_os = "ios", target_os = "android")))]
@@ -201,6 +201,7 @@ fn main() -> anyhow::Result<()> {
             parts_per_million: opts.routing_fee_ppm,
         },
         analytics,
+        send_lock: Arc::new(Mutex::new(())),
     };
 
     // 5. Fire-and-forget every long-running task. Federation clients are
