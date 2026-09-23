@@ -285,9 +285,10 @@ jsonrpsee-types = "0.24.8"
 jsonrpsee-wasm-client = "0.24.9"
 jsonrpsee-ws-client = { version = "0.24.9", default-features = false }
 # fedimint-0.7.0 plus a backport of upstream ldk-node's probing service
-# (lightningdevkit/ldk-node#815); switch back to crates.io once a release
-# containing the probing service ships.
-ldk-node = { package = "fedimint-ldk-node", git = "https://github.com/joschisan/ldk-node", rev = "2485057b976b4245a5caa5c3c94a9db87b114232" }
+# (lightningdevkit/ldk-node#815) and of the HashSet raw-mempool fix
+# (upstream 8c632e5, avoids an O(n²) cache prune on every bitcoind sync);
+# switch back to crates.io once a release containing both ships.
+ldk-node = { package = "fedimint-ldk-node", git = "https://github.com/joschisan/ldk-node", rev = "d1d46e8956da9e37090cade282592b46e2b252ed" }
 leptos = { version = "0.7.8", default-features = false }
 lightning = "0.2.0"
 lightning-invoice = { version = "0.34.0", features = ["std"] }

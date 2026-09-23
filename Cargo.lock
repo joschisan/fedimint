@@ -2412,7 +2412,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357422a457ccb850dc8f1c1680e0670079560feaad6c2e247e3f345c4fab8a3f"
 dependencies = [
  "heck 0.5.0",
- "indexmap 2.9.0",
+ "indexmap 1.9.3",
  "itertools 0.14.0",
  "proc-macro-crate",
  "proc-macro2",
@@ -2430,7 +2430,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caef6056a5788d05d173cdc3c562ac28ae093828f851f69378b74e4e3d578e41"
 dependencies = [
  "heck 0.5.0",
- "indexmap 2.9.0",
+ "indexmap 1.9.3",
  "itertools 0.14.0",
  "proc-macro-crate",
  "proc-macro2",
@@ -3971,7 +3971,7 @@ dependencies = [
 [[package]]
 name = "fedimint-ldk-node"
 version = "0.7.0"
-source = "git+https://github.com/joschisan/ldk-node?rev=2485057b976b4245a5caa5c3c94a9db87b114232#2485057b976b4245a5caa5c3c94a9db87b114232"
+source = "git+https://github.com/joschisan/ldk-node?rev=d1d46e8956da9e37090cade282592b46e2b252ed#d1d46e8956da9e37090cade282592b46e2b252ed"
 dependencies = [
  "base64 0.22.1",
  "bdk_chain",
@@ -6365,7 +6365,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.59.0",
 ]
 
 [[package]]
