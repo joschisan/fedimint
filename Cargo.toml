@@ -287,8 +287,10 @@ jsonrpsee-ws-client = { version = "0.24.9", default-features = false }
 # fedimint-0.7.0 plus a backport of upstream ldk-node's probing service
 # (lightningdevkit/ldk-node#815) and of the HashSet raw-mempool fix
 # (upstream 8c632e5, avoids an O(n²) cache prune on every bitcoind sync);
-# switch back to crates.io once a release containing both ships.
-ldk-node = { package = "fedimint-ldk-node", git = "https://github.com/joschisan/ldk-node", rev = "d1d46e8956da9e37090cade282592b46e2b252ed" }
+# switch back to crates.io once a release containing both ships. The fork
+# also lets `receive_for_hash` set the invoice's final CLTV expiry delta,
+# which upstream does not expose.
+ldk-node = { package = "fedimint-ldk-node", git = "https://github.com/joschisan/ldk-node", rev = "09fa7d259638cad366010697714cd1eb47181594" }
 leptos = { version = "0.7.8", default-features = false }
 lightning = "0.2.0"
 lightning-invoice = { version = "0.34.0", features = ["std"] }

@@ -56,6 +56,7 @@ use fedimint_lnv2_common::gateway_api::{
 use fedimint_lnv2_common::{Bolt11InvoiceDescription, LightningInvoice};
 use fedimint_logging::LOG_GATEWAY;
 use futures::StreamExt as _;
+use lightning::chain::channelmonitor::HTLC_FAIL_BACK_BUFFER;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
@@ -83,6 +84,13 @@ pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 /// the gateway to fund the incoming contract and the federation to decrypt
 /// its preimage.
 const CLAIM_DEADLINE_MINIMUM_BLOCKS: u32 = 42;
+
+/// The final CLTV expiry delta LDK enforces for the invoices the gateway
+/// issues: LDK's claim deadline is [`HTLC_FAIL_BACK_BUFFER`] blocks before
+/// the HTLC expires, so this leaves [`CLAIM_DEADLINE_MINIMUM_BLOCKS`] until
+/// then. The invoice itself requests three blocks more.
+const MIN_FINAL_CLTV_EXPIRY_DELTA: u16 =
+    (CLAIM_DEADLINE_MINIMUM_BLOCKS + HTLC_FAIL_BACK_BUFFER) as u16;
 
 /// Error type for the gateway's HTTP and admin-socket handlers. Wraps
 /// `anyhow::Error` and responds with `500` plus the error message. The public
@@ -817,11 +825,12 @@ impl AppState {
         let invoice = self
             .node
             .bolt11_payment()
-            .receive_for_hash(
+            .receive_for_hash_with_min_final_cltv_expiry_delta(
                 payload.amount.msats,
                 &description,
                 payload.expiry_secs,
                 PaymentHash(*payment_hash.as_byte_array()),
+                MIN_FINAL_CLTV_EXPIRY_DELTA,
             )
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 
