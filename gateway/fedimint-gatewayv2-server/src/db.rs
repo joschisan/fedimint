@@ -1,6 +1,7 @@
+use bitcoin::hashes::sha256;
 use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::core::OperationId;
-use fedimint_core::db::Database;
+use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped as _};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::{Amount, OutPoint, impl_db_lookup, impl_db_record};
 use fedimint_eventlog::EventLogId;
@@ -35,10 +36,13 @@ enum DbKeyPrefix {
     /// are retained so in-flight payments settle and it can be re-enabled.
     DisabledFederation = 0x03,
     /// `OperationId -> OutgoingContractRow` for outgoing (send) contracts the
-    /// gateway is paying. Keyed by `OperationId::from_encodable(payment_hash)`.
-    /// Looked up by the LDK `PaymentSuccessful`/`PaymentFailed` handlers to
-    /// finalize external sends, and by the receive trailer to finalize direct
-    /// swaps.
+    /// gateway is paying. Keyed by the operation derived from the contract
+    /// id, so every contract a sender submits is its own row with its own
+    /// events, and a contract is funded once: the forfeit signature is over
+    /// the contract, not its funding, so a second funding is refused rather
+    /// than paid or forfeited. Resolved through [`DbKeyPrefix::PaymentHash`]
+    /// by the LDK `PaymentSuccessful`/`PaymentFailed` handlers to finalize
+    /// external sends, and by the receive trailer to finalize direct swaps.
     OutgoingContract = 0x04,
     /// `OperationId -> IncomingContractRow` for registered incoming (receive)
     /// contracts. Keyed by `OperationId::from_encodable(payment_hash)`. Looked
@@ -52,6 +56,13 @@ enum DbKeyPrefix {
     /// trailer. Advanced past each dispatched event; a crashed trailer just
     /// re-dispatches idempotently from the persisted cursor on restart.
     TrailerCursor = 0x07,
+    /// `sha256::Hash -> OperationId`: the one payment attempt an invoice's
+    /// hash ever gets at this gateway, the outgoing contract whose settlement
+    /// pays it. Written when the attempt is kicked off, never removed, so a
+    /// later funding of the same invoice is refunded on arrival and a hash
+    /// never has two payments in flight. LDK events and receive outcomes,
+    /// which carry the hash, resolve their outgoing contract through it.
+    PaymentHash = 0x08,
 }
 
 /// Raw key prefix of a federation's client database within the gateway
@@ -119,6 +130,29 @@ impl_db_record!(
     value = OutgoingContractRow,
     db_prefix = DbKeyPrefix::OutgoingContract,
 );
+
+#[derive(Debug, Encodable, Decodable)]
+pub struct PaymentHashKey(pub sha256::Hash);
+
+impl_db_record!(
+    key = PaymentHashKey,
+    value = OperationId,
+    db_prefix = DbKeyPrefix::PaymentHash,
+);
+
+/// The outgoing contract whose settlement pays the invoice with
+/// `payment_hash`, with its operation, or none when the gateway holds no
+/// attempt for it, as for a payment the operator made through the CLI.
+pub async fn outgoing_contract<Cap: Send>(
+    dbtx: &mut DatabaseTransaction<'_, Cap>,
+    payment_hash: sha256::Hash,
+) -> Option<(OperationId, OutgoingContractRow)> {
+    let operation_id = dbtx.get_value(&PaymentHashKey(payment_hash)).await?;
+
+    dbtx.get_value(&OutgoingContractKey(operation_id))
+        .await
+        .map(|row| (operation_id, row))
+}
 
 /// Row describing a registered incoming (receive) contract and the invoice the
 /// gateway issued for it.

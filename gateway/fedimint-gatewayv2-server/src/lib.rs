@@ -35,7 +35,9 @@ use bitcoin::hashes::{Hash, sha256};
 use fedimint_client::ClientHandleArc;
 use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::core::{ModuleKind, OperationId};
-use fedimint_core::db::{Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped as _};
+use fedimint_core::db::{
+    Committable, Database, DatabaseTransaction, IDatabaseTransactionOpsCoreTyped as _,
+};
 use fedimint_core::encoding::Encodable as _;
 use fedimint_core::invite_code::InviteCode;
 use fedimint_core::secp256k1::schnorr::Signature;
@@ -69,8 +71,8 @@ use tracing::{info, warn};
 use crate::client::GatewayClientFactory;
 use crate::db::{
     ClientConfigKey, ClientConfigKeyPrefix, DisabledFederationKey, IncomingContractKey,
-    IncomingContractRow, OutgoingContractKey, OutgoingContractRow, ProcessedLdkEventKey,
-    client_db_prefix,
+    IncomingContractRow, OutgoingContractKey, OutgoingContractRow, PaymentHashKey,
+    ProcessedLdkEventKey, client_db_prefix, outgoing_contract,
 };
 
 /// Name of the gateway's database that is used for metadata and configuration
@@ -505,7 +507,11 @@ impl AppState {
             "The contract expiration is too close to forward the payment"
         );
 
-        let operation_id = OperationId::from_encodable(invoice.payment_hash());
+        // Every contract a sender submits is its own row and operation, and a
+        // contract is funded once: a forfeit signature releases every funding
+        // of its contract, so a second funding would refund the first. The
+        // payment hash index below names the contract that pays the invoice.
+        let operation_id = OperationId::from_encodable(&payload.contract.contract_id());
 
         // --- Insert the outgoing-contract row + log the send-started ------
         // --- event on F1 (one tx); short-circuit on retry ------------------
@@ -524,63 +530,21 @@ impl AppState {
 
         let mut dbtx = self.gateway_db.begin_transaction().await;
 
-        // An invoice this gateway issued for the hash is only ever paid by the
-        // direct-swap branch below. LDK would refuse any other invoice for it
-        // as a duplicate, but the LDK event marker is keyed by payment hash
-        // and shared by inbound and outbound events, and an outgoing row for
-        // the hash would mark its receive as a direct swap, so the send is
-        // cancelled before it registers anything.
-        if self.node.node_id() != invoice.get_payee_pub_key()
-            && dbtx
-                .get_value(&IncomingContractKey(operation_id))
-                .await
-                .is_some()
-        {
-            let f1_client_dbtx = dbtx.to_ref_with_prefix(client_db_prefix(&payload.federation_id));
-
-            let mut f1_module_dbtx = f1_client_dbtx
-                .with_prefix_module_id(f1_module.id)
-                .0
-                .into_nc();
-
-            f1_module
-                .finalize_send_dbtx(
-                    &mut f1_module_dbtx,
-                    operation_id,
-                    payload.contract,
-                    payload.outpoint,
-                    Err(Cancelled::LightningRpcError(
-                        "An invoice for this payment hash was issued by this gateway".to_string(),
-                    )),
-                )
-                .await;
-
-            drop(f1_module_dbtx);
-
-            dbtx.commit_tx().await;
-
-            drop(contract_guard);
-
-            return Self::subscribe_send(&f1_client, operation_id).await;
-        }
-
         if let Some(existing_row) = dbtx
             .insert_entry(&OutgoingContractKey(operation_id), &row)
             .await
         {
-            // A previous request already owns this payment; drop the
+            // A previous request already owns this contract; drop the
             // re-insert and await its terminal.
             dbtx.ignore_uncommitted();
 
-            // Only the request that funded the registered contract may await
-            // its terminal. The operation is keyed by the payment hash, so a
-            // *different* contract for the same invoice lands here too, and the
-            // terminal it would be handed carries a forfeit signature over the
-            // registered contract, which cannot settle it. Refuse rather than
-            // answer for a contract the gateway never took on.
+            // A second funding of the contract gets neither a payment nor a
+            // signature: its sender refunds it with the signature the first
+            // funding received, or waits out its expiration while the first
+            // is paid.
             ensure!(
-                existing_row == row,
-                "Another outgoing contract is already registered for this invoice"
+                existing_row.outpoint == payload.outpoint,
+                "The contract already has a funding"
             );
 
             drop(dbtx);
@@ -611,81 +575,89 @@ impl AppState {
                 .await;
         }
 
-        // --- Direct-swap vs external LN ------------------------------------
+        let started = self
+            .start_payment(&mut dbtx, &payload, &invoice, amount, max_fee, max_delay)
+            .await;
 
-        if self.node.node_id() == invoice.get_payee_pub_key() {
-            // Direct swap: the invoice was issued by this gateway, so a
-            // registered incoming contract is the payment's target. Fund it;
-            // the receive trailer finalizes the send once the receive settles.
-            // Every failure past this point cancels the send, since the
-            // contract is funded and settles only through the gateway.
-            let start_receive = 'swap: {
-                // An invoice of our own node that no receive registered, as
-                // one the operator issued through the CLI.
-                let Some(incoming_row) = dbtx.get_value(&IncomingContractKey(operation_id)).await
-                else {
-                    break 'swap Err(anyhow!("No contract is registered for this payment hash"));
-                };
+        if let Err(error) = started {
+            let f1_client_dbtx = dbtx.to_ref_with_prefix(client_db_prefix(&payload.federation_id));
 
-                if incoming_row.amount.msats != amount {
-                    break 'swap Err(anyhow!("Direct-swap amount mismatch"));
-                }
+            let mut f1_module_dbtx = f1_client_dbtx
+                .with_prefix_module_id(f1_module.id)
+                .0
+                .into_nc();
 
-                let f2_client = self
-                    .select_client(incoming_row.federation_id)
-                    .await
-                    .expect("Direct-swap target federation not connected");
+            f1_module
+                .finalize_send_dbtx(
+                    &mut f1_module_dbtx,
+                    operation_id,
+                    payload.contract,
+                    payload.outpoint,
+                    Err(error),
+                )
+                .await;
+        }
 
-                let f2_module = f2_client
-                    .get_first_module::<GatewayClientModuleV2>()
-                    .expect("Must have client module");
+        dbtx.commit_tx().await;
 
-                let client_operation_id = OperationId::from_encodable(&incoming_row.contract);
+        drop(contract_guard);
 
-                // The contract is funded once, however its invoice is paid; a
-                // contract an inbound HTLC funded has nothing left to swap to.
-                if f2_client.operation_exists(client_operation_id).await {
-                    break 'swap Err(anyhow!("The contract is already funded"));
-                }
+        // --- Await the terminal event on the source federation ------------
 
-                let f2_client_dbtx =
-                    dbtx.to_ref_with_prefix(client_db_prefix(&incoming_row.federation_id));
+        Self::subscribe_send(&f1_client, operation_id).await
+    }
 
-                let mut f2_module_dbtx = f2_client_dbtx
-                    .with_prefix_module_id(f2_module.id)
-                    .0
-                    .into_nc();
+    /// Kicks off the payment of an outgoing contract whose row and send-started
+    /// event are written: an LN send via LDK or a direct-swap receive on the
+    /// target federation. An invoice gets one attempt: a further contract for
+    /// a payment hash the gateway has taken on fails here and is refunded,
+    /// which is safe because the forfeit signature releases only the funding
+    /// it names. A direct swap takes the invoice on once it funds the
+    /// contract, and an invoice whose contract is funded has none left to
+    /// swap to. Every error cancels the send, since the contract settles only
+    /// through the gateway.
+    async fn start_payment(
+        &self,
+        dbtx: &mut DatabaseTransaction<'_, Committable>,
+        payload: &SendPaymentPayload,
+        invoice: &Bolt11Invoice,
+        amount: u64,
+        max_fee: Amount,
+        max_delay: u64,
+    ) -> std::result::Result<(), Cancelled> {
+        let payment_hash = *invoice.payment_hash();
 
-                f2_module
-                    .start_receive_dbtx(
-                        &mut f2_module_dbtx,
-                        client_operation_id,
-                        incoming_row.contract,
-                        amount,
-                    )
-                    .await
-            };
+        let operation_id = OperationId::from_encodable(&payload.contract.contract_id());
 
-            if let Err(err) = start_receive {
-                let f1_client_dbtx =
-                    dbtx.to_ref_with_prefix(client_db_prefix(&payload.federation_id));
+        if dbtx
+            .get_value(&PaymentHashKey(payment_hash))
+            .await
+            .is_some()
+        {
+            return Err(Cancelled::DuplicatePayment);
+        }
 
-                let mut f1_module_dbtx = f1_client_dbtx
-                    .with_prefix_module_id(f1_module.id)
-                    .0
-                    .into_nc();
+        let incoming_operation_id = OperationId::from_encodable(&payment_hash);
 
-                f1_module
-                    .finalize_send_dbtx(
-                        &mut f1_module_dbtx,
-                        operation_id,
-                        payload.contract,
-                        payload.outpoint,
-                        Err(Cancelled::FinalizationError(err.to_string())),
-                    )
-                    .await;
+        if self.node.node_id() != invoice.get_payee_pub_key() {
+            // An invoice this gateway issued for the hash is only ever paid by
+            // the direct swap below. LDK would refuse any other invoice for it
+            // as a duplicate, but the LDK event marker is keyed by payment
+            // hash and shared by inbound and outbound events, so the send is
+            // cancelled before it enters the index.
+            if dbtx
+                .get_value(&IncomingContractKey(incoming_operation_id))
+                .await
+                .is_some()
+            {
+                return Err(Cancelled::LightningRpcError(
+                    "An invoice for this payment hash was issued by this gateway".to_string(),
+                ));
             }
-        } else {
+
+            dbtx.insert_new_entry(&PaymentHashKey(payment_hash), &operation_id)
+                .await;
+
             // External LN payment, fire-and-forget: the outcome arrives via
             // the LDK `PaymentSuccessful` / `PaymentFailed` events.
             let params = lightning::routing::router::RouteParametersConfig {
@@ -697,34 +669,81 @@ impl AppState {
             // A duplicate is cancelled like any other refusal: LDK reports one
             // for any payment it holds under the hash, an invoice this gateway
             // issued included, and none of those settles this send.
-            if let Err(err) = self.node.bolt11_payment().send(&invoice, Some(params)) {
-                let f1_client_dbtx =
-                    dbtx.to_ref_with_prefix(client_db_prefix(&payload.federation_id));
-
-                let mut f1_module_dbtx = f1_client_dbtx
-                    .with_prefix_module_id(f1_module.id)
-                    .0
-                    .into_nc();
-
-                f1_module
-                    .finalize_send_dbtx(
-                        &mut f1_module_dbtx,
-                        operation_id,
-                        payload.contract,
-                        payload.outpoint,
-                        Err(Cancelled::LightningRpcError(err.to_string())),
-                    )
-                    .await;
-            }
+            return self
+                .node
+                .bolt11_payment()
+                .send(invoice, Some(params))
+                .map(|_| ())
+                .map_err(|error| Cancelled::LightningRpcError(error.to_string()));
         }
 
-        dbtx.commit_tx().await;
+        // Direct swap: the invoice was issued by this gateway, so a registered
+        // incoming contract is the payment's target. Fund it; the receive
+        // trailer finalizes the send once the receive settles. An invoice of
+        // our own node that no receive registered, as one the operator issued
+        // through the CLI, has no target.
+        let incoming_row = dbtx
+            .get_value(&IncomingContractKey(incoming_operation_id))
+            .await
+            .ok_or(Cancelled::FinalizationError(
+                "No contract is registered for this payment hash".to_string(),
+            ))?;
 
-        drop(contract_guard);
+        if incoming_row.amount.msats != amount {
+            return Err(Cancelled::FinalizationError(
+                "Direct-swap amount mismatch".to_string(),
+            ));
+        }
 
-        // --- Await the terminal event on the source federation ------------
+        let f2_client = self
+            .select_client(incoming_row.federation_id)
+            .await
+            .expect("Direct-swap target federation not connected");
 
-        Self::subscribe_send(&f1_client, operation_id).await
+        let f2_module = f2_client
+            .get_first_module::<GatewayClientModuleV2>()
+            .expect("Must have client module");
+
+        let client_operation_id = OperationId::from_encodable(&incoming_row.contract);
+
+        // The contract is funded once, however its invoice is paid; a contract
+        // an inbound HTLC funded has nothing left to swap to.
+        if f2_client.operation_exists(client_operation_id).await {
+            return Err(Cancelled::FinalizationError(
+                "The contract is already funded".to_string(),
+            ));
+        }
+
+        {
+            let f2_client_dbtx =
+                dbtx.to_ref_with_prefix(client_db_prefix(&incoming_row.federation_id));
+
+            let mut f2_module_dbtx = f2_client_dbtx
+                .with_prefix_module_id(f2_module.id)
+                .0
+                .into_nc();
+
+            f2_module
+                .start_receive_dbtx(
+                    &mut f2_module_dbtx,
+                    client_operation_id,
+                    incoming_row.contract,
+                    amount,
+                )
+                .await
+                .map_err(|error| {
+                    Cancelled::FinalizationError(format!(
+                        "Could not fund the direct swap's receive: {error}"
+                    ))
+                })?;
+        }
+
+        // Only a funded swap enters the hash index, so the receive outcome
+        // that settles this send is the one of the funding it started.
+        dbtx.insert_new_entry(&PaymentHashKey(payment_hash), &operation_id)
+            .await;
+
+        Ok(())
     }
 
     /// Tails the operation's event log on the source federation until the send
@@ -765,12 +784,7 @@ impl AppState {
         outpoint: fedimint_core::OutPoint,
         outcome: Result<([u8; 32], Amount), Cancelled>,
     ) {
-        let PaymentImage::Hash(payment_hash) = contract.payment_image else {
-            warn!(target: LOG_GATEWAY, "Outgoing contract has no payment hash");
-            return;
-        };
-
-        let operation_id = OperationId::from_encodable(&payment_hash);
+        let operation_id = OperationId::from_encodable(&contract.contract_id());
 
         self.select_client(federation_id)
             .await
@@ -832,10 +846,10 @@ impl AppState {
         // The hash of an outgoing contract this gateway is paying cannot also
         // be the hash of an invoice it issues.
         ensure!(
-            dbtx.get_value(&OutgoingContractKey(operation_id))
+            dbtx.get_value(&PaymentHashKey(payment_hash))
                 .await
                 .is_none(),
-            "The payment hash is in use by an outgoing contract"
+            "The payment hash already has a payment attempt"
         );
 
         ensure!(
@@ -1074,10 +1088,10 @@ impl AppState {
         let operation_id = OperationId::from_encodable(&payment_hash);
 
         // A hash an outgoing contract pays belongs to a direct swap, whose
-        // receive outcome the trailer settles against that send, in flight or
-        // cancelled, so an HTLC for it would fund the contract for nothing.
+        // receive outcome the trailer settles against that send, so an HTLC
+        // for it would fund the contract for nothing.
         if dbtx
-            .get_value(&OutgoingContractKey(operation_id))
+            .get_value(&PaymentHashKey(payment_hash))
             .await
             .is_some()
         {
@@ -1199,9 +1213,7 @@ impl AppState {
             return;
         }
 
-        let operation_id = OperationId::from_encodable(&payment_hash);
-
-        let Some(row) = dbtx.get_value(&OutgoingContractKey(operation_id)).await else {
+        let Some((operation_id, row)) = outgoing_contract(dbtx, payment_hash).await else {
             return;
         };
 

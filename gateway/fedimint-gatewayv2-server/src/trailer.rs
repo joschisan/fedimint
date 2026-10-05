@@ -7,11 +7,11 @@
 //! external side effect that makes the payment terminal from the outside
 //! world's point of view:
 //!
-//! - Direct swap (the daemon DB has an outgoing-contract row for this payment
-//!   hash): finalize the send on the source federation so the sender gets the
-//!   preimage (or forfeit signature).
-//! - External LN receive (no outgoing row): claim the upstream HTLC on the LDK
-//!   node with the revealed preimage, or fail it back so the LN sender is
+//! - Direct swap (the payment hash index names an outgoing contract): finalize
+//!   the send on the source federation so the sender gets the preimage (or
+//!   forfeit signature).
+//! - External LN receive (no outgoing contract): claim the upstream HTLC on the
+//!   LDK node with the revealed preimage, or fail it back so the LN sender is
 //!   refunded.
 //!
 //! This mirrors picomint's daemon-wide trailer but is scoped to one client
@@ -25,7 +25,6 @@ use bitcoin::hashes::sha256;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::Amount;
 use fedimint_core::config::FederationId;
-use fedimint_core::core::OperationId;
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped as _;
 use fedimint_eventlog::PersistedLogEntry;
 use fedimint_gwv2_client::Cancelled;
@@ -34,7 +33,7 @@ use fedimint_lnv2_common::contracts::PaymentImage;
 use fedimint_logging::LOG_GATEWAY;
 use tracing::info;
 
-use crate::db::{OutgoingContractKey, OutgoingContractRow, TrailerCursorKey};
+use crate::db::{OutgoingContractRow, TrailerCursorKey, outgoing_contract};
 use crate::{AppState, as_gw_event};
 
 const CHUNK_SIZE: u64 = 100;
@@ -93,17 +92,10 @@ async fn dispatch(state: &AppState, entry: &PersistedLogEntry) {
         return;
     };
 
-    let row = state
-        .gateway_db
-        .begin_transaction_nc()
-        .await
-        .get_value(&OutgoingContractKey(OperationId::from_encodable(
-            &payment_hash,
-        )))
-        .await;
+    let mut dbtx = state.gateway_db.begin_transaction_nc().await;
 
-    match row {
-        Some(row) => dispatch_direct_swap(state, row, outcome).await,
+    match outgoing_contract(&mut dbtx, payment_hash).await {
+        Some((_, row)) => dispatch_direct_swap(state, row, outcome).await,
         None => dispatch_ln_receive(state, payment_hash, outcome).await,
     }
 }

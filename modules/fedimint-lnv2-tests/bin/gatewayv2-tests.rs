@@ -64,6 +64,8 @@ enum Commands {
     InvoicePaidTwice,
     /// Send an invoice of another node for a hash the gateway registered
     SendOfRegisteredHash,
+    /// Two clients pay one invoice through the gateway
+    TwoClientsPayOneInvoice,
 }
 
 #[tokio::main]
@@ -100,12 +102,17 @@ async fn main() -> anyhow::Result<()> {
                     pegin_gateways(&dev_fed).await?;
                     test_send_of_registered_hash(&dev_fed).await?;
                 }
+                Some(Commands::TwoClientsPayOneInvoice) => {
+                    pegin_gateways(&dev_fed).await?;
+                    test_two_clients_pay_one_invoice(&dev_fed).await?;
+                }
                 None => {
                     // Run all tests if no subcommand is specified
                     test_gateway_registration(&dev_fed).await?;
                     test_payments(&dev_fed).await?;
                     test_invoice_paid_twice(&dev_fed).await?;
                     test_send_of_registered_hash(&dev_fed).await?;
+                    test_two_clients_pay_one_invoice(&dev_fed).await?;
                     test_lnurl_pay(&dev_fed).await?;
 
                     // `test_lnurl_recovery` is left out, here and from the
@@ -523,6 +530,47 @@ async fn test_send_of_registered_hash(dev_fed: &DevJitFed) -> anyhow::Result<()>
     gw_lnd.client().pay_invoice(invoice).await?;
 
     common::await_receive_claimed(&client, receive_op).await?;
+
+    Ok(())
+}
+
+/// Two clients fund a contract for the same invoice. The gateway pays the
+/// invoice for whichever request reaches it first and refunds the other on
+/// arrival, so exactly one of the two sends succeeds.
+async fn test_two_clients_pay_one_invoice(dev_fed: &DevJitFed) -> anyhow::Result<()> {
+    info!("Testing two clients paying one invoice through the gateway...");
+
+    let federation = dev_fed.fed().await?;
+
+    let client_a = federation
+        .new_joined_client("lnv2-two-clients-client-a")
+        .await?;
+
+    let client_b = federation
+        .new_joined_client("lnv2-two-clients-client-b")
+        .await?;
+
+    federation.pegin_client(10_000, &client_a).await?;
+
+    federation.pegin_client(10_000, &client_b).await?;
+
+    let gw_v2 = dev_fed.gw_v2().await?;
+    let lnd = dev_fed.lnd().await?;
+
+    let (invoice, _) = lnd.invoice(1_000_000).await?;
+
+    let (state_a, state_b) = try_join!(
+        common::send(&client_a, &gw_v2.addr, &invoice),
+        common::send(&client_b, &gw_v2.addr, &invoice),
+    )?;
+
+    let paid_a = matches!(state_a, FinalSendOperationState::Success(_));
+    let paid_b = matches!(state_b, FinalSendOperationState::Success(_));
+
+    ensure!(
+        paid_a != paid_b,
+        "exactly one of the two sends must succeed: a {state_a:?}, b {state_b:?}"
+    );
 
     Ok(())
 }
