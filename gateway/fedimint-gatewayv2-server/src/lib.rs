@@ -42,6 +42,7 @@ use fedimint_core::secp256k1::schnorr::Signature;
 use fedimint_core::time::{duration_since_epoch, now};
 use fedimint_core::util::{FmtCompact, FmtCompactAnyhow};
 use fedimint_core::{Amount, crit};
+use fedimint_gatewayv2_cli_core::FederationJoinError;
 use fedimint_gwv2_client::api::GatewayFederationApi as _;
 use fedimint_gwv2_client::events::{
     IncomingPaymentFailed, IncomingPaymentSucceeded, OutgoingPaymentFailed, OutgoingPaymentStarted,
@@ -92,8 +93,9 @@ const CLAIM_DEADLINE_MINIMUM_BLOCKS: u32 = 42;
 const MIN_FINAL_CLTV_EXPIRY_DELTA: u16 =
     (CLAIM_DEADLINE_MINIMUM_BLOCKS + HTLC_FAIL_BACK_BUFFER) as u16;
 
-/// Error type for the gateway's HTTP and admin-socket handlers. Wraps
-/// `anyhow::Error` and responds with `500` plus the error message. The public
+/// Error type for the gateway's public HTTP handlers; the admin socket's
+/// handlers fail with [`cli::CliError`] instead. Wraps `anyhow::Error` and
+/// responds with `500` plus the error message. The public
 /// routes are the LNv2 protocol, whose clients only branch on success vs
 /// failure, so there is no per-category status code or message redaction.
 #[derive(Debug)]
@@ -297,14 +299,11 @@ impl AppState {
     /// config returned by `preview`, so it can run at connect time without
     /// building a client. The network is intentionally not validated here; a
     /// mismatch surfaces later when the client is built and operates.
-    fn ensure_v2_modules(config: &ClientConfig) -> anyhow::Result<()> {
+    fn ensure_v2_modules(config: &ClientConfig) -> Result<(), FederationJoinError> {
         for kind in ["lnv2", "mintv2", "walletv2"] {
             let module_kind = ModuleKind::from_static_str(kind);
             if !config.modules.values().any(|m| m.kind == module_kind) {
-                return Err(anyhow!(
-                    "Federation {} is missing the required {kind} module",
-                    config.calculate_federation_id()
-                ));
+                return Err(FederationJoinError::MissingModule(kind.to_string()));
             }
         }
 
@@ -315,7 +314,7 @@ impl AppState {
     /// download the federation's client configuration and persist it so the
     /// client can be reconstructed (lazily, on first use) when restarting the
     /// gateway.
-    pub async fn connect_federation(&self, invite: InviteCode) -> anyhow::Result<()> {
+    pub async fn connect_federation(&self, invite: InviteCode) -> Result<(), FederationJoinError> {
         // If the config is already persisted, connecting simply re-enables the
         // federation; no need to re-download or build (the client loads lazily
         // on first use).
@@ -332,7 +331,11 @@ impl AppState {
 
         // Fresh connection: download and persist the config WITHOUT building a
         // client. The client (and its first join) happens lazily on first use.
-        let config = self.client_factory.download_config(&invite).await?;
+        let config = self
+            .client_factory
+            .download_config(&invite)
+            .await
+            .map_err(|e| FederationJoinError::ConfigUnavailable(e.to_string()))?;
 
         Self::ensure_v2_modules(&config)?;
 

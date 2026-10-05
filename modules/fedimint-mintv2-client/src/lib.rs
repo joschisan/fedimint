@@ -51,6 +51,7 @@ use fedimint_core::config::FederationId;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::db::{DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::error::ErrorCode;
 use fedimint_core::module::{
     AmountUnit, Amounts, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
 };
@@ -1301,7 +1302,7 @@ async fn download_slice(
     }
 }
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum SendECashError {
     #[error("We need to reissue notes but the client is offline")]
     Offline,
@@ -1311,7 +1312,7 @@ pub enum SendECashError {
     Failure,
 }
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum ReceiveECashError {
     #[error("The ECash is from a different federation")]
     WrongFederation,

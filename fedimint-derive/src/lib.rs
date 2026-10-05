@@ -444,3 +444,96 @@ fn derive_named_decode_block(
         }
     }
 }
+
+/// The variants of a `thiserror` enum as stable codes: `code()` is the
+/// variant name in `snake_case`, `codes()` pairs every code with the
+/// variant's `#[error("...")]` message as written. A variant marked
+/// `#[error(transparent)]` wraps another such enum and contributes that
+/// enum's codes in its place.
+#[proc_macro_derive(ErrorCode)]
+pub fn derive_error_code(input: TokenStream) -> TokenStream {
+    let DeriveInput { ident, data, .. } = parse_macro_input!(input);
+
+    let Data::Enum(DataEnum { variants, .. }) = data else {
+        return error(&ident, "ErrorCode can only be derived for enums").into();
+    };
+
+    let code_arms = variants.iter().map(|v| {
+        let variant = &v.ident;
+
+        if error_message(&v.attrs).is_some() {
+            let code = snake_case(&variant.to_string());
+            quote! { Self::#variant { .. } => #code, }
+        } else {
+            quote! {
+                Self::#variant(inner) => ::fedimint_core::error::ErrorCode::code(inner),
+            }
+        }
+    });
+
+    let codes = variants.iter().map(|v| {
+        if let Some(message) = error_message(&v.attrs) {
+            let code = snake_case(&v.ident.to_string());
+            quote! { codes.push((#code, #message)); }
+        } else {
+            let inner = transparent_inner(v);
+            quote! {
+                codes.extend(<#inner as ::fedimint_core::error::ErrorCode>::codes());
+            }
+        }
+    });
+
+    quote! {
+        impl ::fedimint_core::error::ErrorCode for #ident {
+            fn codes() -> Vec<(&'static str, &'static str)> {
+                let mut codes = Vec::new();
+                #(#codes)*
+                codes
+            }
+
+            fn code(&self) -> &'static str {
+                match self {
+                    #(#code_arms)*
+                }
+            }
+        }
+    }
+    .into()
+}
+
+/// The string literal of a variant's `#[error("...")]` attribute; `None`
+/// for `#[error(transparent)]`.
+fn error_message(attrs: &[Attribute]) -> Option<String> {
+    let attr = attrs
+        .iter()
+        .find(|attr| attr.path().is_ident("error"))
+        .expect("every variant of an ErrorCode enum carries an #[error] attribute");
+
+    match attr.parse_args::<Lit>() {
+        Ok(Lit::Str(message)) => Some(message.value()),
+        _ => None,
+    }
+}
+
+/// The one field a transparent variant wraps, whose codes it contributes.
+fn transparent_inner(variant: &Variant) -> &syn::Type {
+    match &variant.fields {
+        Fields::Unnamed(fields) if fields.unnamed.len() == 1 => &fields.unnamed[0].ty,
+        _ => panic!("a transparent ErrorCode variant wraps exactly one unnamed field"),
+    }
+}
+
+/// `InsufficientBalance` to `insufficient_balance`.
+fn snake_case(ident: &str) -> String {
+    let mut out = String::new();
+
+    for (i, c) in ident.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('_');
+        }
+
+        out.push(c.to_ascii_lowercase());
+    }
+
+    out
+}

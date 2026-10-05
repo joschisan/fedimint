@@ -6,57 +6,156 @@
 //! `fedimint-gatewayv2-cli-core` contract; picomint-style, each handler owns
 //! its logic and operates on the LDK node / database / federation clients
 //! directly, returning the matching cli-core response, which the CLI
-//! pretty-prints.
+//! pretty-prints. A handler refuses a request with [`CliError::rejected`]
+//! and one of cli-core's error enums, whose variant is the code the CLI
+//! prints; an anyhow error reaching a handler is a bug and surfaces as
+//! `internal`.
 
 use std::collections::HashMap;
-use std::str::FromStr as _;
+use std::fs::{Permissions, remove_file, set_permissions};
+use std::future::Future;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixListener as StdUnixListener;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::Context as _;
 use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::{Json, Router};
 use bitcoin::FeeRate;
 use fedimint_core::base32::{self, FEDIMINT_PREFIX};
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped as _;
-use fedimint_core::get_network_for_address;
+use fedimint_core::error::ErrorCode;
 use fedimint_gatewayv2_cli_core as cli_core;
+use fedimint_gatewayv2_cli_core::{
+    LdkError, LdkReceiveError, LdkSendError, MintReceiveError, MintSendError, NotJoinedError,
+    WalletSendError, WalletSendFeeError,
+};
 use fedimint_logging::LOG_GATEWAY;
 use fedimint_mintv2_client::MintClientModule as MintV2ClientModule;
+use fedimint_walletv2_client::WalletClientModule;
 use hex::ToHex as _;
 use ldk_node::UserChannelId;
-use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
-use serde_json::{Value, json};
+use serde::Serialize;
 use tokio::net::UnixListener;
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::db::{ClientConfigKey, DisabledFederationKey};
-use crate::{AppState, GatewayError, client};
+use crate::{AppState, analytics, client};
 
-/// Runs the admin server over a local Unix socket until the task is aborted (on
-/// process shutdown). Mirrors [`crate::public::run_public`] but over a
-/// `UnixListener`. Spawned as a fire-and-forget task from `main`.
-pub async fn run_cli(state: AppState) -> anyhow::Result<()> {
-    let socket_path = state.data_dir.join(cli_core::CLI_SOCKET_FILENAME);
-    // Remove any stale socket left by a previous run before binding.
-    let _ = std::fs::remove_file(&socket_path);
+/// What an admin handler fails with, and what the CLI prints: a status, a
+/// stable `code` the caller branches on and the `error` message it shows
+/// the operator. The body is `{"code": ..., "error": ...}`.
+#[derive(Debug, Serialize)]
+pub struct CliError {
+    #[serde(skip)]
+    pub status: StatusCode,
+    pub code: &'static str,
+    pub error: String,
+}
+
+impl std::fmt::Display for CliError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code, self.error)
+    }
+}
+
+impl CliError {
+    /// A request the daemon refuses for a reason the caller can act on: the
+    /// enum's variant is the code, its message the error. Every error a
+    /// handler returns on purpose goes through here, so the CLI's `--help`
+    /// can list the codes from the same enum. Takes the error by value so a
+    /// handler can pass it straight through `map_err`.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn rejected(error: impl ErrorCode + std::fmt::Display) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code: error.code(),
+            error: error.to_string(),
+        }
+    }
+
+    /// A failure nothing typed: an anyhow error reaching a handler, which is
+    /// a bug in the daemon rather than a rejection of the request.
+    pub fn internal(error: impl std::fmt::Display) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "internal",
+            error: error.to_string(),
+        }
+    }
+}
+
+impl IntoResponse for CliError {
+    fn into_response(self) -> axum::response::Response {
+        (self.status, Json(&self)).into_response()
+    }
+}
+
+impl From<anyhow::Error> for CliError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::internal(e)
+    }
+}
+
+/// Bind the admin socket at `{data_dir}/cli.sock` and return the future that
+/// serves the admin router on it until the process exits. A stale socket from
+/// a previous (crashed) run is unlinked before binding.
+///
+/// The bind happens here, synchronously, rather than inside the returned
+/// future: `main` spawns the future, so a failure inside it would leave the
+/// daemon running with no admin surface, whereas a failure on the daemon's
+/// main path ends the process.
+///
+/// Every route on the socket is full custody and nothing on it authenticates
+/// the peer, so the file modes are the only gate. They are set explicitly
+/// rather than inherited from the umask: the data dir goes owner-only first,
+/// which also covers the databases beside the socket and closes the window
+/// between bind and chmod.
+pub fn run(state: AppState) -> anyhow::Result<impl Future<Output = ()> + use<>> {
+    let data_dir = state.data_dir.clone();
+
+    set_permissions(&data_dir, Permissions::from_mode(0o700))
+        .with_context(|| format!("Failed to make {} owner-only", data_dir.display()))?;
+
+    let socket_path = data_dir.join(cli_core::CLI_SOCKET_FILENAME);
+
+    remove_file(&socket_path).ok();
+
+    let listener = StdUnixListener::bind(&socket_path).with_context(|| {
+        format!(
+            "Failed to bind the admin socket at {}",
+            socket_path.display()
+        )
+    })?;
+
+    set_permissions(&socket_path, Permissions::from_mode(0o600))?;
+
+    listener.set_nonblocking(true)?;
+
+    info!(target: LOG_GATEWAY, socket = %socket_path.display(), "Bound the gatewaydv2 admin socket");
 
     let router = router().with_state(state);
 
-    let listener = UnixListener::bind(&socket_path)?;
-    info!(target: LOG_GATEWAY, socket = %socket_path.display(), "Started gatewaydv2 cli server");
-    axum::serve(listener, router.into_make_service()).await?;
+    Ok(async move {
+        let listener = UnixListener::from_std(listener).expect("called within a tokio runtime");
 
-    Ok(())
+        axum::serve(listener, router.into_make_service())
+            .await
+            .expect("Admin socket server failed");
+    })
 }
 
 fn router() -> Router<AppState> {
     Router::new()
         .route(cli_core::ROUTE_INFO, post(info))
         .route(cli_core::ROUTE_MNEMONIC, post(mnemonic))
+        .route(cli_core::ROUTE_QUERY, post(query))
         .route(cli_core::ROUTE_LDK_BALANCES, post(ldk_balances))
         .route(
             cli_core::ROUTE_LDK_ONCHAIN_RECEIVE,
@@ -112,22 +211,39 @@ fn router() -> Router<AppState> {
         )
 }
 
+/// The federation's client, or the one reason there is none: the
+/// federation is not joined, or its client failed to load, which
+/// [`AppState::select_client`] logs.
+async fn select_client(
+    state: &AppState,
+    federation_id: fedimint_core::config::FederationId,
+) -> Result<fedimint_client::ClientHandleArc, NotJoinedError> {
+    state
+        .select_client(federation_id)
+        .await
+        .map_err(|_| NotJoinedError::NotJoined)
+}
+
 // --- top-level ---
 
 /// Display high-level information about the gateway.
-async fn info(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn info(State(state): State<AppState>) -> Result<Json<cli_core::InfoResponse>, CliError> {
     let node_status = state.node.status();
 
-    Ok(Json(json!(cli_core::InfoResponse {
+    Ok(Json(cli_core::InfoResponse {
         lightning_pk: state.node.node_id(),
         network: state.network.to_string(),
         block_height: u64::from(node_status.current_best_block.height),
         synced_to_chain: node_status.latest_lightning_wallet_sync_timestamp.is_some(),
-    })))
+    }))
 }
 
 /// Returns the gateway's mnemonic words.
-async fn mnemonic(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn mnemonic(
+    State(state): State<AppState>,
+) -> Result<Json<cli_core::MnemonicResponse>, CliError> {
     let mnemonic = client::load_mnemonic(&state.gateway_db)
         .await
         .expect("mnemonic should be set");
@@ -137,13 +253,30 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<Value>, GatewayE
         .map(std::string::ToString::to_string)
         .collect::<Vec<_>>();
 
-    Ok(Json(json!(cli_core::MnemonicResponse { mnemonic: words })))
+    Ok(Json(cli_core::MnemonicResponse { mnemonic: words }))
+}
+
+/// Runs read-only SQL against the analytics db.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn query(
+    State(state): State<AppState>,
+    Json(req): Json<cli_core::QueryRequest>,
+) -> Result<Json<cli_core::QueryResponse>, CliError> {
+    let rows = tokio::task::spawn_blocking(move || analytics::query(&state.data_dir, &req.query))
+        .await
+        .expect("the query task is not cancelled")
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(cli_core::QueryResponse(rows)))
 }
 
 // --- ldk node management ---
 
 /// Returns the onchain and lightning channel capacity balances.
-async fn ldk_balances(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn ldk_balances(
+    State(state): State<AppState>,
+) -> Result<Json<cli_core::LdkBalancesResponse>, CliError> {
     let balances = state.node.list_balances();
 
     // A channel that is not usable — still awaiting its funding confirmation,
@@ -171,7 +304,7 @@ async fn ldk_balances(State(state): State<AppState>) -> Result<Json<Value>, Gate
         .map(|channel| channel.next_outbound_htlc_limit_msat / 1000)
         .sum();
 
-    Ok(Json(json!(cli_core::LdkBalancesResponse {
+    Ok(Json(cli_core::LdkBalancesResponse {
         total_onchain_balance_sat: balances.total_onchain_balance_sats,
         spendable_onchain_balance_sat: balances.spendable_onchain_balance_sats,
         total_anchor_channels_reserve_sat: balances.total_anchor_channels_reserve_sats,
@@ -179,27 +312,31 @@ async fn ldk_balances(State(state): State<AppState>) -> Result<Json<Value>, Gate
         total_inbound_capacity_sat,
         total_outbound_capacity_sat,
         total_next_outbound_htlc_limit_sat,
-    })))
+    }))
 }
 
 /// Generates an onchain address to fund the gateway's lightning node.
-async fn ldk_onchain_receive(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn ldk_onchain_receive(
+    State(state): State<AppState>,
+) -> Result<Json<cli_core::LdkOnchainReceiveResponse>, CliError> {
     let address = state
         .node
         .onchain_payment()
         .new_address()
-        .map_err(|e| anyhow!("Failed to get onchain address: {e}"))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
-    Ok(Json(json!(cli_core::LdkOnchainReceiveResponse {
+    Ok(Json(cli_core::LdkOnchainReceiveResponse {
         address: address.as_unchecked().clone(),
-    })))
+    }))
 }
 
 /// Send funds from the gateway's lightning node on-chain wallet.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_onchain_send(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkOnchainSendRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<cli_core::LdkOnchainSendResponse>, CliError> {
     let txid = state
         .node
         .onchain_payment()
@@ -208,27 +345,26 @@ async fn ldk_onchain_send(
             req.amount.to_sat(),
             FeeRate::from_sat_per_vb(req.sat_per_vbyte),
         )
-        .map_err(|e| anyhow!("Withdraw error: {e}"))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(target: LOG_GATEWAY, txid = %txid, "Sent onchain transaction");
 
-    Ok(Json(json!(cli_core::LdkOnchainSendResponse { txid })))
+    Ok(Json(cli_core::LdkOnchainSendResponse { txid }))
 }
 
 /// Opens a Lightning channel to a peer. Fire-and-forget, picomint-style: the
 /// funding transaction is negotiated and broadcast asynchronously; callers
 /// observe it via the channel list.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_channel_open(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkChannelOpenRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<()>, CliError> {
     let push_amount_msat = if req.push_amount_sat == 0 {
         None
     } else {
         Some(req.push_amount_sat * 1000)
     };
-
-    let host = SocketAddress::from_str(&req.host).map_err(|e| anyhow!("Invalid address: {e}"))?;
 
     // Unannounced by default, matching LDK; a gateway only needs its peers to
     // route to it, not the wider network.
@@ -241,12 +377,12 @@ async fn ldk_channel_open(
     open_channel(
         &state.node,
         req.pubkey,
-        host,
+        req.host,
         req.channel_size_sat,
         push_amount_msat,
         None,
     )
-    .map_err(|e| anyhow!("Failed to open channel: {e}"))?;
+    .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(
         target: LOG_GATEWAY,
@@ -255,17 +391,18 @@ async fn ldk_channel_open(
         "Initiated channel open"
     );
 
-    Ok(Json(json!(())))
+    Ok(Json(()))
 }
 
 /// Closes a channel.
 ///
 /// The channel is named by its `user_channel_id` rather than by peer, since a
 /// peer may hold several; `channel list` reports both fields.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_channel_close(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkChannelCloseRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<()>, CliError> {
     let user_channel_id = UserChannelId(req.user_channel_id);
 
     if req.force {
@@ -276,12 +413,12 @@ async fn ldk_channel_close(
                 req.pubkey,
                 Some("User initiated force close".to_string()),
             )
-            .map_err(|e| anyhow!("Failed to force close channel: {e}"))?;
+            .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
     } else {
         state
             .node
             .close_channel(&user_channel_id, req.pubkey)
-            .map_err(|e| anyhow!("Failed to close channel: {e}"))?;
+            .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
     }
 
     info!(
@@ -292,7 +429,7 @@ async fn ldk_channel_close(
         "Initiated channel closure"
     );
 
-    Ok(Json(json!(())))
+    Ok(Json(()))
 }
 
 /// Splices on-chain funds into the channel with a peer, growing its capacity
@@ -300,10 +437,11 @@ async fn ldk_channel_close(
 ///
 /// The channel is named by its `user_channel_id` rather than by peer, since a
 /// peer may hold several; `channel list` reports both fields.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_channel_splice_in(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkChannelSpliceInRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<()>, CliError> {
     state
         .node
         .splice_in(
@@ -311,7 +449,7 @@ async fn ldk_channel_splice_in(
             req.pubkey,
             req.amount_sat,
         )
-        .map_err(|e| anyhow!("Failed to splice in: {e}"))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(
         target: LOG_GATEWAY,
@@ -321,7 +459,7 @@ async fn ldk_channel_splice_in(
         "Initiated splice-in"
     );
 
-    Ok(Json(json!(())))
+    Ok(Json(()))
 }
 
 /// Splices funds out of a channel to an on-chain address without closing it.
@@ -330,10 +468,11 @@ async fn ldk_channel_splice_in(
 ///
 /// The channel is named by its `user_channel_id` rather than by peer, since a
 /// peer may hold several; `channel list` reports both fields.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_channel_splice_out(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkChannelSpliceOutRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<()>, CliError> {
     state
         .node
         .splice_out(
@@ -342,7 +481,7 @@ async fn ldk_channel_splice_out(
             &req.address.assume_checked(),
             req.amount_sat,
         )
-        .map_err(|e| anyhow!("Failed to splice out: {e}"))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(
         target: LOG_GATEWAY,
@@ -352,11 +491,14 @@ async fn ldk_channel_splice_out(
         "Initiated splice-out"
     );
 
-    Ok(Json(json!(())))
+    Ok(Json(()))
 }
 
 /// Lists all Lightning channels.
-async fn ldk_channel_list(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn ldk_channel_list(
+    State(state): State<AppState>,
+) -> Result<Json<cli_core::LdkChannelListResponse>, CliError> {
     let network_graph = state.node.network_graph();
 
     let peer_addresses: HashMap<_, _> = state
@@ -399,19 +541,21 @@ async fn ldk_channel_list(State(state): State<AppState>) -> Result<Json<Value>, 
         });
     }
 
-    Ok(Json(json!(cli_core::LdkChannelListResponse { channels })))
+    Ok(Json(cli_core::LdkChannelListResponse { channels }))
 }
 
 /// Creates an invoice directly payable to the gateway's lightning node.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_ln_receive(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkLnReceiveRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<cli_core::LdkLnReceiveResponse>, CliError> {
     let expiry_secs = req.expiry_secs.unwrap_or(3600);
 
     let description = match req.description {
         Some(description) => LdkBolt11InvoiceDescription::Direct(
-            Description::new(description).map_err(|_| anyhow!("Invalid invoice description"))?,
+            Description::new(description)
+                .map_err(|_| CliError::rejected(LdkReceiveError::InvalidDescription))?,
         ),
         None => LdkBolt11InvoiceDescription::Direct(Description::empty()),
     };
@@ -420,23 +564,24 @@ async fn ldk_ln_receive(
         .node
         .bolt11_payment()
         .receive(req.amount_msat, &description, expiry_secs)
-        .map_err(|e| anyhow!("Failed to get invoice: {e}"))?;
+        .map_err(|e| CliError::rejected(LdkReceiveError::Ldk(e.to_string())))?;
 
-    Ok(Json(json!(cli_core::LdkLnReceiveResponse {
+    Ok(Json(cli_core::LdkLnReceiveResponse {
         invoice: invoice.to_string(),
-    })))
+    }))
 }
 
 /// Pays an outgoing LN invoice using the gateway's own funds.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_ln_send(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkLnSendRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<cli_core::LdkLnSendResponse>, CliError> {
     let payment_id = state
         .node
         .bolt11_payment()
         .send(&req.invoice, None)
-        .map_err(|e| anyhow!("LDK payment failed to initialize: {e:?}"))?;
+        .map_err(|e| CliError::rejected(LdkSendError::Ldk(e.to_string())))?;
 
     let preimage: [u8; 32] = loop {
         if let Some(payment_details) = state.node.payment(&payment_id) {
@@ -452,67 +597,74 @@ async fn ldk_ln_send(
                     }
                 }
                 PaymentStatus::Failed => {
-                    return Err(anyhow!("LDK payment failed").into());
+                    return Err(CliError::rejected(LdkSendError::PaymentFailed));
                 }
             }
         }
         fedimint_core::runtime::sleep(Duration::from_millis(100)).await;
     };
 
-    Ok(Json(json!(cli_core::LdkLnSendResponse {
+    Ok(Json(cli_core::LdkLnSendResponse {
         preimage: preimage.encode_hex::<String>(),
-    })))
+    }))
 }
 
 /// Sends payment probes over all routes towards a node for the given amount,
 /// to exercise pathfinding and warm the scorer without moving funds. Probe
 /// outcomes surface only in the daemon's LDK logs (the `Got route` and
 /// `Onion Error` lines), so nothing meaningful is returned here.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_ln_probe(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkLnProbeRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<()>, CliError> {
     state
         .node
         .spontaneous_payment()
         .send_probes(req.amount_msat, req.node_id)
-        .map_err(|e| anyhow!("Failed to send probes: {e:?}"))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
-    Ok(Json(json!(())))
+    Ok(Json(()))
 }
 
 /// Connects to a Lightning peer, persisting the connection so the node
 /// reconnects on restart.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_peer_connect(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkPeerConnectRequest>,
-) -> Result<Json<Value>, GatewayError> {
-    let address =
-        SocketAddress::from_str(&req.host).map_err(|e| anyhow!("Invalid address: {e}"))?;
-
+) -> Result<Json<()>, CliError> {
     state
         .node
-        .connect(req.pubkey, address, true)
-        .map_err(|e| anyhow!("Failed to connect to peer: {e}"))?;
+        .connect(req.pubkey, req.host, true)
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
-    Ok(Json(json!(())))
+    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, "Connected to peer");
+
+    Ok(Json(()))
 }
 
 /// Disconnects from a Lightning peer.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn ldk_peer_disconnect(
     State(state): State<AppState>,
     Json(req): Json<cli_core::LdkPeerDisconnectRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<()>, CliError> {
     state
         .node
         .disconnect(req.pubkey)
-        .map_err(|e| anyhow!("Failed to disconnect from peer: {e}"))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
-    Ok(Json(json!(())))
+    info!(target: LOG_GATEWAY, pubkey = %req.pubkey, "Disconnected from peer");
+
+    Ok(Json(()))
 }
 
 /// Lists all Lightning peers.
-async fn ldk_peer_list(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn ldk_peer_list(
+    State(state): State<AppState>,
+) -> Result<Json<cli_core::LdkPeerListResponse>, CliError> {
     let peers = state
         .node
         .list_peers()
@@ -524,107 +676,115 @@ async fn ldk_peer_list(State(state): State<AppState>) -> Result<Json<Value>, Gat
         })
         .collect::<Vec<_>>();
 
-    Ok(Json(json!(cli_core::LdkPeerListResponse { peers })))
+    Ok(Json(cli_core::LdkPeerListResponse { peers }))
 }
 
 // --- federation management ---
 
 /// Join a new federation: download and persist its config; the client itself
 /// is built lazily on first use.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_join(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationJoinRequest>,
-) -> Result<Json<Value>, GatewayError> {
-    state.connect_federation(req.invite).await?;
+) -> Result<Json<()>, CliError> {
+    state
+        .connect_federation(req.invite)
+        .await
+        .map_err(CliError::rejected)?;
 
-    Ok(Json(json!(())))
+    Ok(Json(()))
 }
 
 /// Disable a federation's public client API. Its config and client state are
-/// retained so in-flight payments settle and it can be re-enabled by joining
-/// again.
+/// retained so in-flight payments settle and it can be re-enabled.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_disable(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationDisableRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<()>, CliError> {
     let mut dbtx = state.gateway_db.begin_transaction().await;
 
     dbtx.get_value(&ClientConfigKey(req.federation_id))
         .await
-        .ok_or_else(|| {
-            anyhow!(
-                "No federation available for prefix {}",
-                req.federation_id.to_prefix()
-            )
-        })?;
+        .ok_or_else(|| CliError::rejected(NotJoinedError::NotJoined))?;
 
     dbtx.insert_entry(&DisabledFederationKey(req.federation_id), &())
         .await;
 
     dbtx.commit_tx().await;
 
-    Ok(Json(json!(())))
+    Ok(Json(()))
 }
 
 /// Re-enable a previously disabled federation. Blind remove — no-op if the
 /// row isn't there.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_enable(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationEnableRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<()>, CliError> {
     let mut dbtx = state.gateway_db.begin_transaction().await;
     dbtx.remove_entry(&DisabledFederationKey(req.federation_id))
         .await;
     dbtx.commit_tx().await;
 
-    Ok(Json(json!(())))
+    Ok(Json(()))
 }
 
-/// List connected federations.
-async fn federation_list(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+/// List joined federations.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn federation_list(
+    State(state): State<AppState>,
+) -> Result<Json<cli_core::FederationListResponse>, CliError> {
     let federations = state.federation_list().await;
 
-    Ok(Json(json!(cli_core::FederationListResponse {
-        federations
-    })))
+    Ok(Json(cli_core::FederationListResponse { federations }))
 }
 
 /// Display federation config.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_config(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationConfigRequest>,
-) -> Result<Json<Value>, GatewayError> {
-    let client = state.select_client(req.federation_id).await?;
+) -> Result<Json<cli_core::FederationConfigResponse>, CliError> {
+    let client = select_client(&state, req.federation_id)
+        .await
+        .map_err(CliError::rejected)?;
 
     let config = client.get_config_json().await;
 
-    Ok(Json(json!(cli_core::FederationConfigResponse {
-        config: json!(config),
-    })))
+    Ok(Json(cli_core::FederationConfigResponse {
+        config: serde_json::to_value(config).expect("a client config serializes"),
+    }))
 }
 
-/// Get a federation's ecash balance.
+/// Get the gateway's ecash balance in a federation.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_balance(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationBalanceRequest>,
-) -> Result<Json<Value>, GatewayError> {
-    let client = state.select_client(req.federation_id).await?;
+) -> Result<Json<cli_core::FederationBalanceResponse>, CliError> {
+    let client = select_client(&state, req.federation_id)
+        .await
+        .map_err(CliError::rejected)?;
 
     let balance_msat = client.get_balance_for_btc().await?;
 
-    Ok(Json(json!(cli_core::FederationBalanceResponse {
-        balance_msat
-    })))
+    Ok(Json(cli_core::FederationBalanceResponse { balance_msat }))
 }
 
 // --- per-federation module commands ---
 
 /// Count held ecash notes by denomination.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn mint_count(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationMintCountRequest>,
-) -> Result<Json<Value>, GatewayError> {
-    let client = state.select_client(req.federation_id).await?;
+) -> Result<Json<cli_core::FederationMintCountResponse>, CliError> {
+    let client = select_client(&state, req.federation_id)
+        .await
+        .map_err(CliError::rejected)?;
 
     let counts = client
         .get_first_module::<MintV2ClientModule>()
@@ -632,39 +792,44 @@ async fn mint_count(
         .get_count_by_denomination()
         .await;
 
-    Ok(Json(json!(cli_core::FederationMintCountResponse {
-        counts
-    })))
+    Ok(Json(cli_core::FederationMintCountResponse { counts }))
 }
 
 /// Spend ecash from a federation.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn mint_send(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationMintSendRequest>,
-) -> Result<Json<Value>, GatewayError> {
-    let client = state.select_client(req.federation_id).await?;
+) -> Result<Json<cli_core::FederationMintSendResponse>, CliError> {
+    let client = select_client(&state, req.federation_id)
+        .await
+        .map_err(|e| CliError::rejected(MintSendError::from(e)))?;
 
     let (_, ecash) = client
         .get_first_module::<MintV2ClientModule>()
         .expect("MintV2 module is always attached to gateway clients")
         .send(req.amount, serde_json::Value::Null, true)
-        .await?;
+        .await
+        .map_err(|e| CliError::rejected(MintSendError::from(e)))?;
 
-    Ok(Json(json!(cli_core::FederationMintSendResponse {
+    Ok(Json(cli_core::FederationMintSendResponse {
         ecash: base32::encode_prefixed(FEDIMINT_PREFIX, &ecash),
-    })))
+    }))
 }
 
 /// Receive ecash into the gateway. Blocks until issuance either completes or
 /// fails federation-side.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn mint_receive(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationMintReceiveRequest>,
-) -> Result<Json<Value>, GatewayError> {
+) -> Result<Json<cli_core::FederationMintReceiveResponse>, CliError> {
     let ecash: fedimint_mintv2_client::ECash = base32::decode_prefixed(FEDIMINT_PREFIX, &req.ecash)
-        .map_err(|e| anyhow!("Expected ECash for MintV2 federation: {e}"))?;
+        .map_err(|e| CliError::rejected(MintReceiveError::InvalidEcash(e.to_string())))?;
 
-    let client = state.select_client(req.federation_id).await?;
+    let client = select_client(&state, req.federation_id)
+        .await
+        .map_err(|e| CliError::rejected(MintReceiveError::from(e)))?;
 
     let mint = client
         .get_first_module::<MintV2ClientModule>()
@@ -675,104 +840,107 @@ async fn mint_receive(
     let operation_id = mint
         .receive(ecash, serde_json::Value::Null)
         .await
-        .map_err(|e| anyhow!("{e}"))?;
+        .map_err(|e| CliError::rejected(MintReceiveError::from(e)))?;
 
     match mint
         .await_final_receive_operation_state(operation_id)
-        .await
-        .map_err(|e| anyhow!("{e}"))?
+        .await?
     {
         fedimint_mintv2_client::FinalReceiveOperationState::Success => {}
         fedimint_mintv2_client::FinalReceiveOperationState::Rejected => {
-            return Err(anyhow!("ECash receive was rejected").into());
+            return Err(CliError::rejected(MintReceiveError::Rejected));
         }
     }
 
-    Ok(Json(json!(cli_core::FederationMintReceiveResponse {
-        amount
-    })))
+    Ok(Json(cli_core::FederationMintReceiveResponse { amount }))
 }
 
 /// Fetch the current onchain send-fee for a federation.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn wallet_send_fee(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationWalletSendFeeRequest>,
-) -> Result<Json<Value>, GatewayError> {
-    let client = state.select_client(req.federation_id).await?;
+) -> Result<Json<cli_core::FederationWalletSendFeeResponse>, CliError> {
+    let client = select_client(&state, req.federation_id)
+        .await
+        .map_err(|e| CliError::rejected(WalletSendFeeError::from(e)))?;
 
     let fee = client
-        .get_first_module::<fedimint_walletv2_client::WalletClientModule>()?
+        .get_first_module::<WalletClientModule>()
+        .expect("WalletV2 module is always attached to gateway clients")
         .send_fee()
         .await
-        .map_err(|err| anyhow!("{err:?}"))?;
+        .map_err(|e| CliError::rejected(WalletSendFeeError::from(e)))?;
 
-    Ok(Json(json!(cli_core::FederationWalletSendFeeResponse {
-        fee
-    })))
+    Ok(Json(cli_core::FederationWalletSendFeeResponse { fee }))
 }
 
 /// Withdraw onchain from a federation. Blocks until the send reaches a
 /// terminal state. `--fee` overrides the federation's fee quote; without it
 /// walletv2 fetches the current one itself.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn wallet_send(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationWalletSendRequest>,
-) -> Result<Json<Value>, GatewayError> {
-    let address_network = get_network_for_address(&req.address);
-    let gateway_network = state.network;
-    let Ok(address) = req.address.require_network(gateway_network) else {
-        return Err(anyhow!(
-            "Gateway is running on network {gateway_network}, but provided withdraw address is for network {address_network}"
-        )
-        .into());
-    };
+) -> Result<Json<cli_core::FederationWalletSendResponse>, CliError> {
+    let client = select_client(&state, req.federation_id)
+        .await
+        .map_err(|e| CliError::rejected(WalletSendError::from(e)))?;
 
-    let client = state.select_client(req.federation_id).await?;
-
-    let wallet = client.get_first_module::<fedimint_walletv2_client::WalletClientModule>()?;
+    let wallet = client
+        .get_first_module::<WalletClientModule>()
+        .expect("WalletV2 module is always attached to gateway clients");
 
     let operation_id = wallet
         .send(
-            address.as_unchecked().clone(),
+            req.address.clone(),
             req.amount,
             req.fee,
             serde_json::Value::Null,
         )
         .await
-        .map_err(|e| anyhow!("Error withdrawing funds onchain: {e}"))?;
+        .map_err(|e| CliError::rejected(WalletSendError::from(e)))?;
 
-    let result = wallet
+    match wallet
         .await_final_send_operation_state(operation_id)
-        .await
-        .map_err(|e| anyhow!("Error withdrawing funds onchain: {e}"))?;
-
-    match result {
+        .await?
+    {
         fedimint_walletv2_client::FinalSendOperationState::Success(txid) => {
-            info!(target: LOG_GATEWAY, amount = %req.amount, address = %address, "Sent funds via walletv2");
-            Ok(Json(json!(cli_core::FederationWalletSendResponse { txid })))
+            info!(
+                target: LOG_GATEWAY,
+                amount = %req.amount,
+                address = %req.address.assume_checked_ref(),
+                "Sent funds via walletv2"
+            );
+
+            Ok(Json(cli_core::FederationWalletSendResponse { txid }))
         }
         fedimint_walletv2_client::FinalSendOperationState::Aborted => {
-            Err(anyhow!("Withdrawal transaction was aborted").into())
+            Err(CliError::rejected(WalletSendError::Aborted))
         }
         fedimint_walletv2_client::FinalSendOperationState::Failure => {
-            Err(anyhow!("Withdrawal failed").into())
+            Err(CliError::rejected(WalletSendError::Failure))
         }
     }
 }
 
 /// Generate a deposit address for a federation.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn wallet_receive(
     State(state): State<AppState>,
     Json(req): Json<cli_core::FederationWalletReceiveRequest>,
-) -> Result<Json<Value>, GatewayError> {
-    let client = state.select_client(req.federation_id).await?;
+) -> Result<Json<cli_core::FederationWalletReceiveResponse>, CliError> {
+    let client = select_client(&state, req.federation_id)
+        .await
+        .map_err(CliError::rejected)?;
 
     let address = client
-        .get_first_module::<fedimint_walletv2_client::WalletClientModule>()?
+        .get_first_module::<WalletClientModule>()
+        .expect("WalletV2 module is always attached to gateway clients")
         .receive()
         .await;
 
-    Ok(Json(json!(cli_core::FederationWalletReceiveResponse {
+    Ok(Json(cli_core::FederationWalletReceiveResponse {
         address: address.into_unchecked(),
-    })))
+    }))
 }

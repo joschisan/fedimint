@@ -30,10 +30,9 @@ use fedimint_core::rustls::install_crypto_provider;
 use fedimint_core::util::{FmtCompact as _, SafeUrl, handle_version_hash_command};
 use fedimint_core::{Amount, fedimint_build_code_version_env};
 use fedimint_gatewayv2_server::analytics::Analytics;
-use fedimint_gatewayv2_server::cli::run_cli;
 use fedimint_gatewayv2_server::client::GatewayClientFactory;
 use fedimint_gatewayv2_server::public::run_public;
-use fedimint_gatewayv2_server::{AppState, LDK_NODE_DB_FOLDER};
+use fedimint_gatewayv2_server::{AppState, LDK_NODE_DB_FOLDER, cli};
 use fedimint_lnv2_common::gateway_api::PaymentFee;
 use fedimint_logging::{LOG_GATEWAY, TracingSetup};
 use ldk_node::lightning::ln::msgs::SocketAddress;
@@ -79,8 +78,9 @@ pub struct GatewayOpts {
     )]
     pub ldk_alias: String,
 
-    /// Bitcoin network this gateway will be running on
-    #[arg(long = "network", env = "FM_NETWORK", default_value = "bitcoin")]
+    /// Bitcoin network this gateway will be running on; every federation it
+    /// joins has to run on it
+    #[arg(long = "network", env = "FM_NETWORK")]
     pub network: Network,
 
     /// Bitcoind RPC URL with credentials embedded in the URL, e.g.
@@ -207,9 +207,13 @@ fn main() -> anyhow::Result<()> {
     // 5. Fire-and-forget every long-running task. Federation clients are
     //    lazy-loaded on first use, each spawning its own receive trailer when
     //    built; all work is persisted incrementally and idempotent on retry, so the
-    //    runtime drop on process exit aborts cleanly.
+    //    runtime drop on process exit aborts cleanly. The admin socket is bound
+    //    here, on the main path, so a bind failure ends the daemon instead of
+    //    leaving it running with no admin surface.
+    let admin = cli::run(state.clone())?;
+
     runtime.spawn(state.clone().process_ldk_events());
-    runtime.spawn(run_cli(state.clone()));
+    runtime.spawn(admin);
     runtime.spawn(run_public(state));
 
     // 6. Block main on SIGTERM so the runtime stays alive; on signal, return and

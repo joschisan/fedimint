@@ -26,6 +26,8 @@ services:
       # Read by both the daemon and `gatewaydv2-cli`, so CLI commands run via
       # `docker exec` find the admin socket without extra flags.
       FM_DATA_DIR: /data
+      # Required: the network of every federation the gateway serves.
+      FM_NETWORK: bitcoin
       RUST_LOG: "info,lightning::ln::outbound_payment=debug,lightning::ln::channelmanager=debug"
       # Local chain backend. The password is the plaintext half of the pair
       # whose HMAC appears in bitcoind's `-rpcauth` below; the two must match.

@@ -41,6 +41,7 @@ use fedimint_core::db::{
     Database, DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped,
 };
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::error::ErrorCode;
 use fedimint_core::module::{
     AmountUnit, Amounts, ApiVersion, CommonModuleInit, ModuleCommon, ModuleInit, MultiApiVersion,
 };
@@ -997,7 +998,7 @@ impl WalletClientModule {
     }
 }
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum SendError {
     #[error("Address is from a different network than the federation.")]
     WrongNetwork,
@@ -1013,7 +1014,7 @@ pub enum SendError {
     UnsupportedAddress,
 }
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum ReceiveError {
     #[error("Federation returned an error: {0}")]
     FederationError(String),

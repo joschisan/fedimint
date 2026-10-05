@@ -13,8 +13,8 @@
 //! source of truth; each trailer replays from position 0 when its federation's
 //! client is (lazily) first built after boot.
 //!
-//! Users and agents inspect the db directly via `sqlite3 analytics.sqlite`.
-//! No query transport is layered on top.
+//! The schema is [`ANALYTICS_SCHEMA_SQL`], shared with the CLI so `query
+//! --help` prints it; [`query`] serves the CLI's read-only SQL.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,12 +24,16 @@ use fedimint_client::ClientHandleArc;
 use fedimint_core::config::FederationId;
 use fedimint_core::encoding::Encodable as _;
 use fedimint_eventlog::PersistedLogEntry;
+use fedimint_gatewayv2_cli_core::{ANALYTICS_SCHEMA_SQL, QueryError};
 use fedimint_gwv2_client::events::{
     IncomingPaymentFailed, IncomingPaymentStarted, IncomingPaymentSucceeded, OutgoingPaymentFailed,
     OutgoingPaymentStarted, OutgoingPaymentSucceeded,
 };
 use fedimint_logging::LOG_GATEWAY;
-use rusqlite::Connection;
+use hex::ToHex as _;
+use rusqlite::types::ValueRef;
+use rusqlite::{Connection, OpenFlags};
+use serde_json::{Map, Value};
 use tokio::sync::Mutex;
 
 use crate::as_gw_event;
@@ -73,7 +77,7 @@ impl Analytics {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
 
-        conn.execute_batch(SCHEMA_SQL)
+        conn.execute_batch(ANALYTICS_SCHEMA_SQL)
             .context("failed to install analytics schema")?;
 
         Ok(Self {
@@ -82,132 +86,55 @@ impl Analytics {
     }
 }
 
-/// Schema + the two per-direction payment views. `fee_msat` is the gateway's
-/// own fee for the payment; on the outgoing side `ln_fee_msat` is the LN
-/// routing-fee budget at send time (`send`) and the realized routing cost at
-/// success (`send_success`), so the views can report the slice of the budget
-/// the gateway kept.
-///
-/// A direct swap between two federations writes a `send` row and a `receive`
-/// row with the same payment image, while external LN payments only ever
-/// produce one side — the views expose that as the `direct` column. A swap
-/// whose receive side failed before its state machine started (e.g. funding
-/// rejected) has no receive row and classifies as external.
-const SCHEMA_SQL: &str = r"
-CREATE TABLE send (
-    federation       TEXT NOT NULL,
-    payment_image    TEXT NOT NULL,
-    ts               INTEGER NOT NULL,   -- msecs since unix epoch
-    amount_msat      INTEGER NOT NULL,
-    ln_fee_msat      INTEGER NOT NULL,
-    fee_msat         INTEGER NOT NULL,
-    destination_node TEXT NOT NULL,      -- pubkey of the node we pay
-    PRIMARY KEY (federation, payment_image)
-);
+/// Run read-only SQL against the analytics db and return one JSON object per
+/// row, keyed by result column name. Opens its own `SQLITE_OPEN_READ_ONLY`
+/// connection — WAL mode lets it read concurrently with the trailers' writer
+/// connection, and the flag rejects any write statement outright.
+pub fn query(data_dir: &Path, sql: &str) -> Result<Vec<Map<String, Value>>, QueryError> {
+    let path = data_dir.join(ANALYTICS_DIR).join(ANALYTICS_FILE);
 
-CREATE TABLE send_success (
-    federation    TEXT NOT NULL,
-    payment_image TEXT NOT NULL,
-    ts            INTEGER NOT NULL,
-    preimage      TEXT NOT NULL,
-    ln_fee_msat   INTEGER NOT NULL,
-    PRIMARY KEY (federation, payment_image)
-);
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .expect("the daemon created the analytics db at startup");
 
-CREATE TABLE send_cancel (
-    federation    TEXT NOT NULL,
-    payment_image TEXT NOT NULL,
-    ts            INTEGER NOT NULL,
-    error         TEXT NOT NULL,
-    PRIMARY KEY (federation, payment_image)
-);
+    let mut statement = conn
+        .prepare(sql)
+        .map_err(|e| QueryError::InvalidQuery(e.to_string()))?;
 
-CREATE TABLE receive (
-    federation    TEXT NOT NULL,
-    payment_image TEXT NOT NULL,
-    ts            INTEGER NOT NULL,
-    amount_msat   INTEGER NOT NULL,
-    fee_msat      INTEGER NOT NULL,
-    PRIMARY KEY (federation, payment_image)
-);
+    let columns = statement
+        .column_names()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
 
-CREATE TABLE receive_success (
-    federation    TEXT NOT NULL,
-    payment_image TEXT NOT NULL,
-    ts            INTEGER NOT NULL,
-    preimage      TEXT NOT NULL,
-    PRIMARY KEY (federation, payment_image)
-);
+    let mut rows = statement
+        .query([])
+        .map_err(|e| QueryError::InvalidQuery(e.to_string()))?;
 
-CREATE TABLE receive_failure (
-    federation    TEXT NOT NULL,
-    payment_image TEXT NOT NULL,
-    ts            INTEGER NOT NULL,
-    error         TEXT NOT NULL,
-    PRIMARY KEY (federation, payment_image)
-);
+    let mut result = Vec::new();
 
-CREATE INDEX idx_send_ts            ON send(ts);
-CREATE INDEX idx_send_success_ts    ON send_success(ts);
-CREATE INDEX idx_receive_ts         ON receive(ts);
-CREATE INDEX idx_receive_success_ts ON receive_success(ts);
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| QueryError::InvalidQuery(e.to_string()))?
+    {
+        let mut object = Map::new();
 
-CREATE VIEW outgoing_payments AS
-SELECT
-    s.federation,
-    s.payment_image,
-    s.ts AS started_at,
-    COALESCE(succ.ts, canc.ts) AS completed_at,
-    CASE
-        WHEN succ.payment_image IS NOT NULL THEN 'success'
-        WHEN canc.payment_image IS NOT NULL THEN 'cancelled'
-        ELSE 'pending'
-    END AS status,
-    EXISTS(SELECT 1 FROM receive r WHERE r.payment_image = s.payment_image) AS direct,
-    s.destination_node,
-    s.amount_msat,
-    s.fee_msat       AS gw_fee_msat,
-    s.ln_fee_msat    AS ln_fee_budget_msat,
-    CASE
-        WHEN succ.payment_image IS NOT NULL THEN succ.ln_fee_msat
-        WHEN canc.payment_image IS NOT NULL THEN 0
-        ELSE NULL
-    END AS ln_fee_paid_msat,
-    CASE
-        WHEN succ.payment_image IS NOT NULL THEN s.ln_fee_msat - succ.ln_fee_msat
-        WHEN canc.payment_image IS NOT NULL THEN 0
-        ELSE NULL
-    END AS ln_fee_kept_msat,
-    succ.preimage,
-    canc.error
-FROM send s
-LEFT JOIN send_success succ
-       ON succ.federation = s.federation AND succ.payment_image = s.payment_image
-LEFT JOIN send_cancel canc
-       ON canc.federation = s.federation AND canc.payment_image = s.payment_image;
+        for (i, column) in columns.iter().enumerate() {
+            let value = match row.get_ref(i).expect("the column index is in range") {
+                ValueRef::Null => Value::Null,
+                ValueRef::Integer(n) => Value::from(n),
+                ValueRef::Real(f) => Value::from(f),
+                ValueRef::Text(text) => String::from_utf8_lossy(text).into_owned().into(),
+                ValueRef::Blob(blob) => Value::String(blob.encode_hex()),
+            };
 
-CREATE VIEW incoming_payments AS
-SELECT
-    r.federation,
-    r.payment_image,
-    r.ts AS started_at,
-    COALESCE(succ.ts, fail.ts) AS completed_at,
-    CASE
-        WHEN succ.payment_image IS NOT NULL THEN 'success'
-        WHEN fail.payment_image IS NOT NULL THEN 'failure'
-        ELSE 'pending'
-    END AS status,
-    EXISTS(SELECT 1 FROM send s WHERE s.payment_image = r.payment_image) AS direct,
-    r.amount_msat,
-    r.fee_msat       AS gw_fee_msat,
-    succ.preimage,
-    fail.error
-FROM receive r
-LEFT JOIN receive_success succ
-       ON succ.federation = r.federation AND succ.payment_image = r.payment_image
-LEFT JOIN receive_failure fail
-       ON fail.federation = r.federation AND fail.payment_image = r.payment_image;
-";
+            object.insert(column.clone(), value);
+        }
+
+        result.push(object);
+    }
+
+    Ok(result)
+}
 
 /// Drain one federation client's event log forward in chunks and mirror each
 /// gwv2 payment event into the SQLite analytics DB. Blocks on the client's

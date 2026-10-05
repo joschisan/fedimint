@@ -13,12 +13,13 @@ name = "gatewaydv2-cli"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = { workspace = true }
 clap = { workspace = true }
+fedimint-core = { workspace = true }
 fedimint-gatewayv2-cli-core = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
