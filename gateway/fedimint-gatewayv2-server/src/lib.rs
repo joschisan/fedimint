@@ -658,16 +658,10 @@ impl AppState {
                 ..Default::default()
             };
 
-            // A duplicate payment means a previous run of this request already
-            // kicked off the payment (its transaction failed to commit after
-            // the LDK send); the LDK events drive its terminal, so treat it as
-            // a successful kick-off instead of cancelling an in-flight send.
-            let send_result = match self.node.bolt11_payment().send(&invoice, Some(params)) {
-                Err(ldk_node::NodeError::DuplicatePayment) => Ok(()),
-                result => result.map(|_| ()),
-            };
-
-            if let Err(err) = send_result {
+            // A duplicate is cancelled like any other refusal: LDK reports one
+            // for any payment it holds under the hash, an invoice this gateway
+            // issued included, and none of those settles this send.
+            if let Err(err) = self.node.bolt11_payment().send(&invoice, Some(params)) {
                 let f1_client_dbtx =
                     dbtx.to_ref_with_prefix(client_db_prefix(&payload.federation_id));
 
