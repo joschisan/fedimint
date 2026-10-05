@@ -615,6 +615,17 @@ impl Lnd {
             bitcoin::hashes::HashEngine::input(&mut engine, &preimage);
             bitcoin::hashes::sha256::Hash::from_engine(engine)
         };
+        let payment_request = self.create_hold_invoice_for_hash(amount, hash).await?;
+        Ok((preimage, payment_request, hash))
+    }
+
+    /// Adds a hold invoice for a payment hash chosen by the caller, as one
+    /// whose preimage this node does not know.
+    pub async fn create_hold_invoice_for_hash(
+        &self,
+        amount: u64,
+        hash: sha256::Hash,
+    ) -> anyhow::Result<String> {
         let cltv_expiry = 650;
         let hold_request = self
             .invoices_client_lock()
@@ -627,8 +638,7 @@ impl Lnd {
             })
             .await?
             .into_inner();
-        let payment_request = hold_request.payment_request;
-        Ok((preimage, payment_request, hash))
+        Ok(hold_request.payment_request)
     }
 
     pub async fn settle_hold_invoice(

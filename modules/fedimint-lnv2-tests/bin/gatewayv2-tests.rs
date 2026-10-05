@@ -60,6 +60,10 @@ enum Commands {
     LnurlPay,
     /// Test LNURL receives after recovery from seed
     LnurlRecovery,
+    /// Pay one gateway invoice twice, by direct swap and over Lightning
+    InvoicePaidTwice,
+    /// Send an invoice of another node for a hash the gateway registered
+    SendOfRegisteredHash,
 }
 
 #[tokio::main]
@@ -88,10 +92,20 @@ async fn main() -> anyhow::Result<()> {
                     pegin_gateways(&dev_fed).await?;
                     test_lnurl_recovery(&dev_fed).await?;
                 }
+                Some(Commands::InvoicePaidTwice) => {
+                    pegin_gateways(&dev_fed).await?;
+                    test_invoice_paid_twice(&dev_fed).await?;
+                }
+                Some(Commands::SendOfRegisteredHash) => {
+                    pegin_gateways(&dev_fed).await?;
+                    test_send_of_registered_hash(&dev_fed).await?;
+                }
                 None => {
                     // Run all tests if no subcommand is specified
                     test_gateway_registration(&dev_fed).await?;
                     test_payments(&dev_fed).await?;
+                    test_invoice_paid_twice(&dev_fed).await?;
+                    test_send_of_registered_hash(&dev_fed).await?;
                     test_lnurl_pay(&dev_fed).await?;
 
                     // `test_lnurl_recovery` is left out, here and from the
@@ -427,6 +441,88 @@ async fn test_payments(dev_fed: &DevJitFed) -> anyhow::Result<()> {
 
     // gatewaydv2 exposes no payment-summary admin command; its analytics
     // SQLite mirror is asserted in `test_analytics` at the end of the run.
+
+    Ok(())
+}
+
+/// An invoice of the gateway funds its recipient once, whichever way it is
+/// paid first: after a direct swap paid it, a Lightning payment of it is
+/// failed back, and after a Lightning payment, a direct swap of it is
+/// refunded.
+async fn test_invoice_paid_twice(dev_fed: &DevJitFed) -> anyhow::Result<()> {
+    info!("Testing an invoice paid by direct swap and over Lightning...");
+
+    let federation = dev_fed.fed().await?;
+
+    let client = federation
+        .new_joined_client("lnv2-invoice-paid-twice-client")
+        .await?;
+
+    federation.pegin_client(10_000, &client).await?;
+
+    let gw_lnd = dev_fed.gw_lnd().await?;
+    let gw_v2 = dev_fed.gw_v2().await?;
+
+    info!("Paying an invoice by direct swap, then over Lightning...");
+
+    let (invoice, receive_op) = common::receive(&client, &gw_v2.addr, 1_000_000).await?;
+
+    let state = common::send(&client, &gw_v2.addr, &invoice.to_string()).await?;
+    assert!(matches!(state, FinalSendOperationState::Success(_)));
+
+    common::await_receive_claimed(&client, receive_op).await?;
+
+    ensure!(
+        gw_lnd.client().pay_invoice(invoice).await.is_err(),
+        "a Lightning payment of a swapped invoice must be failed back"
+    );
+
+    info!("Paying an invoice over Lightning, then by direct swap...");
+
+    let (invoice, receive_op) = common::receive(&client, &gw_v2.addr, 1_000_000).await?;
+
+    gw_lnd.client().pay_invoice(invoice.clone()).await?;
+
+    common::await_receive_claimed(&client, receive_op).await?;
+
+    let state = common::send(&client, &gw_v2.addr, &invoice.to_string()).await?;
+    assert!(matches!(state, FinalSendOperationState::Refunded));
+
+    Ok(())
+}
+
+/// The gateway uses a payment hash for one thing. The client registers an
+/// incoming contract with the gateway; the LND node then issues a hold
+/// invoice of its own for the same hash, and a send of that through the
+/// gateway is refunded rather than paid, while the gateway's own invoice for
+/// the hash is still paid over Lightning afterwards.
+async fn test_send_of_registered_hash(dev_fed: &DevJitFed) -> anyhow::Result<()> {
+    info!("Testing a send of a payment hash the gateway registered...");
+
+    let federation = dev_fed.fed().await?;
+
+    let client = federation
+        .new_joined_client("lnv2-registered-hash-client")
+        .await?;
+
+    federation.pegin_client(10_000, &client).await?;
+
+    let gw_lnd = dev_fed.gw_lnd().await?;
+    let gw_v2 = dev_fed.gw_v2().await?;
+    let lnd = dev_fed.lnd().await?;
+
+    let (invoice, receive_op) = common::receive(&client, &gw_v2.addr, 1_000_000).await?;
+
+    let hold_invoice = lnd
+        .create_hold_invoice_for_hash(1_000_000, *invoice.payment_hash())
+        .await?;
+
+    let state = common::send(&client, &gw_v2.addr, &hold_invoice).await?;
+    assert!(matches!(state, FinalSendOperationState::Refunded));
+
+    gw_lnd.client().pay_invoice(invoice).await?;
+
+    common::await_receive_claimed(&client, receive_op).await?;
 
     Ok(())
 }
