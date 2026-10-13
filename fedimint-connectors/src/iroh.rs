@@ -653,20 +653,9 @@ impl IrohConnector {
             Some(node_addr) => {
                 trace!(target: LOG_NET_IROH, %node_id, "Using a connectivity override for connection");
                 let node_addr = node_addr_stable_to_next(&node_addr);
-                let conn = endpoint_next
-                    .connect(node_addr.clone(), FEDIMINT_API_ALPN)
-                    .await;
-
-                #[cfg(not(target_family = "wasm"))]
-                if let Ok(conn) = &conn {
-                    Self::spawn_connection_monitoring_next(
-                        conn,
-                        node_addr.id,
-                        self.path_change.clone(),
-                    );
-                }
-
-                conn
+                endpoint_next
+                    .connect(node_addr, FEDIMINT_API_ALPN)
+                    .await
             }
             None => endpoint_next.connect(
                 next_node_id,
@@ -675,6 +664,12 @@ impl IrohConnector {
         }
         .map_err(Into::into)
         .map_err(ServerError::Connection)?;
+
+        // Every connection is monitored, not only the overridden ones: the
+        // path log is how a relayed or flapping peer is told apart from a
+        // lagging one.
+        #[cfg(not(target_family = "wasm"))]
+        Self::spawn_connection_monitoring_next(&conn, next_node_id, self.path_change.clone());
 
         // Retain the connection so `connectivity` can read its paths back;
         // iroh 1.0 offers no endpoint-level lookup to recover it from.
