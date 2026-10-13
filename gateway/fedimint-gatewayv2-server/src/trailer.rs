@@ -21,6 +21,8 @@
 //! past each dispatched event. Dispatches are idempotent, so a crashed
 //! trailer just re-runs the last events from the cursor on restart.
 
+use std::time::Instant;
+
 use bitcoin::hashes::sha256;
 use fedimint_client::ClientHandleArc;
 use fedimint_core::Amount;
@@ -92,11 +94,34 @@ async fn dispatch(state: &AppState, entry: &PersistedLogEntry) {
         return;
     };
 
+    let succeeded = outcome.is_ok();
+    let started = Instant::now();
+
     let mut dbtx = state.gateway_db.begin_transaction_nc().await;
 
     match outgoing_contract(&mut dbtx, payment_hash).await {
-        Some((_, row)) => dispatch_direct_swap(state, row, outcome).await,
-        None => dispatch_ln_receive(state, payment_hash, outcome).await,
+        Some((_, row)) => {
+            dispatch_direct_swap(state, row, outcome).await;
+
+            info!(
+                target: LOG_GATEWAY,
+                %payment_hash,
+                succeeded,
+                elapsed_ms = started.elapsed().as_millis(),
+                "Finalized direct swap"
+            );
+        }
+        None => {
+            dispatch_ln_receive(state, payment_hash, outcome).await;
+
+            info!(
+                target: LOG_GATEWAY,
+                %payment_hash,
+                succeeded,
+                elapsed_ms = started.elapsed().as_millis(),
+                "Settled lightning receive"
+            );
+        }
     }
 }
 

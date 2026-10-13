@@ -1,5 +1,6 @@
 use core::fmt;
 use std::collections::BTreeMap;
+use std::time::SystemTime;
 
 use anyhow::anyhow;
 use fedimint_api_client::api::{FederationApiExt, ServerError};
@@ -11,16 +12,22 @@ use fedimint_core::core::OperationId;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{Amounts, ApiRequestErased};
 use fedimint_core::secp256k1::Keypair;
+use fedimint_core::time::now;
 use fedimint_core::{NumPeersExt, OutPoint, PeerId};
 use fedimint_lnv2_common::contracts::IncomingContract;
 use fedimint_lnv2_common::endpoint_constants::DECRYPTION_KEY_SHARE_ENDPOINT;
 use fedimint_lnv2_common::{LightningInput, LightningInputV0};
 use fedimint_logging::LOG_CLIENT_MODULE_GW;
 use tpe::{AggregatePublicKey, DecryptionKeyShare, PublicKeyShare, aggregate_dk_shares};
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 use super::events::{IncomingPaymentFailed, IncomingPaymentSucceeded};
 use crate::GatewayClientContextV2;
+
+/// Milliseconds since `since`, for the receive timing log lines.
+fn elapsed_ms(since: SystemTime) -> u128 {
+    now().duration_since(since).unwrap_or_default().as_millis()
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
@@ -144,6 +151,15 @@ impl ReceiveStateMachine {
     ) -> Result<BTreeMap<PeerId, DecryptionKeyShare>, String> {
         let num_peers = global_context.api().all_peers().to_num_peers();
         let module_api = global_context.module_api();
+        let started = now();
+        let payment_image = contract.commitment.payment_image.clone();
+
+        info!(
+            target: LOG_CLIENT_MODULE_GW,
+            ?payment_image,
+            %outpoint,
+            "Awaiting decryption key shares"
+        );
 
         // The decryption key share endpoint long-polls until the share exists, which
         // happens atomically when the funding transaction is accepted. We can therefore
@@ -152,21 +168,33 @@ impl ReceiveStateMachine {
         // path. Acceptance is still awaited to detect a rejected funding transaction.
         let decryption_shares = module_api.request_with_strategy_retry(
             FilterMapThreshold::new(
-                move |peer_id, share: DecryptionKeyShare| {
-                    if !contract.verify_decryption_share(
-                        tpe_pks
-                            .get(&peer_id)
-                            .ok_or(ServerError::InternalClientError(anyhow!(
-                                "Missing TPE PK for peer {peer_id}?!"
-                            )))?,
-                        &share,
-                    ) {
-                        return Err(fedimint_api_client::api::ServerError::InvalidResponse(
-                            anyhow!("Invalid decryption share"),
-                        ));
-                    }
+                {
+                    let payment_image = payment_image.clone();
 
-                    Ok(share)
+                    move |peer_id, share: DecryptionKeyShare| {
+                        if !contract.verify_decryption_share(
+                            tpe_pks
+                                .get(&peer_id)
+                                .ok_or(ServerError::InternalClientError(anyhow!(
+                                    "Missing TPE PK for peer {peer_id}?!"
+                                )))?,
+                            &share,
+                        ) {
+                            return Err(fedimint_api_client::api::ServerError::InvalidResponse(
+                                anyhow!("Invalid decryption share"),
+                            ));
+                        }
+
+                        debug!(
+                            target: LOG_CLIENT_MODULE_GW,
+                            ?payment_image,
+                            %peer_id,
+                            elapsed_ms = elapsed_ms(started),
+                            "Received decryption key share"
+                        );
+
+                        Ok(share)
+                    }
                 },
                 num_peers,
             ),
@@ -177,14 +205,33 @@ impl ReceiveStateMachine {
         let decryption_shares = std::pin::pin!(decryption_shares);
         let tx_accepted = std::pin::pin!(global_context.await_tx_accepted(outpoint.txid));
 
-        match futures::future::select(decryption_shares, tx_accepted).await {
-            futures::future::Either::Left((shares, _)) => Ok(shares),
+        let shares = match futures::future::select(decryption_shares, tx_accepted).await {
+            futures::future::Either::Left((shares, _)) => shares,
             futures::future::Either::Right((accepted, decryption_shares)) => {
                 accepted?;
 
-                Ok(decryption_shares.await)
+                info!(
+                    target: LOG_CLIENT_MODULE_GW,
+                    ?payment_image,
+                    elapsed_ms = elapsed_ms(started),
+                    "Funding transaction accepted"
+                );
+
+                decryption_shares.await
             }
-        }
+        };
+
+        // The threshold is met by the fastest responders, so the peers missing
+        // here are the ones that were lagging or unreachable.
+        info!(
+            target: LOG_CLIENT_MODULE_GW,
+            ?payment_image,
+            elapsed_ms = elapsed_ms(started),
+            peers = ?shares.keys().collect::<Vec<_>>(),
+            "Decryption key shares reached threshold"
+        );
+
+        Ok(shares)
     }
 
     async fn transition_decryption_shares(
@@ -253,6 +300,12 @@ impl ReceiveStateMachine {
             .contract
             .decrypt_preimage(&agg_decryption_key)
         {
+            info!(
+                target: LOG_CLIENT_MODULE_GW,
+                payment_image = ?old_state.common.contract.commitment.payment_image,
+                "Decrypted preimage"
+            );
+
             client_ctx
                 .module
                 .client_ctx

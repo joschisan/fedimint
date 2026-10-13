@@ -743,6 +743,13 @@ impl AppState {
         dbtx.insert_new_entry(&PaymentHashKey(payment_hash), &operation_id)
             .await;
 
+        info!(
+            target: LOG_GATEWAY,
+            %payment_hash,
+            amount_msat = amount,
+            "Funding direct swap receive"
+        );
+
         Ok(())
     }
 
@@ -1185,7 +1192,16 @@ impl AppState {
             // pegged in / has insufficient liquidity). Fail the HTLC back so
             // the sender is refunded, matching the v1 relay-error path.
             self.fail_for_hash(payment_hash);
+
+            return;
         }
+
+        info!(
+            target: LOG_GATEWAY,
+            %payment_hash,
+            amount_msat,
+            "Funding incoming contract for claimable HTLC"
+        );
     }
 
     /// Handles a terminal outbound LN payment: looks up the outgoing contract
